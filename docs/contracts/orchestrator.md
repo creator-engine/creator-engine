@@ -1,230 +1,297 @@
-# Contract: Thin Orchestrator + Approved-Plan Ratification Gate
-
-Gate: v3 **G-2.0** — the thin orchestrator + the approved-plan ratification
-gate (the first slice of G-2; opens the second MVP milestone after G-1 /
-plane C is complete). **G-2.1** hardens it: the gate is wired to a forge-native
-approval source-of-truth (`forge.plan_approved`) through an injected resolver
-seam, and a no-self-approval guardrail (`approved_by` != the running
-`seat_identity`) is enforced. **G-2.2** adds a JIT, least-privilege, time-boxed
-per-run credential: an injected `token_minter` seam (`forge.mint_scoped_token` /
-`revoke_scoped_token`) minted for the provisioned sandbox, gated on the policy
-`secret_allowlist`, and attested to the evidence spine.
-Validator check: **none** — the orchestrator is pure in-process glue behind the
-G-1.1 runner adapter, and the G-2.1 resolver + the G-2.2 minter are pure behind
-the G-iii forge `GhRunner` seam. Neither registers a `@register` check
-(`--list-checks` stays **43**) nor an `isolation_backend` (`available_backends()`
-stays `('gvisor-proxy', 'local-noop')`).
-Module: `validators/creator_engine_validator/orchestrator.py`
-Reuses: the G-1.1 adapter (`runner.get_backend` / `RunnerBackend` /
-`ProvisionRequest` / `RunRequest`), the G-1.3b `AuditOverlayBackend`, and the
-G-1.3a hash-chained `runtime_evidence_spine`.
+# CE Orchestrator Role Contract
 
 ## Purpose
 
-The orchestrator is the thin glue that composes the merged plane-C parts into
-one ratified, audited run of an agent seat. Its authored surface is *glue* — per
-the v3-spec architect report, "check approval (one query), provision/teardown a
-runner, collect results … not a coordination engine". The single entry point
-`run_plan(...)`:
+The CE Orchestrator is the governed controller role that keeps a fleet of
+specialized seats moving through an auditable delivery lifecycle. It owns
+coordination, dispatch, supervision, harvest, review routing, gate evaluation,
+and checkpointing. It is not a general implementation worker and does not
+collapse author, reviewer, and merge-gate responsibilities into one lane.
 
-1. **gate-checks** an `ApprovedPlan` and refuses (`PlanNotRatified`) BEFORE any
-   side effect if the run is not ratified and bound to the exact policy;
-2. **resolves** the inner isolation backend — an injected backend (CI / tests)
-   else `get_backend(runtime_policy["isolation_backend"])`;
-3. **wraps** it in the `AuditOverlayBackend` so every lifecycle step is attested
-   to the hash-chained evidence spine, bound to the policy's `policy_sha`;
-4. **drives** `provision -> run -> collect -> teardown` and returns the
-   collected, content-addressed, hash-chained evidence.
+The Orchestrator's contract is action-centric: it defines which delivery
+actions may proceed autonomously when their predicates hold, which actions are
+reserved until an Operator supplies authority, and what records must exist so
+another controller can resume without relying on memory-only state.
 
-A reader with only a fresh clone must be able to answer: *was this run
-authorized by a human-ratified plan, bound to the exact runtime-policy, before
-the sandbox started?* — and verify the answer from the returned evidence chain.
+This contract is substrate-independent. The same role rules apply whether the
+acting surface is a local command-line seat, a contained worker, a hosted agent
+runtime, a forge application, a cockpit actuator, or a future orchestration
+substrate. The substrate may change mechanics, but not decision authority,
+required predicates, or reserved boundaries.
 
-This contract is **defensive**: it adds authorization + accountability to the
-Creator Engine's own agent runtime. It is never an offensive capability.
+## Role Definition
 
-## The ratification gate — the locked guardrail
+The Orchestrator owns a lifecycle, not a work item. Its core duties are:
 
-The orchestrator **will not provision a runtime unless an approved plan is
-present and valid.** A human (the Operator) ratifies the plan *before* the
-sandbox starts; the agent never self-approves. The boundary lives **outside and
-below the agent** — the orchestrator refuses, and the seat it runs cannot bypass
-that refusal.
+- convert intake into scoped, role-shaped work;
+- check live territory before dispatch and before gate decisions;
+- dispatch governed workers with explicit authority envelopes;
+- monitor liveness, branch drift, validation state, and blockers;
+- harvest worker output without broadening worker authority;
+- route independent review and verification;
+- hold the merge gate until all predicates are satisfied;
+- surface reserved decisions to the Operator;
+- immediately pull forward the next ready lane; and
+- emit resumable checkpoint state.
 
-The gate consumes an `ApprovedPlan` record:
+The Orchestrator may perform coordination and gate analysis inline. It must not
+perform substantive implementation or full authoring review inline when a
+governed worker lane is available.
 
-| field | meaning |
-| --- | --- |
-| `run_id` | the run this approval authorizes; MUST equal the requested `run_id` |
-| `policy_sha` | a 64-hex digest binding the approval to the exact runtime-policy version in force; MUST equal the record's `policy_sha` |
-| `approved_by` | the ratifier identity (NOT the agent seat being run); MUST be non-empty |
-| `approval_ref` | a pointer to the ratifying artifact (e.g. the forge issue / plan-PR); MUST be non-empty |
+## Nine-Step Lifecycle
 
-`run_plan` raises `PlanNotRatified` (a subclass of `runner.RunnerError`) BEFORE
-the inner backend's `provision` is ever called when the approval is absent,
-mis-bound (`run_id` / `policy_sha` mismatch), carries a non-hex `policy_sha`, or
-is unattributed. This mirrors the G-1.0 `PolicyRejected` and the G-1.2
-availability-gate "refuse before side effect" discipline. The inner backend's
-own `provision` then re-applies the G-1.0 deny surface (`PolicyRejected` on an
-unclean record) — a second, independent refusal surface the orchestrator does
-not duplicate.
+1. **Intake**: accept an Operator request, issue signal, pull-request state, or
+   conveyor signal; identify the objective, stop line, authority class, and
+   known dependencies.
+2. **Territory map**: inspect active claims, in-flight branches, path manifests,
+   review state, worktree state, locks, and changed-path ownership; skip,
+   reroute, or split work that would collide.
+3. **Claim or skip**: claim only unblocked, dependency-ready work that is not
+   already owned; record a concrete skip reason for locked, blocked, stale, or
+   colliding candidates.
+4. **Dispatch**: create a self-contained worker brief naming role, branch,
+   allowed surfaces, allowed paths, validation bar, evidence requirements, and
+   stop line; dispatch by pointer plus hash when the brief is long.
+5. **Watch**: monitor worker liveness, context pressure, branch drift, CI,
+   local validation, review comments, dependency changes, and stop-line output;
+   refresh, split, or return work when the current lane is no longer the right
+   execution surface.
+6. **Harvest**: collect worker output at READY or stop line; verify branch,
+   changed paths, scope fit, declared work class, validation evidence, and
+   carrier records; preserve artifacts without expanding the worker's grant.
+7. **Independent review and verification**: route authored work to a distinct
+   reviewer or verification lane; require review evidence before gate decisions
+   that depend on independent review.
+8. **Gate and disposition**: hold the gate; proceed only when independent
+   review, green validation, declared work class, ratification, territory
+   safety, and applicable action predicates are satisfied. Missing predicates
+   return the work, block the lane, or queue an Operator decision.
+9. **Conveyor next lane and checkpoint**: choose the next ready item or unblock
+   the next lane immediately after closeout, and emit checkpoint state covering
+   active workers, claims, branches, blockers, gate status, pending Operator
+   decisions, and recommended next actions.
 
-## Predicate summary
+Lifecycle states are:
 
-| predicate | refusal |
-| --- | --- |
-| approved plan present | `PlanNotRatified` when `approved_plan is None` |
-| run bound | `PlanNotRatified` when `approved_plan.run_id != run_id` |
-| policy bound | `PlanNotRatified` when `approved_plan.policy_sha` is not a 64-hex digest, or `!= runtime_policy["policy_sha"]` |
-| attested | `PlanNotRatified` when `approved_by` or `approval_ref` is empty |
-| not self-approved | `PlanNotRatified` when a `seat_identity` is supplied and `approved_by == seat_identity` |
-| backend resolvable | propagates `UnknownBackend` (e.g. `openshell`, not yet registered) |
-| backend available | propagates `BackendUnavailable` (e.g. `gvisor-proxy` with no runsc) |
-| policy clean | propagates the inner backend's `PolicyRejected` |
-
-## Forge-native approval resolution (G-2.1)
-
-In G-2.0 the `ApprovedPlan` was a caller-supplied literal. G-2.1 makes the
-**forge the source-of-truth** for it without coupling the orchestrator to the
-forge: `run_plan` takes two keyword-only seams — `approval_resolver` and
-`seat_identity`. When no `approved_plan` is supplied and a resolver is injected,
-`run_plan` calls `approval_resolver(runtime_policy, run_id)` and gate-checks the
-result. The production resolver is a thin closure over
-`forge.plan_approved(query, *, seat_identity, gh_runner)`; injecting it (rather
-than importing the forge here) keeps the orchestrator pure and forge-free.
-
-`forge.plan_approved` resolves an `ApprovedPlan` from a plan-PR and returns it
-only when **all** of the following hold (else it returns `None`; a transport
-failure raises `ForgeConfigError`):
-
-| axis | rule |
-| --- | --- |
-| run + policy bound | the PR body carries `ce-run-id:` / `ce-policy-sha:` markers equal to the requested `run_id` / `policy_sha` |
-| commit-pinned | the `APPROVED` review's `commit_id` equals the PR head SHA (re-asserts GitHub's stale-on-commit-change behaviour) |
-| independent | the approver is neither the PR author nor the running `seat_identity` (no self-approval) |
-| state | only an `APPROVED` review counts (`COMMENTED` / `CHANGES_REQUESTED` do not) |
-
-The resolved `approval_ref` is `{repo}#{pr}@{head_sha}`. Defence-in-depth: even a
-caller-supplied or resolved plan is re-checked by the gate's `approved_by` !=
-`seat_identity` guardrail, so the seat can never approve its own run on any path.
-Like the rest of `forge/`, the resolver performs **zero** live network in
-tests (the `GhRunner` is injected) and registers no check.
-
-## Purity and the injectable backend seam
-
-`run_plan` allocates no container, opens no socket, and runs no subprocess
-itself. All live work stays behind the G-1.1 adapter and the G-1.2 injectable
-seam: the backend is an injectable parameter, so CI exercises the full lifecycle
-against the inert `LocalNoopBackend` with **zero live subprocess**. Because the
-schema's `isolation_backend` enum is `[gvisor-proxy, openshell, os-native]` (it
-does not include `local-noop`), a clean policy selects `gvisor-proxy`
-(availability-gated), `openshell` (a fast-follow), or `os-native` (the ce-ops#71
-unprivileged-default scaffold — registered, deny-surface-enforcing, but
-fail-closed until its sandbox mechanism lands) in production; tests inject the
-inert backend directly. Importing the module performs zero I/O.
-
-The returned evidence is the audit overlay's collect-time spine snapshot
-(`provision`, `run`, `collect`, plus the credential issuance/revocation records
-when a `token_minter` is injected — see G-2.2), content-addressed and
-hash-chained and bound to the run's `policy_sha`; a clean run satisfies
-`verify_chain(records) == []`. `teardown` is still executed to release the
-runtime.
-
-## Per-run scoped credential (G-2.2)
-
-Once a run is ratified, G-2.2 gives it a **just-in-time, least-privilege,
-time-boxed, audited per-run credential** rather than a long-lived ambient token.
-`run_plan` takes a third keyword-only seam — `token_minter` — and runs the
-credential lifecycle *inside* the provisioned sandbox's lifecycle:
-
-```
-provision  ->  [mint + gate + attest]  ->  run  ->  [attest revocation]  ->  collect  ->  teardown
+```text
+INTAKE -> MAP_TERRITORY -> CLAIM_OR_SKIP -> DISPATCH -> WATCH -> HARVEST
+-> VERIFY_AND_REVIEW -> GATE -> NEXT_LANE -> CHECKPOINT
 ```
 
-- **Ordering — provision first, then mint.** The sandbox is provisioned **without
-  credentials**; the credential is minted JIT for that handle and (in production)
-  injected at runtime via the backend/proxy. This matches the secure-runtime model
-  ("the agent holds no network/secrets; the proxy holds both") and gives clean
-  failure semantics — a provision failure mints nothing, and a refused/failed mint
-  still tears the sandbox down (the mint runs under a `try` whose `finally` tears
-  down). It refines the earlier "between the gate and provision" sketch.
-- **Policy-gated issuance (the local permission ceiling).** When `token_minter`
-  returns a `MintedCredential`, `run_plan` classifies a `SecretEvent(name=…)` for
-  the credential's `secret_name` against the runtime-policy `secret_allowlist` via
-  the G-1.3b classifier. `allowed` → the issuance is attested and the run proceeds;
-  anything else → `CredentialNotPermitted` (after provision, before run/collect;
-  the runtime is still torn down). A run can only mint a credential the policy
-  already permits.
-- **Attested to the spine.** Both the issuance (at the run phase) and the
-  revocation (at the teardown phase, recorded *before* collect so it lands in the
-  snapshot) are hash-chained evidence records bound to `policy_sha` — **without**
-  the secret name's value, the token value, or the token ref. Revocation is
-  defense-in-depth: release the credential the instant the run no longer needs it,
-  not after its ≤1h ttl elapses (a 2-minute run must not hold a 60-minute token).
-- **Secret hygiene — the orchestrator never holds the value.** The `MintedCredential`
-  port type is deliberately **value-free** (it has no `value` field); the live secret
-  lives only in the forge `ScopedToken` (redacted from its repr) and never enters the
-  orchestrator or the evidence spine.
+`RETURNED` routes back to dispatch with a narrower brief. `BLOCKED` routes to a
+checkpoint plus an Operator decision request. `HALT` stops the lane until a
+reserved authority record is supplied.
 
-`forge.mint_scoped_token(request, *, gh_runner)` / `forge.revoke_scoped_token(token,
-*, gh_runner)` do the actual minting/revocation behind the injectable `GhRunner`
-(`POST app/installations/{id}/access_tokens` scoped to one repo + an explicit
-least-privilege `permissions` subset; `DELETE installation/token`). They **refuse
-before any forge call** (`TokenMintRefused`) an empty / `admin` / forbidden permission
-set, a ttl outside `0 < t <= 3600`, a non-64-hex `policy_sha`, a malformed repo, or a
-non-positive installation id. The production `token_minter` is a thin caller-side
-closure that mints via `forge.mint_scoped_token`, maps the result to the value-free
-`MintedCredential`, and arranges `forge.revoke_scoped_token` at completion — so the
-orchestrator stays pure and forge-free, registering no check (`--list-checks` stays
-**43**) and no backend, with **zero** live mint in tests (the `GhRunner` is injected).
+## Lifecycle Invariants
 
-## Evidence persistence + the composition root (G-3.6b)
+- **No inline implementation**: substantive source changes, feature builds, and
+  full review work are delegated to governed worker seats.
+- **Author and reviewer are distinct**: the authoring lane must not satisfy its
+  own independent review predicate.
+- **Territory-aware before dispatch and merge**: changed-path ownership,
+  in-flight branches, locks, manifests, and collision risk are checked before a
+  worker starts and again before gate disposition.
+- **Merge requires review, green validation, declared work class, and
+  ratification**: a gate decision cannot proceed with a missing predicate.
+- **Reserved actions halt**: reserved actions do not proceed by momentum,
+  convenience, or model confidence; they wait for an Operator authority record.
+- **Least authority by role**: worker mounts, credentials, egress, and path
+  access are shaped by role and dispatch envelope.
+- **No authority by prompt wording alone**: authority must be reflected in
+  records, envelopes, policies, or ratified run-mode state.
+- **Idle seat is a fault**: after closeout, the Orchestrator pulls forward the
+  next ready, unblocked lane or records why no safe lane exists.
+- **Memory is advisory**: recalled state may guide search, but live repository,
+  forge, validation, and record evidence decide.
 
-The lifecycle's terminal disposition (G-3.1 / G-3.6a) opens/claims the PR for the
-run's `RunChangeSet` through an injected `change_opener` and attests a typed
-`runtime_run_outcome` record (`outcome: pr_opened` + a value-free `change_set`
-pointer; on the disposition axis, never a `lifecycle_phase`). G-3.6b makes that
-run's evidence **durable** and wires the production composition root:
+## Authority Taxonomy
 
-- **The `evidence_sink` seam.** `run_plan` takes a keyword-only `evidence_sink`
-  (the production wiring is the G-3.5 `evidence_sink.file_evidence_sink`). When
-  injected, the run's **final** evidence — the full hash chain *including* the
-  terminal run-outcome record — is persisted **after `teardown`, on the success
-  path**. The sink is an injectable seam: the default `None` persists nothing and
-  performs zero I/O (the orchestrator stays pure — it writes no file itself), and
-  a non-conforming chain's `EvidencePersistRefused` **propagates** (it is a defect
-  to surface, not swallow). The sink never re-hashes a record, so the persisted
-  chain re-reads to `verify_chain() == []` and validates against
-  `schemas/runtime-evidence.schema.yaml`.
-- **The composition root — `run_assembly.make_run_driver(repo, root, …)`.** The
-  first production `run` driver. It is the one place that imports `forge` and
-  holds the live `ScopedToken.value` (the opposite of the pure orchestrator),
-  assembling the seams into one `run_plan(...)` drive: the production
-  `token_minter` (over `forge.mint_scoped_token` / `revoke_scoped_token` → the
-  value-free `MintedCredential`), the **minter→runner bridge** (a closure cell
-  sharing the one live `ScopedToken` from the minter to the `change_opener`'s
-  authenticated `gh` runner via `forge.authenticated_gh_runner`, so the
-  change-opener authenticates AS the same minted token while the orchestrator
-  never sees the value), the production `change_opener` (over
-  `forge.open_change(..., apply=False)`), and the `file_evidence_sink`. It revokes
-  the credential at completion (success **or** failure). The live `value` lives
-  only in the closure cell and, at call time, only in the child `gh` env — never
-  the orchestrator, the evidence, argv, input, a log, disk, or the parent
-  environment. The driver runs entirely offline against an injected backend +
-  fake `gh_runner` / `spawn` / `write` (CI monkeypatches `subprocess` / `socket` /
-  `Path.write_text` to explode); it is the exact entry G-3.7 promotes to live
-  (`apply=True` + a real installation, outside the CI-purity envelope).
+Authority is classified by action. Autonomous actions are routine delivery
+actions that may proceed when their predicates hold. Reserved actions halt until
+the Operator supplies authority.
 
-## Deferred (NOT in this slice)
+### Autonomous Actions
 
-- **The live spike (G-3.7)** — promoting the composition root to a real drive
-  (`apply=True`, a real GitHub App installation, a real container) OUTSIDE the
-  CI-purity envelope; the human-created App key never enters the task container.
-- **`merge()` in the drive** — the gated squash-merge (`forge.merge`) is deferred
-  to G-3.7; G-3.6b opens + persists only.
-- **OpenShell** as a registered backend behind the same `RunnerBackend` adapter
-  (the research-gated G-2.3).
+The Orchestrator may perform these actions autonomously when the named
+predicates are satisfied:
 
-This module is the seed for the architect's pre-committed `ce_orchestrator`
-extraction; until then it lives in the installable validator package so the
-existing CI pytest job covers it.
+| Action | Predicates |
+| --- | --- |
+| intake, territory-map, claim-or-skip | candidate is dependency-ready; collision checks are current; skip reasons are recorded |
+| dispatch | work is scoped; role is least-authority; paths are file-disjoint against active territory; brief carries evidence requirements and stop line |
+| watch, validate, preflight, rerun transient checks, return-to-author | action does not broaden scope, credentials, mounts, egress, or path authority |
+| harvest worker output | output matches the brief and stop line; changed paths are in scope; evidence is preserved |
+| route independent review and submit reviewer verdict evidence | reviewer is distinct from author and has the appropriate role/run-mode authority |
+| merge-gate disposition | independent review, green validation, declared work class, ratification, in-arc status, and all action predicates are satisfied |
+| open or update ordinary delivery pull requests | action is within the active run-mode and scoped delivery envelope |
+| conveyor next-lane and batch dispatch | dependency order, author/reviewer separation, and file-disjointness hold |
+| checkpoint and emit resume state | state is redaction-safe, current, and sufficient for another controller to resume |
+| model and effort routing | routing changes execution cost or reasoning depth only; it must not broaden authority |
+
+### Reserved Actions
+
+The Orchestrator must halt and queue an Operator decision before:
+
+- release, sign, publish, deploy, or promote artifacts;
+- arm fleet-wide automation or perform the first live flip of a new autonomous
+  capability;
+- scrub history or perform irreversible destructive work;
+- weaken a guard, bypass a gate, or create a new policy exception;
+- broaden a worker's mount, egress, credential, or path authority beyond its
+  dispatched envelope;
+- act on new, ambiguous, or high-consequence scope;
+- merge or dispose of a change with any missing gate predicate; or
+- act when direct evidence conflicts with remembered or recalled state.
+
+Governing principle: autonomous means reversible, in-policy,
+predicate-satisfied delivery action. Reserved means irreversible,
+governance-altering, scope-expanding, authority-minting, or evidence-conflicted
+action.
+
+## Substrate Independence
+
+Containment is a runtime substrate concern, not an authority source. A contained
+seat, uncontained seat, hosted runtime, local command-line process, forge
+application, or cockpit actuator may have different mechanics, but the
+authority taxonomy and gate predicates remain the same.
+
+The Orchestrator must therefore make decisions from role, run-mode, records,
+envelopes, and predicates, not from where an action is executed. Substrate may
+affect how credentials are delivered, how evidence is captured, and how output
+is harvested. It must not decide who may approve, review, merge, publish,
+deploy, or broaden authority.
+
+For review authority, the load-bearing wall is author-not-equal-reviewer plus
+the active reviewer/run-mode authority. Containment status alone must neither
+grant nor remove review authority.
+
+## Worker and Seat Model
+
+The Orchestrator drives governed seats through role-shaped authority. A dispatch
+must name exactly one role and must not let a worker silently change roles.
+
+| Role | Use | Authority shape |
+| --- | --- | --- |
+| `architect_research` | Read-only discovery, architecture analysis, option comparison, reproduction planning, and implementation briefing. | Read-only repository and governance surfaces; no source edits; no merge, approval, or publish authority. |
+| `implementer` | Scoped docs or source edits inside one allocated worktree and branch. | Write authority only inside the delegated path envelope; no approval, merge, publish, or scope-broadening authority. |
+| `verification` | Test execution, build replay, validation, CI/log review, artifact inspection, and evidence collection. | Read-only source plus scratch/build output as needed; no source edits unless explicitly dispatched as implementer; no approval or merge authority. |
+| `reviewer` | Independent review verdicts and review evidence for authored work. | Read-only review authority shaped by reviewer role and run-mode; distinct from the authoring lane. |
+
+Seat routing rules:
+
+- choose the least-authority role that can complete the work;
+- start with research when scope, risk, or evidence is unclear;
+- dispatch implementation only after paths, branch, validation, and stop line
+  are concrete;
+- use verification for replayable evidence and check diagnosis;
+- use reviewer seats for independent review semantics;
+- split mixed build/review tasks into separate lanes; and
+- preserve author/reviewer separation across contained and uncontained seats.
+
+Seat state tracked by the Orchestrator includes role, branch, worktree or
+runtime reference, containment mode, assigned scope, expected stop line,
+changed-path territory, liveness, context pressure, validation status, review
+status, and blockers.
+
+## Required Runtime Records
+
+The Orchestrator contract requires four durable runtime records. Records must be
+redaction-safe and must avoid secret values, credential material, private host
+details, and memory-only authority.
+
+### Checkpoint
+
+Purpose: capture resumable Orchestrator state so another controller can safely
+continue the lifecycle.
+
+Required fields:
+
+- record kind and version;
+- checkpoint identifier;
+- creation timestamp;
+- Orchestrator/run identity that is safe to expose;
+- active objective;
+- lifecycle state;
+- relevant issue, pull request, branch, and change references;
+- active claims with worker role, branch, containment mode, and stop line;
+- territory-map reference;
+- gate status for validation, review, declared work class, and ratification;
+- pending Operator-decision references;
+- blockers; and
+- recommended next action.
+
+### Territory-Map
+
+Purpose: make file and branch ownership visible before dispatch and before gate
+disposition.
+
+Required fields:
+
+- record kind and version;
+- map identifier;
+- creation timestamp;
+- base reference;
+- observed branches, pull requests, claims, locks, manifests, and changed
+  paths;
+- entries mapping path patterns or paths to current owner, branch, claim, and
+  lock status;
+- collision checks for candidate work;
+- stale or contested territory notes; and
+- map freshness or expiration marker.
+
+### Harvest-Packet
+
+Purpose: preserve worker output and evidence at READY or stop line without
+turning a controller summary into the source of truth.
+
+Required fields:
+
+- record kind and version;
+- packet identifier;
+- worker and role;
+- brief reference and brief digest;
+- branch, base reference, and head digest;
+- changed paths;
+- diff summary;
+- declared work class;
+- validation commands and results;
+- artifact references;
+- stop-line result;
+- scope verdict; and
+- follow-up or return-to-author instruction when needed.
+
+### Operator-Decision Queue
+
+Purpose: represent decisions that exceed autonomous authority and block until
+the Operator resolves them.
+
+Required fields:
+
+- record kind and version;
+- decision identifier;
+- creation timestamp;
+- requesting Orchestrator/run identity that is safe to expose;
+- authority basis;
+- requested decision;
+- concrete options with consequences;
+- recommended option, if any;
+- halt-until-resolved flag;
+- current status;
+- resolution timestamp and resolver identity when resolved; and
+- resolution notes.
+
+## Acceptance Criteria
+
+An Orchestrator implementation conforms to this contract when:
+
+- each lifecycle transition is observable through records or evidence;
+- autonomous actions name the predicates they relied on;
+- reserved actions halt and enter the Operator-decision queue;
+- worker dispatches are role-shaped, least-authority, and territory-aware;
+- harvest packets preserve branch, diff, scope, validation, and stop-line
+  evidence;
+- independent review is distinct from authoring work;
+- gate disposition refuses missing review, validation, work-class,
+  ratification, or territory predicates; and
+- checkpoint state is sufficient for another controller to resume the lane
+  without private memory.
