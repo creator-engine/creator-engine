@@ -1,39 +1,12 @@
-# PR path manifest - ce-ops#291 PR-A automerge classifier dry-run
+# PR path manifest — ce-ops#291 · CEO-mode auto-merge classifier dry-run
 
-Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention).
-The authorized path set below reflects the current classify-only implementation.
-
-- **Declared work class:** epic
-
-Per-file purpose (closed path set - 10 paths):
-- **`.ce/changelog/ce-291-automerge-classifier-dryrun.md`** *(A)* - changelog and local dry-run evidence.
-- **`.ce/pr-manifests/ce-291-automerge-classifier-dryrun.md`** *(A)* - this carrier, self-inclusive.
-- **`.ce/reference/schemas.generated.md`** *(M)* - generated schema reference refreshed for the new automerge schemas.
-- **`validators/creator_engine_validator/forge/automerge_mutation_policy.yaml`** *(A)* - data-driven mutation policy, state path, decision directory, and path predicates.
-- **`validators/creator_engine_validator/forge/automerge_policy.py`** *(M)* - secret-free policy state, decision composition, and dry-run decision emitter.
-- **`validators/creator_engine_validator/forge/mutation_classifier.py`** *(M)* - config-driven highest-risk-wins path classifier.
-- **`validators/creator_engine_validator/schemas/automerge-decision.schema.yaml`** *(M)* - packaged decision record schema.
-- **`validators/creator_engine_validator/schemas/automerge-policy.schema.yaml`** *(M)* - packaged policy state/config schema.
-- **`validators/tests/unit/test_automerge_policy.py`** *(M)* - automerge policy and dry-run unit tests.
-- **`validators/tests/unit/test_mutation_classifier.py`** *(M)* - classifier path table and fail-closed unit tests.
-
-Dry-run evidence:
-
-| PR | Commit | Expected | Actual | Mutation | Size |
-| --- | --- | --- | --- | --- | --- |
-| #545 | `26968a9f8e947365d9c8a82a8476e753d82b22d0` | AUTO | AUTO | docs | target_advisory/tiny |
-| #584 | `2b34e39486b7d075913579861ae222e564b4c3a2` | GESTURE | GESTURE | security | warn/story |
-| #546 | `33887a6ff4b87448b6fe978b20cebd8757c47fd1` | GESTURE | GESTURE | schema | warn/story |
-
-Dry-run JSON records were written locally under `.ce/state/automerge/decisions/`;
-that directory is ignored by `.gitignore` through `.ce/state/`, so the summary
-above is the tracked evidence carrier.
+This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-291-automerge-classifier-dryrun` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=10
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=38e68be3d2ea5b4195a46950f0b3cb4a982b96c679a04b67a35402987e069e68
+AUTHORIZED_PATHS_SHA256=3e26be14e15ffb74ba185a822f8da554dc2fdf45f385cc0692eae1e9aa5e82f2
 
 ```text
 .ce/changelog/ce-291-automerge-classifier-dryrun.md
@@ -44,6 +17,7 @@ validators/creator_engine_validator/forge/automerge_policy.py
 validators/creator_engine_validator/forge/mutation_classifier.py
 validators/creator_engine_validator/schemas/automerge-decision.schema.yaml
 validators/creator_engine_validator/schemas/automerge-policy.schema.yaml
+validators/pyproject.toml
 validators/tests/unit/test_automerge_policy.py
 validators/tests/unit/test_mutation_classifier.py
 ```
