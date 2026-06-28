@@ -1,0 +1,214 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "release/v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the v prefix, for refs/tags/release/vX.Y.Z"
+        required: true
+        type: string
+      dry_run:
+        description: "Run the release orchestrator with --dry-run"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  release:
+    name: Stage release draft and operator sign surface
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release inputs
+        id: release-inputs
+        env:
+          DISPATCH_VERSION: ${{ inputs.version || '' }}
+          DISPATCH_DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${DISPATCH_VERSION}"
+            dry_run="${DISPATCH_DRY_RUN}"
+            tag_name="release/v${version}"
+          else
+            tag_name="${GITHUB_REF#refs/tags/}"
+            version="${tag_name#release/v}"
+            dry_run="false"
+          fi
+
+          if [[ ! "${tag_name}" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release workflow only accepts release/vX.Y.Z tags: ${tag_name}" >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${version}"
+            echo "tag_name=${tag_name}"
+            echo "dry_run=${dry_run}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout release tag
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/release/v{0}', inputs.version) || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify annotated release tag
+        run: |
+          set -euo pipefail
+          tag_name="${{ steps.release-inputs.outputs.tag_name }}"
+          tag_type="$(git cat-file -t "${tag_name}")"
+          if [[ "${tag_type}" != "tag" ]]; then
+            echo "release tag must be annotated; ${tag_name} is ${tag_type}" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator (offline, from repo wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            -r validators/requirements.txt
+
+      - name: Install validator build deps (offline, from dev wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            --find-links validators/wheelhouse-dev \
+            -r validators/requirements-dev.txt
+
+      - name: Run release orchestrator
+        id: orchestrate
+        env:
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+          TAG_NAME: ${{ steps.release-inputs.outputs.tag_name }}
+          DRY_RUN: ${{ steps.release-inputs.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          packet_dir="${RUNNER_TEMP}/ce-ratification-packet-${VERSION}"
+          stage_dir="${RUNNER_TEMP}/ce-release-stage-${VERSION}"
+          packet_tgz="${RUNNER_TEMP}/ce-ratification-packet-${VERSION}.tgz"
+          mkdir -p "${packet_dir}"
+
+          args=(
+            --json
+            release
+            --repo-root .
+            --tag "${TAG_NAME}"
+            --out "${stage_dir}"
+            --changelog-out "${packet_dir}/RELEASE-NOTES.md"
+            --github-out "${packet_dir}/GITHUB-RELEASE-BODY.md"
+            --force
+          )
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
+            python -m creator_engine_validator "${args[@]}" \
+            | tee "${packet_dir}/release.json"
+
+          if [[ -d "${stage_dir}" ]]; then
+            mkdir -p "${packet_dir}/staged-release"
+            cp -a "${stage_dir}/." "${packet_dir}/staged-release/"
+          fi
+
+          python - <<'PYEOF'
+          import json
+          import os
+          from pathlib import Path
+
+          packet_dir = Path(os.environ["RUNNER_TEMP"]) / f"ce-ratification-packet-{os.environ['VERSION']}"
+          payload = json.loads((packet_dir / "release.json").read_text(encoding="utf-8"))
+          body_path = packet_dir / "GITHUB-RELEASE-BODY.md"
+          release_body = body_path.read_text(encoding="utf-8")
+          issue_path = packet_dir / "SIGN-SURFACE-ISSUE.md"
+          issue_path.write_text(
+              "\n".join(
+                  [
+                      "AWAITING-OPERATOR",
+                      "",
+                      f"Release: {os.environ['TAG_NAME']}",
+                      f"Version: {payload['version']}",
+                      f"Draft release: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/releases/tag/{os.environ['TAG_NAME']}",
+                      f"Ratification packet artifact: ce-ratification-packet-{payload['version']}",
+                      f"Draft release asset: ce-ratification-packet-{payload['version']}.tgz",
+                      f"canonical_spec_sha256: {payload['canonical_spec_sha256']}",
+                      f"signing_key_id: {payload['signing_key_id']}",
+                      f"intended_public_anchor: {payload['intended_public_anchor']}",
+                      "",
+                      "Exact offline signing command:",
+                      "",
+                      "```bash",
+                      payload["signing_command"],
+                      "```",
+                      "",
+                      "Release body:",
+                      "",
+                      release_body,
+                      "",
+                  ]
+              ),
+              encoding="utf-8",
+          )
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as out:
+              out.write(f"packet_dir={packet_dir}\n")
+              out.write(f"packet_tgz={Path(os.environ['RUNNER_TEMP']) / ('ce-ratification-packet-' + payload['version'] + '.tgz')}\n")
+              out.write(f"github_body={body_path}\n")
+              out.write(f"issue_body={issue_path}\n")
+              out.write(f"canonical_spec_sha256={payload['canonical_spec_sha256']}\n")
+              out.write(f"signing_command={payload['signing_command']}\n")
+          PYEOF
+
+          tar -C "${packet_dir}" -czf "${packet_tgz}" .
+
+      - name: Upload ratification packet artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ce-ratification-packet-${{ steps.release-inputs.outputs.version }}
+          path: |
+            ${{ steps.orchestrate.outputs.packet_tgz }}
+            ${{ steps.orchestrate.outputs.packet_dir }}/
+          if-no-files-found: error
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.release-inputs.outputs.tag_name }}
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+          PACKET_TGZ: ${{ steps.orchestrate.outputs.packet_tgz }}
+          GITHUB_BODY: ${{ steps.orchestrate.outputs.github_body }}
+        run: |
+          set -euo pipefail
+          gh release create "${TAG_NAME}" \
+            "${PACKET_TGZ}#CE ratification packet ${VERSION}" \
+            --draft \
+            --verify-tag \
+            --title "Creator Engine v${VERSION}" \
+            --notes-file "${GITHUB_BODY}"
+
+      - name: Create operator sign surface issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.release-inputs.outputs.tag_name }}
+          ISSUE_BODY: ${{ steps.orchestrate.outputs.issue_body }}
+        run: |
+          set -euo pipefail
+          gh issue create \
+            --title "AWAITING-OPERATOR ${TAG_NAME} signing surface" \
+            --body-file "${ISSUE_BODY}"

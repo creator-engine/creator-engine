@@ -20,3 +20,8 @@ separate GitHub release body, while preserving all source fragments in place.
   operator ratification packet that surfaces canonical bytes, stage manifest,
   signing instructions, shas, signing key id, and intended `ce-root-v1` public
   anchor.
+- Add the W2d release workflow: annotated `release/vX.Y.Z` tag/manual dispatch
+  checkout at the tag ref, offline validator install, runner-temp release
+  orchestration, ratification packet artifact upload, draft GitHub Release
+  creation, and an `AWAITING-OPERATOR` signing-surface issue without automated
+  signing, signature intake, publishing, queueing, merging, or main mutation.
