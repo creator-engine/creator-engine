@@ -70,14 +70,35 @@ def _clean_build_artifacts(validators_dir: Path) -> None:
             shutil.rmtree(path)
 
 
-def _build_wheel(validators_dir: Path, out_dir: Path) -> None:
+def _stage_build_source(validators_dir: Path, build_dir: Path) -> Path:
+    staged = build_dir / "source"
+    if staged.exists():
+        shutil.rmtree(staged)
+    staged.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(validators_dir / "pyproject.toml", staged / "pyproject.toml")
+    readme = validators_dir / "README.md"
+    if readme.is_file():
+        shutil.copy2(readme, staged / "README.md")
+    shutil.copytree(
+        validators_dir / "creator_engine_validator",
+        staged / "creator_engine_validator",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    return staged
+
+
+def _build_wheel(validators_dir: Path, out_dir: Path, *, build_dir: Path | None = None) -> None:
     env = os.environ.copy()
     env["PIP_NO_INDEX"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONHASHSEED"] = "0"
     env["PYTHONNOUSERSITE"] = "1"
     env["SOURCE_DATE_EPOCH"] = SOURCE_DATE_EPOCH
-    _clean_build_artifacts(validators_dir)
+    build_source = validators_dir
+    if build_dir is None:
+        _clean_build_artifacts(validators_dir)
+    else:
+        build_source = _stage_build_source(validators_dir, build_dir)
     for stale_wheel in out_dir.glob(APP_WHEEL_GLOB):
         stale_wheel.unlink()
     cmd = [
@@ -88,7 +109,7 @@ def _build_wheel(validators_dir: Path, out_dir: Path) -> None:
         "--no-isolation",
         "--outdir",
         str(out_dir),
-        str(validators_dir),
+        str(build_source),
     ]
     try:
         try:
@@ -108,15 +129,25 @@ def _build_wheel(validators_dir: Path, out_dir: Path) -> None:
                 + f"\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
             )
     finally:
-        _clean_build_artifacts(validators_dir)
+        if build_dir is None:
+            _clean_build_artifacts(validators_dir)
+        else:
+            shutil.rmtree(build_source, ignore_errors=True)
 
 
-def build_app_wheel_from_source(repo_root: Path | str, out_dir: Path | str) -> WheelManifest:
+def build_app_wheel_from_source(
+    repo_root: Path | str,
+    out_dir: Path | str,
+    *,
+    build_dir: Path | str | None = None,
+) -> WheelManifest:
     """Build the first-party validator wheel from checkout source into ``out_dir``.
 
     The digest is always recomputed from the freshly built wheel. The caller gets
     metadata only; updating ``SHA256SUMS`` or committing artifacts belongs to the
-    later bake job, not this helper.
+    later bake job, not this helper. ``build_dir`` stages an isolated source copy
+    for backend build artifacts, so stale checkout-local ``validators/build``
+    state cannot influence the wheel.
     """
     root = Path(repo_root).resolve()
     validators_dir = root / "validators"
@@ -124,10 +155,13 @@ def build_app_wheel_from_source(repo_root: Path | str, out_dir: Path | str) -> W
         raise WheelBakeError(f"missing validator source directory: {validators_dir}")
     out = Path(out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    isolated_build = Path(build_dir).resolve() if build_dir is not None else None
+    if isolated_build is not None:
+        isolated_build.mkdir(parents=True, exist_ok=True)
 
     version = _project_version(validators_dir)
     source_commit = _source_commit(root)
-    _build_wheel(validators_dir, out)
+    _build_wheel(validators_dir, out, build_dir=isolated_build)
 
     wheels = sorted(out.glob(APP_WHEEL_GLOB))
     if len(wheels) != 1:
