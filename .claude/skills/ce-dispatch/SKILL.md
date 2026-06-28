@@ -27,9 +27,13 @@ disable-model-invocation: false
 2. Apply the pointer + SHA mechanic per [[ce-seat-dispatch-prompt-pointer-sha]]:
    write the seed brief to a file, compute its `sha256sum`, and send the worker
    only the file pointer and the hash.
-3. Check the live in-flight file-territory map before dispatching
-   ([[ce-dispatch-territory-map-before-dispatch]]); intersect the candidate's
-   paths against in-flight work.
+3. **REQUIRED territory-check (hard stop before dispatch):** Check the live
+   in-flight territory map per [[ce-dispatch-territory-map-before-dispatch]].
+   Inspect ALL of: `.ce/pr-manifests/` (open carrier slugs), `.ce/briefs/`
+   (active briefs), `git worktree list` output (live worktree branches), and
+   `.ce/wt-*/` staging directories. Intersect EVERY candidate path against ALL
+   in-flight files. If any path collision is found, do not dispatch; report the
+   collision to the controller and stop.
 4. Record or verify the work claim before the target seat starts.
 
 This skill carries no authority and grants no gate. Any forge mutation that a

@@ -146,11 +146,12 @@ def test_is_ce_action_skill_classifier():
 
 
 def test_shipped_pilot_skills_pass_the_guard():
-    # The two pilot skills shipped in THIS repo must satisfy the guard.
+    # The three pilot skills shipped in THIS repo must satisfy the guard.
     repo_root = Path(__file__).resolve().parents[3]
     skills_root = repo_root / ".claude" / "skills"
     assert (skills_root / "ce-dispatch" / "SKILL.md").is_file()
     assert (skills_root / "ce-merge-gate" / "SKILL.md").is_file()
+    assert (skills_root / "ce-harvest" / "SKILL.md").is_file()
 
     result = run([repo_root])
 
