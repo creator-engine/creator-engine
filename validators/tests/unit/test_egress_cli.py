@@ -62,13 +62,36 @@ def test_dry_run_returns_zero_and_does_not_request_apply(tmp_path, capsys):
     seen = {}
 
     def fake_courier(seat_id, repo_path, branch, **kw):
-        seen.update(seat_id=seat_id, branch=branch, apply=kw["apply"])
+        seen.update(
+            seat_id=seat_id,
+            branch=branch,
+            apply=kw["apply"],
+            declared_work_class=kw["declared_work_class"],
+        )
         return _ok_result(applied=False)
 
     rc = cli.main(_args(tmp_path), courier_fn=fake_courier)
     assert rc == 0
-    assert seen == {"seat_id": "dev-4", "branch": "ce-x", "apply": False}  # apply defaults OFF
+    assert seen == {
+        "seat_id": "dev-4",
+        "branch": "ce-x",
+        "apply": False,
+        "declared_work_class": None,
+    }  # apply defaults OFF; work class defaults to carrier discovery
     assert "ce-x" in capsys.readouterr().out
+
+
+def test_declared_work_class_arg_is_threaded_to_courier(tmp_path):
+    seen = {}
+
+    def fake_courier(seat_id, repo_path, branch, **kw):
+        seen["declared_work_class"] = kw["declared_work_class"]
+        return _ok_result(applied=False)
+
+    rc = cli.main(_args(tmp_path, "--declared-work-class", "story"), courier_fn=fake_courier)
+
+    assert rc == 0
+    assert seen["declared_work_class"] == "story"
 
 
 def test_apply_flag_requests_apply(tmp_path):

@@ -215,6 +215,7 @@ def test_host_broker_handles_apply_request_without_returning_or_recording_token(
         push_fn=spy.push,
         open_pr_fn=spy.open_pr,
         revoke_fn=spy.revoke,
+        declared_work_class="story",
     )
 
     assert response["status"] == 200
@@ -242,6 +243,7 @@ def test_host_broker_refuses_contained_token_material_before_courier(tmp_path):
         push_fn=spy.push,
         open_pr_fn=spy.open_pr,
         revoke_fn=spy.revoke,
+        declared_work_class="story",
     )
 
     assert response["status"] == 403
@@ -267,6 +269,7 @@ def test_host_broker_ignores_request_apply_choice_and_rejects_wrong_seat(tmp_pat
         push_fn=spy.push,
         open_pr_fn=spy.open_pr,
         revoke_fn=spy.revoke,
+        declared_work_class="story",
     )
 
     assert response["status"] == 200
@@ -286,6 +289,7 @@ def test_host_broker_ignores_request_apply_choice_and_rejects_wrong_seat(tmp_pat
         push_fn=spy.push,
         open_pr_fn=spy.open_pr,
         revoke_fn=spy.revoke,
+        declared_work_class="story",
     )
 
     assert response["status"] == 403
@@ -426,6 +430,7 @@ def test_json_line_seam_returns_one_secret_free_response_line(tmp_path):
         push_fn=spy.push,
         open_pr_fn=spy.open_pr,
         revoke_fn=spy.revoke,
+        declared_work_class="story",
     )
 
     assert raw.endswith("\n")

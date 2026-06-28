@@ -31,11 +31,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlencode
 
-import yaml
-
+from creator_engine_validator.checks.path_manifest_fidelity import branch_slug
 from creator_engine_validator.forge._redact import redact_gh_stderr
 from creator_engine_validator.forge.credential_runner import authenticated_gh_runner
 from creator_engine_validator.forge.scoped_token import ScopedToken, revoke_scoped_token
+from creator_engine_validator.pr_preflight import DECLARED_WORK_CLASS_PATTERN, WORK_CLASSES
 from egress_broker.audit import append_audit, count_recent_pushes
 from egress_broker.commit_facts import CommitFactsError, read_commit_facts
 from egress_broker.config import BrokerConfig, BrokerConfigError, SeatAppConfig
@@ -125,59 +125,47 @@ def contained_seat_self_push(
 # ---------------------------------------------------------------------------
 # The PR step — idempotent open-or-update carrying the gateway attribution
 # ---------------------------------------------------------------------------
-def _branch_slug(branch: str) -> str:
-    from creator_engine_validator.checks.path_manifest_fidelity import branch_slug
-
-    return branch_slug(branch)
-
-
-def _declared_work_class(repo_path: str | None, branch: str) -> str | None:
-    if not repo_path:
-        return None
-
-    changelog_path = Path(repo_path) / ".ce" / "changelog" / f"{_branch_slug(branch)}.md"
+def discover_declared_work_class(repo_path: str, branch: str) -> str:
+    """Resolve the PR's declared work class from its per-branch carrier, fail-closed."""
+    carrier_path = Path(repo_path) / ".ce" / "pr-manifests" / f"{branch_slug(branch)}.md"
     try:
-        lines = changelog_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-    if not lines or lines[0].strip() != "---":
-        return None
+        carrier_text = carrier_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise EgressRefused(
+            f"declared work class is required; no readable PR carrier at {carrier_path}"
+        ) from exc
 
-    end = next((idx for idx, line in enumerate(lines[1:], start=1) if line.strip() == "---"), None)
-    if end is None:
-        return None
+    matches = DECLARED_WORK_CLASS_PATTERN.findall(carrier_text)
+    if len(matches) != 1:
+        raise EgressRefused(
+            f"declared work class is required; expected exactly one declaration in "
+            f"{carrier_path}, found {len(matches)}"
+        )
 
-    try:
-        front_matter = yaml.safe_load("\n".join(lines[1:end])) or {}
-    except yaml.YAMLError:
-        return None
-    if not isinstance(front_matter, dict):
-        return None
-
-    work_class = front_matter.get("work_class")
-    if not isinstance(work_class, str):
-        return None
-    work_class = work_class.strip()
-    return work_class or None
+    work_class = matches[0].strip().lower()
+    if work_class not in WORK_CLASSES:
+        raise EgressRefused(
+            f"declared work class {matches[0]!r} in {carrier_path} is not one of "
+            f"{', '.join(WORK_CLASSES)}"
+        )
+    return work_class
 
 
-def render_pr_body(*, seat_id: str, branch: str, head_sha: str, repo_path: str | None = None) -> str:
+def render_pr_body(*, seat_id: str, branch: str, head_sha: str, declared_work_class: str) -> str:
     """The PR body noting signed authorship + that the gateway (not the agent) pushed.
 
     ADR-0007: "Authorship travels with the signed commit (``ce-dev-N`` authored, Verified ·
     gateway pushed)." This is the human/audit mirror of that anchor; the verified-author fact is
     the commit signature itself.
     """
-    work_class = _declared_work_class(repo_path, branch)
-    work_class_line = f"- **Declared work class:** {work_class}\n" if work_class else ""
     return (
         f"Authored by `{seat_id}`, gateway-pushed (ADR-0007 egress broker — deterministic v0).\n\n"
         f"The contained seat `{seat_id}` authored and **signed** this commit locally; the "
         f"non-agent egress broker verified the signature + policy and pushed it. The author "
         f"identity travels with the signed commit; the broker is the transport, not the author.\n\n"
+        f"- **Declared work class:** {declared_work_class}\n"
         f"- head branch: `{branch}`\n"
         f"- signed head: `{head_sha}`\n"
-        f"{work_class_line}"
     )
 
 
@@ -208,8 +196,8 @@ def open_or_update_pr(
     *,
     seat_id: str,
     head_sha: str,
+    declared_work_class: str,
     gh_runner,
-    repo_path: str | None = None,
 ) -> dict:
     """Open exactly one PR for ``branch`` -> ``base`` (or refresh the existing one's body).
 
@@ -219,7 +207,12 @@ def open_or_update_pr(
     child env. Raises on a transport failure (redacted).
     """
     owner = repo.split("/", 1)[0]
-    body_text = render_pr_body(seat_id=seat_id, branch=branch, head_sha=head_sha, repo_path=repo_path)
+    body_text = render_pr_body(
+        seat_id=seat_id,
+        branch=branch,
+        head_sha=head_sha,
+        declared_work_class=declared_work_class,
+    )
     query = urlencode((("state", "open"), ("head", f"{owner}:{branch}"), ("base", base)))
 
     code, parsed, stderr = _gh_api(
@@ -304,6 +297,7 @@ def courier(
     now: Callable[[], float] | None = None,
     audit_now=None,
     apply: bool = False,
+    declared_work_class: str | None = None,
     preconditions_hook: PreconditionHook | None = None,
     # Boundary injection — defaults compose the real forge; tests pass fakes.
     read_facts_fn: Callable[[], CommitFacts] | None = None,
@@ -380,6 +374,33 @@ def courier(
             pushed=False, pr_number=None, installation_id=None, decision=decision, audit_record=rec,
         )
 
+    try:
+        resolved_declared_work_class = (
+            declared_work_class.strip().lower()
+            if declared_work_class is not None
+            else discover_declared_work_class(repo_path, branch)
+        )
+    except EgressRefused as exc:
+        rec = append_audit(
+            audit_log,
+            {**base, "decision": "deny", "applied": False, "pushed": False,
+             "transport_refusal": str(exc)},
+            now=audit_now,
+        )
+        raise EgressRefused(str(exc), decision=decision, audit_record=rec) from exc
+    if resolved_declared_work_class not in WORK_CLASSES:
+        reason = (
+            f"declared work class {resolved_declared_work_class!r} is not one of "
+            f"{', '.join(WORK_CLASSES)}"
+        )
+        rec = append_audit(
+            audit_log,
+            {**base, "decision": "deny", "applied": False, "pushed": False,
+             "transport_refusal": reason},
+            now=audit_now,
+        )
+        raise EgressRefused(reason, decision=decision, audit_record=rec)
+
     # 6. allow + apply → mint → push → PR → revoke (token always revoked in finally).
     _resolve = resolve_id_fn or (
         lambda s: resolve_installation_id(
@@ -405,7 +426,7 @@ def courier(
     _open_pr = open_pr_fn or (
         lambda token: open_or_update_pr(
             config.repo, branch, config.policy.base_branch, seat_id=seat_id, head_sha=facts.head_sha,
-            repo_path=repo_path,
+            declared_work_class=resolved_declared_work_class,
             gh_runner=authenticated_gh_runner(token, spawn=gh_spawn) if gh_spawn else authenticated_gh_runner(token),
         )
     )
