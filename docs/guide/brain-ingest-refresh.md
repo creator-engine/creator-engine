@@ -44,7 +44,7 @@ Common options:
 scripts/brain-ingest-refresh.sh
 scripts/brain-ingest-refresh.sh --state-root .ce/state
 scripts/brain-ingest-refresh.sh --db .ce/state/brain/recall.sqlite
-scripts/brain-ingest-refresh.sh --embedder vllm-openai --endpoint http://127.0.0.1:8989/v1/embeddings
+scripts/brain-ingest-refresh.sh --embedder vllm-openai --endpoint http://localhost:PORT/v1/embeddings
 scripts/brain-ingest-refresh.sh --force
 scripts/brain-ingest-refresh.sh --dry-run
 ```
@@ -57,9 +57,9 @@ CE_BRAIN_INGEST_DB=.ce/state/brain/recall.sqlite
 CE_BRAIN_INGEST_CE_BIN=ce
 CE_BRAIN_INGEST_EMBEDDER=deterministic
 CE_BRAIN_INGEST_MODEL_PATH=/path/to/model
-CE_BRAIN_INGEST_ENDPOINT=http://127.0.0.1:8989/v1/embeddings
-CE_BRAIN_INGEST_ENDPOINT_MODEL_ID=Qwen/Qwen3-Embedding-8B
-CE_BRAIN_INGEST_ENDPOINT_DIM=4096
+CE_BRAIN_INGEST_ENDPOINT=http://localhost:PORT/v1/embeddings
+CE_BRAIN_INGEST_ENDPOINT_MODEL_ID=<your-model-id>
+CE_BRAIN_INGEST_ENDPOINT_DIM=<embedding-dimension>
 ```
 
 `--force` bypasses the mtime prefilter and asks ingest to reconcile the full
