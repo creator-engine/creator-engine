@@ -8,11 +8,11 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=4
 
-AUTHORIZED_PATHS_SHA256=173067197f3a4717b2dabcf0f5d2302e6fa2b91bf3fc47ee0e1017c740f154cf
+AUTHORIZED_PATHS_SHA256=4367c082c5b11f217dfc4ca5b652dd2d61d9b6e7cbbee6a03ebcbdf4633f6a71
 
 ```text
 .ce/changelog/ce-brain-ingest-refresh.md
 .ce/pr-manifests/ce-brain-ingest-refresh.md
-docs/operations/brain-ingest-refresh.md
+docs/guide/brain-ingest-refresh.md
 scripts/brain-ingest-refresh.sh
 ```
