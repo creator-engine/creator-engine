@@ -9,6 +9,24 @@ Use this playbook before handing a branch to a controller for commit, push, or r
 > split lands on main, use `pytest -m "not slow"` — that is for iteration only;
 > the full suite still gates the push.
 
+> **MANDATORY before EVERY push — no exemptions.** `ce validate-pr` (the full
+> CI-parity offline suite, whole tree, run on a CLEAN working tree) MUST go green
+> locally before pushing ANY PR — feature PRs, release / publish PRs, AND
+> controller-authored PRs alike. There is no "it's just a release / signature
+> ceremony" exemption: a release-publish PR is still a code change to the install
+> spec and MUST pass the offline suite first. The offline suite mirrors
+> `.github/workflows/validate.yml` exactly, so a local green ≈ CI green; pushing
+> without it wastes a forge round-trip and surfaces failures publicly. Cautionary
+> example: a release-publish PR (0.2.0 → 0.3.0) was pushed after verifying only
+> the release signature, and 6 version-pinned install-spec tests still expecting
+> `0.2.0` went RED at CI — every one of them would have been caught by running the
+> offline suite locally first (see
+> [`../delivery/VERSIONING_AND_RELEASE_POLICY.md`](../delivery/VERSIONING_AND_RELEASE_POLICY.md)
+> "Release-publish preflight"). The durable fix — making those install-spec tests
+> read the version dynamically from `version.py` so a release bump no longer breaks
+> them — is tracked on the internal roadmap under the autonomous-release work
+> (W2 release-bump).
+
 1. Start from current main.
 
    ```sh
