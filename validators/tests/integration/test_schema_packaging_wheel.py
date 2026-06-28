@@ -22,6 +22,9 @@ import pytest
 
 pytestmark = pytest.mark.slow
 
+STRICT_ENV = "CE_SCHEMA_PACKAGING_STRICT"
+REQUIRED_DEV_WHEEL_PROJECTS = ("build", "setuptools")
+
 
 def _venv_bin(venv_dir: Path, name: str) -> Path:
     bindir = "Scripts" if os.name == "nt" else "bin"
@@ -29,23 +32,61 @@ def _venv_bin(venv_dir: Path, name: str) -> Path:
     return venv_dir / bindir / exe
 
 
+def _strict_schema_packaging_lane() -> bool:
+    return os.environ.get(STRICT_ENV) == "1" or os.environ.get("CI") == "true"
+
+
+def _skip_or_fail(message: str) -> None:
+    if _strict_schema_packaging_lane():
+        pytest.fail(f"{message} ({STRICT_ENV}=1/CI strict lane must run this test)")
+    pytest.skip(message)
+
+
+def _assert_dev_build_wheels_vendored(validators_dir: Path) -> None:
+    wheelhouse_dev = validators_dir / "wheelhouse-dev"
+    missing = [
+        project
+        for project in REQUIRED_DEV_WHEEL_PROJECTS
+        if not any(wheelhouse_dev.glob(f"{project}-*.whl"))
+    ]
+    if missing:
+        _skip_or_fail(
+            "schema packaging integration test must not skip for missing build "
+            "backend tooling; vendor these wheels in validators/wheelhouse-dev/: "
+            + ", ".join(missing)
+        )
+
+
 def test_installed_wheel_resolves_schemas_from_non_repo_cwd(repo_root: Path, tmp_path: Path):
     """A wheel-installed CLI resolves its schemas from a non-repo CWD (ce-ops#331)."""
     validators_dir = repo_root / "validators"
     if not validators_dir.is_dir():  # pragma: no cover - installed-wheel context
-        pytest.skip("no source tree to build from")
+        _skip_or_fail("no source tree to build from")
     if sys.version_info < (3, 14):  # pragma: no cover - contract floor
-        pytest.skip("packaging contract targets python>=3.14")
+        _skip_or_fail("packaging contract targets python>=3.14")
 
     # 1. Build the wheel from source.
+    _assert_dev_build_wheels_vendored(validators_dir)
     dist_dir = tmp_path / "dist"
-    build_cmd = [sys.executable, "-m", "build", "--wheel", "--outdir", str(dist_dir), str(validators_dir)]
+    build_cmd = [
+        sys.executable,
+        "-m",
+        "build",
+        "--wheel",
+        "--no-isolation",
+        "--outdir",
+        str(dist_dir),
+        str(validators_dir),
+    ]
     try:
         proc = subprocess.run(build_cmd, capture_output=True, text=True, timeout=600)
     except (FileNotFoundError, subprocess.SubprocessError) as exc:  # pragma: no cover
-        pytest.skip(f"python -m build unavailable: {exc}")
+        _skip_or_fail(f"python -m build unavailable; offline dev wheelhouse install is broken: {exc}")
     if proc.returncode != 0:  # pragma: no cover - environment guard
-        pytest.skip(f"wheel build failed (build backend/deps unavailable):\n{proc.stderr}")
+        _skip_or_fail(
+            "wheel build failed; build backend/deps must be available from "
+            f"validators/wheelhouse-dev/ in the offline lane:\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
     wheels = sorted(dist_dir.glob("creator_engine_validator-*.whl"))
     assert len(wheels) == 1, f"expected one wheel, got {[w.name for w in wheels]}"
     wheel = wheels[0]
@@ -66,7 +107,7 @@ def test_installed_wheel_resolves_schemas_from_non_repo_cwd(repo_root: Path, tmp
         capture_output=True, text=True, timeout=300,
     )
     if mk.returncode != 0:  # pragma: no cover - environment guard
-        pytest.skip(f"could not create clean venv:\n{mk.stderr}")
+        _skip_or_fail(f"could not create clean venv:\n{mk.stderr}")
     py = _venv_bin(venv_dir, "python")
     wheelhouse = validators_dir / "wheelhouse"
     install_cmd = [str(py), "-m", "pip", "install", "--quiet"]
@@ -83,10 +124,10 @@ def test_installed_wheel_resolves_schemas_from_non_repo_cwd(repo_root: Path, tmp
         install_cmd, capture_output=True, text=True, timeout=600, env=clean_install_env
     )
     if install.returncode != 0:  # pragma: no cover - offline/dep guard
-        pytest.skip(f"pip install of built wheel failed (offline deps?):\n{install.stderr}")
+        _skip_or_fail(f"pip install of built wheel failed (offline deps?):\n{install.stderr}")
     ce = _venv_bin(venv_dir, "ce")
     if not ce.is_file():  # pragma: no cover - environment guard
-        pytest.skip(
+        _skip_or_fail(
             "clean venv has no 'ce' console script after install "
             f"(venv/pip environment issue):\n{install.stdout}\n{install.stderr}"
         )
