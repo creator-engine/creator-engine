@@ -120,7 +120,9 @@ def _verify_evidence_ref(
 def _source_ratification(source_ratification: Mapping[str, Any]) -> dict[str, str]:
     if not isinstance(source_ratification, Mapping):
         raise MissingSourceRatification("source_ratification must be a mapping")
-    ratification = _require_source_ratification(dict(source_ratification))
+    ratification = _require_source_ratification(
+        {"source_ratification": dict(source_ratification)}
+    )
     return {
         "prompt_ref": ratification["prompt_ref"],
         "sha256": _require_sha(ratification["sha256"], field="source_ratification.sha256"),
