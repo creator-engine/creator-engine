@@ -26,10 +26,12 @@ from creator_engine_validator.release_changelog import (
     ReleaseChangelogError,
     aggregate_changelog,
 )
-from creator_engine_validator.release_orchestrate import (
+from creator_engine_validator import release_orchestrator
+from creator_engine_validator.release_orchestrator import (
     ReleaseOrchestrationError,
     orchestrate_release,
 )
+from creator_engine_validator.release_publish import PLACEHOLDER_SIGNATURE, ReleaseStageResult
 from creator_engine_validator.wheel_bake import WheelManifest
 
 
@@ -544,6 +546,7 @@ def test_orchestrate_with_explicit_version_stages_and_emits_packet(tmp_path: Pat
         out=out,
         version="0.2.0",
         force=True,
+        validate_pr_runner=lambda r: 0,
         build_wheel=_fake_builder,
         verify_parity=lambda r: [],
     )
@@ -555,10 +558,13 @@ def test_orchestrate_with_explicit_version_stages_and_emits_packet(tmp_path: Pat
     assert Path(result.packet.canonical_path).is_file()
     assert Path(result.packet.manifest_path).is_file()
     assert Path(result.packet.signing_instructions_path).is_file()
-    assert result.packet.signature_placeholder == "<RESIGN-REQUIRED-ce-root-v1>"
+    assert result.packet.intended_public_anchor == "ce-root-v1"
+    assert result.packet.signature_placeholder == PLACEHOLDER_SIGNATURE
+    assert result.packet.github_release_body.startswith("## Release 0.2.0")
+    assert result.preflight.validate_pr.returncode == 0
     # NO real signature is produced — the staged spec still has the placeholder.
     staged_spec = (out / "llms-install.md").read_text(encoding="utf-8")
-    assert "<RESIGN-REQUIRED-ce-root-v1>" in staged_spec
+    assert PLACEHOLDER_SIGNATURE in staged_spec
 
 
 def test_orchestrate_dry_run_does_not_promote(tmp_path: Path):
@@ -570,10 +576,14 @@ def test_orchestrate_dry_run_does_not_promote(tmp_path: Path):
         out=out,
         version="0.2.0",
         dry_run=True,
+        validate_pr_runner=lambda r: 0,
         build_wheel=_fake_builder,
         verify_parity=lambda r: [],
     )
     assert result.version == "0.2.0"
+    assert result.packet.canonical_path.endswith("llms-install.canonical")
+    assert result.packet.manifest_path.endswith("release-stage-manifest.yml")
+    assert result.packet.signing_instructions_path.endswith("SIGNING-INSTRUCTIONS.md")
     # dry-run leaves no promoted output dir.
     assert not out.exists() or not any(out.iterdir())
 
@@ -602,9 +612,169 @@ def test_orchestrate_tag_version_mismatch_fails_closed(tmp_path: Path):
         out=out,
         tag="release/v0.3.0",
         force=True,
+        validate_pr_runner=lambda r: 0,
         build_wheel=_fake_builder,
         verify_parity=lambda r: [],
     )
     assert result.version == "0.3.0"
     assert result.stage.version == "0.3.0"
     assert result.bump.source == "tag"
+
+
+def test_orchestrate_fails_closed_on_dirty_checkout(tmp_path: Path):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    (root / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+    validate_called = False
+
+    def _validate(_: Path) -> int:
+        nonlocal validate_called
+        validate_called = True
+        return 0
+
+    with pytest.raises(ReleaseOrchestrationError, match="checkout must be clean"):
+        orchestrate_release(
+            repo_root=root,
+            out=tmp_path / "stage",
+            version="0.2.0",
+            validate_pr_runner=_validate,
+            build_wheel=_fake_builder,
+            verify_parity=lambda r: [],
+        )
+    assert validate_called is False
+
+
+def test_orchestrate_fails_closed_on_validate_pr_preflight(tmp_path: Path):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+
+    with pytest.raises(ReleaseOrchestrationError, match="ce validate-pr preflight failed"):
+        orchestrate_release(
+            repo_root=root,
+            out=tmp_path / "stage",
+            version="0.2.0",
+            validate_pr_runner=lambda r: 42,
+            build_wheel=_fake_builder,
+            verify_parity=lambda r: [],
+        )
+
+
+def test_orchestrate_uses_injected_stage_function_and_preserves_placeholder_only(tmp_path: Path):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    calls: dict[str, object] = {}
+
+    def _stage(**kwargs):
+        calls.update(kwargs)
+        out_dir = Path(kwargs["out"])
+        return ReleaseStageResult(
+            out_dir=out_dir,
+            version=kwargs["version"],
+            build_git_sha="a" * 40,
+            wheel_name="creator_engine_validator-0.2.0-py3-none-any.whl",
+            wheel_sha256="1" * 64,
+            sha256s_sha256="2" * 64,
+            canonical_spec_sha256="3" * 64,
+            signature_placeholder=PLACEHOLDER_SIGNATURE,
+            signing_command="ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I ce-root-v1 -n ce-spec-v1 - < llms-install.canonical > llms-install.md.sig",
+            artifacts=(),
+        )
+
+    result = orchestrate_release(
+        repo_root=root,
+        out=tmp_path / "stage",
+        version="0.2.0",
+        validate_pr_runner=lambda r: 0,
+        stage_release=_stage,
+    )
+
+    assert calls["version"] == "0.2.0"
+    assert calls["signing_key_id"] == "ce-root-v1"
+    assert calls["dry_run"] is False
+    assert result.packet.signature_placeholder == PLACEHOLDER_SIGNATURE
+    assert result.packet.signing_key_id == "ce-root-v1"
+    assert result.packet.intended_public_anchor == "ce-root-v1"
+
+
+def test_release_cli_json_uses_release_orchestrator_packet(monkeypatch, tmp_path: Path, capsys):
+    def _fake_orchestrate(**kwargs):
+        assert kwargs["github_out"] == str(tmp_path / "github.md")
+        packet = release_orchestrator.RatificationPacket(
+            version="0.2.0",
+            build_git_sha="a" * 40,
+            wheel_sha256="1" * 64,
+            sha256s_sha256="2" * 64,
+            canonical_spec_sha256="3" * 64,
+            signing_key_id="ce-root-v1",
+            intended_public_anchor="ce-root-v1",
+            signature_placeholder=PLACEHOLDER_SIGNATURE,
+            signing_command="ssh-keygen -Y sign ...",
+            canonical_path=str(tmp_path / "stage" / "llms-install.canonical"),
+            manifest_path=str(tmp_path / "stage" / "release-stage-manifest.yml"),
+            signing_instructions_path=str(tmp_path / "stage" / "SIGNING-INSTRUCTIONS.md"),
+            github_release_body="## Release 0.2.0\n",
+        )
+        bump = BumpResult(
+            version="0.2.0",
+            previous_version="0.1.0",
+            source="tag",
+            version_py=tmp_path / "version.py",
+            pyproject=tmp_path / "pyproject.toml",
+        )
+        changelog = aggregate_changelog(repo_root=kwargs["repo_root"], version="0.2.0")
+        return release_orchestrator.OrchestrationResult(
+            version="0.2.0",
+            preflight=release_orchestrator.PreflightResult(
+                requested_version="0.2.0",
+                head_sha="a" * 40,
+                clean_head=True,
+                validate_pr=release_orchestrator.ValidatePrResult(command=("ce", "validate-pr"), returncode=0),
+            ),
+            bump=bump,
+            changelog=changelog,
+            stage=ReleaseStageResult(
+                out_dir=Path(kwargs["out"]),
+                version="0.2.0",
+                build_git_sha="a" * 40,
+                wheel_name="creator_engine_validator-0.2.0-py3-none-any.whl",
+                wheel_sha256="1" * 64,
+                sha256s_sha256="2" * 64,
+                canonical_spec_sha256="3" * 64,
+                signature_placeholder=PLACEHOLDER_SIGNATURE,
+                signing_command="ssh-keygen -Y sign ...",
+                artifacts=(),
+            ),
+            packet=packet,
+            changelog_out=None,
+            github_out=tmp_path / "github.md",
+        )
+
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    monkeypatch.setattr(release_orchestrator, "orchestrate_release", _fake_orchestrate)
+
+    assert (
+        cli.main(
+            [
+                "--json",
+                "release",
+                "--repo-root",
+                str(root),
+                "--tag",
+                "release/v0.2.0",
+                "--out",
+                str(tmp_path / "stage"),
+                "--github-out",
+                str(tmp_path / "github.md"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ratification_packet"]["artifacts"]["llms-install.canonical"].endswith("llms-install.canonical")
+    assert payload["ratification_packet"]["artifacts"]["release-stage-manifest.yml"].endswith("release-stage-manifest.yml")
+    assert payload["ratification_packet"]["artifacts"]["SIGNING-INSTRUCTIONS.md"].endswith("SIGNING-INSTRUCTIONS.md")
+    assert payload["ratification_packet"]["canonical_spec_sha256"] == "3" * 64
+    assert payload["ratification_packet"]["intended_public_anchor"] == "ce-root-v1"
+    assert payload["ratification_packet"]["signature_placeholder"] == PLACEHOLDER_SIGNATURE
+    assert payload["ratification_packet"]["github_release_body"].startswith("## Release 0.2.0")

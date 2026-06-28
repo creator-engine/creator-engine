@@ -379,6 +379,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="root trust anchor that will sign this release (placeholder staged; default: ce-root-v1, the public trust root)",
     )
     release.add_argument("--changelog-out", default=None, help="also write aggregated release notes to this file")
+    release.add_argument("--github-out", default=None, help="also write the GitHub release body markdown to this file")
     release.add_argument("--force", action="store_true", help="replace a non-empty output directory atomically")
     release.add_argument(
         "--dry-run",
@@ -830,7 +831,7 @@ def _release_changelog(args) -> int:
 
 
 def _release(args) -> int:
-    from .release_orchestrate import ReleaseOrchestrationError, orchestrate_release
+    from .release_orchestrator import ReleaseOrchestrationError, orchestrate_release
 
     try:
         result = orchestrate_release(
@@ -841,6 +842,7 @@ def _release(args) -> int:
             part=args.part,
             signing_key_id=args.signing_key_id,
             changelog_out=args.changelog_out,
+            github_out=args.github_out,
             force=args.force,
             dry_run=args.dry_run,
         )
@@ -848,22 +850,50 @@ def _release(args) -> int:
         print(f"ERROR: release refused: {exc}", file=sys.stderr)
         return 1
     packet = result.packet
+    packet_payload = {
+        "version": packet.version,
+        "artifacts": {
+            "llms-install.canonical": packet.canonical_path,
+            "release-stage-manifest.yml": packet.manifest_path,
+            "SIGNING-INSTRUCTIONS.md": packet.signing_instructions_path,
+        },
+        "canonical_spec_sha256": packet.canonical_spec_sha256,
+        "shas": {
+            "build_git_sha": packet.build_git_sha,
+            "wheel_sha256": packet.wheel_sha256,
+            "sha256s_sha256": packet.sha256s_sha256,
+            "canonical_spec_sha256": packet.canonical_spec_sha256,
+        },
+        "signing_key_id": packet.signing_key_id,
+        "intended_public_anchor": packet.intended_public_anchor,
+        "signature_placeholder": packet.signature_placeholder,
+        "signing_command": packet.signing_command,
+        "github_release_body": packet.github_release_body,
+    }
     payload = {
         "version": result.version,
         "previous_version": result.bump.previous_version,
         "bump_source": result.bump.source,
+        "preflight_head_sha": result.preflight.head_sha,
+        "preflight_validate_pr_returncode": result.preflight.validate_pr.returncode,
         "changelog_fragment_count": result.changelog.fragment_count,
         "changelog_since_tag": result.changelog.since_tag,
         "changelog_out": str(result.changelog_out) if result.changelog_out else None,
+        "github_out": str(result.github_out) if result.github_out else None,
         "out_dir": str(result.stage.out_dir),
         "build_git_sha": packet.build_git_sha,
+        "wheel_sha256": packet.wheel_sha256,
+        "sha256s_sha256": packet.sha256s_sha256,
         "canonical_spec_sha256": packet.canonical_spec_sha256,
         "signing_key_id": packet.signing_key_id,
+        "intended_public_anchor": packet.intended_public_anchor,
         "signature_placeholder": packet.signature_placeholder,
         "signing_command": packet.signing_command,
         "canonical_path": packet.canonical_path,
         "manifest_path": packet.manifest_path,
         "signing_instructions_path": packet.signing_instructions_path,
+        "github_release_body": packet.github_release_body,
+        "ratification_packet": packet_payload,
         "dry_run": bool(args.dry_run),
     }
     if getattr(args, "json_output", False):
@@ -875,6 +905,7 @@ def _release(args) -> int:
         print(f"changelog: {result.changelog.fragment_count} fragment(s) since {result.changelog.since_tag or 'all'}")
         print(f"canonical spec sha256: {packet.canonical_spec_sha256}")
         print(f"signing key id: {packet.signing_key_id}")
+        print(f"intended public anchor: {packet.intended_public_anchor}")
         print(f"signature placeholder: {packet.signature_placeholder}")
         print("RATIFICATION PACKET (Operator signs offline; nothing here signs/publishes):")
         print(f"  canonical bytes:      {packet.canonical_path}")
