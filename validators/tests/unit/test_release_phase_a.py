@@ -7,12 +7,14 @@ existing placeholder-signed release-stage; no signing/publishing is added).
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import cli
 from creator_engine_validator.release_bump import (
     BumpResult,
     ReleaseBumpError,
@@ -110,6 +112,70 @@ def test_bump_from_part(tmp_path: Path):
     result = bump_release_version(repo_root=root, part="minor")
     assert result.version == "0.3.0"
     assert result.source == "part:minor"
+
+
+def test_bump_from_part_uses_latest_release_tag_when_source_is_stale(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.4.0")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.invalid")
+    _git(root, "config", "user.name", "T")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "release 0.4.0")
+    _git(root, "tag", "-a", "release/v0.4.0", "-m", "r040")
+
+    # Simulate a rehearsal checkout whose source version is behind the latest
+    # release tag. The part bump must not compute from the stale source.
+    _write_version_sources(root, "0.3.0")
+    result = bump_release_version(repo_root=root, part="patch")
+    assert result.version == "0.4.1"
+    assert '__version__ = "0.4.1"' in (
+        root / "validators" / "creator_engine_validator" / "version.py"
+    ).read_text()
+    assert 'version = "0.4.1"' in (root / "validators" / "pyproject.toml").read_text()
+
+
+def test_bump_from_part_does_not_downgrade_when_source_is_ahead_of_tag(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.3.0")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.invalid")
+    _git(root, "config", "user.name", "T")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "release 0.3.0")
+    _git(root, "tag", "-a", "release/v0.3.0", "-m", "r030")
+
+    _write_version_sources(root, "0.4.0")
+    result = bump_release_version(repo_root=root, part="patch")
+    assert result.version == "0.4.1"
+
+
+def test_bump_updates_only_project_version_in_pyproject(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.2.0")
+    pyproject = root / "validators" / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + '\n[tool.example]\nversion = "9.9.9"\n',
+        encoding="utf-8",
+    )
+    bump_release_version(repo_root=root, tag="release/v0.3.0")
+
+    text = pyproject.read_text(encoding="utf-8")
+    assert '[project]\nname = "creator-engine-validator"\nversion = "0.3.0"\n' in text
+    assert '[tool.example]\nversion = "9.9.9"\n' in text
+
+
+def test_release_bump_cli_json_output(tmp_path: Path, capsys):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.2.0")
+
+    assert cli.main(["--json", "release-bump", "--repo-root", str(root), "--tag", "release/v0.3.0"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["version"] == "0.3.0"
+    assert payload["previous_version"] == "0.2.0"
+    assert payload["source"] == "tag"
+    assert payload["version_py"].endswith("validators/creator_engine_validator/version.py")
+    assert payload["pyproject"].endswith("validators/pyproject.toml")
 
 
 def test_bump_requires_exactly_one_of_tag_or_part(tmp_path: Path):
