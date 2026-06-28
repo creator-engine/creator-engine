@@ -349,7 +349,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="select fragments introduced after this ref (default: most recent release/* tag, else all)",
     )
+    release_changelog.add_argument(
+        "--date",
+        dest="release_date",
+        default=None,
+        help="release-note date YYYY-MM-DD (default: latest selected fragment date, else undated)",
+    )
     release_changelog.add_argument("--out", default=None, help="write the release notes to this file (default: stdout)")
+    release_changelog.add_argument(
+        "--github-out",
+        default=None,
+        help="write the GitHub release body markdown to this file",
+    )
 
     release = sub.add_parser(
         "release",
@@ -764,6 +775,7 @@ def _release_changelog(args) -> int:
             repo_root=args.repo_root,
             version=args.version,
             since_tag=args.since_tag,
+            release_date=args.release_date,
         )
     except ReleaseChangelogError as exc:
         print(f"ERROR: release-changelog refused: {exc}", file=sys.stderr)
@@ -772,24 +784,45 @@ def _release_changelog(args) -> int:
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(result.notes, encoding="utf-8")
+    if args.github_out:
+        github_out_path = Path(args.github_out)
+        github_out_path.parent.mkdir(parents=True, exist_ok=True)
+        github_out_path.write_text(result.github_body, encoding="utf-8")
     if getattr(args, "json_output", False):
         print(
             json.dumps(
                 {
                     "version": result.version,
+                    "release_date": result.release_date,
                     "fragment_count": result.fragment_count,
                     "since_tag": result.since_tag,
                     "out": args.out,
+                    "github_out": args.github_out,
                     "notes": result.notes,
+                    "github_body": result.github_body,
+                    "towncrier": (
+                        {
+                            "runtime_available": result.towncrier.runtime_available,
+                            "config": result.towncrier.config,
+                        }
+                        if result.towncrier
+                        else None
+                    ),
                 },
                 indent=2,
                 sort_keys=True,
             )
         )
-    elif args.out:
+    elif args.out or args.github_out:
+        targets = []
+        if args.out:
+            targets.append(f"notes -> {args.out}")
+        if args.github_out:
+            targets.append(f"github body -> {args.github_out}")
         print(
             f"release-changelog: wrote {result.fragment_count} fragment(s) "
-            f"(since {result.since_tag or 'all'}) -> {args.out}"
+            f"(since {result.since_tag or 'all'}, date {result.release_date}) "
+            f"{', '.join(targets)}"
         )
     else:
         print(result.notes)

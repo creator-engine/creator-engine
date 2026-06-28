@@ -68,6 +68,25 @@ def _changelog_fragment(root: Path, name: str, *, kind: str, slug: str, issue: s
     return path
 
 
+def _legacy_changelog_fragment(
+    root: Path,
+    name: str,
+    *,
+    type_: str,
+    slug: str,
+    ticket: str,
+    body: str,
+) -> Path:
+    cdir = root / ".ce" / "changelog"
+    cdir.mkdir(parents=True, exist_ok=True)
+    path = cdir / name
+    path.write_text(
+        f"---\nslug: {slug}\ndate: 2026-06-28\ntype: {type_}\nscope: test\nticket: {ticket}\n---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 # --------------------------------------------------------------------------- #
 # release-bump (A1)
 # --------------------------------------------------------------------------- #
@@ -255,6 +274,8 @@ def test_changelog_aggregates_all_when_no_release_tag(tmp_path: Path):
     assert "## Fixed" in result.notes
     assert "a-feature" in result.notes
     assert "ce-ops#1" in result.notes
+    assert result.release_date == "2026-06-27"
+    assert "## Release 0.3.0 - 2026-06-27" in result.github_body
 
 
 def test_changelog_groups_by_kind_deterministically(tmp_path: Path):
@@ -266,6 +287,52 @@ def test_changelog_groups_by_kind_deterministically(tmp_path: Path):
     # Added section lists slugs alphabetically: a before z.
     added_block = result.notes.split("## Added")[1]
     assert added_block.index("**a**") < added_block.index("**z**")
+
+
+def test_changelog_accepts_kind_issue_and_type_ticket_front_matter(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    _changelog_fragment(
+        root,
+        "kind.md",
+        kind="added",
+        slug="kind-shape",
+        issue="ce-ops#10",
+        body="Modern front matter.",
+    )
+    _legacy_changelog_fragment(
+        root,
+        "type.md",
+        type_="fixed",
+        slug="type-shape",
+        ticket="ce-ops#11",
+        body="Legacy front matter.",
+    )
+
+    result = aggregate_changelog(repo_root=root, version="0.3.0")
+
+    assert result.fragment_count == 2
+    assert "kind-shape" in result.notes
+    assert "ce-ops#10" in result.notes
+    assert "## Fixed" in result.notes
+    assert "type-shape" in result.notes
+    assert "ce-ops#11" in result.notes
+
+
+def test_changelog_exposes_towncrier_compatible_adapter(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    _changelog_fragment(root, "a.md", kind="added", slug="a", issue="", body="A.")
+
+    result = aggregate_changelog(repo_root=root, version="0.3.0")
+
+    assert result.towncrier is not None
+    assert result.towncrier.config["directory"] == ".ce/changelog"
+    assert result.towncrier.config["section_field"] == "kind"
+    assert result.towncrier.config["section_field_alias"] == "type"
+    assert result.towncrier.config["issue_field"] == "issue"
+    assert result.towncrier.config["issue_field_alias"] == "ticket"
+    assert isinstance(result.towncrier.runtime_available, bool)
 
 
 def test_changelog_handles_fragment_without_front_matter(tmp_path: Path):
@@ -299,6 +366,58 @@ def test_changelog_since_tag_selects_only_new_fragments(tmp_path: Path):
     assert result.fragment_count == 1
     assert "new" in result.notes
     assert "**old**" not in result.notes
+
+
+def test_changelog_does_not_delete_or_move_selected_fragments(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    old = _changelog_fragment(root, "old.md", kind="added", slug="old", issue="", body="Old.")
+    new = _changelog_fragment(root, "new.md", kind="fixed", slug="new", issue="", body="New.")
+
+    result = aggregate_changelog(repo_root=root, version="0.3.0")
+
+    assert result.fragment_count == 2
+    assert old.is_file()
+    assert new.is_file()
+    assert sorted(p.name for p in (root / ".ce" / "changelog").glob("*.md")) == ["new.md", "old.md"]
+
+
+def test_release_changelog_cli_writes_notes_github_body_and_json(tmp_path: Path, capsys):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    _changelog_fragment(root, "a.md", kind="added", slug="a", issue="ce-ops#1", body="A added.")
+    notes_out = tmp_path / "release-notes.md"
+    github_out = tmp_path / "github-body.md"
+
+    rc = cli.main(
+        [
+            "--json",
+            "release-changelog",
+            "--repo-root",
+            str(root),
+            "--version",
+            "0.3.0",
+            "--date",
+            "2026-06-28",
+            "--out",
+            str(notes_out),
+            "--github-out",
+            str(github_out),
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["version"] == "0.3.0"
+    assert payload["release_date"] == "2026-06-28"
+    assert payload["fragment_count"] == 1
+    assert payload["out"] == str(notes_out)
+    assert payload["github_out"] == str(github_out)
+    assert "github_body" in payload
+    assert payload["towncrier"]["config"]["section_field_alias"] == "type"
+    assert notes_out.read_text(encoding="utf-8").startswith("# Release 0.3.0 - 2026-06-28")
+    assert github_out.read_text(encoding="utf-8").startswith("## Release 0.3.0 - 2026-06-28")
+    assert (root / ".ce" / "changelog" / "a.md").is_file()
 
 
 def test_changelog_missing_dir_fails_closed(tmp_path: Path):

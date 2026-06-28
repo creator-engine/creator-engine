@@ -1,10 +1,11 @@
-"""Deterministic changelog aggregator for autonomous release (Phase A2).
+"""Deterministic changelog aggregation for autonomous release (Phase A2).
 
-Assembles the hand-authored ``.ce/changelog/*.md`` fragments into dated
-release notes, grouped by ``kind``. The design's preferred rent — ``towncrier``
-— is **not available offline** (no wheel in ``validators/wheelhouse``, not
-importable in the build env), so per the design's stated fallback this is a
-minimal, deterministic aggregator over the existing fragment convention:
+The release brief points at ``towncrier``. This repository's offline validator
+environment does not carry a ``towncrier`` wheel, so this module owns a thin
+towncrier-compatible adapter over the existing CE fragment convention instead
+of adding a network dependency or silently pretending the runtime exists.
+
+Supported front matter shapes:
 
     ---
     slug: <slug>
@@ -13,19 +14,28 @@ minimal, deterministic aggregator over the existing fragment convention:
     scope: <free text>
     issue: <ce-ops#N, ...>
     ---
-    <markdown body>
 
-Fragments without front-matter are still included (slug derived from the
+and the older variant:
+
+    ---
+    slug: <slug>
+    date: <YYYY-MM-DD>
+    type: <added|changed|fixed|...>
+    scope: <free text>
+    ticket: <ce-ops#N, ...>
+    ---
+
+Fragments without front matter are still included (slug derived from the
 filename, kind = ``other``) so nothing silently drops from a release.
 
 ``since-last-tag`` selection: fragments whose commit was introduced after the
-previous ``release/*`` tag's commit. When no ``release/*`` tag exists yet (the
-current state of the repo) the whole active fragment set is the release —
-deterministic and re-runnable. This module only *reads* fragments and emits
-notes; it does NOT archive/move anything (archive-on-publish is Phase B).
+previous ``release/*`` tag's commit. When no ``release/*`` tag exists yet, the
+whole active fragment set is the release. This module only reads fragments and
+emits notes; it does NOT archive, move, or delete anything.
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -65,6 +75,19 @@ _KIND_HEADINGS = {
     "other": "Other",
 }
 _FRONT_MATTER_RE = re.compile(r"\A---\n(?P<fm>.*?)\n---\n(?P<body>.*)\Z", re.DOTALL)
+_ISO_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+
+TOWNCRIER_COMPATIBLE_CONFIG = {
+    "directory": CHANGELOG_DIRNAME,
+    "section_field": "kind",
+    "section_field_alias": "type",
+    "issue_field": "issue",
+    "issue_field_alias": "ticket",
+    "filename": "CHANGELOG.md",
+    "start_string": "<!-- towncrier release notes start -->",
+    "template": "ce-frontmatter-fragment",
+    "types": {kind: _KIND_HEADINGS.get(kind, kind.capitalize()) for kind in _KIND_ORDER},
+}
 
 
 class ReleaseChangelogError(RuntimeError):
@@ -83,12 +106,23 @@ class Fragment:
 
 
 @dataclass(frozen=True)
+class TowncrierCompatibility:
+    """Runtime-free description of the CE fragment adapter for towncrier."""
+
+    runtime_available: bool
+    config: dict[str, object]
+
+
+@dataclass(frozen=True)
 class ChangelogResult:
     version: str
     notes: str
+    github_body: str
+    release_date: str
     fragment_count: int
     since_tag: str | None
     fragments: tuple[Fragment, ...] = field(default_factory=tuple)
+    towncrier: TowncrierCompatibility | None = None
 
 
 def _parse_front_matter(text: str) -> tuple[dict[str, str], str]:
@@ -111,9 +145,9 @@ def _load_fragment(path: Path) -> Fragment:
         path=path,
         slug=fields.get("slug") or path.stem,
         date=fields.get("date", ""),
-        kind=(fields.get("kind") or "other").strip().lower(),
+        kind=(fields.get("kind") or fields.get("type") or "other").strip().lower(),
         scope=fields.get("scope", ""),
-        issue=fields.get("issue", ""),
+        issue=fields.get("issue") or fields.get("ticket", ""),
         body=body,
     )
 
@@ -166,30 +200,105 @@ def _kind_sort_key(kind: str) -> tuple[int, str]:
         return (len(_KIND_ORDER), kind)
 
 
-def _render_notes(version: str, fragments: list[Fragment]) -> str:
+def _fragment_sort_key(fragment: Fragment) -> tuple[str, str, str]:
+    return (fragment.date, fragment.slug, fragment.path.name)
+
+
+def _release_date(fragments: list[Fragment], explicit_date: str | None) -> str:
+    if explicit_date:
+        if not _ISO_DATE_RE.match(explicit_date):
+            raise ReleaseChangelogError(f"release date must be YYYY-MM-DD: {explicit_date!r}")
+        return explicit_date
+    dates = sorted({frag.date for frag in fragments if _ISO_DATE_RE.match(frag.date)})
+    return dates[-1] if dates else "undated"
+
+
+def _indent_markdown(lines: list[str]) -> list[str]:
+    rendered: list[str] = []
+    for line in lines:
+        rendered.append(f"  {line}" if line else "")
+    return rendered
+
+
+def _body_lines_for_bullet(frag: Fragment) -> list[str]:
+    body = frag.body.strip()
+    if not body:
+        return [frag.slug]
+    raw_lines = body.splitlines()
+    first_idx = next((idx for idx, line in enumerate(raw_lines) if line.strip()), 0)
+    first = re.sub(r"^[-*]\s+", "", raw_lines[first_idx].strip())
+    return [first, *_indent_markdown(raw_lines[first_idx + 1 :])]
+
+
+def _render_grouped_fragments(lines: list[str], grouped: dict[str, list[Fragment]], *, github: bool) -> None:
+    heading_prefix = "###" if github else "##"
+    for kind in sorted(grouped, key=_kind_sort_key):
+        heading = _KIND_HEADINGS.get(kind, kind.capitalize())
+        lines.append(f"{heading_prefix} {heading}")
+        lines.append("")
+        for frag in sorted(grouped[kind], key=_fragment_sort_key):
+            suffix_bits = []
+            if frag.issue:
+                suffix_bits.append(frag.issue)
+            if frag.scope:
+                suffix_bits.append(frag.scope)
+            suffix = f" ({'; '.join(suffix_bits)})" if suffix_bits else ""
+            body_lines = _body_lines_for_bullet(frag)
+            lines.append(f"- **{frag.slug}**{suffix}: {body_lines[0]}")
+            for line in body_lines[1:]:
+                lines.append(line)
+        lines.append("")
+
+
+def _group_fragments(fragments: list[Fragment]) -> dict[str, list[Fragment]]:
     grouped: dict[str, list[Fragment]] = {}
     for frag in fragments:
         grouped.setdefault(frag.kind, []).append(frag)
+    return grouped
 
-    lines = [f"# Release {version}", ""]
+
+def _render_notes(version: str, release_date: str, fragments: list[Fragment], since_tag: str | None) -> str:
+    grouped = _group_fragments(fragments)
+
+    lines = [f"# Release {version} - {release_date}", ""]
+    lines.append(
+        f"_Selected {len(fragments)} changelog fragment(s) since {since_tag or 'the beginning'}._"
+    )
+    lines.append("")
     if not fragments:
         lines.append("_No changelog fragments for this release._")
         lines.append("")
         return "\n".join(lines)
 
-    for kind in sorted(grouped, key=_kind_sort_key):
-        heading = _KIND_HEADINGS.get(kind, kind.capitalize())
-        lines.append(f"## {heading}")
-        lines.append("")
-        # Deterministic intra-group order: slug.
-        for frag in sorted(grouped[kind], key=lambda f: f.slug):
-            suffix = f" ({frag.issue})" if frag.issue else ""
-            first_line = frag.body.splitlines()[0].strip() if frag.body else frag.slug
-            # Strip a leading markdown bullet/emphasis so we control the bullet.
-            first_line = re.sub(r"^[-*]\s+", "", first_line)
-            lines.append(f"- **{frag.slug}**{suffix}: {first_line}")
-        lines.append("")
+    _render_grouped_fragments(lines, grouped, github=False)
     return "\n".join(lines)
+
+
+def _render_github_body(version: str, release_date: str, fragments: list[Fragment], since_tag: str | None) -> str:
+    grouped = _group_fragments(fragments)
+
+    lines = [
+        f"## Release {version} - {release_date}",
+        "",
+        f"Generated from {len(fragments)} `.ce/changelog` fragment(s) since `{since_tag or 'the beginning'}`.",
+        "",
+    ]
+    if not fragments:
+        lines.append("_No changelog fragments for this release._")
+        lines.append("")
+        return "\n".join(lines)
+
+    _render_grouped_fragments(lines, grouped, github=True)
+    return "\n".join(lines)
+
+
+def towncrier_compatibility() -> TowncrierCompatibility:
+    """Return the offline adapter shape without importing or requiring towncrier."""
+
+    return TowncrierCompatibility(
+        runtime_available=importlib.util.find_spec("towncrier") is not None,
+        config=dict(TOWNCRIER_COMPATIBLE_CONFIG),
+    )
 
 
 def aggregate_changelog(
@@ -197,6 +306,7 @@ def aggregate_changelog(
     repo_root: Path | str,
     version: str,
     since_tag: str | None = None,
+    release_date: str | None = None,
 ) -> ChangelogResult:
     """Aggregate active ``.ce/changelog`` fragments into release notes.
 
@@ -225,11 +335,17 @@ def aggregate_changelog(
         chosen = [p for p in all_paths if p.name in selected_names]
 
     fragments = tuple(_load_fragment(p) for p in chosen)
-    notes = _render_notes(version, list(fragments))
+    fragment_list = list(fragments)
+    resolved_date = _release_date(fragment_list, release_date)
+    notes = _render_notes(version, resolved_date, fragment_list, resolved_tag)
+    github_body = _render_github_body(version, resolved_date, fragment_list, resolved_tag)
     return ChangelogResult(
         version=version,
         notes=notes,
+        github_body=github_body,
+        release_date=resolved_date,
         fragment_count=len(fragments),
         since_tag=resolved_tag,
         fragments=fragments,
+        towncrier=towncrier_compatibility(),
     )
