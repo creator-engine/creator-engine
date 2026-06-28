@@ -26,6 +26,7 @@ from .mutation_classifier import (
 AUTOMERGE_DECISION_AUTO: Final[str] = "AUTO"
 AUTOMERGE_DECISION_GESTURE: Final[str] = "GESTURE"
 DEFAULT_AUTOMERGE_POLICY_STATE_RELATIVE: Final[Path] = Path("automerge") / "policy.json"
+DEFAULT_AUTOMERGE_DECISIONS_RELATIVE: Final[Path] = Path("automerge") / "decisions"
 
 
 class AutoMergePolicyStateError(Exception):
@@ -200,6 +201,32 @@ def load_automerge_policy_state(path: str | Path) -> AutoMergePolicyState:
     if not isinstance(payload, Mapping):
         raise AutoMergePolicyStateError("automerge policy state must be a JSON object")
     return AutoMergePolicyState.from_payload(payload)
+
+
+def load_decision_records(state_dir: str | Path) -> list[dict[str, Any]]:
+    """Load emitted automerge decision records from ``state_dir``.
+
+    This is read-only observability over ``.ce/state/automerge/decisions``:
+    missing directories are empty, records are returned in deterministic path
+    order, and malformed/unreadable records fail closed.
+    """
+
+    decisions_dir = Path(state_dir) / DEFAULT_AUTOMERGE_DECISIONS_RELATIVE
+    if not decisions_dir.exists():
+        return []
+    if not decisions_dir.is_dir():
+        raise AutoMergePolicyStateError(f"{decisions_dir} is not a directory")
+
+    records: list[dict[str, Any]] = []
+    for record_path in sorted(decisions_dir.glob("*.json")):
+        try:
+            payload = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise AutoMergePolicyStateError(f"{record_path}: {exc}") from exc
+        if not isinstance(payload, Mapping):
+            raise AutoMergePolicyStateError(f"{record_path}: decision record must be a JSON object")
+        records.append(dict(payload))
+    return records
 
 
 def save_automerge_policy_state(path: str | Path, state: AutoMergePolicyState) -> None:
