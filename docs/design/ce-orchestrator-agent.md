@@ -52,11 +52,11 @@ Strong in-repository evidence exists for the core role contract:
 - `.claude/agents/README.md` and the role files define governed worker
   behavior and the reviewer specialization.
 - Internal operating-practice checkpoints supplied as read-only seed context
-  ground the operating practice that this design productizes: G1-G5 live
-  grants and R-reserved HALT snapshots, night conveyor cadence, no-forks
-  restricted-agent discipline, verify-before-dispatch, territory-map checks,
-  context gates, contained dispatch mechanics, harvest/fan-in mechanics, and
-  the CEO-mode shift.
+  ground the operating practice that this design productizes: action-taxonomy
+  authority snapshots, reserved HALT boundaries, night conveyor cadence,
+  no-forks restricted-agent discipline, verify-before-dispatch, territory-map
+  checks, context gates, contained dispatch mechanics, harvest/fan-in mechanics,
+  and the CEO-mode shift.
 
 Important gaps remain:
 
@@ -103,7 +103,7 @@ The Orchestrator Agent owns a lifecycle, not an implementation task.
    the merge-gate policy.
 7. **Gate/merge**: hold the merge gate. Merge only when independent review,
    green validation, declared work class, ratification, and applicable
-   grant conditions are all satisfied.
+   action predicates are all satisfied.
 8. **Conveyor next lane**: immediately select the next ready work item or
    unblock the next lane. The Orchestrator should not idle while ready,
    unclaimed, unblocked work exists.
@@ -173,58 +173,42 @@ Primary outputs:
 
 ## Decision and Authority Model
 
-The Orchestrator needs a simple split: autonomous delivery decisions are
-allowed inside grants; governance, irreversible, or high-consequence
-decisions escalate.
+The Orchestrator needs a simple split: autonomous delivery actions are allowed
+when their predicates hold; reserved actions halt until the Operator supplies
+authority. This proposed authority model is the intended basis for ADR-0013,
+the substrate-independent-authority decision record, to be ratified by the
+Operator. This design proposes the model; ADR-0013 will ratify it.
 
-### Autonomous Decisions
+### Action Taxonomy
 
-The Orchestrator may decide to:
+**Autonomous — routine delivery actions, allowed when their predicates hold:**
 
-- pick the next unclaimed, unblocked, dependency-ready ticket;
-- skip a locked or blocked ticket with a recorded reason;
-- decompose work into file-disjoint dispatches;
-- choose `architect_research`, `implementer`, `verification`, or reviewer
-  specialization based on task shape;
-- choose model/effort routing within current policy;
-- rerun transient checks or request a worker fix when the evidence is clear;
-- harvest a worker result that matches its brief and stop line;
-- open or update ordinary delivery PRs when the applicable grant permits it;
-- continue the conveyor after merge or return-to-author.
+| Action (verb) | Gated by |
+|---|---|
+| intake · territory-map · claim-or-skip | record skip reason; collision-check before claim |
+| dispatch (role-shaped, self-contained brief) | file-disjoint vs other seats/PRs; least-authority role; pointer+hash |
+| watch · validate/preflight · rerun-transient-check · return-to-author | no scope or credential broadening |
+| harvest worker output | output matches brief + stop-line; changed paths in scope |
+| route independent review · submit reviewer verdict | author ≠ reviewer |
+| merge / gate | independent review + green CI + declared work-class + ratification + never-red-under-grant + in-arc |
+| open / update ordinary delivery PR | within current grant |
+| conveyor next-lane · batch dispatch | dependency order + author/reviewer separation + file-disjointness |
+| checkpoint / emit resume-state | — |
+| model / effort routing | execution detail only — must NOT broaden mounts, credentials, egress, or action authority |
 
-### Escalation Decisions
+**Reserved — HALT until the Operator supplies authority:**
 
-The Orchestrator must surface an Operator decision when:
+release · sign · publish · deploy · fleet rollout/arming (including the first
+live auto-merge flip and strangeLoop arming) · history scrub · weakening a
+guard or a new policy exception · broadening a worker's
+mount/egress/credentials/path authority beyond its dispatched envelope ·
+irreversible destructive work · new / ambiguous / high-consequence scope ·
+merging with any missing predicate · acting when direct evidence contradicts
+remembered or recalled state.
 
-- scope is new, ambiguous, or high-consequence;
-- the requested action is R-reserved/HALT;
-- the lane requires release, sign, publish, deploy, fleet rollout/arming,
-  history scrub, weakening guards, irreversible destructive work, or a new
-  policy exception;
-- direct evidence conflicts with remembered or recalled state;
-- the Orchestrator would need to broaden worker credentials, mounts, egress,
-  or path authority beyond the dispatched envelope;
-- merge predicates are missing but there is pressure to proceed;
-- the first live auto-merge flip or equivalent governance escalation is
-  requested.
-
-### Grants and Reserves
-
-The root resume-state checkpoints say G1-G5 autonomous grants are live, while
-R-reserved items remain HALT. The continuation brief names ADR-0013 as the
-substrate-independent authority source, but no tracked ADR-0013 file or
-authority ADR draft is present in this checkout. This document therefore
-canonizes the model at the contract level and marks precise grant text and
-substrate details as a follow-up inventory.
-
-| Band | Contract | Current design stance |
-|---|---|---|
-| G1 | Merge-gate grant | Autonomous merge may proceed only when the baseline is clean, carrier/preflight passes, work is in-arc, declared work class is present, required CI is green, the branch was never red under the relevant grant, independent review exists, and ratification is satisfied. |
-| G2 | Dispatch/claim grant | Autonomous claim and worker dispatch are allowed for unblocked, unlocked, dependency-ready work with file-territory checks and visible claim comments. |
-| G3 | Validation/retry grant | Autonomous local preflight, CI inspection, transient rerun, and return-to-author loops are allowed when they do not broaden scope or credentials. |
-| G4 | Harvest/fan-in grant | Autonomous harvest of contained or non-contained worker results is allowed when output matches the brief, changed paths are in scope, and evidence is preserved. |
-| G5 | Conveyor/queue grant | Autonomous pull-forward, batch dispatch, and next-lane routing are allowed when dependency order, author/reviewer separation, and file-disjointness hold. |
-| R-reserved | HALT/reserve | Release, sign, publish, deploy, fleet rollout/arming, history scrub, weakening guards, irreversible destructive work, and new high-consequence scope require Operator authority. |
+Governing principle: **Autonomous = reversible, in-policy, predicate-satisfied
+delivery actions. Reserved = anything irreversible, governance-altering,
+scope-expanding, or authority-minting.**
 
 Authority is **substrate-independent**: the same decision contract should hold
 whether the acting surface is a Codex seat, Claude-Code pane, server-side
@@ -262,14 +246,15 @@ Model and effort routing:
 - Use higher-reasoning research lanes when the Orchestrator must reconcile
   conflicting evidence, plan cross-ticket decomposition, or judge ambiguous
   authority.
-- Treat model selection as an execution detail inside the current grant. It
-  must not broaden mounts, credentials, egress, or action authority.
+- Treat model selection as an execution detail inside the current authorized
+  action. It must not broaden mounts, credentials, egress, or action authority.
 - Preserve the same evidence bar regardless of model: changed paths,
   validation output, review routing, and gate predicates must be recorded.
 
 Current seat pattern:
 
-- Non-contained controller seats may self-push within grant.
+- Non-contained controller seats may self-push within current authority and
+  dispatch envelope.
 - Contained build seats need harvest fallback or
   courier mechanics for forge side effects.
 - The Orchestrator dispatches self-contained briefs and avoids inline work.
@@ -281,7 +266,7 @@ Harvest mechanics:
 - The worker declares READY or reaches its stop line.
 - The Orchestrator verifies branch, diff, declared changed paths, and evidence.
 - Contained-seat output is harvested through a staging worktree or equivalent
-  fan-in packet; non-contained output can be self-pushed if grant conditions
+  fan-in packet; non-contained output can be self-pushed if action predicates
   permit.
 - Harvest does not imply merge readiness. It feeds independent review and
   gate validation.
@@ -441,7 +426,7 @@ version: 1
 decision_id: string
 created_at: timestamp
 requested_by: string
-authority_basis: G1 | G2 | G3 | G4 | G5 | R-reserved | unknown
+authority_basis: autonomous | reserved | unknown
 request: string
 options:
   - id: string
@@ -469,7 +454,7 @@ Required surfaces:
 - harvest queue with diff summary and validation evidence;
 - review/gate queue showing independent review, CI/preflight, work class,
   ratification, and missing predicates;
-- HALT panel for R-reserved decisions, with concrete choices and consequences;
+- HALT panel for reserved decisions, with concrete choices and consequences;
 - conveyor next-lane recommendations.
 
 CEO-mode / `strangeLoop` composition:
@@ -477,7 +462,7 @@ CEO-mode / `strangeLoop` composition:
 - CEO-mode is a run-mode shift from hands-on dev control to throughput
   leadership: direct development engagement gives way to fully-autonomous CEO-mode. The Orchestrator
   prioritizes fleet throughput while governance catches up one step behind.
-- CEO-mode does not weaken R-reserved boundaries. The first live auto-merge
+- CEO-mode does not weaken reserved boundaries. The first live auto-merge
   flip remains Operator-reserved.
 - `strangeLoop` currently affects reviewer independence and review topology,
   not privileged action. It can help form independent review loops, but it
@@ -511,18 +496,18 @@ Operator-decision requests. Build read-only cockpit views first.
 
 ### Layer 4: Governed Actuation
 
-Wire actions behind existing grants: claim, dispatch, harvest, review route,
-preflight, PR update, and merge gate. Keep R-reserved actions as explicit
-Operator-blocking prompts. Only after this layer is proven should CEO-mode
-actuators be considered.
+Wire actions behind the ratified action-taxonomy predicates: claim, dispatch,
+harvest, review route, preflight, PR update, and merge gate. Keep reserved
+actions as explicit Operator-blocking prompts. Only after this layer is proven
+should CEO-mode actuators be considered.
 
 ### Layer 5: Evals and Trace Review
 
 Add trace-review and evaluation coverage before broad actuation. Required
 scenarios include stale worker liveness, context-pressure refresh, path
 collision, missing independent review, red CI, dirty checkout, missing
-declared work class, R-reserved action request, contained harvest fan-in, and
-conveyor pickup after closeout. Each trace should name the grant considered,
+declared work class, reserved action request, contained harvest fan-in, and
+conveyor pickup after closeout. Each trace should name the action considered,
 the evidence inspected, the decision made, and the next lane selected or
 blocked.
 
@@ -533,9 +518,9 @@ substrate, not the source of governance truth.
 
 ## Risks and Open Questions
 
-- **Grant precision**: G1-G5 need a tracked authority inventory sourced from
-  the root resume-state checkpoints, recovered authority snapshots, and the
-  still-missing ADR, then reconciled with current playbooks.
+- **Authority precision**: ADR-0013 needs to ratify the action taxonomy,
+  predicates, and reserved boundaries, then reconcile them with current
+  playbooks.
 - **Memory drift**: company brain recall can speed orchestration but must not
   override repository or forge evidence.
 - **Over-automation**: CEO-mode pressure could turn "keep the conveyor moving"
@@ -551,7 +536,7 @@ substrate, not the source of governance truth.
   future server runtimes expose different mechanics. Authority must remain
   above those mechanics.
 - **Cockpit as actuator**: read-only status is safe; action buttons need
-  separate grants and audit records.
+  separate authority and audit records.
 
 ## Proposed ce-ops Epic
 
@@ -564,16 +549,16 @@ path to CEO-mode composition.
 | Order | Ticket | Scope | Depends on |
 |---|---|---|---|
 | 1 | Canonize Orchestrator role contract | Ratify lifecycle, invariants, state machine, inputs/outputs, and non-goals. | This design |
-| 2 | Inventory G1-G5 and R-reserved authority | Recover exact grant text from root resume states/authority snapshots; produce a tracked authority matrix and note absent ADR evidence. | 1 |
+| 2 | Define the controller action-taxonomy (autonomous vs reserved) and ratify it as ADR-0013 | Promote this proposed authority model into the formal substrate-independent authority decision record. | 1 |
 | 3 | Add Orchestrator section to controller-bootstrap SSOT | Extend the preview-only SSOT with Orchestrator lifecycle, cadence, decisions, and checkpoint schema pointers. | 1, 2 |
 | 4 | Productize dispatch/harvest skill pointers | Create ratified `ce-dispatch` and `ce-harvest` pointers to tracked playbooks and pointer+hash mechanics. | 3 |
 | 5 | Specify Orchestrator checkpoint record | Design a structured checkpoint/resume record for active objective, workers, claims, blockers, gate state, and next action. | 1 |
 | 6 | Specify fleet territory map record | Define read-only records/views for active claims, branches, PRs, changed paths, locks, and collision checks. | 5 |
 | 7 | Specify harvest/fan-in packet | Define a durable packet for contained and non-contained worker output: branch, diff, changed paths, evidence, validation, and stop-line result. | 4, 5 |
-| 8 | Specify Operator decision queue | Design the HALT/R-reserved decision surface with options, consequences, authority basis, and resolution records. | 2, 5 |
+| 8 | Specify Operator decision queue | Design the HALT/reserved decision surface with options, consequences, authority basis, and resolution records. | 2, 5 |
 | 9 | Build read-only Orchestrator cockpit | Render intake, territory, seats, harvest queue, review/gate queue, and Operator decision queue without actuators. | 5, 6, 7, 8 |
-| 10 | Wire governed actuation behind grants | Add claim, dispatch, harvest, review-route, preflight, PR-update, and merge-gate actions behind G-grants; keep R-reserved blocked. | 2, 6, 7, 9 |
-| 11 | Add Orchestrator evals and trace review | Create eval scenarios for stalled workers, path collisions, missing review, red CI, R-reserved requests, and conveyor pickup. | 3, 5, 10 |
+| 10 | Wire governed actuation behind action predicates | Add claim, dispatch, harvest, review-route, preflight, PR-update, and merge-gate actions behind the ratified action taxonomy; keep reserved actions blocked. | 2, 6, 7, 9 |
+| 11 | Add Orchestrator evals and trace review | Create eval scenarios for stalled workers, path collisions, missing review, red CI, reserved requests, and conveyor pickup. | 3, 5, 10 |
 | 12 | CEO-mode / strangeLoop integration design | Define how CEO-mode uses the cockpit and how `strangeLoop` contributes independent review without privileged authority. | 8, 9, 11 |
 
 Suggested dependency path:
@@ -598,9 +583,8 @@ For this design:
   independent review, gate/merge, conveyor next lane, checkpointing, and
   Operator decision surfacing.
 - It distinguishes autonomous decisions from Operator escalation.
-- It defines G1-G5/R-reserved at the contract level and records the missing
-  ADR/substrate-detail gap while grounding cadence and grant snapshots in the
-  root resume-state checkpoints.
+- It defines the action taxonomy at the contract level and records ADR-0013 as
+  the intended formal home for Operator ratification.
 - It describes governed worker roles, model/effort routing implications,
   contained vs non-contained seats, and harvest mechanics.
 - It grounds deterministic knowledge loading in the controller-bootstrap
@@ -612,12 +596,12 @@ For this design:
 For future implementation:
 
 - No Orchestrator action should execute without a visible record naming the
-  grant, target, predicates, and result.
+  action, target, predicates, and result.
 - No worker should receive broader mount, egress, credential, or path authority
   than its role and dispatch envelope require.
 - No merge should happen without independent review, green validation, declared
-  work class, ratification, and applicable grant predicates.
-- No R-reserved action should proceed without an Operator authority record.
+  work class, ratification, and applicable action predicates.
+- No reserved action should proceed without an Operator authority record.
 
 ## References
 
