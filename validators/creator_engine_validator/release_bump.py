@@ -19,7 +19,10 @@ assertion after writing so the two can never drift.
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,6 +78,51 @@ def next_version(current: str, part: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
+def _core_tuple(version: str) -> tuple[int, int, int]:
+    match = SEMVER_RE.fullmatch(version.strip())
+    if not match:
+        raise ReleaseBumpError(f"version {version!r} is not valid semver")
+    major, minor, patch = match.group("core").split(".")
+    return int(major), int(minor), int(patch)
+
+
+def _rehearsal_baseline(current: str, tag_version: str | None) -> str:
+    """Use the greater of current source semver and latest release-tag semver."""
+    if tag_version is None:
+        return current
+    return tag_version if _core_tuple(tag_version) > _core_tuple(current) else current
+
+
+def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _latest_release_tag_version(repo_root: Path) -> str | None:
+    """Latest valid ``release/v*`` tag version, or None outside a git repo.
+
+    The rehearsal path is allowed to run in throwaway fixtures with no git
+    history, so tag discovery is advisory: no git/no tag means "use current
+    version.py".
+    """
+    proc = _git(repo_root, "tag", "--list", "release/v*", "--sort=-creatordate")
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        tag = line.strip()
+        if not tag:
+            continue
+        try:
+            return version_from_tag(tag)
+        except ReleaseBumpError:
+            continue
+    return None
+
+
 def _validators_dir(repo_root: Path) -> Path:
     if (repo_root / "validators" / "pyproject.toml").is_file():
         return repo_root / "validators"
@@ -113,25 +161,58 @@ def _write_version_py(version_py: Path, new_version: str) -> None:
         raise ReleaseBumpError(
             f"expected exactly one __version__ assignment in {version_py}, found {count}"
         )
-    version_py.write_text(replaced, encoding="utf-8")
+    _atomic_write_text(version_py, replaced)
 
 
 def _write_pyproject_version(pyproject: Path, new_version: str) -> None:
     text = pyproject.read_text(encoding="utf-8")
-    # Only the [project] table version line. The packaging guard reads
-    # [project].version; we anchor on the bare top-level `version = "..."`
-    # assignment, which is the [project] version in this pyproject.
-    replaced, count = re.subn(
-        r'^(version = ")[^"]+(")$',
-        rf"\g<1>{new_version}\g<2>",
-        text,
-        flags=re.MULTILINE,
-    )
+    replaced, count = _replace_project_version(text, new_version)
     if count != 1:
         raise ReleaseBumpError(
-            f"expected exactly one top-level version assignment in {pyproject}, found {count}"
+            f"expected exactly one [project].version assignment in {pyproject}, found {count}"
         )
-    pyproject.write_text(replaced, encoding="utf-8")
+    _atomic_write_text(pyproject, replaced)
+
+
+def _replace_project_version(text: str, new_version: str) -> tuple[str, int]:
+    lines = text.splitlines(keepends=True)
+    in_project = False
+    count = 0
+    rendered: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+        if in_project:
+            line, replaced = re.subn(
+                r'^(\s*version\s*=\s*")[^"]+(".*)$',
+                rf"\g<1>{new_version}\g<2>",
+                line,
+            )
+            count += replaced
+        rendered.append(line)
+    return "".join(rendered), count
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    _atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def bump_release_version(
@@ -145,14 +226,21 @@ def bump_release_version(
     Exactly one of ``tag`` (``release/vX.Y.Z``) or ``part`` must be given:
 
     * ``tag``: target version IS the tag's version (tag-as-source-of-truth).
-    * ``part``: target = :func:`next_version` of the current ``version.py``
-      version (the ``workflow_dispatch`` rehearsal path).
+    * ``part``: target = :func:`next_version` from the greater semver core of
+      current ``version.py`` and the latest valid ``release/v*`` tag when one
+      is visible (the ``workflow_dispatch`` rehearsal path).
 
     Writes ``version.py:__version__`` and ``pyproject [project].version``
-    atomically, then asserts the two agree AND that, for the tag path, the
+    with atomic per-file replacement and transaction rollback, then asserts
+    the two agree AND that, for the tag path, the
     written version equals the tag version — refusing (and rolling the two
     files back) on any mismatch. This is staging only: nothing is committed,
     nothing signed, nothing published.
+
+    ``version_runtime.render_build_file`` is intentionally not used here:
+    that renders the generated ``_version.py`` build-identity file tied to a
+    commit SHA. The bump surface owns only the canonical source semver files;
+    release-stage regenerates ``_version.py`` later at build time.
     """
     if (tag is None) == (part is None):
         raise ReleaseBumpError("provide exactly one of tag or part")
@@ -178,7 +266,8 @@ def bump_release_version(
         target = version_from_tag(tag)
         source = "tag"
     else:
-        target = next_version(previous, part)  # type: ignore[arg-type]
+        baseline = _rehearsal_baseline(previous, _latest_release_tag_version(root))
+        target = next_version(baseline, part)  # type: ignore[arg-type]
         source = f"part:{part}"
 
     if not SEMVER_RE.fullmatch(target):
@@ -203,8 +292,8 @@ def bump_release_version(
                 f"tag/version disagreement after bump: tag={tag!r} version.py={written_py!r}"
             )
     except Exception:
-        version_py.write_bytes(original_version_py)
-        pyproject.write_bytes(original_pyproject)
+        _atomic_write_bytes(version_py, original_version_py)
+        _atomic_write_bytes(pyproject, original_pyproject)
         raise
 
     return BumpResult(

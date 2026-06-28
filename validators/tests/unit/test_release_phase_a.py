@@ -7,12 +7,14 @@ existing placeholder-signed release-stage; no signing/publishing is added).
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import cli
 from creator_engine_validator.release_bump import (
     BumpResult,
     ReleaseBumpError,
@@ -24,10 +26,12 @@ from creator_engine_validator.release_changelog import (
     ReleaseChangelogError,
     aggregate_changelog,
 )
-from creator_engine_validator.release_orchestrate import (
+from creator_engine_validator import release_orchestrator
+from creator_engine_validator.release_orchestrator import (
     ReleaseOrchestrationError,
     orchestrate_release,
 )
+from creator_engine_validator.release_publish import PLACEHOLDER_SIGNATURE, ReleaseStageResult
 from creator_engine_validator.wheel_bake import WheelManifest
 
 
@@ -61,6 +65,25 @@ def _changelog_fragment(root: Path, name: str, *, kind: str, slug: str, issue: s
     path = cdir / name
     path.write_text(
         f"---\nslug: {slug}\ndate: 2026-06-27\nkind: {kind}\nscope: test\nissue: {issue}\n---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _legacy_changelog_fragment(
+    root: Path,
+    name: str,
+    *,
+    type_: str,
+    slug: str,
+    ticket: str,
+    body: str,
+) -> Path:
+    cdir = root / ".ce" / "changelog"
+    cdir.mkdir(parents=True, exist_ok=True)
+    path = cdir / name
+    path.write_text(
+        f"---\nslug: {slug}\ndate: 2026-06-28\ntype: {type_}\nscope: test\nticket: {ticket}\n---\n\n{body}\n",
         encoding="utf-8",
     )
     return path
@@ -110,6 +133,70 @@ def test_bump_from_part(tmp_path: Path):
     result = bump_release_version(repo_root=root, part="minor")
     assert result.version == "0.3.0"
     assert result.source == "part:minor"
+
+
+def test_bump_from_part_uses_latest_release_tag_when_source_is_stale(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.4.0")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.invalid")
+    _git(root, "config", "user.name", "T")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "release 0.4.0")
+    _git(root, "tag", "-a", "release/v0.4.0", "-m", "r040")
+
+    # Simulate a rehearsal checkout whose source version is behind the latest
+    # release tag. The part bump must not compute from the stale source.
+    _write_version_sources(root, "0.3.0")
+    result = bump_release_version(repo_root=root, part="patch")
+    assert result.version == "0.4.1"
+    assert '__version__ = "0.4.1"' in (
+        root / "validators" / "creator_engine_validator" / "version.py"
+    ).read_text()
+    assert 'version = "0.4.1"' in (root / "validators" / "pyproject.toml").read_text()
+
+
+def test_bump_from_part_does_not_downgrade_when_source_is_ahead_of_tag(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.3.0")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.invalid")
+    _git(root, "config", "user.name", "T")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "release 0.3.0")
+    _git(root, "tag", "-a", "release/v0.3.0", "-m", "r030")
+
+    _write_version_sources(root, "0.4.0")
+    result = bump_release_version(repo_root=root, part="patch")
+    assert result.version == "0.4.1"
+
+
+def test_bump_updates_only_project_version_in_pyproject(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.2.0")
+    pyproject = root / "validators" / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + '\n[tool.example]\nversion = "9.9.9"\n',
+        encoding="utf-8",
+    )
+    bump_release_version(repo_root=root, tag="release/v0.3.0")
+
+    text = pyproject.read_text(encoding="utf-8")
+    assert '[project]\nname = "creator-engine-validator"\nversion = "0.3.0"\n' in text
+    assert '[tool.example]\nversion = "9.9.9"\n' in text
+
+
+def test_release_bump_cli_json_output(tmp_path: Path, capsys):
+    root = tmp_path / "repo"
+    _write_version_sources(root, "0.2.0")
+
+    assert cli.main(["--json", "release-bump", "--repo-root", str(root), "--tag", "release/v0.3.0"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["version"] == "0.3.0"
+    assert payload["previous_version"] == "0.2.0"
+    assert payload["source"] == "tag"
+    assert payload["version_py"].endswith("validators/creator_engine_validator/version.py")
+    assert payload["pyproject"].endswith("validators/pyproject.toml")
 
 
 def test_bump_requires_exactly_one_of_tag_or_part(tmp_path: Path):
@@ -189,6 +276,8 @@ def test_changelog_aggregates_all_when_no_release_tag(tmp_path: Path):
     assert "## Fixed" in result.notes
     assert "a-feature" in result.notes
     assert "ce-ops#1" in result.notes
+    assert result.release_date == "2026-06-27"
+    assert "## Release 0.3.0 - 2026-06-27" in result.github_body
 
 
 def test_changelog_groups_by_kind_deterministically(tmp_path: Path):
@@ -200,6 +289,52 @@ def test_changelog_groups_by_kind_deterministically(tmp_path: Path):
     # Added section lists slugs alphabetically: a before z.
     added_block = result.notes.split("## Added")[1]
     assert added_block.index("**a**") < added_block.index("**z**")
+
+
+def test_changelog_accepts_kind_issue_and_type_ticket_front_matter(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    _changelog_fragment(
+        root,
+        "kind.md",
+        kind="added",
+        slug="kind-shape",
+        issue="ce-ops#10",
+        body="Modern front matter.",
+    )
+    _legacy_changelog_fragment(
+        root,
+        "type.md",
+        type_="fixed",
+        slug="type-shape",
+        ticket="ce-ops#11",
+        body="Legacy front matter.",
+    )
+
+    result = aggregate_changelog(repo_root=root, version="0.3.0")
+
+    assert result.fragment_count == 2
+    assert "kind-shape" in result.notes
+    assert "ce-ops#10" in result.notes
+    assert "## Fixed" in result.notes
+    assert "type-shape" in result.notes
+    assert "ce-ops#11" in result.notes
+
+
+def test_changelog_exposes_towncrier_compatible_adapter(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    _changelog_fragment(root, "a.md", kind="added", slug="a", issue="", body="A.")
+
+    result = aggregate_changelog(repo_root=root, version="0.3.0")
+
+    assert result.towncrier is not None
+    assert result.towncrier.config["directory"] == ".ce/changelog"
+    assert result.towncrier.config["section_field"] == "kind"
+    assert result.towncrier.config["section_field_alias"] == "type"
+    assert result.towncrier.config["issue_field"] == "issue"
+    assert result.towncrier.config["issue_field_alias"] == "ticket"
+    assert isinstance(result.towncrier.runtime_available, bool)
 
 
 def test_changelog_handles_fragment_without_front_matter(tmp_path: Path):
@@ -233,6 +368,58 @@ def test_changelog_since_tag_selects_only_new_fragments(tmp_path: Path):
     assert result.fragment_count == 1
     assert "new" in result.notes
     assert "**old**" not in result.notes
+
+
+def test_changelog_does_not_delete_or_move_selected_fragments(tmp_path: Path):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    old = _changelog_fragment(root, "old.md", kind="added", slug="old", issue="", body="Old.")
+    new = _changelog_fragment(root, "new.md", kind="fixed", slug="new", issue="", body="New.")
+
+    result = aggregate_changelog(repo_root=root, version="0.3.0")
+
+    assert result.fragment_count == 2
+    assert old.is_file()
+    assert new.is_file()
+    assert sorted(p.name for p in (root / ".ce" / "changelog").glob("*.md")) == ["new.md", "old.md"]
+
+
+def test_release_changelog_cli_writes_notes_github_body_and_json(tmp_path: Path, capsys):
+    root = tmp_path / "repo"
+    _write_version_sources(root)
+    _changelog_fragment(root, "a.md", kind="added", slug="a", issue="ce-ops#1", body="A added.")
+    notes_out = tmp_path / "release-notes.md"
+    github_out = tmp_path / "github-body.md"
+
+    rc = cli.main(
+        [
+            "--json",
+            "release-changelog",
+            "--repo-root",
+            str(root),
+            "--version",
+            "0.3.0",
+            "--date",
+            "2026-06-28",
+            "--out",
+            str(notes_out),
+            "--github-out",
+            str(github_out),
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["version"] == "0.3.0"
+    assert payload["release_date"] == "2026-06-28"
+    assert payload["fragment_count"] == 1
+    assert payload["out"] == str(notes_out)
+    assert payload["github_out"] == str(github_out)
+    assert "github_body" in payload
+    assert payload["towncrier"]["config"]["section_field_alias"] == "type"
+    assert notes_out.read_text(encoding="utf-8").startswith("# Release 0.3.0 - 2026-06-28")
+    assert github_out.read_text(encoding="utf-8").startswith("## Release 0.3.0 - 2026-06-28")
+    assert (root / ".ce" / "changelog" / "a.md").is_file()
 
 
 def test_changelog_missing_dir_fails_closed(tmp_path: Path):
@@ -359,6 +546,7 @@ def test_orchestrate_with_explicit_version_stages_and_emits_packet(tmp_path: Pat
         out=out,
         version="0.2.0",
         force=True,
+        validate_pr_runner=lambda r: 0,
         build_wheel=_fake_builder,
         verify_parity=lambda r: [],
     )
@@ -370,10 +558,13 @@ def test_orchestrate_with_explicit_version_stages_and_emits_packet(tmp_path: Pat
     assert Path(result.packet.canonical_path).is_file()
     assert Path(result.packet.manifest_path).is_file()
     assert Path(result.packet.signing_instructions_path).is_file()
-    assert result.packet.signature_placeholder == "<RESIGN-REQUIRED-ce-root-v1>"
+    assert result.packet.intended_public_anchor == "ce-root-v1"
+    assert result.packet.signature_placeholder == PLACEHOLDER_SIGNATURE
+    assert result.packet.github_release_body.startswith("## Release 0.2.0")
+    assert result.preflight.validate_pr.returncode == 0
     # NO real signature is produced — the staged spec still has the placeholder.
     staged_spec = (out / "llms-install.md").read_text(encoding="utf-8")
-    assert "<RESIGN-REQUIRED-ce-root-v1>" in staged_spec
+    assert PLACEHOLDER_SIGNATURE in staged_spec
 
 
 def test_orchestrate_dry_run_does_not_promote(tmp_path: Path):
@@ -385,10 +576,14 @@ def test_orchestrate_dry_run_does_not_promote(tmp_path: Path):
         out=out,
         version="0.2.0",
         dry_run=True,
+        validate_pr_runner=lambda r: 0,
         build_wheel=_fake_builder,
         verify_parity=lambda r: [],
     )
     assert result.version == "0.2.0"
+    assert result.packet.canonical_path.endswith("llms-install.canonical")
+    assert result.packet.manifest_path.endswith("release-stage-manifest.yml")
+    assert result.packet.signing_instructions_path.endswith("SIGNING-INSTRUCTIONS.md")
     # dry-run leaves no promoted output dir.
     assert not out.exists() or not any(out.iterdir())
 
@@ -417,9 +612,169 @@ def test_orchestrate_tag_version_mismatch_fails_closed(tmp_path: Path):
         out=out,
         tag="release/v0.3.0",
         force=True,
+        validate_pr_runner=lambda r: 0,
         build_wheel=_fake_builder,
         verify_parity=lambda r: [],
     )
     assert result.version == "0.3.0"
     assert result.stage.version == "0.3.0"
     assert result.bump.source == "tag"
+
+
+def test_orchestrate_fails_closed_on_dirty_checkout(tmp_path: Path):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    (root / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+    validate_called = False
+
+    def _validate(_: Path) -> int:
+        nonlocal validate_called
+        validate_called = True
+        return 0
+
+    with pytest.raises(ReleaseOrchestrationError, match="checkout must be clean"):
+        orchestrate_release(
+            repo_root=root,
+            out=tmp_path / "stage",
+            version="0.2.0",
+            validate_pr_runner=_validate,
+            build_wheel=_fake_builder,
+            verify_parity=lambda r: [],
+        )
+    assert validate_called is False
+
+
+def test_orchestrate_fails_closed_on_validate_pr_preflight(tmp_path: Path):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+
+    with pytest.raises(ReleaseOrchestrationError, match="ce validate-pr preflight failed"):
+        orchestrate_release(
+            repo_root=root,
+            out=tmp_path / "stage",
+            version="0.2.0",
+            validate_pr_runner=lambda r: 42,
+            build_wheel=_fake_builder,
+            verify_parity=lambda r: [],
+        )
+
+
+def test_orchestrate_uses_injected_stage_function_and_preserves_placeholder_only(tmp_path: Path):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    calls: dict[str, object] = {}
+
+    def _stage(**kwargs):
+        calls.update(kwargs)
+        out_dir = Path(kwargs["out"])
+        return ReleaseStageResult(
+            out_dir=out_dir,
+            version=kwargs["version"],
+            build_git_sha="a" * 40,
+            wheel_name="creator_engine_validator-0.2.0-py3-none-any.whl",
+            wheel_sha256="1" * 64,
+            sha256s_sha256="2" * 64,
+            canonical_spec_sha256="3" * 64,
+            signature_placeholder=PLACEHOLDER_SIGNATURE,
+            signing_command="ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I ce-root-v1 -n ce-spec-v1 - < llms-install.canonical > llms-install.md.sig",
+            artifacts=(),
+        )
+
+    result = orchestrate_release(
+        repo_root=root,
+        out=tmp_path / "stage",
+        version="0.2.0",
+        validate_pr_runner=lambda r: 0,
+        stage_release=_stage,
+    )
+
+    assert calls["version"] == "0.2.0"
+    assert calls["signing_key_id"] == "ce-root-v1"
+    assert calls["dry_run"] is False
+    assert result.packet.signature_placeholder == PLACEHOLDER_SIGNATURE
+    assert result.packet.signing_key_id == "ce-root-v1"
+    assert result.packet.intended_public_anchor == "ce-root-v1"
+
+
+def test_release_cli_json_uses_release_orchestrator_packet(monkeypatch, tmp_path: Path, capsys):
+    def _fake_orchestrate(**kwargs):
+        assert kwargs["github_out"] == str(tmp_path / "github.md")
+        packet = release_orchestrator.RatificationPacket(
+            version="0.2.0",
+            build_git_sha="a" * 40,
+            wheel_sha256="1" * 64,
+            sha256s_sha256="2" * 64,
+            canonical_spec_sha256="3" * 64,
+            signing_key_id="ce-root-v1",
+            intended_public_anchor="ce-root-v1",
+            signature_placeholder=PLACEHOLDER_SIGNATURE,
+            signing_command="ssh-keygen -Y sign ...",
+            canonical_path=str(tmp_path / "stage" / "llms-install.canonical"),
+            manifest_path=str(tmp_path / "stage" / "release-stage-manifest.yml"),
+            signing_instructions_path=str(tmp_path / "stage" / "SIGNING-INSTRUCTIONS.md"),
+            github_release_body="## Release 0.2.0\n",
+        )
+        bump = BumpResult(
+            version="0.2.0",
+            previous_version="0.1.0",
+            source="tag",
+            version_py=tmp_path / "version.py",
+            pyproject=tmp_path / "pyproject.toml",
+        )
+        changelog = aggregate_changelog(repo_root=kwargs["repo_root"], version="0.2.0")
+        return release_orchestrator.OrchestrationResult(
+            version="0.2.0",
+            preflight=release_orchestrator.PreflightResult(
+                requested_version="0.2.0",
+                head_sha="a" * 40,
+                clean_head=True,
+                validate_pr=release_orchestrator.ValidatePrResult(command=("ce", "validate-pr"), returncode=0),
+            ),
+            bump=bump,
+            changelog=changelog,
+            stage=ReleaseStageResult(
+                out_dir=Path(kwargs["out"]),
+                version="0.2.0",
+                build_git_sha="a" * 40,
+                wheel_name="creator_engine_validator-0.2.0-py3-none-any.whl",
+                wheel_sha256="1" * 64,
+                sha256s_sha256="2" * 64,
+                canonical_spec_sha256="3" * 64,
+                signature_placeholder=PLACEHOLDER_SIGNATURE,
+                signing_command="ssh-keygen -Y sign ...",
+                artifacts=(),
+            ),
+            packet=packet,
+            changelog_out=None,
+            github_out=tmp_path / "github.md",
+        )
+
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    monkeypatch.setattr(release_orchestrator, "orchestrate_release", _fake_orchestrate)
+
+    assert (
+        cli.main(
+            [
+                "--json",
+                "release",
+                "--repo-root",
+                str(root),
+                "--tag",
+                "release/v0.2.0",
+                "--out",
+                str(tmp_path / "stage"),
+                "--github-out",
+                str(tmp_path / "github.md"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ratification_packet"]["artifacts"]["llms-install.canonical"].endswith("llms-install.canonical")
+    assert payload["ratification_packet"]["artifacts"]["release-stage-manifest.yml"].endswith("release-stage-manifest.yml")
+    assert payload["ratification_packet"]["artifacts"]["SIGNING-INSTRUCTIONS.md"].endswith("SIGNING-INSTRUCTIONS.md")
+    assert payload["ratification_packet"]["canonical_spec_sha256"] == "3" * 64
+    assert payload["ratification_packet"]["intended_public_anchor"] == "ce-root-v1"
+    assert payload["ratification_packet"]["signature_placeholder"] == PLACEHOLDER_SIGNATURE
+    assert payload["ratification_packet"]["github_release_body"].startswith("## Release 0.2.0")
