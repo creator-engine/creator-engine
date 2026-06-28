@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 67
+Schema files: 68
 
 ## Index
 
@@ -50,6 +50,7 @@ Schema files: 67
 | `schemas/pcl-record.schema.yaml` | Creator Engine PCL (Project Coordination Ledger) record substrate | `object` |
 | `schemas/plan-wrapper-sidecar.schema.yaml` | Creator Engine Plan Wrapper Sidecar | `object` |
 | `schemas/playbook.schema.yaml` | Creator Engine playbook workflow | `object` |
+| `schemas/press-merge-bundle.schema.yaml` | Creator Engine Proposed Press-Merge Bundle | `object` |
 | `schemas/recommended-prompt.schema.yaml` | Creator Engine Hermes Recommended-Prompt Front Matter | `object` |
 | `schemas/review-evidence.schema.yaml` | Creator Engine Review Evidence Record | `object` |
 | `schemas/reviewer-authority-envelope.schema.yaml` | Creator Engine reviewer-venue side-effect-authority envelope | `object` |
@@ -1459,6 +1460,37 @@ Definitions:
 | `dispatch_target` | string | no | enum `governed-seat`, `reviewer-seat`, `author-seat`, `controller-seat`, `human-operator`, `uncontained-courier`, `forge-courier`, `ci` |  |
 | `non_empty_steps` | array | no | minItems `1` |  |
 | `hook` | object | no | unevaluatedProperties `false` |  |
+
+### `schemas/press-merge-bundle.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Proposed Press-Merge Bundle |
+| `$id` | `https://creator-engine.local/schemas/press-merge-bundle.schema.yaml` |
+| Root type | `object` |
+
+Proposed, not frozen, schema for a deterministic press-merge evidence bundle. The bundle is a PR-keyed sibling of the evidence fan-in packet: it aggregates local ref+sha evidence for the Operator's merge-read surface...
+
+Required fields:
+
+`kind`, `schema_version`, `bundle_id`, `has_authority`, `pr`, `source_ratification`, `diff_summary`, `test_results`, `review_evidence`, `computer_use_evidence`, `evidence_refs`, `content_hash`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | string | yes | const `press-merge-bundle` |  |
+| `schema_version` | string | yes | const `1` |  |
+| `bundle_id` | string | yes | pattern `^[a-z][a-z0-9-]{2,127}$` |  |
+| `has_authority` | boolean | yes | const `false` | A press-merge bundle never grants merge authority. Any bundle asserting authority is invalid. |
+| `pr` | object | yes | unevaluatedProperties `false` |  |
+| `source_ratification` | object | yes | unevaluatedProperties `false` |  |
+| `diff_summary` | object | yes | unevaluatedProperties `false` |  |
+| `test_results` | object | yes | unevaluatedProperties `false` |  |
+| `review_evidence` | array | yes | minItems `1` |  |
+| `computer_use_evidence` | array | yes |  |  |
+| `evidence_refs` | array | yes |  |  |
+| `content_hash` | string | yes | pattern `^[0-9a-f]{64}$` |  |
 
 ### `schemas/recommended-prompt.schema.yaml`
 

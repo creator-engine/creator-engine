@@ -17,23 +17,31 @@ and is proposed, not frozen.
 Per-file purpose:
 - **`.ce/changelog/w3-evidence-bundle-press-merge.md`** *(A)* - changelog fragment.
 - **`.ce/pr-manifests/w3-evidence-bundle-press-merge.md`** *(A)* - this closed path-set carrier.
+- **`.ce/reference/schemas.generated.md`** *(M)* - regenerated schema reference including the new press-merge-bundle schema (schema_reference_autogen_sync guard).
 - **`docs/operations/PRESS_MERGE_BUNDLE.md`** *(A)* - design note and prose contract for the proposed press-merge bundle.
+- **`validators/creator_engine_validator/_versions.py`** *(M)* - add baselined shared->v1 allowlist entry for press_merge_bundle->fanin_runtime (version_boundary guard).
 - **`validators/creator_engine_validator/press_merge_bundle.py`** *(A)* - CLI-agnostic aggregator and Markdown renderer.
+- **`validators/creator_engine_validator/public_docs_confidentiality.py`** *(M)* - add PRESS_MERGE_BUNDLE.md to KNOWN_OPERATIONS_EXCEPTIONS ratchet (public_docs_confidentiality guard).
 - **`validators/creator_engine_validator/schemas/press-merge-bundle.schema.yaml`** *(A)* - proposed schema, exposed through the repo-root `schemas/` symlink.
 - **`validators/tests/unit/test_press_merge_bundle.py`** *(A)* - focused unit tests for the aggregator and renderer entrypoints.
+- **`validators/tests/unit/test_version_boundary.py`** *(M)* - update allowlist size assertion from 4 to 5 and update the exact-set test to include the new W3 edge.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=f63e71f725cbb0c1cd8e93ef197d42c7414c2be6f29299873e2cc8855884073b
+AUTHORIZED_PATHS_SHA256=67f9b75f20ffb63a5256f25ae67344c08220c3999ff017d221aecce630b20d6a
 
 ```text
 .ce/changelog/w3-evidence-bundle-press-merge.md
 .ce/pr-manifests/w3-evidence-bundle-press-merge.md
+.ce/reference/schemas.generated.md
 docs/operations/PRESS_MERGE_BUNDLE.md
+validators/creator_engine_validator/_versions.py
 validators/creator_engine_validator/press_merge_bundle.py
+validators/creator_engine_validator/public_docs_confidentiality.py
 validators/creator_engine_validator/schemas/press-merge-bundle.schema.yaml
 validators/tests/unit/test_press_merge_bundle.py
+validators/tests/unit/test_version_boundary.py
 ```

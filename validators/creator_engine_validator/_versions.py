@@ -317,6 +317,15 @@ BASELINE_SHARED_TO_VERSION_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
         # 4th baselined edge, ce-ops#297: ClaudeCodeAdapter must verify the v1
         # Claude hook pack before reporting enforcement installed.
         ("harness_adapters.claude_code_adapter", "hook_pack_confirm"),
+        # W3 press-merge bundle: a shared, CLI-agnostic evidence aggregator that
+        # reuses fanin_runtime's canonical serialisation, content-hash helper,
+        # SHA256 helper, schema version, and shared refusal class hierarchy.
+        # Classified shared (not v1): it carries no launch/lane authority and is
+        # intentionally CLI-agnostic so the v1 ce_cli stub and a future v3 surface
+        # can both wire it without coupling the two runtimes to each other.
+        # The HARD v1<->v3 invariant is untouched: press_merge_bundle imports only
+        # fanin_runtime (v1) and two shared modules (loader, schema).
+        ("press_merge_bundle", "fanin_runtime"),
     }
 )
 
