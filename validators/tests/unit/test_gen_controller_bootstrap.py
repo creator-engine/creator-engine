@@ -51,6 +51,7 @@ def test_required_overlay_keys():
         "preflight_discipline",
         "g5_body_line_rule",
         "new_ce_group_coupling",
+        "merge_gate_checklist",
     }
 
 
@@ -72,6 +73,17 @@ def test_overlay_content_in_rendered_output():
         assert "## Controller Knowledge Overlay" in content
         assert "Read SSOT-grounded bootstrap before accepting any task." in content
         assert "### Startup Sequence" in content
+
+
+def test_merge_gate_checklist_rendered():
+    ssot, ssot_path, ssot_hash = _load_ssot()
+
+    files = gen_controller_bootstrap.build_files(ssot, "all", ssot_path, ssot_hash)
+    for rel_path in (Path("codex/AGENTS.md"), Path("claude/CLAUDE.md")):
+        content = files[rel_path]
+        assert "Merge-Gate Checklist" in content
+        assert "dismissed" in content.lower()
+        assert "APPROVED" in content
 
 
 def test_generator_refuses_live_paths():
@@ -101,3 +113,12 @@ def test_missing_overlay_section_fails_closed():
 
     with pytest.raises(SystemExit):
         gen_controller_bootstrap.validate_ssot(missing_overlay)
+
+
+def test_missing_merge_gate_checklist_fails_closed():
+    ssot, _ssot_path, _ssot_hash = _load_ssot()
+    missing = copy.deepcopy(ssot)
+    del missing["controller_knowledge_overlay"]["merge_gate_checklist"]
+
+    with pytest.raises(SystemExit):
+        gen_controller_bootstrap.validate_ssot(missing)
