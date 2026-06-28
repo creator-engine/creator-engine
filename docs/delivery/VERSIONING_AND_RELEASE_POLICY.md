@@ -43,3 +43,34 @@ Creating a git tag, publishing a GitHub release, changing package versions, or
 changing release credentials/settings is outside ordinary documentation work.
 Those actions require a later, separate Operator-ratified publication gate with
 explicit evidence, validation, and stop conditions.
+
+## Release-publish preflight
+
+A release-publish PR is a code change, not a signature ceremony, and is subject
+to the same mandatory preflight as any other PR: `ce validate-pr` (the full
+CI-parity offline suite, whole tree, on a CLEAN working tree) MUST go green
+locally before the PR is pushed. Verifying only the release signature is not
+sufficient. The offline suite mirrors `.github/workflows/validate.yml`, so a
+local green ≈ CI green.
+
+Release-publish PRs have a specific failure mode that makes this preflight
+non-optional. Publishing a new version `X.Y.Z` updates `docs/llms-install.md`
+and adds `docs/downloads/X.Y.Z/`, which BREAKS the version-pinned install-spec
+tests that assert the prior version:
+
+- `validators/tests/unit/test_v3_installer.py`
+- `validators/tests/integration/test_install_bootstrap.py`
+- `validators/tests/unit/test_onboard_apply_live.py`
+
+The publish PR MUST run `ce validate-pr` locally and update those version-pinned
+tests to the new version **in the same PR** before pushing.
+
+Cautionary example: a release-publish PR (0.2.0 → 0.3.0) was pushed after
+verifying only the release signature. Six version-pinned install-spec
+assertions still expecting `0.2.0` went RED at CI — every one of them would have
+been caught by running the offline suite locally first.
+
+The durable fix is to make those install-spec tests read the version
+dynamically from `creator_engine_validator.version` (release-agnostic) so a
+release bump no longer requires editing them. That refactor is tracked on the
+internal roadmap under the autonomous-release work (W2 release-bump).
