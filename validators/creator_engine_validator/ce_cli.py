@@ -1037,6 +1037,9 @@ def _build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--all", action="store_true", dest="all_probes", help="run all registered probes")
     bp.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    be = brain_sub.add_parser("eval", help=argparse.SUPPRESS)
+    be.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     bb = brain_sub.add_parser("bootstrap", help="emit the deterministic brain injection bootstrap payload")
     _add_state_root(bb)
     _add_optional_scope(bb)
@@ -2801,6 +2804,26 @@ def _brain_probe(args) -> int:
     return 0
 
 
+def _brain_eval(args) -> int:
+    from . import brain_eval
+
+    report = brain_eval.run_eval()
+    payload = report.to_dict()
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        status = "OK" if report.ok else "FAIL"
+        print(
+            f"ce brain eval: {status} "
+            f"({report.passed_count}/{report.case_count} case(s) passed; "
+            f"{report.fixture_count} fixture(s))"
+        )
+        for leg, metrics in payload["metrics"].items():
+            summary = " ".join(f"{name}={value:.6f}" for name, value in metrics.items())
+            print(f"  {leg}: {summary}")
+    return 0 if report.ok else 1
+
+
 def _brain_ingest(args) -> int:
     try:
         scope = _brain_scope(args, required=False)
@@ -4204,6 +4227,7 @@ _BRAIN_DISPATCH = {
     "bootstrap": _brain_bootstrap,
     "check": _brain_check,
     "correct": _brain_correct,
+    "eval": _brain_eval,
     "init": _brain_init,
     "ingest": _brain_ingest,
     "recall": _brain_recall,
