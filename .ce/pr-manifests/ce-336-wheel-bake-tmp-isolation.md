@@ -8,6 +8,8 @@ AUTHORIZED_PATHS_COUNT=4
 
 AUTHORIZED_PATHS_SHA256=1c2964d38a1df235fdfb57b098fd866e3bfa482cb0f35a8c5114fdc2d97b87e8
 
+- **Declared work class:** tiny
+
 ```text
 .ce/changelog/ce-336-wheel-bake-tmp-isolation.md
 .ce/pr-manifests/ce-336-wheel-bake-tmp-isolation.md
