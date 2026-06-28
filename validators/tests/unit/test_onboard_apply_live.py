@@ -28,9 +28,13 @@ import yaml
 from creator_engine_validator import onboard_apply, onboard_apply_live, v3_installer
 from creator_engine_validator.forge.github_repo_config import DEFAULT_MAIN_PROTECTION
 from creator_engine_validator.forge.ruleset import CE_PROTECTION_RULESET_NAME, RulesetPolicy
+from creator_engine_validator.version import SEMVER as CE_SEMVER
 
 _FX = Path(__file__).parent / "fixtures" / "ce88_live_forge"
 _REPO = "creator-engine/creator-engine"
+_CE_DOWNLOADS_ROOT = Path(__file__).resolve().parents[3] / "docs" / "downloads"
+_CE_DOWNLOADS_DIR = _CE_DOWNLOADS_ROOT / CE_SEMVER
+_CE_DOWNLOADS_URL_PREFIX = f"creator-engine.dev/downloads/{CE_SEMVER}/"
 _MINTED = "ghs_fake_minted_value"  # the value the fake mint transport returns
 _BOOTSTRAP_PAT = "ghp_fakeclassicbootstrappatvalue0000000000"  # classic PAT (ghp_ prefix)
 _BOOTSTRAP_PAT_FG = "github_pat_11FAKEfinegrainedbootstrappatvalue00000"  # fine-grained PAT (ce-ops#94)
@@ -45,6 +49,16 @@ def _schema() -> dict[str, Any]:
 
 def _fx(name: str) -> str:
     return (_FX / name).read_text(encoding="utf-8")
+
+
+def _scanner_mirror_dir() -> Path:
+    current = _CE_DOWNLOADS_DIR / "scanners"
+    if (current / "scanner-mirror.fragment.yaml").is_file():
+        return current
+    matches = sorted(_CE_DOWNLOADS_ROOT.glob("*/scanners/scanner-mirror.fragment.yaml"))
+    if len(matches) == 1:
+        return matches[0].parent
+    return current
 
 
 def _scanner_archive(tool: str, payload: bytes) -> bytes:
@@ -771,13 +785,13 @@ def test_plain_join_apply_completes_for_legacy_validate_yml_repo(tmp_path):
 
 # ---------------------------------------------------------------------------
 # ce-ops#90 (design A, Operator-ratified) — 2nd live-forge driver gap (dev-3 dogfood).
-# install_dependencies fetches the pinned userspace wheel (uv) from CE's OWN mirror
-# (docs/downloads/0.3.0/, NOT astral.sh / a live index), sha256-verifies it against the
+# install_dependencies fetches the pinned userspace wheel (uv) from CE's OWN versioned mirror
+# (NOT astral.sh / a live index), sha256-verifies it against the
 # in-code pin (bound to the signed required_wheels entry), then installs OFFLINE via
 # `pip --no-index --find-links`. wait_for_app_installation is a read-only already-installed
 # detect. All tests are OFFLINE: injected mirror_fetch + pip_spawn → ZERO network / pip.
 # ---------------------------------------------------------------------------
-_MIRROR_DIR = Path(__file__).resolve().parents[3] / "docs" / "downloads" / "0.3.0"
+_MIRROR_DIR = _CE_DOWNLOADS_DIR
 _UV_PIN = onboard_apply_live.MIRROR_USERSPACE_WHEELS["uv"]
 _UV_BYTES = (_MIRROR_DIR / _UV_PIN.filename).read_bytes()
 
@@ -814,7 +828,7 @@ def test_install_dependencies_fetches_uv_from_mirror_and_installs_offline():
     assert result == {"ok": True, "installed": ["uv"]}
     # fetched the pinned wheel from CE's mirror (NOT astral/PyPI) ...
     assert calls["fetch"] == [_UV_PIN.url]
-    assert "creator-engine.dev/downloads/0.3.0/" in _UV_PIN.url
+    assert _CE_DOWNLOADS_URL_PREFIX in _UV_PIN.url
     assert "astral" not in _UV_PIN.url
     # ... and installed it OFFLINE from a local find-links dir.
     assert len(calls["pip"]) == 1
@@ -1012,7 +1026,7 @@ def test_install_dependencies_fallback_with_tampered_wheel_fails_closed(tmp_path
 
 def test_uv_pin_matches_served_mirror_wheel_and_signed_manifest():
     # the in-code pin must equal the ACTUAL served mirror wheel bytes (reproduced) AND the
-    # docs/downloads/0.3.0/SHA256SUMS line AND the docs/llms-install.md required_wheels entry —
+    # versioned SHA256SUMS line AND the docs/llms-install.md required_wheels entry —
     # so the apply-time anti-tamper pin can never silently drift from the signed manifest.
     import hashlib as _h
     served = _MIRROR_DIR / _UV_PIN.filename
@@ -1210,7 +1224,7 @@ from creator_engine_validator.forge.scoped_token import (  # noqa: E402
 
 _READ_TOKEN = "ghs_read_token_value"
 _WRITE_TOKEN = "ghs_write_token_value"
-_SCANNER_MIRROR_DIR = Path(__file__).resolve().parents[3] / "docs" / "downloads" / "0.2.0" / "scanners"
+_SCANNER_MIRROR_DIR = _scanner_mirror_dir()
 
 
 class _AdoptionForge:

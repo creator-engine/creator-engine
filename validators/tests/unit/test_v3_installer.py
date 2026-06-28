@@ -24,6 +24,7 @@ import yaml
 from creator_engine_validator import _versions as ver
 from creator_engine_validator import v3_installer as inst
 from creator_engine_validator.checks.ce_spend_envelope import _check_optout
+from creator_engine_validator.version import SEMVER as CE_SEMVER
 
 SPEC = b"# Install CE\nsteps: ...\n"
 PINNED = inst.PINNED_KEYS
@@ -31,6 +32,10 @@ KEY = "ce-root-v1"
 HEX = "a" * 64
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_CE_PACKAGE_VERSION = CE_SEMVER
+_CE_APP_WHEEL = f"creator_engine_validator-{_CE_PACKAGE_VERSION}-py3-none-any.whl"
+_CE_ARTIFACT_BASE_URL = f"https://creator-engine.example/downloads/{_CE_PACKAGE_VERSION}"
+_STALE_PACKAGE_VERSION = f"{_CE_PACKAGE_VERSION}-stale"
 ANSWERS_SCHEMA = yaml.safe_load(
     (_REPO_ROOT / inst.ANSWERS_SCHEMA_PATH).read_text(encoding="utf-8")
 )
@@ -378,9 +383,9 @@ def test_v3_installer_parses_bootstrap_artifact_manifest_from_current_spec():
     manifest = inst.parse_bootstrap_manifest(_SPEC_TEXT)
     assert manifest.artifact_manifest_version == 1
     assert manifest.package_name == "creator-engine-validator"
-    assert manifest.package_version == "0.3.0"
+    assert manifest.package_version == _CE_PACKAGE_VERSION
     assert manifest.python_requires == ">=3.14"
-    assert manifest.app_wheel == "creator_engine_validator-0.3.0-py3-none-any.whl"
+    assert manifest.app_wheel == _CE_APP_WHEEL
     assert manifest.answers_schema_url == "https://creator-engine.dev/schemas/install-answers.schema.yaml"
     assert manifest.python_acquisition.tool == "uv"
     assert manifest.python_acquisition.version == "0.11.21"
@@ -400,7 +405,7 @@ def test_v3_installer_parses_bootstrap_artifact_manifest_from_current_spec():
 
 def test_v3_installer_rejects_bad_bootstrap_manifest():
     bad_missing_app = _SPEC_TEXT.replace(
-        "  app_wheel: creator_engine_validator-0.3.0-py3-none-any.whl\n",
+        f"  app_wheel: {_CE_APP_WHEEL}\n",
         "",
     )
     with pytest.raises(inst.InstallRefused, match="missing app_wheel"):
@@ -432,7 +437,7 @@ def test_sha256s_parser_and_platform_plan():
     assert arm_plan["platform"] == "linux-aarch64-cp314"
     arm_wheel_names = {wheel["filename"] for wheel in arm_plan["wheels"]}
     assert "attrs-26.1.0-py3-none-any.whl" in arm_wheel_names
-    assert "creator_engine_validator-0.3.0-py3-none-any.whl" in arm_wheel_names
+    assert _CE_APP_WHEEL in arm_wheel_names
     assert "pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl" in arm_wheel_names
     assert "rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl" in arm_wheel_names
     assert "uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl" in arm_wheel_names
@@ -461,7 +466,7 @@ _ANSWERS_SCHEMA_SHA = "c" * 64
 _APP_WHEEL_SHA = "d" * 64
 _ATTRS_WHEEL_SHA = "e" * 64
 _UV_TARBALL_SHA = "f" * 64
-_APP_WHEEL = "creator_engine_validator-0.2.0-py3-none-any.whl"
+_APP_WHEEL = _CE_APP_WHEEL
 _ATTRS_WHEEL = "attrs-26.1.0-py3-none-any.whl"
 _ANSWERS_SCHEMA_FILE = "install-answers.schema.yaml"
 _UV_TARBALL = "uv-x86_64-unknown-linux-gnu.tar.gz"
@@ -477,10 +482,10 @@ def _reinstall_manifest() -> inst.BootstrapManifest:
     return inst.BootstrapManifest(
         artifact_manifest_version=1,
         package_name="creator-engine-validator",
-        package_version="0.2.0",
+        package_version=_CE_PACKAGE_VERSION,
         python_requires=">=3.14",
-        artifact_base_url="https://creator-engine.example/downloads/0.2.0",
-        sha256s_url="https://creator-engine.example/downloads/0.2.0/SHA256SUMS",
+        artifact_base_url=_CE_ARTIFACT_BASE_URL,
+        sha256s_url=f"{_CE_ARTIFACT_BASE_URL}/SHA256SUMS",
         sha256s_sha256=inst.content_digest(_REINSTALL_SHA256S),
         install_sh_url="https://creator-engine.example/install.sh",
         install_sh_sha256s_entry="install.sh",
@@ -490,12 +495,12 @@ def _reinstall_manifest() -> inst.BootstrapManifest:
         required_wheels=(
             inst.BootstrapWheel(
                 _APP_WHEEL,
-                f"https://creator-engine.example/downloads/0.2.0/{_APP_WHEEL}",
+                f"{_CE_ARTIFACT_BASE_URL}/{_APP_WHEEL}",
                 _APP_WHEEL_SHA,
             ),
             inst.BootstrapWheel(
                 _ATTRS_WHEEL,
-                f"https://creator-engine.example/downloads/0.2.0/{_ATTRS_WHEEL}",
+                f"{_CE_ARTIFACT_BASE_URL}/{_ATTRS_WHEEL}",
                 _ATTRS_WHEEL_SHA,
             ),
         ),
@@ -504,7 +509,7 @@ def _reinstall_manifest() -> inst.BootstrapManifest:
                 platform="linux-x86_64-cp314",
                 tool="uv",
                 version="0.11.21",
-                url=f"https://creator-engine.example/downloads/0.2.0/{_UV_TARBALL}",
+                url=f"{_CE_ARTIFACT_BASE_URL}/{_UV_TARBALL}",
                 sha256=_UV_TARBALL_SHA,
                 command="uv python install 3.14",
             ),
@@ -910,7 +915,7 @@ def test_ce_scaffold_valid_paths_still_plan_writes():
 def test_existing_verified_venv_reuses_and_partial_venv_rebuilds_safely():
     desired = {
         "package_name": "creator-engine-validator",
-        "package_version": "0.2.0",
+        "package_version": _CE_PACKAGE_VERSION,
         "python_requires": ">=3.14",
         "platform": "linux-x86_64-cp314",
         "app_wheel_sha256": _APP_WHEEL_SHA,
@@ -929,7 +934,7 @@ def test_existing_verified_venv_reuses_and_partial_venv_rebuilds_safely():
 
     partial = inst.plan_verified_venv_reconcile(
         desired,
-        {**current, "package_version": "0.1.0", "verified": False},
+        {**current, "package_version": _STALE_PACKAGE_VERSION, "verified": False},
     )
     assert partial["action"] == "build_staging_promote"
     assert partial["staging_required"] is True
@@ -2200,7 +2205,7 @@ def test_reinstall_convergence_fully_installed_state_preserves_identity_and_skip
             "repo": "chmod735/creator-engine-canonical",
             "reviewer": "chmod735",
         },
-        "venv": {"state": "current", "target": "venv-0.2.0-good"},
+        "venv": {"state": "current", "target": f"venv-{_CE_PACKAGE_VERSION}-good"},
         "github_app": {
             "state": "installed",
             "installation_id": 12345678,
