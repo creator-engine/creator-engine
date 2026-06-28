@@ -277,10 +277,10 @@ _GITHUB_ACCEPT = "application/vnd.github+json"
 
 @dataclass(frozen=True)
 class MirrorUserspaceWheel:
-    """A sha256-pinned, no-sudo userspace tool wheel SERVED FROM CE's own 0.2.0 mirror.
+    """A sha256-pinned, no-sudo userspace tool wheel SERVED FROM CE's own 0.3.0 mirror.
 
     Design A (Operator-ratified, ce-ops#90): the apply-time ``install_dependencies`` leg
-    fetches ``url`` from CE's mirror (``docs/downloads/0.2.0/``, NOT astral.sh / PyPI), verifies
+    fetches ``url`` from CE's mirror (``docs/downloads/0.3.0/``, NOT astral.sh / PyPI), verifies
     the downloaded bytes against ``sha256`` BEFORE install (anti-tamper), then installs OFFLINE
     via ``pip install --no-index --find-links <downloaded-dir> <tool>``. The pin is bound to the
     SIGNED ``required_wheels`` entry in ``docs/llms-install.md`` and the served wheel by a parity
@@ -306,7 +306,7 @@ MIRROR_USERSPACE_WHEELS: dict[str, MirrorUserspaceWheel] = {
         tool="uv",
         filename="uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
         url=(
-            "https://creator-engine.dev/downloads/0.2.0/"
+            "https://creator-engine.dev/downloads/0.3.0/"
             "uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
         ),
         sha256="b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd",
@@ -1058,7 +1058,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         (``no_userspace_installer_configured``); the dev-3 brownfield dogfood hit exactly that
         on the os-native ``uv`` dep (the 2nd live-forge driver leg left on the conservative base
         — the 1st was the detector, ce-ops#90 #241). **Design A (Operator-ratified):** each
-        userspace tool's wheel is fetched from CE's own 0.2.0 mirror (``docs/downloads/0.2.0/``,
+        userspace tool's wheel is fetched from CE's own 0.3.0 mirror (``docs/downloads/0.3.0/``,
         NOT astral.sh / a live index), its bytes sha256-verified against the in-code pin
         (``MIRROR_USERSPACE_WHEELS``, bound to the SIGNED ``required_wheels`` entry) BEFORE
         install, then installed OFFLINE via ``pip install --no-index --find-links <dir> <tool>``;
