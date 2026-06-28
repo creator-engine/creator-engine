@@ -60,6 +60,44 @@ def test_offenses_reports_planted_private_repo_url(tmp_path: Path):
     assert "README.md:1 [confidential ce-ops private-repo URL]" in hits[0]
 
 
+def test_offenses_reports_planted_skynet_codename(tmp_path: Path):
+    """The confidential internal codename 'skynet' must be flagged in any casing."""
+    doc = tmp_path / "README.md"
+    doc.write_text("Ratified in the CEO-Mode/skynet discussion.\n", encoding="utf-8")
+
+    hits = _offenses(doc, repo_root=tmp_path)
+
+    assert len(hits) == 1
+    assert "README.md:1 [confidential internal codename skynet]" in hits[0]
+
+
+def test_offenses_reports_planted_ce_ops_hyphen_ticket_ref(tmp_path: Path):
+    """The hyphen form 'ce-ops-341' must be flagged (misses the existing # pattern)."""
+    doc = tmp_path / "README.md"
+    doc.write_text("tag: ce-ops-341\n", encoding="utf-8")
+
+    hits = _offenses(doc, repo_root=tmp_path)
+
+    assert len(hits) == 1
+    assert "README.md:1 [confidential ce-ops hyphen ticket ref]" in hits[0]
+
+
+def test_ce_ops_adr_hyphen_form_not_flagged_by_numeric_pattern(tmp_path: Path):
+    """'ce-ops-adr-0003' must NOT be flagged by the numeric ce-ops-\\d+ pattern.
+
+    The pattern requires digits immediately after 'ce-ops-'; 'adr' is not a digit,
+    so ADR-ref slugs using this form are safe from false positives.
+    """
+    doc = tmp_path / "README.md"
+    doc.write_text("tag: ce-ops-adr-0003\n", encoding="utf-8")
+
+    hits = _offenses(doc, repo_root=tmp_path)
+
+    # Only expect zero hits from the ce-ops-\d+ pattern; other patterns should
+    # also not fire on this clean descriptor string.
+    assert hits == []
+
+
 def test_offenses_accepts_clean_temp_doc(tmp_path: Path):
     doc = tmp_path / "docs" / "clean.md"
     doc.parent.mkdir()

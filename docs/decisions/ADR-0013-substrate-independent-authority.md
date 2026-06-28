@@ -13,7 +13,7 @@ review_by: "2026-12-28"
 mutation_class: governance
 evidence_refs:
   - kind: session
-    ref: "Operator-ratified principle, 2026-06-28 CEO-Mode/skynet discussion (4 enumerated sub-principles)"
+    ref: "Operator-ratified principle, 2026-06-28 CEO-Mode governed-autonomy ratification discussion (4 enumerated sub-principles)"
     tag: operator-ratification
   - kind: session
     ref: "Operator direction, 2026-06-28: authority model must be action-centric (autonomous vs reserved verbs), not grant-numbered or substrate-coupled"
@@ -29,16 +29,16 @@ evidence_refs:
     tag: g2-007-reviewer-authority
   - kind: issue
     ref: "internal governance: run-mode parameterization of the never-APPROVE guard (AutoReview; CLOSED)"
-    tag: ce-ops-341
+    tag: run-mode-parameterization
   - kind: issue
     ref: "internal governance: strangeLoop C-cluster coordination and governed autonomy lane"
-    tag: ce-ops-6
+    tag: strangeloop-lane
   - kind: issue
     ref: "internal governance: CEO-mode policy-tiered auto-merge (Wave 1.1; CLOSED)"
-    tag: ce-ops-291
+    tag: ceo-mode-automerge
   - kind: issue
     ref: "internal governance: SO_PEERCRED self-push socket attestation for the egress broker (CLOSED)"
-    tag: ce-ops-289
+    tag: socket-attestation
   - kind: code
     ref: "tools/egress-broker/ce_egress_self_review_broker.py:170-171 — conflated APPROVE refusal"
     tag: conflation-broker
@@ -47,10 +47,10 @@ evidence_refs:
     tag: conflation-proxy
   - kind: adr
     ref: "ce-ops decision-records/ADR-0003-reviewer-independence-isolation-domain.md (ce-ops private repo)"
-    tag: ce-ops-adr-0003
+    tag: adr-0003
   - kind: adr
     ref: "ce-ops decision-records/ADR-0004-agent-containment-eligibility.md (ce-ops private repo)"
-    tag: ce-ops-adr-0004
+    tag: adr-0004
 ratification:
   ratified_by: "chmod735"
   ratified_at: "2026-06-28"
@@ -73,7 +73,7 @@ crosswalk:
 
 ### The operator-ratified principle (2026-06-28)
 
-The following four sub-principles were ratified by the Operator in the CEO-Mode/skynet
+The following four sub-principles were ratified by the Operator in the CEO-Mode governed-autonomy ratification
 discussion on 2026-06-28. They are recorded here as the grounding for this ADR.
 
 1. **Containment is not authority.** Containment is an isolation and runtime substrate
