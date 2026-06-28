@@ -62,6 +62,16 @@ def _request(event="COMMENT", body="Looks reasonable."):
     )
 
 
+def _payload(event="COMMENT", body="Looks reasonable."):
+    return {
+        "seat_id": "seat-reviewer-1",
+        "pr_number": 7,
+        "head_sha": _HEAD,
+        "event": event,
+        "body": body,
+    }
+
+
 def _token(value=_SECRET):
     return ScopedToken(
         run_id="self-review-run",
@@ -165,6 +175,103 @@ def test_approve_is_refused_before_resolve_mint_or_transport():
 
     assert "COMMENT or REQUEST_CHANGES" in str(exc.value)
     assert called == {"resolve": 0, "mint": 0, "spawn": 0}
+
+
+def test_approve_refused_in_dev_mode():
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(_payload(event="APPROVE"), run_mode="dev")
+
+    assert "APPROVE is controller approval-wall only" in str(exc.value)
+
+
+def test_approve_refused_when_run_mode_none():
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(_payload(event="APPROVE"), run_mode=None)
+
+    assert "APPROVE is controller approval-wall only" in str(exc.value)
+
+
+def test_approve_allowed_in_strangeloop_mode():
+    request = broker.parse_request(_payload(event="APPROVE"), run_mode="strangeLoop")
+
+    assert request.event == "APPROVE"
+
+
+def test_submit_self_review_approve_refused_in_dev_mode():
+    called = {"resolve": 0, "mint": 0, "spawn": 0}
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.submit_self_review(
+            _request(event="APPROVE"),
+            config=_config(),
+            resolve_id_fn=lambda seat: called.__setitem__("resolve", called["resolve"] + 1),
+            mint_fn=lambda req: called.__setitem__("mint", called["mint"] + 1),
+            gh_spawn=lambda *args: called.__setitem__("spawn", called["spawn"] + 1),
+            run_mode="dev",
+        )
+
+    assert "COMMENT or REQUEST_CHANGES" in str(exc.value)
+    assert called == {"resolve": 0, "mint": 0, "spawn": 0}
+
+
+def test_submit_self_review_approve_allowed_in_strangeloop_mode(monkeypatch):
+    called = {"resolve": 0, "mint": 0, "spawn": 0}
+
+    def resolve_id(seat):
+        called["resolve"] += 1
+        return 123
+
+    def mint(req):
+        called["mint"] += 1
+        return _token()
+
+    def spawn(argv, input_text, env):
+        called["spawn"] += 1
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": 989}), stderr="")
+
+    def fake_submit(review, *, binding, minter, token_spawn=None, **kwargs):
+        token = minter(
+            TokenRequest(
+                repo=review.repo,
+                installation_id=binding.installation_id,
+                run_id=binding.run_id,
+                policy_sha=binding.policy_sha,
+                permissions=dict(binding.permissions),
+                secret_name=binding.secret_name,
+                requested_ttl_seconds=binding.requested_ttl_seconds,
+                escalation_authority=binding.escalation_authority,
+            )
+        )
+        if token_spawn is not None:
+            token_spawn(
+                ["gh", "api", "-X", "POST", f"repos/{review.repo}/pulls/{review.pr_number}/reviews"],
+                json.dumps({"event": review.event, "commit_id": review.head_sha}),
+                {"GH_TOKEN": token.value},
+            )
+        return broker.SelfReviewResult(
+            ok=True,
+            repo=review.repo,
+            pr_number=review.pr_number,
+            head_sha=review.head_sha,
+            event=review.event,
+            review_id=989,
+            applied=True,
+        )
+
+    monkeypatch.setattr(broker, "submit_contained_seat_pr_review", fake_submit)
+
+    result = broker.submit_self_review(
+        _request(event="APPROVE"),
+        config=_config(),
+        resolve_id_fn=resolve_id,
+        mint_fn=mint,
+        gh_spawn=spawn,
+        resolve_author_fn=_author(),
+        run_mode="strangeLoop",
+    )
+
+    assert result.event == "APPROVE"
+    assert called == {"resolve": 1, "mint": 1, "spawn": 1}
 
 
 def test_author_is_refused_before_resolve_mint_or_transport():
