@@ -43,6 +43,10 @@ gates:
     type: sunset
     description: "Courier-forge-op sunsets when the egress gateway lands."
     required: true
+  - id: annoyance-filed
+    type: dor
+    description: "Recurring toil is named, ticketed, and dispatched before continuing."
+    required: false
 stages:
   - id: dispatch
     title: "Dispatch"
@@ -64,6 +68,11 @@ stages:
     brief: briefs/courier-forge-op.md
     dispatch_target: uncontained-courier
     gates: [work-claim, courier-sunset]
+  - id: annoyance-to-tool
+    title: "Annoyance → Tool"
+    brief: briefs/annoyance-to-tool.md
+    dispatch_target: controller-seat
+    gates: [annoyance-filed]
 ratified_flow_hooks:
   - id: adr0007-model-b
     trigger: "contained-seat-needs-forge-op"
