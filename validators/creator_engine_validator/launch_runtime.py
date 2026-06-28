@@ -22,6 +22,7 @@ adapter; no secrets or environment values are printed.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field, replace
@@ -31,6 +32,7 @@ from typing import Any, Mapping, Sequence
 from . import (
     _versions,
     brain_bootstrap,
+    brain_recall_surface,
     claude_launch_spec,
     codex_launch_spec,
     hermes_launch_spec,
@@ -49,6 +51,7 @@ DEFAULT_SESSION = "ce-controller"
 DEFAULT_WINDOW = "controller"
 SUPPORTED_HARNESSES = frozenset({"claude", "codex", "hermes", "openclaw"})
 VISIBILITY = "operator_visible"
+LOGGER = logging.getLogger(__name__)
 
 
 class LaunchError(Exception):
@@ -319,6 +322,22 @@ def _brain_state_root(repo_root: Path | str | None) -> Path:
     return Path(repo_root or ".") / _versions.V3_LOCAL_STATE_ROOT
 
 
+def _controller_recall_context(repo_root: Path | str | None, payload: Mapping[str, Any]) -> str:
+    context = payload.get("context")
+    role = None
+    seat_class = None
+    if isinstance(context, Mapping):
+        role = context.get("role")
+        seat_class = context.get("seat_class")
+    repo = Path(repo_root or ".")
+    return (
+        "Controller launch brain hydration "
+        f"role={role or brain_bootstrap.DEFAULT_ROLE} "
+        f"seat_class={seat_class or brain_bootstrap.DEFAULT_SEAT_CLASS} "
+        f"repo_root={repo}"
+    )
+
+
 def _has_launched_event(seat_dir: Path | str) -> bool:
     events_path = Path(seat_dir) / seat_sentinel.EVENTS_FILENAME
     return any(
@@ -329,7 +348,7 @@ def _has_launched_event(seat_dir: Path | str) -> bool:
 
 def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str, Any]:
     try:
-        return brain_bootstrap.build_bootstrap_payload(
+        payload = brain_bootstrap.build_bootstrap_payload(
             state_root=_brain_state_root(repo_root),
             role=brain_bootstrap.DEFAULT_ROLE,
             seat_class=brain_bootstrap.DEFAULT_SEAT_CLASS,
@@ -339,6 +358,26 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
         raise BrainBootstrapLaunchRefused(
             f"refusing Controller launch before spawn: {details}"
         ) from exc
+    try:
+        surface = brain_recall_surface.open_surface(
+            state_root=_brain_state_root(repo_root),
+            embedder_name="vllm-openai",
+        )
+        hydration = surface.hydrate_session(
+            _controller_recall_context(repo_root, payload),
+            top_k=5,
+            allow_confidential_egress=False,
+        )
+        recall_payload = hydration.to_dict()
+        recall_payload["advisory"] = True
+        recall_payload["source"] = "brain_recall_surface.hydrate_session"
+        recall_payload["embedder"] = "vllm-openai"
+        recall_payload["top_k"] = 5
+        recall_payload["allow_confidential_egress"] = False
+        payload["recall"] = recall_payload
+    except Exception as exc:
+        LOGGER.warning("Controller brain semantic recall hydration skipped: %s", exc)
+    return payload
 
 
 def _require_launch_pinned_foreman_contract() -> None:

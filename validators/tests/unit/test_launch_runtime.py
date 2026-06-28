@@ -401,6 +401,83 @@ def test_launch_injects_brain_bootstrap_payload_ref(tmp_path):
     assert f"export CE_BRAIN_BOOTSTRAP_SHA256={result.plan.brain_bootstrap_sha256}" in wrapper
 
 
+def test_controller_brain_bootstrap_adds_advisory_recall_when_available(tmp_path, monkeypatch):
+    calls: dict[str, dict] = {}
+
+    class Hydration:
+        def __init__(self, context: str):
+            self.context = context
+
+        def to_dict(self):
+            return {
+                "context": self.context,
+                "core_loaded": False,
+                "core_path": None,
+                "note": "fake recall hydration",
+                "recall": [
+                    {
+                        "tier": "recall",
+                        "source_path": "docs/company-brain.md",
+                        "chunk_ref": "launch-runtime",
+                        "content_hash": "abc123",
+                        "as_of": "2026-06-28T00:00:00Z",
+                        "verify_against": "docs/company-brain.md",
+                    }
+                ],
+            }
+
+    class Surface:
+        def hydrate_session(self, context: str, **kwargs):
+            calls["hydrate"] = {"context": context, **kwargs}
+            return Hydration(context)
+
+    def open_surface(**kwargs):
+        calls["open_surface"] = kwargs
+        return Surface()
+
+    monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
+
+    payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
+
+    assert calls["open_surface"] == {
+        "state_root": tmp_path / ".ce" / "state",
+        "embedder_name": "vllm-openai",
+    }
+    assert calls["hydrate"]["top_k"] == 5
+    assert calls["hydrate"]["allow_confidential_egress"] is False
+    assert "role=controller" in calls["hydrate"]["context"]
+    assert "seat_class=foreman" in calls["hydrate"]["context"]
+    assert f"repo_root={tmp_path}" in calls["hydrate"]["context"]
+
+    assert payload["knowledge_ssot"]["assertions"][0]["claim"]["object"] == "ready"
+    assert payload["recall"]["advisory"] is True
+    assert payload["recall"]["embedder"] == "vllm-openai"
+    assert payload["recall"]["allow_confidential_egress"] is False
+    assert payload["recall"]["recall"][0]["tier"] == "recall"
+
+
+def test_controller_brain_bootstrap_falls_back_to_ssot_when_recall_unavailable(
+    tmp_path, monkeypatch, caplog
+):
+    expected = brain_bootstrap.build_bootstrap_payload(
+        state_root=tmp_path / ".ce" / "state",
+        role=brain_bootstrap.DEFAULT_ROLE,
+        seat_class=brain_bootstrap.DEFAULT_SEAT_CLASS,
+    )
+
+    def open_surface(**_kwargs):
+        raise RuntimeError("vllm endpoint unavailable")
+
+    monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
+    caplog.set_level("WARNING", logger=launch_runtime.__name__)
+
+    payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
+
+    assert payload == expected
+    assert "recall" not in payload
+    assert "semantic recall hydration skipped" in caplog.text
+
+
 @pytest.mark.parametrize("harness", ["claude", "hermes", "openclaw"])
 def test_spawned_launch_injects_foreman_charter_and_worker_spawn_for_harnesses(
     tmp_path, harness
