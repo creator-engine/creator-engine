@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview-only controller bootstrap generator for ce-ops#244.
+"""Preview-only controller bootstrap generator for the controller bootstrap SSOT.
 
 This scaffold intentionally does not mutate live harness files. It renders
 bootstrap previews from a tracked JSON SSOT so reviewers can inspect the
@@ -143,6 +143,7 @@ def validate_ssot(ssot: Any) -> None:
         "preflight_discipline",
         "g5_body_line_rule",
         "new_ce_group_coupling",
+        "merge_gate_checklist",
     ):
         require_list(overlay.get(key), f"$.controller_knowledge_overlay.{key}")
     require_mapping(
@@ -284,6 +285,7 @@ def render_knowledge_overlay(ssot: dict[str, Any]) -> str:
         ("Preflight Discipline", bullet_lines(overlay["preflight_discipline"])),
         ("G5 Body-Line Rule", bullet_lines(overlay["g5_body_line_rule"])),
         ("New ce Group Coupling", bullet_lines(overlay["new_ce_group_coupling"])),
+        ("Merge-Gate Checklist", bullet_lines(overlay["merge_gate_checklist"])),
     )
     rendered_sections: list[str] = []
     for title, body in sections:
