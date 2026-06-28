@@ -28,16 +28,16 @@ evidence_refs:
     ref: "docs/operations/REVIEWER_VENUE_AUTHORITY.md — G2.007.2/G2.007.3 reviewer-authority-envelope seam"
     tag: g2-007-reviewer-authority
   - kind: issue
-    ref: "https://github.com/creator-engine/ce-ops/issues/341 (CLOSED) — AutoReview never-APPROVE guard: parameterize by run_mode for strangeLoop autonomy"
+    ref: "internal governance: run-mode parameterization of the never-APPROVE guard (AutoReview; CLOSED)"
     tag: ce-ops-341
   - kind: issue
-    ref: "https://github.com/creator-engine/ce-ops/issues/6 — Lane: strangeLoop C-cluster, coordination and governed autonomy"
+    ref: "internal governance: strangeLoop C-cluster coordination and governed autonomy lane"
     tag: ce-ops-6
   - kind: issue
-    ref: "https://github.com/creator-engine/ce-ops/issues/291 (CLOSED) — CEO-mode policy-tiered auto-merge (Wave 1.1)"
+    ref: "internal governance: CEO-mode policy-tiered auto-merge (Wave 1.1; CLOSED)"
     tag: ce-ops-291
   - kind: issue
-    ref: "https://github.com/creator-engine/ce-ops/issues/289 (CLOSED) — Egress broker: attest self-push socket origin via SO_PEERCRED"
+    ref: "internal governance: SO_PEERCRED self-push socket attestation for the egress broker (CLOSED)"
     tag: ce-ops-289
   - kind: code
     ref: "tools/egress-broker/ce_egress_self_review_broker.py:170-171 — conflated APPROVE refusal"
@@ -59,12 +59,15 @@ ratification:
 crosswalk:
   informs:
     - ADR-0007
-    - "https://github.com/creator-engine/ce-ops/issues/341"
-    - "https://github.com/creator-engine/ce-ops/issues/6"
-    - "https://github.com/creator-engine/ce-ops/issues/291"
+    - "internal: run-mode parameterization of the never-APPROVE guard"
+    - "internal: strangeLoop coordination lane"
+    - "internal: CEO-mode policy-tiered auto-merge engine"
 ---
 
 # Authority is substrate-independent; agent-autonomous review and approval gated by role and ratified run-mode
+
+> **Traceability note:** Precise internal governance linkage (issue numbers, sprint references)
+> is maintained in the internal decision-record companion, not in this public record.
 
 ## Context and Problem Statement
 
@@ -127,16 +130,14 @@ reviewer-authority-envelope. Whether that seat is contained is irrelevant.
   `pr_review` mechanic on exactly one PR, keyed to role (`reviewer`) and lane kind (`review`).
   This seam is exactly the right primitive for authority-by-role; it is not yet wired to
   the broker/herdr path.
-- [governance issue #341](https://github.com/creator-engine/ce-ops/issues/341) (closed)
-  identified the never-APPROVE guard as a hardcoded constant that should instead flow from
-  the run-mode, and noted that strangeLoop may need APPROVE under a deliberate governance
-  decision.
-- [governance issue #291](https://github.com/creator-engine/ce-ops/issues/291) (closed,
-  CEO-mode) built the policy-tiered auto-merge run-mode engine (dry-run mode), which
-  parameterizes what is allowed without a per-PR human gesture.
-- [governance issue #6](https://github.com/creator-engine/ce-ops/issues/6) (strangeLoop
-  lane) is the long-pole autonomous-review endpoint: a governed coordination loop where the
-  loop itself constitutes the governance path.
+- The run-mode parameterization of the never-APPROVE guard (closed) identified the
+  never-APPROVE guard as a hardcoded constant that should instead flow from the run-mode,
+  and noted that strangeLoop may need APPROVE under a deliberate governance decision.
+- The CEO-mode policy-tiered auto-merge engine (closed) built the policy-tiered
+  auto-merge run-mode engine (dry-run mode), which parameterizes what is allowed without
+  a per-PR human gesture.
+- The strangeLoop coordination lane is the long-pole autonomous-review endpoint: a governed
+  coordination loop where the loop itself constitutes the governance path.
 - **ce-ops ADR-0003** (reviewer-independence-isolation-domain, private ce-ops repo) and
   **ce-ops ADR-0004** (agent-containment-eligibility, private ce-ops repo) are the
   upstream decision records this ADR composes with; ADR-0003 defines the
@@ -147,9 +148,8 @@ reviewer-authority-envelope. Whether that seat is contained is irrelevant.
 
 - The Operator-ratified principle (four sub-principles above) is the governing authority.
 - The author-not-equal-approver guard is load-bearing and must be preserved.
-- The run-mode parameterization from [governance issue #341](https://github.com/creator-engine/ce-ops/issues/341)
-  and the reviewer-authority-envelope from G2.007.2/G2.007.3 are already the right
-  primitives; they need wiring, not redesign.
+- The run-mode parameterization of the never-APPROVE guard and the reviewer-authority-envelope
+  from G2.007.2/G2.007.3 are already the right primitives; they need wiring, not redesign.
 - Fail-closed posture must be preserved: no weakening of default deny; APPROVE under a
   ratified run-mode is an explicit grant, not a default.
 - ADR-0007's TCB-minimization discipline still applies to egress; this ADR is about
@@ -233,10 +233,9 @@ The gating logic is:
 3. **Run-mode policy check (required for APPROVE).** The active run-mode must permit
    autonomous APPROVE. For the current run-modes (`solo`, `team`), autonomous APPROVE
    remains gated on the Operator ratification gesture at the run-mode level (not per-PR).
-   For a future explicitly-ratified `strangeLoop` run-mode
-   ([governance issue #6](https://github.com/creator-engine/ce-ops/issues/6)), the loop
-   itself constitutes the governance path, and APPROVE may be permitted under the envelope.
-   The run-mode is a configuration of the system, not a per-request flag.
+   For a future explicitly-ratified `strangeLoop` run-mode (the strangeLoop coordination
+   lane), the loop itself constitutes the governance path, and APPROVE may be permitted
+   under the envelope. The run-mode is a configuration of the system, not a per-request flag.
 
 4. **Substrate is not checked.** Whether the reviewer seat is contained or uncontained
    is not a factor in whether APPROVE is permitted or denied.
@@ -247,9 +246,8 @@ The gating logic is:
 
 - Aligns the code with the ratified Operator principle. Containment and review authority
   are orthogonal; coupling them was an implementation shortcut, not a governance requirement.
-- Unblocks agent-autonomous review under ratified run-modes (the
-  [strangeLoop endgame](https://github.com/creator-engine/ce-ops/issues/6) and the
-  near-term CEO-mode auto-review-and-approve path).
+- Unblocks agent-autonomous review under ratified run-modes (the strangeLoop endgame and
+  the near-term CEO-mode auto-review-and-approve path).
 - The author-not-equal-approver wall is preserved and strengthened: it is now clearly the
   primary invariant, not a footnote next to a containment check.
 - The reviewer-authority-envelope seam (G2.007.2/G2.007.3) provides exactly the right
@@ -265,8 +263,8 @@ The gating logic is:
   deferred to the follow-on ticket). Until wired, the default-deny posture is preserved by
   failing closed on a missing or invalid envelope.
 - The run-mode integration must be tested before any live APPROVE is permitted: dry-run
-  classify-only mode must gate the first live flip (same discipline as
-  [governance issue #291](https://github.com/creator-engine/ce-ops/issues/291)).
+  classify-only mode must gate the first live flip (same discipline as the CEO-mode
+  policy-tiered auto-merge engine).
 - The `ContainedSeatReview` docstring and the broker module-level docstring must be
   rewritten to reflect the correct model (role+run-mode wall, not containment wall).
 
@@ -278,15 +276,14 @@ The gating logic is:
 | ce-ops ADR-0003 (reviewer independence) | This ADR composes with ADR-0003: the author-not-equal-approver rule from ADR-0003 is preserved and is the primary wall here. |
 | ce-ops ADR-0004 (containment eligibility) | ADR-0004 maps containment to reviewer-dispatch eligibility (e.g. an uncontained/advisory seat is ineligible). This ADR does not contradict that: a contained seat satisfying ADR-0004 is eligible. This ADR adds that being contained does not cap the reviewer's authority once eligible. |
 | G2.007.2 / G2.007.3 (reviewer-authority-envelope) | The reviewer-authority-envelope is the implementation primitive for role+run-mode-gated APPROVE. This ADR requires its use. G2.007.3 wiring to the broker/herdr path is the implementation dependency. |
-| [governance/341](https://github.com/creator-engine/ce-ops/issues/341) (run_mode parameterization) | This ADR ratifies the principle that governance issue #341 identified: the never-APPROVE guard must be a run-mode-keyed policy, not a constant. This ADR is the written decision; governance issue #341 surfaced the gap. |
-| [governance/291](https://github.com/creator-engine/ce-ops/issues/291) (CEO-mode) | The CEO-mode policy engine provides the run-mode infrastructure. APPROVE permission in a given run-mode is a policy decision encoded in that engine. |
-| [governance/6](https://github.com/creator-engine/ce-ops/issues/6) (strangeLoop) | strangeLoop is the autonomous-review endpoint. The APPROVE permission under strangeLoop is an explicit governance decision to be made when strangeLoop is scoped; this ADR clears the way for it. |
+| run-mode parameterization of the never-APPROVE guard | This ADR ratifies the principle that the referenced internal governance work identified: the never-APPROVE guard must be a run-mode-keyed policy, not a constant. This ADR is the written decision; that work surfaced the gap. |
+| CEO-mode policy-tiered auto-merge engine | The CEO-mode policy engine provides the run-mode infrastructure. APPROVE permission in a given run-mode is a policy decision encoded in that engine. |
+| strangeLoop coordination lane | strangeLoop is the autonomous-review endpoint. The APPROVE permission under strangeLoop is an explicit governance decision to be made when strangeLoop is scoped; this ADR clears the way for it. |
 
 ## What this ADR does NOT decide
 
 - The definition of the strangeLoop run-mode or the specific conditions under which APPROVE
-  is permitted within it. That is tracked in
-  [governance issue #6](https://github.com/creator-engine/ce-ops/issues/6).
+  is permitted within it. That is tracked in the strangeLoop coordination lane governance item.
 - The exact implementation shape of the broker/proxy modification. That is the engineering
   ticket to be filed.
 - The wiring of the reviewer-authority-envelope to the herdr path. That is G2.007.3
@@ -295,8 +292,7 @@ The gating logic is:
 
 ## Ratification
 
-Ratified by Operator **chmod735** on **2026-06-28** via
-[governance issue #348](https://github.com/creator-engine/ce-ops/issues/348).
+Ratified by Operator **chmod735** on **2026-06-28** via this ADR's ratification record.
 Promoted from the governance research draft (sha256 prefix `7fec84fc`, 294 lines)
 to `docs/decisions/ADR-0013-substrate-independent-authority.md` via a governance PR.
 

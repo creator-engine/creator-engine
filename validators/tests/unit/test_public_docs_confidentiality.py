@@ -46,6 +46,20 @@ def test_offenses_reports_planted_confidential_ticket_ref(tmp_path: Path):
     assert "README.md:1 [confidential ce-ops# ticket reference]" in hits[0]
 
 
+def test_offenses_reports_planted_private_repo_url(tmp_path: Path):
+    """The URL form of a ce-ops private-repo link must also be flagged."""
+    doc = tmp_path / "README.md"
+    doc.write_text(
+        "See https://github.com/creator-engine/ce-ops/issues/341 for details.\n",
+        encoding="utf-8",
+    )
+
+    hits = _offenses(doc, repo_root=tmp_path)
+
+    assert len(hits) == 1
+    assert "README.md:1 [confidential ce-ops private-repo URL]" in hits[0]
+
+
 def test_offenses_accepts_clean_temp_doc(tmp_path: Path):
     doc = tmp_path / "docs" / "clean.md"
     doc.parent.mkdir()
