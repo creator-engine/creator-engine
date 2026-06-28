@@ -6,13 +6,14 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=8
+AUTHORIZED_PATHS_COUNT=9
 
-AUTHORIZED_PATHS_SHA256=33094c46307efb79341e12cb5cb194369722cde6ea687f139aaee825acb055f0
+AUTHORIZED_PATHS_SHA256=6586ad25c44043e1a53e712bb9a345b401dd236ff2a4a49da0e17dd5980754b4
 
 ```text
 .ce/changelog/ce-orchestrator-record-schemas.md
 .ce/pr-manifests/ce-orchestrator-record-schemas.md
+.ce/reference/schemas.generated.md
 validators/creator_engine_validator/orchestrator_records.py
 validators/creator_engine_validator/schemas/orchestrator-checkpoint.schema.yaml
 validators/creator_engine_validator/schemas/orchestrator-harvest-packet.schema.yaml

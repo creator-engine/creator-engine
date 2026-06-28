@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 68
+Schema files: 72
 
 ## Index
 
@@ -46,6 +46,10 @@ Schema files: 68
 | `schemas/mission-brief.schema.yaml` | Creator Engine Mission-Brief record substrate | `object` |
 | `schemas/mutation-class.schema.yaml` | Creator Engine Mutation Class Declaration List | `array` |
 | `schemas/operating-mode-policy.schema.yaml` | Creator Engine v2 Operating Mode Policy | `object` |
+| `schemas/orchestrator-checkpoint.schema.yaml` | Creator Engine Orchestrator Checkpoint Record | `object` |
+| `schemas/orchestrator-harvest-packet.schema.yaml` | Creator Engine Orchestrator Harvest Packet Record | `object` |
+| `schemas/orchestrator-operator-decision.schema.yaml` | Creator Engine Orchestrator Operator Decision Record | `object` |
+| `schemas/orchestrator-territory-map.schema.yaml` | Creator Engine Orchestrator Territory Map Record | `object` |
 | `schemas/pane-registry.schema.yaml` | Creator Engine Pane Registry Record | `object` |
 | `schemas/pcl-record.schema.yaml` | Creator Engine PCL (Project Coordination Ledger) record substrate | `object` |
 | `schemas/plan-wrapper-sidecar.schema.yaml` | Creator Engine Plan Wrapper Sidecar | `object` |
@@ -1323,6 +1327,140 @@ Definitions:
 | --- | --- | --- | --- | --- |
 | `nonEmptyString` | string | no | pattern `\\S`<br>minLength `1` |  |
 | `operatorPolicyPointer` | oneOf | no |  |  |
+
+### `schemas/orchestrator-checkpoint.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Orchestrator Checkpoint Record |
+| `$id` | `https://creator-engine.local/schemas/orchestrator-checkpoint.schema.yaml` |
+| Root type | `object` |
+
+Runtime checkpoint for the governed CE Orchestrator Agent. The design source names this as the durable resume snapshot for objective, lifecycle state, active worker claims, gate posture, operator decisions, and the ne...
+
+Required fields:
+
+`kind`, `version`, `checkpoint_id`, `created_at`, `controller_id`, `objective`, `lifecycle_state`, `refs`, `active_claims`, `territory_map_ref`, `gate`, `operator_decisions`, `next_action`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | string | yes | const `ce-orchestrator-checkpoint` |  |
+| `version` | integer | yes | const `1` |  |
+| `checkpoint_id` | string | yes | minLength `1`<br>maxLength `256` |  |
+| `created_at` | string | yes | format `date-time`<br>minLength `1` |  |
+| `controller_id` | string | yes | minLength `1`<br>maxLength `256` |  |
+| `objective` | string | yes | minLength `1` |  |
+| `lifecycle_state` | string | yes | enum `INTAKE`, `MAP_TERRITORY`, `DISPATCH`, `WATCH`, `HARVEST`, `VERIFY_AND_REVIEW`, `GATE`, `CHECKPOINT`, `NEXT_LANE`, `BLOCKED`, `HALT` |  |
+| `refs` | object | yes | unevaluatedProperties `false` |  |
+| `active_claims` | array | yes |  |  |
+| `territory_map_ref` | string | yes | minLength `1` | Opaque reference to the territory-map record that grounded collision checks for this checkpoint. Empty only if no map has been minted yet. |
+| `gate` | object | yes | unevaluatedProperties `false` |  |
+| `operator_decisions` | $ref #/$defs/string_refs | yes |  | References to operator-decision queue records related to this checkpoint. The decision bodies remain separate records so they can be resolved independently of checkpoint snapshots. |
+| `next_action` | string | yes | minLength `1` |  |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `string_refs` | array | no |  |  |
+
+### `schemas/orchestrator-harvest-packet.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Orchestrator Harvest Packet Record |
+| `$id` | `https://creator-engine.local/schemas/orchestrator-harvest-packet.schema.yaml` |
+| Root type | `object` |
+
+Runtime packet for contained and non-contained worker harvest. It preserves worker identity, role, brief pointer and hash, branch/base/head evidence, changed paths, validation evidence, stop-line outcome, and scope ve...
+
+Required fields:
+
+`kind`, `version`, `packet_id`, `worker_id`, `role`, `brief_ref`, `brief_sha256`, `branch`, `base_ref`, `head_sha`, `changed_paths`, `diff_summary`, `evidence`, `stop_line_result`, `scope_verdict`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | string | yes | const `ce-orchestrator-harvest-packet` |  |
+| `version` | integer | yes | const `1` |  |
+| `packet_id` | string | yes | minLength `1`<br>maxLength `256` |  |
+| `worker_id` | string | yes | minLength `1` |  |
+| `role` | string | yes | enum `implementer`, `verification`, `architect_research`, `reviewer` |  |
+| `brief_ref` | string | yes | minLength `1` |  |
+| `brief_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `branch` | string | yes | minLength `1` |  |
+| `base_ref` | string | yes | minLength `1` |  |
+| `head_sha` | string | yes | pattern `^[0-9a-f]{7,64}$` | Git commit SHA observed at harvest time. Short SHAs are allowed for local packets, but callers should prefer full 40-character commit ids. |
+| `changed_paths` | array | yes |  |  |
+| `diff_summary` | string | yes | minLength `1` |  |
+| `evidence` | object | yes | unevaluatedProperties `false` |  |
+| `stop_line_result` | string | yes | enum `ready`, `blocked`, `returned`, `superseded` |  |
+| `scope_verdict` | string | yes | enum `in_scope`, `out_of_scope`, `needs_controller_review` |  |
+
+### `schemas/orchestrator-operator-decision.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Orchestrator Operator Decision Record |
+| `$id` | `https://creator-engine.local/schemas/orchestrator-operator-decision.schema.yaml` |
+| Root type | `object` |
+
+Runtime queue record for an Operator-reserved Orchestrator decision. It captures the request, authority basis, concrete options, recommended option, halt posture, and eventual resolution.
+
+Required fields:
+
+`kind`, `version`, `decision_id`, `created_at`, `requested_by`, `authority_basis`, `request`, `options`, `recommended_option`, `halt_until_resolved`, `resolution`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | string | yes | const `ce-orchestrator-operator-decision` |  |
+| `version` | integer | yes | const `1` |  |
+| `decision_id` | string | yes | minLength `1`<br>maxLength `256` |  |
+| `created_at` | string | yes | format `date-time`<br>minLength `1` |  |
+| `requested_by` | string | yes | minLength `1` |  |
+| `authority_basis` | string | yes | enum `autonomous`, `reserved`, `unknown` |  |
+| `request` | string | yes | minLength `1` |  |
+| `options` | array | yes | minItems `1` |  |
+| `recommended_option` | string | yes | minLength `1` | Option id recommended by the Orchestrator. Cross-field membership is enforced by runtime code in a later slice, not by this shape schema. |
+| `halt_until_resolved` | boolean | yes |  |  |
+| `resolution` | object | yes | unevaluatedProperties `false` |  |
+
+### `schemas/orchestrator-territory-map.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Orchestrator Territory Map Record |
+| `$id` | `https://creator-engine.local/schemas/orchestrator-territory-map.schema.yaml` |
+| Root type | `object` |
+
+Runtime map of active Orchestrator territory: path patterns, owning worker, issue/PR/branch refs, claim refs, lock state, changed paths, and explicit collision-check outcomes.
+
+Required fields:
+
+`kind`, `version`, `map_id`, `created_at`, `base_ref`, `entries`, `collision_checks`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | string | yes | const `ce-orchestrator-territory-map` |  |
+| `version` | integer | yes | const `1` |  |
+| `map_id` | string | yes | minLength `1`<br>maxLength `256` |  |
+| `created_at` | string | yes | format `date-time`<br>minLength `1` |  |
+| `base_ref` | string | yes | minLength `1` |  |
+| `entries` | array | yes |  |  |
+| `collision_checks` | array | yes |  |  |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `non_empty_strings` | array | no |  |  |
 
 ### `schemas/pane-registry.schema.yaml`
 
