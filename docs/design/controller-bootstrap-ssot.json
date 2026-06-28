@@ -1,7 +1,7 @@
 {
   "metadata": {
     "schema_version": "1.0",
-    "source": "ce-ops#244 follow-up grounded in ce-ops#163 and Spec 005 sections d.2/f",
+    "source": "Spec 005 sections d.2/f governance follow-up",
     "status": "draft-preview-only",
     "ratification_status": "not ratified for live bootstrap injection",
     "preview_warning": "Preview-only output from scripts/gen-controller-bootstrap.py. Do not install into live CLAUDE.md, AGENTS.md, or .claude/agents without a separate ratified injection step."

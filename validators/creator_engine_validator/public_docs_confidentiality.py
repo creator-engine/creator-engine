@@ -100,7 +100,6 @@ KNOWN_PENDING: frozenset[str] = frozenset(
         "docs/decisions/ADR-0011-devops-privileged-action-broker.md",
         "docs/decisions/ADR-0012-openbao-micro-unit-standup.md",
         "docs/design/controller-bootstrap-injection.md",
-        "docs/design/controller-bootstrap-ssot.json",
         "docs/devops/openbao-approval-wall-arming.md",
         "docs/devops/openbao-operator-bringup.md",
         "docs/devops/openbao-production-golive.md",

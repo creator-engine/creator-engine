@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview-only controller bootstrap generator for ce-ops#244.
+"""Preview-only controller bootstrap generator for the controller bootstrap SSOT.
 
 This scaffold intentionally does not mutate live harness files. It renders
 bootstrap previews from a tracked JSON SSOT so reviewers can inspect the
