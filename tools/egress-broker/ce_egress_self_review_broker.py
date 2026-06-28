@@ -57,6 +57,11 @@ from egress_broker.minter import (  # noqa: E402
 )
 from egress_broker.orchestrator import policy_binding_sha  # noqa: E402
 
+try:
+    from creator_engine_validator.grading_policy import RunMode as _RunMode  # noqa: E402
+except ImportError:
+    _RunMode = None  # type: ignore[assignment,misc]
+
 EXIT_OK = 0
 EXIT_REFUSED = 2
 EXIT_CONFIG_ERROR = 3
@@ -69,6 +74,7 @@ REVIEW_PERMISSIONS = {"metadata": "read", "pull_requests": "write"}
 REVIEW_TTL_SECONDS = 600
 REVIEW_SECRET_NAME = "forge_self_review"
 ALLOWED_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES"})
+STRANGELOOP_ALLOWED_EVENTS = ALLOWED_EVENTS | frozenset({"APPROVE"})
 
 _RE_HEAD_SHA = re.compile(r"^[0-9a-fA-F]{40,64}$")
 _LOG = logging.getLogger("ce-egress-self-review")
@@ -80,6 +86,27 @@ class SelfReviewRefused(Exception):
 
 class _BrokerStartupError(Exception):
     """Fail-closed startup error; message is safe to print (no secrets)."""
+
+
+def _is_strangeloop(run_mode: str | None) -> bool:
+    """Return True only when run_mode is explicitly the strangeLoop value."""
+    if run_mode is None:
+        return False
+    if _RunMode is not None:
+        return run_mode == _RunMode.STRANGE_LOOP.value
+    return run_mode == "strangeLoop"
+
+
+def _allowed_events(run_mode: str | None) -> frozenset[str]:
+    if _is_strangeloop(run_mode):
+        return STRANGELOOP_ALLOWED_EVENTS
+    return ALLOWED_EVENTS
+
+
+def _event_refusal_message(run_mode: str | None) -> str:
+    if _is_strangeloop(run_mode):
+        return "review event must be COMMENT, REQUEST_CHANGES, or APPROVE"
+    return "review event must be COMMENT or REQUEST_CHANGES"
 
 
 def _approle_token_supplier(
@@ -293,7 +320,7 @@ class SelfReviewResult:
         }
 
 
-def parse_request(payload: Mapping[str, Any]) -> SelfReviewRequest:
+def parse_request(payload: Mapping[str, Any], run_mode: str | None = None) -> SelfReviewRequest:
     """Validate the bounded JSON object into a value-only request.
 
     This performs the APPROVE exclusion before any caller can resolve/mint or
@@ -314,10 +341,10 @@ def parse_request(payload: Mapping[str, Any]) -> SelfReviewRequest:
     if not _RE_HEAD_SHA.match(head_sha):
         raise SelfReviewRefused("request head_sha must be a 40-64 hex commit id")
     event = str(payload.get("event") or "").strip().upper()
-    if event == "APPROVE":
+    if event == "APPROVE" and not _is_strangeloop(run_mode):
         raise SelfReviewRefused("APPROVE is controller approval-wall only; host broker refuses it")
-    if event not in ALLOWED_EVENTS:
-        raise SelfReviewRefused("review event must be COMMENT or REQUEST_CHANGES")
+    if event not in _allowed_events(run_mode):
+        raise SelfReviewRefused(_event_refusal_message(run_mode))
     body = str(payload.get("body") or "")
     return SelfReviewRequest(
         seat_id=seat_id,
@@ -354,6 +381,7 @@ def submit_self_review(
     resolve_id_fn: Callable[[SeatAppConfig], int] | None = None,
     mint_fn: Callable[[TokenRequest], ScopedToken] | None = None,
     resolve_author_fn: Callable[[str, int], str] | None = None,
+    run_mode: str | None = None,
 ) -> SelfReviewResult:
     """Mint a scoped review credential and submit COMMENT/REQUEST_CHANGES via ``gh api``.
 
@@ -369,8 +397,10 @@ def submit_self_review(
     for ANY event (COMMENT / REQUEST_CHANGES / the already-refused APPROVE).
     Author resolution fails CLOSED.
     """
-    if request.event == "APPROVE" or request.event not in ALLOWED_EVENTS:
-        raise SelfReviewRefused("review event must be COMMENT or REQUEST_CHANGES")
+    if request.event == "APPROVE" and not _is_strangeloop(run_mode):
+        raise SelfReviewRefused(_event_refusal_message(run_mode))
+    if request.event not in _allowed_events(run_mode):
+        raise SelfReviewRefused(_event_refusal_message(run_mode))
 
     try:
         seat = config.seat(request.seat_id)
@@ -500,7 +530,7 @@ class _ReviewHandler(socketserver.BaseRequestHandler):
         try:
             raw = _read_bounded_from_socket(self.request, max_bytes=server.max_request_bytes)
             payload = bounded_json_load(raw, max_bytes=server.max_request_bytes)
-            request = parse_request(payload)
+            request = parse_request(payload, run_mode=server.run_mode)
             result = server.submitter(request)
             response: dict[str, object] = result.to_dict()
             status = "ok"
@@ -527,10 +557,12 @@ class SelfReviewServer(socketserver.UnixStreamServer):
         submitter: Callable[[SelfReviewRequest], SelfReviewResult],
         max_request_bytes: int,
         activated_socket: socket.socket | None = None,
+        run_mode: str | None = None,
     ) -> None:
         self.socket_path = socket_path
         self.submitter = submitter
         self.max_request_bytes = max_request_bytes
+        self.run_mode = run_mode
         self._owns_socket_path = activated_socket is None
         if activated_socket is None:
             Path(socket_path).parent.mkdir(parents=True, exist_ok=True)
@@ -565,6 +597,7 @@ def serve(
     gh_spawn=None,
     now: Callable[[], float] | None = None,
     activated_socket: socket.socket | None = None,
+    run_mode: str | None = None,
 ) -> None:
     """Serve the Unix socket until interrupted."""
     def submitter(request: SelfReviewRequest) -> SelfReviewResult:
@@ -575,6 +608,7 @@ def serve(
             transport=transport,
             gh_spawn=gh_spawn,
             now=now,
+            run_mode=run_mode,
         )
 
     with SelfReviewServer(
@@ -582,6 +616,7 @@ def serve(
         submitter=submitter,
         max_request_bytes=max_request_bytes,
         activated_socket=activated_socket,
+        run_mode=run_mode,
     ) as server:
         _LOG.info("listening socket=%s repo=%s", socket_path, config.repo)
         server.serve_forever()
