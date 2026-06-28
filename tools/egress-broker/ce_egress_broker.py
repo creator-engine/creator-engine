@@ -60,6 +60,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--branch", required=True, help="the seat-authored head branch to courier")
     p.add_argument("--config", required=True, help="path to the broker config JSON")
     p.add_argument("--audit-log", default=None, help="override the audit log path from the config")
+    p.add_argument(
+        "--declared-work-class",
+        choices=("tiny", "story", "feature", "epic"),
+        default=None,
+        help="PR body work-class declaration; defaults to the per-branch PR carrier when omitted",
+    )
     p.add_argument("--apply", action="store_true", help="actually mint+push+PR (default: dry-run plan)")
     p.add_argument("--json", action="store_true", help="emit the result as JSON on stdout")
     return p
@@ -118,6 +124,7 @@ def main(argv=None, *, courier_fn=None) -> int:
             config=config,
             signer=signer,
             apply=args.apply,
+            declared_work_class=args.declared_work_class,
         )
     except EgressRefused as exc:
         print(f"[ce-egress] REFUSED (fail-closed): {exc}", file=sys.stderr)

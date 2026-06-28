@@ -16,6 +16,7 @@ import json
 import pytest
 
 from creator_engine_validator.forge.scoped_token import ScopedToken
+from creator_engine_validator.pr_preflight import DECLARED_WORK_CLASS_PATTERN
 from egress_broker.config import load_broker_config
 from egress_broker.orchestrator import (
     ContainedSeatSelfPushRequest,
@@ -172,6 +173,7 @@ class _ContainedSelfPushSpy:
 
 def _courier(tmp_path, branch, facts, spy, *, apply=False, config=None, **kw):
     cfg = config or _config(tmp_path)
+    kw.setdefault("declared_work_class", "story")
     return courier(
         "dev-4",
         "/seat/workspace/creator-engine",
@@ -190,6 +192,7 @@ def _courier(tmp_path, branch, facts, spy, *, apply=False, config=None, **kw):
 
 def _self_push(tmp_path, branch, facts, spy, *, apply=False, config=None, **kw):
     cfg = config or _config(tmp_path)
+    kw.setdefault("declared_work_class", "story")
     return contained_seat_self_push(
         ContainedSeatSelfPushRequest(
             seat_id="dev-4",
@@ -372,6 +375,7 @@ def test_missing_branch_is_refused_and_audited(tmp_path):
     with pytest.raises(EgressRefused):
         courier(
             "dev-4", "/seat/ws", "ce-x", config=_config(tmp_path), apply=True,
+            declared_work_class="story",
             read_facts_fn=boom, resolve_id_fn=spy.resolve_id, mint_fn=spy.mint,
             push_fn=spy.push, open_pr_fn=spy.open_pr, revoke_fn=spy.revoke,
         )
@@ -384,6 +388,7 @@ def test_unknown_seat_is_refused_and_audited(tmp_path):
     with pytest.raises(EgressRefused):
         courier(
             "dev-9", "/seat/ws", "ce-x", config=_config(tmp_path), apply=True,
+            declared_work_class="story",
             read_facts_fn=lambda: _GOOD_FACTS, resolve_id_fn=spy.resolve_id, mint_fn=spy.mint,
             push_fn=spy.push, open_pr_fn=spy.open_pr, revoke_fn=spy.revoke,
         )
@@ -465,6 +470,7 @@ def test_apply_without_injected_mint_uses_default_minter(tmp_path):
     result = courier(
         "dev-4", "/seat/workspace/creator-engine", "ce-egress-broker",
         config=_config(tmp_path), apply=True, read_facts_fn=lambda: _GOOD_FACTS,
+        declared_work_class="story",
         signer=signer, transport=transport, now=lambda: 1_700_000_000,
         push_fn=push, open_pr_fn=open_pr, revoke_fn=revoke,
     )
@@ -505,6 +511,7 @@ def test_empty_minted_token_refuses_before_push_or_pr_and_ignores_ambient_auth(t
         courier(
             "dev-4", "/seat/workspace/creator-engine", "ce-egress-broker",
             config=_config(tmp_path), apply=True, read_facts_fn=lambda: _GOOD_FACTS,
+            declared_work_class="story",
             resolve_id_fn=resolve_id, mint_fn=mint,
             push_fn=forbidden_transport, open_pr_fn=forbidden_transport,
             revoke_fn=forbidden_transport,
@@ -549,46 +556,84 @@ def test_rate_limit_blocks_after_cap(tmp_path):
 # PR step — idempotent open-or-update with gateway attribution in the body
 # ---------------------------------------------------------------------------
 def test_render_pr_body_notes_authorship_and_gateway_push():
-    body = render_pr_body(seat_id="dev-4", branch="ce-x", head_sha="a" * 40)
+    body = render_pr_body(
+        seat_id="dev-4",
+        branch="ce-x",
+        head_sha="a" * 40,
+        declared_work_class="story",
+    )
     assert "dev-4" in body
     assert "gateway-pushed" in body.lower()
     assert "a" * 40 in body
 
 
-def test_render_pr_body_includes_declared_work_class_from_changelog(tmp_path):
-    changelog = tmp_path / ".ce" / "changelog" / "ce-x.md"
-    changelog.parent.mkdir(parents=True)
-    changelog.write_text(
-        "---\n"
-        "issue: ce-ops#290\n"
-        "work_class: tiny\n"
-        "---\n"
-        "\n"
-        "Broker PR body work-class injection.\n",
+def test_render_pr_body_carries_declared_work_class():
+    body = render_pr_body(
+        seat_id="dev-4",
+        branch="ce-x",
+        head_sha="a" * 40,
+        declared_work_class="story",
+    )
+    matches = DECLARED_WORK_CLASS_PATTERN.findall(body)
+
+    assert matches == ["story"]
+    assert body.count("- **Declared work class:** story") == 1
+    assert body.index("- **Declared work class:** story") < body.index("- head branch:")
+
+
+def test_courier_auto_discovers_work_class_from_carrier(tmp_path):
+    branch = "ce-egress-broker"
+    carrier = tmp_path / ".ce" / "pr-manifests" / f"{branch}.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text(
+        "# PR path manifest - ce-egress-broker\n\n"
+        "- **Declared work class:** feature\n\n"
+        "```text\n"
+        "tools/egress-broker/egress_broker/orchestrator.py\n"
+        "```\n",
         encoding="utf-8",
     )
+    spy = _Spy()
 
-    body = render_pr_body(seat_id="dev-4", branch="ce-x", head_sha="a" * 40, repo_path=str(tmp_path))
+    result = courier(
+        "dev-4",
+        str(tmp_path),
+        branch,
+        config=_config(tmp_path),
+        apply=True,
+        read_facts_fn=lambda: _GOOD_FACTS,
+        resolve_id_fn=spy.resolve_id,
+        mint_fn=spy.mint,
+        push_fn=spy.push,
+        open_pr_fn=spy.open_pr,
+        revoke_fn=spy.revoke,
+    )
 
-    assert "- **Declared work class:** tiny" in body
+    assert result.pr_number == 321
+    assert ("open_pr", "ghs_minted_value") in spy.calls
 
 
-@pytest.mark.parametrize(
-    ("changelog_text", "branch"),
-    [
-        pytest.param(None, "ce-missing", id="missing"),
-        pytest.param("---\nwork_class: [tiny\n---\n", "ce-malformed", id="malformed"),
-    ],
-)
-def test_render_pr_body_omits_declared_work_class_when_changelog_unusable(tmp_path, changelog_text, branch):
-    if changelog_text is not None:
-        changelog = tmp_path / ".ce" / "changelog" / f"{branch}.md"
-        changelog.parent.mkdir(parents=True)
-        changelog.write_text(changelog_text, encoding="utf-8")
+def test_courier_fails_closed_no_work_class(tmp_path):
+    spy = _Spy()
 
-    body = render_pr_body(seat_id="dev-4", branch=branch, head_sha="a" * 40, repo_path=str(tmp_path))
+    with pytest.raises(EgressRefused) as exc_info:
+        courier(
+            "dev-4",
+            str(tmp_path),
+            "ce-egress-broker",
+            config=_config(tmp_path),
+            apply=True,
+            read_facts_fn=lambda: _GOOD_FACTS,
+            resolve_id_fn=spy.resolve_id,
+            mint_fn=spy.mint,
+            push_fn=spy.push,
+            open_pr_fn=spy.open_pr,
+            revoke_fn=spy.revoke,
+        )
 
-    assert "- **Declared work class:**" not in body
+    assert "declared work class is required" in str(exc_info.value)
+    assert spy.calls == []
+    assert _audit_lines(tmp_path)[-1]["decision"] == "deny"
 
 
 def _gh_fake(existing=None, calls=None):
@@ -617,7 +662,8 @@ def test_open_or_update_pr_creates_when_none_exists():
     calls = []
     out = open_or_update_pr(
         "creator-engine/creator-engine", "ce-x", "main",
-        seat_id="dev-4", head_sha="a" * 40, gh_runner=_gh_fake(existing=[], calls=calls),
+        seat_id="dev-4", head_sha="a" * 40, declared_work_class="story",
+        gh_runner=_gh_fake(existing=[], calls=calls),
     )
     assert out["pr_number"] == 777
     assert out["created"] is True
@@ -631,7 +677,8 @@ def test_open_or_update_pr_encodes_lookup_query_params():
     calls = []
     open_or_update_pr(
         "creator-engine/creator-engine", "ce-x&base=develop", "main",
-        seat_id="dev-4", head_sha="a" * 40, gh_runner=_gh_fake(existing=[], calls=calls),
+        seat_id="dev-4", head_sha="a" * 40, declared_work_class="story",
+        gh_runner=_gh_fake(existing=[], calls=calls),
     )
     get_path = calls[0]["argv"][4]
     query = urlsplit(get_path).query
@@ -648,7 +695,8 @@ def test_open_or_update_pr_updates_when_one_exists():
     existing = [{"number": 42, "head": {"sha": "a" * 40}}]
     out = open_or_update_pr(
         "creator-engine/creator-engine", "ce-x", "main",
-        seat_id="dev-4", head_sha="a" * 40, gh_runner=_gh_fake(existing=existing, calls=calls),
+        seat_id="dev-4", head_sha="a" * 40, declared_work_class="story",
+        gh_runner=_gh_fake(existing=existing, calls=calls),
     )
     assert out["pr_number"] == 42
     assert out["created"] is False
