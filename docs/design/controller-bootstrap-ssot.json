@@ -199,10 +199,10 @@
       "Probe-don't-remember: verify seat states, branch states, and in-flight territory before dispatch."
     ],
     "pre_dispatch_checklist": [
-      "Check the live in-flight territory map: consult .ce/pr-manifests/, .ce/briefs/, active worktrees under .claude/worktrees/, and .ce/wt-*/.",
-      "Intersect every candidate path against in-flight files.",
+      "Check the live in-flight territory map: read .ce/pr-manifests/ for open carrier slugs, .ce/briefs/ for active briefs, git worktree list for live branches, and .ce/wt-*/ for harvest staging; intersect every candidate path against ALL of these.",
       "Check context percentage; above 40 percent, compact or clear before an unrelated dispatch.",
       "Save the seed brief to a file, send the seat the pointer plus sha256sum, and avoid long inline prompts.",
+      "Verify-not-already-landed: before re-dispatching or re-deciding, check git log origin/main and the PR list for the ticket; if the work or Operator decision already landed, do not re-dispatch.",
       "Verify the work claim before the seat starts."
     ],
     "harvest_sequence": [
@@ -242,6 +242,13 @@
       "Update test_v1_docs_reconciliation.py expected set.",
       "Regenerate .ce/reference/cli.generated.md via python scripts/gen_cli_reference.py --write.",
       "For internal-only groups, add to the internal-groups set; README check is exempt."
+    ],
+    "merge_gate_checklist": [
+      "Confirm reviewDecision == APPROVED on the current head from a non-author seat; a dismissed changes-request does not satisfy this.",
+      "Confirm every required CI check on the current head is passing.",
+      "Confirm ratification: a standing merge grant or explicit Operator confirmation is in scope.",
+      "If any gate is missing: report which gate failed and do not merge.",
+      "If all three gates pass: report gates GREEN then STOP; the merge itself is a separate explicit step."
     ]
   },
   "harness_outputs": {
