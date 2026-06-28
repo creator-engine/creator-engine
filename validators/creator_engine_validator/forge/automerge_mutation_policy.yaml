@@ -1,0 +1,82 @@
+schema_version: "1"
+state_path: ".ce/state/automerge/policy.json"
+decisions_dir: ".ce/state/automerge/decisions"
+fail_closed_class: redaction
+class_order:
+  - none
+  - docs
+  - code
+  - schema
+  - deploy
+  - governance
+  - identity
+  - security
+  - attestation
+  - redaction
+required_checks: []
+path_predicates:
+  docs:
+    - "docs/**"
+    - "*.md"
+    - ".ce/changelog/**"
+    - ".ce/pr-manifests/**"
+  code:
+    - "validators/**"
+    - "tools/**"
+    - "src/**"
+    - "app/**"
+    - "apps/**"
+    - "packages/**"
+  schema:
+    - "schemas/**"
+    - "surfaces/manifest.yaml"
+    - "*.schema.yaml"
+    - "*.schema.json"
+  deploy:
+    - "deploy/**"
+    - ".github/**"
+    - "Dockerfile"
+    - "Dockerfile.*"
+    - "Containerfile"
+    - "docker-compose.yml"
+    - "docker-compose.yaml"
+  governance:
+    - ".ce/contracts/**"
+    - "docs/contracts/**"
+    - "contracts/**"
+    - "playbooks/**"
+    - "governance/**"
+    - "GOVERNANCE.md"
+    - "CODEOWNERS"
+  identity:
+    - "identity-registry/**"
+    - "identity/**"
+    - "accounts/**"
+    - "account-config/**"
+    - "app-config/**"
+    - "secret_identity.py"
+    - "identity-registry*"
+    - "reviewer-registry*"
+    - "github-app*.yaml"
+    - "github-app*.yml"
+  security:
+    - "validators/creator_engine_validator/forge/cred_injection_proxy.py"
+    - "tools/egress-broker/**"
+    - "tools/egress_broker/**"
+    - "openbao/**"
+    - "vault/**"
+    - "**/openbao/**"
+    - "**/wall/**"
+  attestation:
+    - "validators/creator_engine_validator/forge/approval_capability.py"
+    - "attestations/**"
+    - ".ce/attestations/**"
+  redaction:
+    - "validators/creator_engine_validator/forge/_redact.py"
+    - "validators/creator_engine_validator/forge/redact.py"
+    - "redaction/**"
+    - ".ce/redaction/**"
+    - "redaction-filters/**"
+    - "redaction_filters/**"
+    - "**/redaction-filters/**"
+    - "**/redaction_filters/**"

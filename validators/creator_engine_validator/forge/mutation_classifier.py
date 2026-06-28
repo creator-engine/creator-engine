@@ -1,236 +1,205 @@
-"""Path-to-mutation-class classifier for the CEO-mode auto-merge policy.
+"""Config-driven path-to-mutation-class classifier for automerge dry runs.
 
-``mutation_class_for_paths(changed_paths)`` returns the *highest-risk* mutation
-class touched by a PR's changed paths, fail-closed: an unknown or privileged
-path maps to the most-privileged class, never AUTO.
-
-This module is pure/offline: no network, no subprocess, no disk writes, no
-randomness. It only inspects path strings against a deterministic predicate table.
-The predicate table deliberately mirrors the mutation class taxonomy in
-``work_sizing.py``/``_RISK_TABLE`` — both must stay consistent.
-
-Design invariants:
-- Fail-closed: an empty path list → ``"docs"`` (lowest non-none class, safest
-  possible claim for a PR with no changed paths). A path matching no predicate
-  → falls through to ``"code"`` (conservative middle ground).
-- Privilege escalates monotonically: the classifier always returns the
-  *highest-risk* class across all changed paths.
-- No mutation: this module only classifies; it never triggers merges or
-  capability minting.
+The classifier is pure and fail-closed. It reads path predicates from policy
+data and returns the highest-risk mutation class touched by a changed path set.
+Unknown or ambiguous input resolves to the configured fail-closed class.
 """
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-from typing import Final
+import fnmatch
+import hashlib
+import json
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Final, Mapping, Sequence
 
-# Ordered from LOWEST risk to HIGHEST risk.  The ordering determines which class
-# wins when multiple predicates match across a PR's changed paths.
-_CLASS_ORDER: Final[tuple[str, ...]] = (
-    "none",
-    "docs",
-    "code",
-    "schema",
-    "deploy",
-    "governance",
-    "identity",
-    "security",
-    "attestation",
-    "redaction",
+import yaml
+
+from ..work_sizing import MUTATION_CLASSES
+
+DEFAULT_MUTATION_POLICY_PATH: Final[Path] = Path(__file__).with_name(
+    "automerge_mutation_policy.yaml"
 )
 
-# Sentinel for the ``none`` / no-content case (truly empty PR).
-_CLASS_NONE_IDX: Final[int] = _CLASS_ORDER.index("none")
-_CLASS_DOCS_IDX: Final[int] = _CLASS_ORDER.index("docs")
-_CLASS_CODE_IDX: Final[int] = _CLASS_ORDER.index("code")
-
-
-def _class_index(name: str) -> int:
-    try:
-        return _CLASS_ORDER.index(name)
-    except ValueError:
-        # Unknown class → most privileged (fail-closed).
-        return len(_CLASS_ORDER) - 1
-
-
-def _normalize(path: str) -> PurePosixPath:
-    return PurePosixPath(path.replace("\\", "/").strip("/") or ".")
-
-
-def _path_class(path: str) -> str:
-    """Return the mutation class for a single changed path.
-
-    Predicates are evaluated in priority order: the FIRST matching predicate
-    wins for this path.  The caller takes the maximum across all paths.
-    """
-    p = _normalize(path)
-    parts = tuple(p.parts)
-    name = p.name.lower()
-    suffix = p.suffix.lower()
-
-    # ── SECURITY / ATTESTATION / REDACTION ─────────────────────────────────
-    # Wall, broker, egress-gating, cred-injection, redaction: most privileged.
-    # These must be checked before the broader ``forge/`` code predicate.
-    _security_file_stems = frozenset({
-        "approval_capability",
-        "cred_injection_proxy",
-        "secret_identity",
-        "_redact",
-        "redact",
-    })
-    _security_dir_parts = frozenset({
-        "egress-broker",
-        "egress_broker",
-        "openbao",
-        "openbao-config",
-    })
-
-    # cred_injection_proxy, approval_capability, _redact, secret_identity
-    stem = p.stem.lower()
-    if stem in _security_file_stems:
-        # attestation for approval_capability (the wall itself)
-        if stem == "approval_capability":
-            return "attestation"
-        # redaction classifier
-        if stem in {"_redact", "redact"}:
-            return "redaction"
-        # secret_identity → identity
-        if stem == "secret_identity":
-            return "identity"
-        return "security"
-
-    # egress broker (tools/egress-broker/**) → security
-    if any(part in _security_dir_parts for part in parts):
-        return "security"
-
-    # ── IDENTITY ────────────────────────────────────────────────────────────
-    _identity_stems = frozenset({
-        "identity_registry",
-        "reviewer_registry",
-        "identity-registry",
-        "reviewer-registry",
-    })
-    _identity_file_names = frozenset({
-        "identity-registry.schema.yaml",
-        "reviewer-registry.schema.yaml",
-    })
-    if stem in _identity_stems or name in _identity_file_names:
-        return "identity"
-    # schemas/identity-registry.schema.yaml and similar
-    if parts and parts[0] == "schemas" and "identity" in name:
-        return "identity"
-    # account config / app-key artefacts
-    if parts and parts[0] in {"accounts", "account-config", "identity"}:
-        return "identity"
-
-    # ── GOVERNANCE ──────────────────────────────────────────────────────────
-    _governance_dirs = frozenset({
-        "playbooks",
-        "governance",
-    })
-    _governance_contract_dirs = frozenset({
-        "contracts",
-    })
-    if parts and parts[0] in _governance_dirs:
-        return "governance"
-    # .ce/contracts/**, docs/contracts/**
-    if len(parts) >= 2 and parts[1] in _governance_contract_dirs:
-        return "governance"
-    if parts and parts[0] in _governance_contract_dirs:
-        return "governance"
-    # GOVERNANCE.md root file
-    if len(parts) == 1 and name in {"governance.md", "security.md", "code_of_conduct.md"}:
-        return "governance"
-
-    # ── DEPLOY ──────────────────────────────────────────────────────────────
-    # .github/workflows/**, Dockerfiles, deploy/**, systemd units, install scripts
-    _deploy_dirs = frozenset({"deploy", ".github"})
-    _deploy_file_names = frozenset({
-        "dockerfile",
-        "containerfile",
-        "docker-compose.yml",
-        "docker-compose.yaml",
-    })
-    if parts and parts[0] in _deploy_dirs:
-        return "deploy"
-    if name in _deploy_file_names or name.startswith("dockerfile."):
-        return "deploy"
-    # systemd service files, install scripts
-    if suffix in {".service", ".timer", ".socket"} or name in {"install.sh", "install-ce.sh"}:
-        return "deploy"
-
-    # ── SCHEMA ──────────────────────────────────────────────────────────────
-    # schemas/**, surfaces/manifest.yaml, *.schema.yaml, mutation-class-taxonomy
-    _schema_dirs = frozenset({"schemas"})
-    if parts and parts[0] in _schema_dirs:
-        return "schema"
-    if name == "manifest.yaml" and len(parts) >= 2 and parts[-2] == "surfaces":
-        return "schema"
-    if name.endswith(".schema.yaml") or name.endswith(".schema.json"):
-        return "schema"
-    # surfaces/manifest.yaml specifically
-    if len(parts) >= 2 and parts[0] == "surfaces" and name == "manifest.yaml":
-        return "schema"
-
-    # ── DOCS ────────────────────────────────────────────────────────────────
-    # docs/**, *.md (excluding privileged markdown already caught above),
-    # .ce/changelog/**, .ce/pr-manifests/**
-    _docs_dirs = frozenset({"docs"})
-    _docs_ce_subdirs = frozenset({"changelog", "pr-manifests"})
-    if parts and parts[0] in _docs_dirs:
-        # docs/contracts/** is already caught above as governance
-        if len(parts) >= 2 and parts[1] in _governance_contract_dirs:
-            return "governance"
-        return "docs"
-    if suffix == ".md":
-        return "docs"
-    # .ce/changelog/**, .ce/pr-manifests/**
-    if len(parts) >= 2 and parts[0] == ".ce" and parts[1] in _docs_ce_subdirs:
-        return "docs"
-    # CHANGELOG.md, README.md, CONTRIBUTING.md, etc. at root (already caught by .md suffix)
-
-    # ── CODE ────────────────────────────────────────────────────────────────
-    # Everything else: validators/**, tools/**, app source — conservative middle.
-    return "code"
-
-
-def mutation_class_for_paths(changed_paths: list[str]) -> str:
-    """Return the highest-risk mutation class across ``changed_paths``.
-
-    Fail-closed contract:
-    - Empty list → ``"docs"`` (lowest non-none; no paths means PR is likely
-      docs-only or trivially safe, but we still need a class).
-    - Path matching no predicate → ``"code"`` (conservative).
-    - Unknown class returned by a predicate → ``"redaction"`` (highest; internal
-      safeguard against predicate bugs).
-
-    Never returns ``"none"`` for a non-empty path list because even a PR that
-    only touches files we haven't classified deserves ``"code"`` at minimum.
-    """
-    if not changed_paths:
-        return "docs"
-
-    highest_idx = _CLASS_DOCS_IDX  # start at docs, escalate upward
-    for path in changed_paths:
-        cls = _path_class(str(path))
-        idx = _class_index(cls)
-        if idx > highest_idx:
-            highest_idx = idx
-        # Short-circuit: already at maximum privileged class
-        if highest_idx == len(_CLASS_ORDER) - 1:
-            break
-
-    return _CLASS_ORDER[highest_idx]
-
-
-# Convenience set: classes that map to AUTO ratification gates per _RISK_TABLE.
+CLASS_ORDER: Final[tuple[str, ...]] = MUTATION_CLASSES
 AUTO_CLASSES: Final[frozenset[str]] = frozenset({"none", "docs"})
-
-# Classes that always require operator_merge (never auto-mergeable).
 GESTURE_CLASSES: Final[frozenset[str]] = frozenset(
-    {"code", "schema", "deploy", "governance", "identity", "security", "attestation", "redaction"}
+    cls for cls in CLASS_ORDER if cls not in AUTO_CLASSES
 )
-
-# Privileged classes that carry ring1_push_block / non_delegable.
 PRIVILEGED_CLASSES: Final[frozenset[str]] = frozenset(
     {"governance", "identity", "security", "attestation", "redaction"}
 )
+
+
+class MutationPolicyError(Exception):
+    """Mutation-class policy could not be loaded safely."""
+
+
+@dataclass(frozen=True)
+class MutationPolicy:
+    """Secret-free path classification policy."""
+
+    path_predicates: Mapping[str, tuple[str, ...]]
+    class_order: tuple[str, ...] = CLASS_ORDER
+    fail_closed_class: str = "redaction"
+    state_path: str = ".ce/state/automerge/policy.json"
+    decisions_dir: str = ".ce/state/automerge/decisions"
+    required_checks: tuple[str, ...] = ()
+    raw: Mapping[str, Any] | None = None
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> "MutationPolicy":
+        raw_order = payload.get("class_order", CLASS_ORDER)
+        if not isinstance(raw_order, Sequence) or isinstance(raw_order, (str, bytes)):
+            raise MutationPolicyError("class_order must be a sequence")
+        class_order = tuple(str(item) for item in raw_order)
+        if set(class_order) != set(MUTATION_CLASSES):
+            raise MutationPolicyError("class_order must contain the mutation taxonomy")
+
+        fail_closed_class = str(payload.get("fail_closed_class", "redaction"))
+        if fail_closed_class not in class_order:
+            raise MutationPolicyError("fail_closed_class must be a mutation class")
+
+        raw_predicates = payload.get("path_predicates")
+        if not isinstance(raw_predicates, Mapping):
+            raise MutationPolicyError("path_predicates must be an object")
+
+        predicates: dict[str, tuple[str, ...]] = {}
+        for cls_name, raw_patterns in raw_predicates.items():
+            class_name = str(cls_name)
+            if class_name not in class_order:
+                raise MutationPolicyError("path predicate class is unknown")
+            if not isinstance(raw_patterns, Sequence) or isinstance(raw_patterns, (str, bytes)):
+                raise MutationPolicyError("path predicate patterns must be a sequence")
+            patterns = tuple(str(pattern) for pattern in raw_patterns if str(pattern))
+            predicates[class_name] = patterns
+
+        raw_required = payload.get("required_checks", ())
+        if not isinstance(raw_required, Sequence) or isinstance(raw_required, (str, bytes)):
+            raise MutationPolicyError("required_checks must be a sequence")
+
+        return cls(
+            path_predicates=predicates,
+            class_order=class_order,
+            fail_closed_class=fail_closed_class,
+            state_path=str(payload.get("state_path", ".ce/state/automerge/policy.json")),
+            decisions_dir=str(payload.get("decisions_dir", ".ce/state/automerge/decisions")),
+            required_checks=tuple(str(check) for check in raw_required if str(check)),
+            raw=dict(payload),
+        )
+
+    @property
+    def policy_sha(self) -> str:
+        material = self.raw if self.raw is not None else self.to_payload()
+        canonical = json.dumps(material, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "class_order": list(self.class_order),
+            "fail_closed_class": self.fail_closed_class,
+            "state_path": self.state_path,
+            "decisions_dir": self.decisions_dir,
+            "required_checks": list(self.required_checks),
+            "path_predicates": {
+                class_name: list(patterns)
+                for class_name, patterns in self.path_predicates.items()
+            },
+        }
+
+    def class_rank(self, class_name: str) -> int:
+        try:
+            return self.class_order.index(class_name)
+        except ValueError:
+            return self.class_order.index(self.fail_closed_class)
+
+
+def load_mutation_policy(path: str | Path = DEFAULT_MUTATION_POLICY_PATH) -> MutationPolicy:
+    """Load the checked-in automerge mutation policy."""
+
+    policy_path = Path(path)
+    try:
+        payload = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise MutationPolicyError(str(exc)) from exc
+    if not isinstance(payload, Mapping):
+        raise MutationPolicyError("mutation policy must be a mapping")
+    return MutationPolicy.from_payload(payload)
+
+
+@lru_cache(maxsize=1)
+def default_mutation_policy() -> MutationPolicy:
+    return load_mutation_policy(DEFAULT_MUTATION_POLICY_PATH)
+
+
+def mutation_class_for_paths(
+    paths: Sequence[str],
+    policy: MutationPolicy | Mapping[str, Any] | None = None,
+) -> str:
+    """Return the highest-risk mutation class for ``paths``.
+
+    ``policy`` may be a loaded :class:`MutationPolicy` or a raw policy mapping.
+    Unknown paths and invalid policy inputs resolve to the most-privileged
+    configured class instead of raising into callers that need a decision.
+    """
+
+    resolved = _coerce_policy(policy)
+    if not paths:
+        return resolved.fail_closed_class
+
+    highest = resolved.fail_closed_class
+    highest_rank = -1
+    fail_rank = resolved.class_rank(resolved.fail_closed_class)
+
+    for raw_path in paths:
+        path = _normalize_path(raw_path)
+        if not path:
+            return resolved.fail_closed_class
+        matches = _matching_classes(path, resolved)
+        if not matches:
+            return resolved.fail_closed_class
+        for class_name in matches:
+            rank = resolved.class_rank(class_name)
+            if rank > highest_rank:
+                highest = class_name
+                highest_rank = rank
+        if highest_rank >= fail_rank:
+            return resolved.fail_closed_class
+
+    return highest if highest_rank >= 0 else resolved.fail_closed_class
+
+
+def _coerce_policy(policy: MutationPolicy | Mapping[str, Any] | None) -> MutationPolicy:
+    if policy is None:
+        try:
+            return default_mutation_policy()
+        except MutationPolicyError:
+            return MutationPolicy(path_predicates={}, fail_closed_class="redaction")
+    if isinstance(policy, MutationPolicy):
+        return policy
+    try:
+        return MutationPolicy.from_payload(policy)
+    except MutationPolicyError:
+        return MutationPolicy(path_predicates={}, fail_closed_class="redaction")
+
+
+def _normalize_path(path: object) -> str:
+    return str(path).replace("\\", "/").strip().strip("/")
+
+
+def _matching_classes(path: str, policy: MutationPolicy) -> list[str]:
+    matched: list[str] = []
+    for class_name, patterns in policy.path_predicates.items():
+        if any(_matches(path, pattern) for pattern in patterns):
+            matched.append(class_name)
+    return matched
+
+
+def _matches(path: str, pattern: str) -> bool:
+    normalized_pattern = pattern.replace("\\", "/").strip().strip("/")
+    if not normalized_pattern:
+        return False
+    if "/" not in normalized_pattern:
+        return fnmatch.fnmatchcase(Path(path).name, normalized_pattern)
+    return fnmatch.fnmatchcase(path, normalized_pattern)
