@@ -174,6 +174,29 @@ def _governed_event(tool_name, tool_input):
     return {"hook_event_name": "PreToolUse", "tool_name": tool_name, "tool_input": tool_input}
 
 
+def _write_reviewer_authority_envelope(root: Path, pr_number: int = 108) -> str:
+    ref = "reviewer-authority.ce.yml"
+    (root / ref).write_text(
+        json.dumps(
+            {
+                "reviewer_authority_envelope": {
+                    "envelope_id": "rva-live-hook-reviewer",
+                    "mechanic": "pr_review",
+                    "pr_number": pr_number,
+                    "head_sha": "aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+                    "actor": "ubuntuaws745-cmyk",
+                    "ratified_prompt_sha": "ae1b9db11155f4ad841ef3fa399cd508c64d1ff184d1e0d1437e859c0dacfe27",
+                    "emitting_role": "reviewer",
+                    "operating_mode": "strict",
+                    "recorded_at": "2026-06-01T10:43:13Z",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return ref
+
+
 def test_governed_out_of_manifest_edit_advisory_allows(tmp_path):
     # G-i (v3 kickoff): a governed path-manifest mismatch is now ADVISORY end to
     # end — the hook emits permissionDecision "allow" with the advisory context
@@ -209,6 +232,32 @@ def test_governed_secret_read_denies(tmp_path):
 def test_governed_git_push_denies(tmp_path):
     root = _build_governed_root(tmp_path, ["docs/keep.md"])
     proc = _run_hook(_governed_event("Bash", {"command": "git push origin main"}), root)
+    assert proc.returncode == 0
+    assert _permission(proc) == "deny"
+
+
+def test_distinct_reviewer_authority_env_allows_live_pr_review_comment(tmp_path):
+    root = _build_governed_root(tmp_path, ["docs/keep.md"])
+    ref = _write_reviewer_authority_envelope(root)
+
+    proc = _run_hook(
+        _governed_event("Bash", {"command": "gh pr review 108 --comment --body governed"}),
+        root,
+        extra_env={"CE_REVIEWER_AUTHORITY_REF": ref},
+    )
+
+    assert proc.returncode == 0
+    assert _permission(proc) == "allow"
+
+
+def test_live_pr_review_without_reviewer_authority_env_denies(tmp_path):
+    root = _build_governed_root(tmp_path, ["docs/keep.md"])
+
+    proc = _run_hook(
+        _governed_event("Bash", {"command": "gh pr review 108 --comment --body governed"}),
+        root,
+    )
+
     assert proc.returncode == 0
     assert _permission(proc) == "deny"
 
