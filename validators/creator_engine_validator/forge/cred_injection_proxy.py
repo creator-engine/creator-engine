@@ -41,7 +41,12 @@ _AUDIT_TOKEN_VALUE_RE = re.compile(
 )
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _HEAD_SHA_RE = re.compile(r"^[0-9a-fA-F]{40,64}$")
-_CONTAINED_REVIEW_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES"})
+_REVIEW_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES"})
+_APPROVE_EVENT = "APPROVE"
+_APPROVE_PERMITTING_RUN_MODES = frozenset({"strangeLoop"})
+_APPROVE_RUN_MODE_TO_ENVELOPE_MODES = {
+    "strangeLoop": frozenset({"transcendence"}),
+}
 
 
 class CredentialProxyRefused(ForgeConfigRefused):
@@ -120,11 +125,11 @@ class ProxyDispatchResult:
 
 @dataclass(frozen=True)
 class ContainedSeatReview:
-    """A contained seat's value-only PR review intent.
+    """A governed seat's value-only PR review intent.
 
-    This is intentionally narrower than GitHub's review API. Contained seats may
-    submit only opinionated non-approval reviews through this seam; gate-valid
-    approvals remain controller-only approval-wall work.
+    This is intentionally narrower than GitHub's review API. ``APPROVE`` is
+    permitted only by role + run-mode + reviewer-authority-envelope policy;
+    containment substrate is not part of the decision.
     """
 
     seat_id: str
@@ -135,6 +140,9 @@ class ContainedSeatReview:
     body: str = ""
     role_profile: str = "reviewer"
     host: str = "api.github.com"
+    run_mode: str | None = None
+    reviewer_authority_envelope: Mapping[str, Any] | None = None
+    containment_substrate: str | None = None
 
 
 @dataclass(frozen=True)
@@ -246,15 +254,17 @@ def submit_contained_seat_pr_review(
     token_spawn: Any = None,
     evaluator: PolicyEvaluator = evaluate,
 ) -> ContainedSeatReviewResult:
-    """Submit a contained seat COMMENT/REQUEST_CHANGES review through the proxy.
+    """Submit a governed seat PR review through the request-time proxy.
 
-    The contained seat supplies only value facts. The trusted caller owns
-    ``minter`` and either supplies ``transport`` or lets this function build the
-    default trusted ``gh api`` transport outside the sandbox. ``APPROVE`` is
-    deliberately refused before policy evaluation or token minting.
+    The seat supplies only value facts. The trusted caller owns ``minter`` and
+    either supplies ``transport`` or lets this function build the default trusted
+    ``gh api`` transport outside the sandbox. ``APPROVE`` is gated by run-mode
+    and a valid reviewer-authority envelope before policy evaluation or token
+    minting; containment status is not consulted.
     """
 
     event = _validate_contained_review(review)
+    approve_authority_checked = event == _APPROVE_EVENT
     payload: dict[str, object] = {"event": event, "commit_id": review.head_sha}
     if review.body:
         payload["body"] = review.body
@@ -270,6 +280,7 @@ def submit_contained_seat_pr_review(
         head_sha=review.head_sha,
         headers={"Accept": "application/vnd.github+json"},
         body=json.dumps(payload, sort_keys=True),
+        approve_authority_checked=approve_authority_checked,
     )
     metadata = dict(durable_metadata or {})
     metadata.setdefault("contained_review_event", event)
@@ -373,10 +384,9 @@ def _outbound_request(request: TransportRequest, token: ScopedToken) -> Outbound
 
 def _validate_contained_review(review: ContainedSeatReview) -> str:
     event = (review.event or "").strip().upper().replace("-", "_")
-    if event not in _CONTAINED_REVIEW_EVENTS:
+    if event not in _REVIEW_EVENTS | frozenset({_APPROVE_EVENT}):
         raise CredentialProxyRefused(
-            "contained seat review event must be COMMENT or REQUEST_CHANGES; "
-            "APPROVE is controller approval-wall only"
+            "governed seat review event must be COMMENT, REQUEST_CHANGES, or APPROVE"
         )
     if not review.seat_id.strip():
         raise CredentialProxyRefused("contained seat review requires a seat_id")
@@ -390,7 +400,100 @@ def _validate_contained_review(review: ContainedSeatReview) -> str:
         raise CredentialProxyRefused(f"pr_number {review.pr_number!r} must be a positive integer")
     if not _HEAD_SHA_RE.match(review.head_sha or ""):
         raise CredentialProxyRefused("contained seat review requires a 40-64 hex head_sha")
+    if event == _APPROVE_EVENT:
+        validate_approve_authority(
+            run_mode=review.run_mode,
+            reviewer_authority_envelope=review.reviewer_authority_envelope,
+            pr_number=review.pr_number,
+            head_sha=review.head_sha,
+        )
     return event
+
+
+def approve_permitted_by_run_mode(run_mode: str | None) -> bool:
+    """Return True only for run-modes ratified to autonomous APPROVE."""
+
+    return str(run_mode or "").strip() in _APPROVE_PERMITTING_RUN_MODES
+
+
+def validate_approve_authority(
+    *,
+    run_mode: str | None,
+    reviewer_authority_envelope: Mapping[str, Any] | None,
+    pr_number: int,
+    head_sha: str,
+) -> Mapping[str, Any]:
+    """Validate the APPROVE authority predicate, fail-closed.
+
+    ``APPROVE`` is authorized by run-mode policy plus a schema-valid
+    reviewer-authority envelope. The envelope must authorize ``pr_review`` for
+    the same PR/head, be emitted by a reviewer, and use an operating mode
+    compatible with the permitting run-mode. This helper deliberately ignores
+    containment substrate.
+    """
+
+    mode = str(run_mode or "").strip()
+    if not approve_permitted_by_run_mode(mode):
+        label = mode or "<unset>"
+        raise CredentialProxyRefused(
+            f"APPROVE refused: autonomous APPROVE is disabled for run_mode={label}"
+        )
+    if not isinstance(reviewer_authority_envelope, Mapping):
+        raise CredentialProxyRefused(
+            "APPROVE refused: missing reviewer-authority-envelope"
+        )
+    data: dict[str, Any]
+    if "reviewer_authority_envelope" in reviewer_authority_envelope:
+        data = dict(reviewer_authority_envelope)
+    else:
+        data = {"reviewer_authority_envelope": dict(reviewer_authority_envelope)}
+    try:
+        from ..checks.reviewer_authority_envelope import (
+            KEY as _RVA_KEY,
+            validate_reviewer_authority_envelope_record,
+        )
+    except Exception as exc:  # pragma: no cover - import/environment guard
+        raise CredentialProxyRefused(
+            "APPROVE refused: reviewer-authority-envelope validator unavailable"
+        ) from exc
+
+    errors = validate_reviewer_authority_envelope_record(
+        data,
+        "<reviewer-authority-envelope>",
+    )
+    if errors:
+        raise CredentialProxyRefused(
+            "APPROVE refused: invalid reviewer-authority-envelope"
+        )
+    rec = data.get(_RVA_KEY)
+    if not isinstance(rec, Mapping):
+        raise CredentialProxyRefused(
+            "APPROVE refused: invalid reviewer-authority-envelope"
+        )
+    if str(rec.get("mechanic", "")).strip() != "pr_review":
+        raise CredentialProxyRefused(
+            "APPROVE refused: reviewer-authority-envelope mechanic must be pr_review"
+        )
+    if rec.get("pr_number") != pr_number:
+        raise CredentialProxyRefused(
+            "APPROVE refused: reviewer-authority-envelope PR does not match request"
+        )
+    if str(rec.get("head_sha", "")).strip().lower() != head_sha.lower():
+        raise CredentialProxyRefused(
+            "APPROVE refused: reviewer-authority-envelope head_sha does not match request"
+        )
+    if str(rec.get("emitting_role", "")).strip() != "reviewer":
+        raise CredentialProxyRefused(
+            "APPROVE refused: reviewer-authority-envelope emitting_role must be reviewer"
+        )
+    allowed_envelope_modes = _APPROVE_RUN_MODE_TO_ENVELOPE_MODES.get(mode, frozenset())
+    envelope_mode = str(rec.get("operating_mode", "")).strip()
+    if envelope_mode not in allowed_envelope_modes:
+        raise CredentialProxyRefused(
+            "APPROVE refused: reviewer-authority-envelope operating_mode is not "
+            f"compatible with run_mode={mode}"
+        )
+    return rec
 
 
 def _base_audit(dispatch: ContainedDispatch, decision: Decision) -> dict[str, object]:
@@ -457,5 +560,7 @@ __all__ = [
     "TransportAdapter",
     "dispatch_with_credential_injection",
     "gh_api_transport_adapter",
+    "approve_permitted_by_run_mode",
     "submit_contained_seat_pr_review",
+    "validate_approve_authority",
 ]

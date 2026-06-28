@@ -190,7 +190,7 @@ def test_self_fire_review_path_never_posts_approve_event() -> None:
     )
     assert raw_decision.allowed is False
     assert any(
-        check.name == "contained_review_event_allowed" and not check.passed
+        check.name == "review_event_allowed" and not check.passed
         for check in raw_decision.checks
     )
 

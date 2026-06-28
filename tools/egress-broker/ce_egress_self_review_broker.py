@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Host-side Unix-socket self-review broker for contained CE seats.
+"""Host-side Unix-socket self-review broker for governed CE seats.
 
-The contained seat submits value-only PR review intent over a Unix socket:
-``{seat_id, pr_number, head_sha, event, body}``. The host broker validates the
-bounded JSON request, refuses ``APPROVE`` before any GitHub/source-host call,
-mints a short-lived repo-scoped review credential outside the sandbox, injects
-it only into the trusted host ``gh api`` subprocess environment, and returns a
-secret-free JSON result.
+The seat submits value-only PR review intent over a Unix socket:
+``{seat_id, pr_number, head_sha, event, body, reviewer_authority_envelope?}``.
+The host broker validates the bounded JSON request, gates ``APPROVE`` by role +
+run-mode + reviewer-authority-envelope policy, mints a short-lived repo-scoped
+review credential outside the sandbox only after the author≠reviewer check,
+injects it only into the trusted host ``gh api`` subprocess environment, and
+returns a secret-free JSON result.
 
 Protocol: one connection carries one JSON object. The client half-closes after
 writing; the broker responds with one JSON object and closes.
@@ -44,6 +45,7 @@ from creator_engine_validator.forge.cred_injection_proxy import (  # noqa: E402
     CredentialBinding,
     CredentialProxyRefused,
     submit_contained_seat_pr_review,
+    validate_approve_authority,
 )
 from creator_engine_validator.forge.scoped_token import ScopedToken, TokenRequest  # noqa: E402
 from egress_broker.config import BrokerConfig, BrokerConfigError, SeatAppConfig, load_broker_config  # noqa: E402
@@ -287,13 +289,15 @@ def _resolve_pr_author(repo: str, pr_number: int) -> str:
 
 @dataclass(frozen=True)
 class SelfReviewRequest:
-    """Value-only request accepted from the contained seat."""
+    """Value-only request accepted from the governed seat."""
 
     seat_id: str
     pr_number: int
     head_sha: str
     event: str
     body: str = ""
+    reviewer_authority_envelope: Mapping[str, Any] | None = None
+    containment_substrate: str | None = None
 
 
 @dataclass(frozen=True)
@@ -323,8 +327,8 @@ class SelfReviewResult:
 def parse_request(payload: Mapping[str, Any], run_mode: str | None = None) -> SelfReviewRequest:
     """Validate the bounded JSON object into a value-only request.
 
-    This performs the APPROVE exclusion before any caller can resolve/mint or
-    invoke a source-host transport.
+    This performs the run-mode/envelope APPROVE shape check before any caller
+    can resolve/mint or invoke a source-host transport.
     """
     if not isinstance(payload, Mapping):
         raise SelfReviewRefused("request must be a JSON object")
@@ -346,13 +350,39 @@ def parse_request(payload: Mapping[str, Any], run_mode: str | None = None) -> Se
     if event not in _allowed_events(run_mode):
         raise SelfReviewRefused(_event_refusal_message(run_mode))
     body = str(payload.get("body") or "")
+    reviewer_authority_envelope = _request_reviewer_authority_envelope(payload)
+    containment_substrate = (
+        str(payload.get("containment_substrate")).strip()
+        if payload.get("containment_substrate") is not None
+        else None
+    )
+    if event == "APPROVE":
+        try:
+            validate_approve_authority(
+                run_mode=run_mode,
+                reviewer_authority_envelope=reviewer_authority_envelope,
+                pr_number=pr_number,
+                head_sha=head_sha,
+            )
+        except CredentialProxyRefused as exc:
+            raise SelfReviewRefused(str(exc)) from exc
     return SelfReviewRequest(
         seat_id=seat_id,
         pr_number=pr_number,
         head_sha=head_sha,
         event=event,
         body=body,
+        reviewer_authority_envelope=reviewer_authority_envelope,
+        containment_substrate=containment_substrate,
     )
+
+
+def _request_reviewer_authority_envelope(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    for key in ("reviewer_authority_envelope", "reviewer_authority"):
+        value = payload.get(key)
+        if isinstance(value, Mapping):
+            return value
+    return None
 
 
 def bounded_json_load(data: bytes, *, max_bytes: int = DEFAULT_MAX_REQUEST_BYTES) -> Mapping[str, Any]:
@@ -383,22 +413,20 @@ def submit_self_review(
     resolve_author_fn: Callable[[str, int], str] | None = None,
     run_mode: str | None = None,
 ) -> SelfReviewResult:
-    """Mint a scoped review credential and submit COMMENT/REQUEST_CHANGES via ``gh api``.
+    """Mint a scoped review credential and submit a governed PR review via ``gh api``.
 
     The request is assumed to have passed :func:`parse_request`; this function
-    re-checks the event as defense-in-depth before config lookup or source-host
-    calls. Credentials are env-only through ``authenticated_gh_runner`` inside
-    the existing credential-injection proxy helper.
+    re-checks the event as defense-in-depth before source-host write calls.
+    Credentials are env-only through ``authenticated_gh_runner`` inside the
+    existing credential-injection proxy helper.
 
     Before minting any credential the broker enforces the **author≠reviewer**
     invariant (mirroring ``forge/plan_approval.py`` /
     ``forge/review_pickup.py``): the PR author is resolved host-side and a seat
     is refused if it is the PR's own author — no seat may review a PR it wrote,
-    for ANY event (COMMENT / REQUEST_CHANGES / the already-refused APPROVE).
-    Author resolution fails CLOSED.
+    for ANY event (COMMENT / REQUEST_CHANGES / gated APPROVE). Author resolution
+    fails CLOSED.
     """
-    if request.event == "APPROVE" and not _is_strangeloop(run_mode):
-        raise SelfReviewRefused(_event_refusal_message(run_mode))
     if request.event not in _allowed_events(run_mode):
         raise SelfReviewRefused(_event_refusal_message(run_mode))
 
@@ -419,6 +447,17 @@ def submit_self_review(
             "self-review refused: requesting seat is the PR author "
             "(author≠reviewer invariant)"
         )
+
+    if request.event == "APPROVE":
+        try:
+            validate_approve_authority(
+                run_mode=run_mode,
+                reviewer_authority_envelope=request.reviewer_authority_envelope,
+                pr_number=request.pr_number,
+                head_sha=request.head_sha,
+            )
+        except CredentialProxyRefused as exc:
+            raise SelfReviewRefused(str(exc)) from exc
 
     # Signer selection (ce-ops#268): an injected ``signer`` (tests, back-compat)
     # wins. Otherwise route by the seat's key source — secret_ref → vault-backed
@@ -481,6 +520,9 @@ def submit_self_review(
                 head_sha=request.head_sha,
                 event=request.event,
                 body=request.body,
+                run_mode=run_mode,
+                reviewer_authority_envelope=request.reviewer_authority_envelope,
+                containment_substrate=request.containment_substrate,
             ),
             binding=binding,
             minter=mint_fn or _default_minter,
@@ -624,16 +666,18 @@ def serve(
 
 def send_request(socket_path: str, request: SelfReviewRequest, *, timeout: float = 30.0) -> dict[str, object]:
     """Small client helper used by the opt-in live smoke mode."""
-    payload = json.dumps(
-        {
-            "seat_id": request.seat_id,
-            "pr_number": request.pr_number,
-            "head_sha": request.head_sha,
-            "event": request.event,
-            "body": request.body,
-        },
-        sort_keys=True,
-    ).encode("utf-8")
+    request_payload: dict[str, object] = {
+        "seat_id": request.seat_id,
+        "pr_number": request.pr_number,
+        "head_sha": request.head_sha,
+        "event": request.event,
+        "body": request.body,
+    }
+    if request.reviewer_authority_envelope is not None:
+        request_payload["reviewer_authority_envelope"] = dict(request.reviewer_authority_envelope)
+    if request.containment_substrate is not None:
+        request_payload["containment_substrate"] = request.containment_substrate
+    payload = json.dumps(request_payload, sort_keys=True).encode("utf-8")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(timeout)
         client.connect(socket_path)
@@ -654,7 +698,7 @@ def send_request(socket_path: str, request: SelfReviewRequest, *, timeout: float
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ce-egress-self-review-broker",
-        description="Host-side Unix-socket broker for contained-seat COMMENT/REQUEST_CHANGES PR reviews.",
+        description="Host-side Unix-socket broker for governed COMMENT/REQUEST_CHANGES PR reviews.",
     )
     parser.add_argument("--socket", default=DEFAULT_SOCKET, help="Unix socket path")
     parser.add_argument("--config", help="broker config JSON path (required for daemon mode)")
