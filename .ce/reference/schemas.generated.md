@@ -14,7 +14,7 @@ Schema files: 68
 | `schemas/architect-evidence.schema.yaml` | Creator Engine Architect Evidence Record | `object` |
 | `schemas/authority-matrix.schema.yaml` | Creator Engine Authority Matrix | `array` |
 | `schemas/automerge-decision.schema.yaml` | Creator Engine Auto-Merge Decision Record | `object` |
-| `schemas/automerge-policy.schema.yaml` | Creator Engine Auto-Merge Policy State | `object` |
+| `schemas/automerge-policy.schema.yaml` | Creator Engine Auto-Merge Policy | `unspecified` |
 | `schemas/brain-assertion.schema.yaml` | Creator Engine Brain Assertion Ledger | `object` |
 | `schemas/brain-recall-record.schema.yaml` | Creator Engine Brain Recall Index Entry | `object` |
 | `schemas/brownfield-baseline-attestation.schema.yaml` | Creator Engine Brownfield Baseline Attestation | `object` |
@@ -209,52 +209,58 @@ Array item properties:
 | `$id` | `https://creator-engine.local/schemas/automerge-decision.schema.yaml` |
 | Root type | `object` |
 
-Value-only auto-merge decision record emitted by automerge-decide (dry-run or live classification). Never secret-bearing. Safe to write to disk or emit as JSON for audit.
+Value-only dry-run automerge decision. It records a verdict; it is not an action.
 
 Required fields:
 
-`decision`, `mutation_class`, `size_band`, `minimum_work_class`, `ratification_gates`, `run_mode`, `kill_switch`, `class_flag`, `checks_green`, `review_decision_blocked`, `rationale`
+`class`, `size_band`, `minimum_work_class`, `mutation_class`, `gates`, `decision`, `rationale`, `policy_sha`, `checks_snapshot`, `run_mode`, `kill_switch`, `class_flag`, `reviewDecision`, `checks_green`
 
 Properties:
 
 | Property | Shape | Required | Constraints | Description |
 | --- | --- | --- | --- | --- |
-| `decision` | string | yes | enum `AUTO`, `GESTURE_REQUIRED` | The policy decision for this PR. AUTO means all guards passed and the policy engine would auto-merge (if armed). GESTURE_REQUIRED means a human Operator gesture is needed. |
-| `mutation_class` | string | yes |  | The highest-risk mutation class across all changed paths, as returned by mutation_class_for_paths(). Fail-closed classifier. |
-| `size_band` | string | yes | enum `target_advisory`, `warn`, `explain_or_split`, `split_required`, `unknown` | The size band returned by classify_change_size(). "unknown" when change_stats were not provided. |
-| `minimum_work_class` | string | yes |  | The minimum work class required by the size band. |
-| `ratification_gates` | array | yes |  | The ratification gates from size_ceremony(work_class, mutation_class). Drives the AUTO vs GESTURE_REQUIRED decision. |
-| `run_mode` | string | yes |  | The run_mode from the policy state at decision time. |
-| `kill_switch` | boolean | yes |  | The kill_switch value from the policy state at decision time. |
-| `class_flag` | boolean | yes |  | The per-class auto_merge flag from the policy state for this mutation_class at decision time. |
-| `checks_green` | boolean | yes |  | True if all required checks were green at classification time. |
-| `review_decision_blocked` | boolean | yes |  | True if reviewDecision was CHANGES_REQUESTED. |
-| `rationale` | array | yes |  | Human-readable list of guard evaluation steps explaining why the decision was AUTO or GESTURE_REQUIRED. |
-| `pr_number` | [integer, "null"] | no |  | Optional PR number for audit correlation. |
-| `head_sha` | [string, "null"] | no |  | Optional PR head SHA for audit correlation. |
+| `class` | string | yes | enum `tiny`, `story`, `feature`, `epic` |  |
+| `size_band` | string | yes | enum `target_advisory`, `warn`, `explain_or_split`, `split_required` |  |
+| `minimum_work_class` | string | yes | enum `tiny`, `story`, `feature`, `epic` |  |
+| `mutation_class` | string | yes | enum `none`, `docs`, `code`, `schema`, `deploy`, `governance`, `identity`, `security`, `attestation`, `redaction` |  |
+| `gates` | array | yes |  |  |
+| `decision` | string | yes | enum `AUTO`, `GESTURE` |  |
+| `rationale` | array | yes |  |  |
+| `policy_sha` | string | yes | pattern `^[a-f0-9]{64}$` |  |
+| `checks_snapshot` | object | yes |  |  |
+| `run_mode` | string | yes |  |  |
+| `kill_switch` | boolean | yes |  |  |
+| `class_flag` | boolean | yes |  |  |
+| `reviewDecision` | string \| null | yes |  |  |
+| `checks_green` | boolean | yes |  |  |
+| `pr_number` | integer \| null | no |  |  |
+| `head_sha` | string \| null | no |  |  |
 
 ### `schemas/automerge-policy.schema.yaml`
 
 | Metadata | Value |
 | --- | --- |
-| Title | Creator Engine Auto-Merge Policy State |
+| Title | Creator Engine Auto-Merge Policy |
 | `$id` | `https://creator-engine.local/schemas/automerge-policy.schema.yaml` |
-| Root type | `object` |
+| Root type | `unspecified` |
 
-Durable, secret-free auto-merge policy state for the CEO-mode policy engine (ce-ops#291 PR-A). Ships with run_mode=dev and all class flags false so nothing auto-merges until an Operator flips the enabling decision (PR...
+Secret-free policy data for ce-ops#291 classify-only automerge dry runs.
 
 Required fields:
 
-`run_mode`, `kill_switch`, `classes`
+_None declared._
 
 Properties:
 
+_No properties declared._
+
+Definitions:
+
 | Property | Shape | Required | Constraints | Description |
 | --- | --- | --- | --- | --- |
-| `run_mode` | string | yes | enum `dev`, `ceo`, `strangeLoop` | Master run-mode switch. dev=nothing auto-merges; ceo=docs/none may auto-merge when class flags are on; strangeLoop=future widening (design only). Ships as "dev". |
-| `kill_switch` | boolean | yes |  | Emergency halt: true stops all auto-merge instantly regardless of class flags or run_mode. Ships as false. |
-| `classes` | object | yes |  | Per-mutation-class flags. Each key is a mutation class name; value is the per-class policy object. All ship as auto_merge: false. |
-| `enabling_decision_ref` | [string, "null"] | no |  | Opaque reference to the Operator ratification record that authorises auto-merge for this policy state (e.g. a decision-record path, PR URL, or DAYSHIFT manifest ref). Must be non-null for any auto_merge=true flag to t... |
+| `mutation_class` | string | no | enum `none`, `docs`, `code`, `schema`, `deploy`, `governance`, `identity`, `security`, `attestation`, `redaction` |  |
+| `policy_state` | object | no | additionalProperties `false` |  |
+| `mutation_policy` | object | no | additionalProperties `false` |  |
 
 ### `schemas/brain-assertion.schema.yaml`
 
