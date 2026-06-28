@@ -127,6 +127,8 @@ def _required_checks(payload: Mapping[str, Any]) -> tuple[str, ...] | ActuationR
     checks = tuple(str(item).strip() for item in raw if str(item).strip())
     if len(checks) != len(raw):
         return _refuse("required_checks_invalid")
+    if not checks:
+        return _refuse("required_checks_empty")
     return checks
 
 
@@ -184,7 +186,7 @@ def _live_required_checks_green(
     gh_runner,
 ) -> bool | ActuationResult:
     if not required_checks:
-        return True
+        return _refuse("required_checks_empty")
     if gh_runner is None:
         return _refuse("gh_runner_missing")
     try:

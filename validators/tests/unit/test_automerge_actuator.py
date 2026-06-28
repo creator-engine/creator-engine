@@ -163,3 +163,68 @@ def test_actuates_only_when_all_green(tmp_path: Path) -> None:
     assert result.reason == "all_predicates_green"
     assert len(gh.mutation_calls()) == 1
     assert result.auto_merge_result.enabled is True
+
+
+def test_refuses_empty_required_checks(tmp_path: Path) -> None:
+    """required_checks present but empty must refuse fail-closed, not vacuously pass."""
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(
+        _write(tmp_path, _decision(required_checks=[])), gh_runner=gh
+    )
+
+    assert result.refused is True
+    assert result.reason == "required_checks_empty"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_run_mode_absent(tmp_path: Path) -> None:
+    """Absent run_mode must refuse with run_mode_missing_or_invalid, not go Dormant."""
+    gh = FakeActuatorGh()
+    payload = _decision()
+    del payload["run_mode"]
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "run_mode_missing_or_invalid"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_run_mode_non_string(tmp_path: Path) -> None:
+    """Non-string run_mode must refuse, not go Dormant."""
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(
+        _write(tmp_path, _decision(run_mode=42)), gh_runner=gh
+    )
+
+    assert result.refused is True
+    assert result.reason == "run_mode_missing_or_invalid"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_policy_sha_absent(tmp_path: Path) -> None:
+    """Absent policy_sha must refuse before any mutation."""
+    gh = FakeActuatorGh()
+    payload = _decision()
+    del payload["policy_sha"]
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "policy_sha_invalid"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_policy_sha_malformed(tmp_path: Path) -> None:
+    """Malformed policy_sha (not 64-char lowercase hex) must refuse before any mutation."""
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(
+        _write(tmp_path, _decision(policy_sha="not-a-sha")), gh_runner=gh
+    )
+
+    assert result.refused is True
+    assert result.reason == "policy_sha_invalid"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
