@@ -78,10 +78,10 @@ def _wheel_digest(data: bytes) -> str:
 
 
 def _patch_site_app_wheel_from_source(tmp_path: Path, repo_root: Path, site: Path) -> None:
-    wheel_name = "creator_engine_validator-0.2.0-py3-none-any.whl"
-    wheel = site / "downloads" / "0.2.0" / wheel_name
+    wheel_name = "creator_engine_validator-0.3.0-py3-none-any.whl"
+    wheel = site / "downloads" / "0.3.0" / wheel_name
     member = "creator_engine_validator/v3_cli.py"
-    record = "creator_engine_validator-0.2.0.dist-info/RECORD"
+    record = "creator_engine_validator-0.3.0.dist-info/RECORD"
     replacement = (repo_root / "validators" / "creator_engine_validator" / "v3_cli.py").read_bytes()
 
     with zipfile.ZipFile(wheel, "r") as zin:
@@ -117,7 +117,7 @@ def _patch_site_app_wheel_from_source(tmp_path: Path, repo_root: Path, site: Pat
     rewritten.replace(wheel)
 
     wheel_hash = hashlib.sha256(wheel.read_bytes()).hexdigest()
-    sha256s = site / "downloads" / "0.2.0" / "SHA256SUMS"
+    sha256s = site / "downloads" / "0.3.0" / "SHA256SUMS"
     sha_lines = []
     for line in sha256s.read_text(encoding="utf-8").splitlines():
         if line.endswith(f"  {wheel_name}"):
@@ -176,7 +176,7 @@ if [ "${FAKE_404_DOWNLOAD:-}" = "1" ] && [[ "$rel" == downloads/* ]]; then
   echo "curl: (22) The requested URL returned error: 404" >&2
   exit 22
 fi
-if [ -n "${FAKE_BAD_WHEEL:-}" ] && [[ "$rel" == "downloads/0.2.0/${FAKE_BAD_WHEEL}" ]]; then
+if [ -n "${FAKE_BAD_WHEEL:-}" ] && [[ "$rel" == "downloads/0.3.0/${FAKE_BAD_WHEEL}" ]]; then
   printf 'not the signed wheel bytes' > "$out"
   exit 0
 fi
@@ -597,7 +597,7 @@ def test_install_sh_accepts_linux_aarch64_and_selects_arm_wheelhouse(tmp_path: P
     assert "unsupported_platform" not in proc.stderr
     assert arm_pyyaml in proc.stderr
     urls = _curl_urls(tmp_path / "curl.log")
-    assert any(url.endswith(f"/downloads/0.2.0/{arm_pyyaml}") for url in urls)
+    assert any(url.endswith(f"/downloads/0.3.0/{arm_pyyaml}") for url in urls)
     assert not any("pyyaml" in url and "x86_64" in url for url in urls)
 
 
