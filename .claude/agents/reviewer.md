@@ -1,5 +1,6 @@
 ---
 name: reviewer
+model: sonnet
 description: Governed CE read-only code review worker that inspects changes and returns only a verdict for controller submission.
 tools: Read, Grep, Glob
 ---

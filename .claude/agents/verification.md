@@ -1,5 +1,6 @@
 ---
 name: verification
+model: haiku
 description: CE governed read-only verification worker for running tests and returning reproducible verification evidence; no mutation or network egress by default.
 tools: Read, Grep, Glob, Bash
 ---

@@ -1,5 +1,6 @@
 ---
 name: implementer
+model: sonnet
 description: Build an assigned Creator Engine task inside exactly one allocated worktree, with task-scoped write authority and no approval, merge, or gate-adjacent authority.
 tools:
   - Read

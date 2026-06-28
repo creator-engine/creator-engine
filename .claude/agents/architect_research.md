@@ -1,5 +1,6 @@
 ---
 name: architect_research
+model: sonnet
 description: CE governed read-only architect/research worker for codebase reading, source-host read API use, and ratified web/documentation research; returns findings only.
 tools: Read, Grep, Glob, WebFetch, WebSearch
 ---
