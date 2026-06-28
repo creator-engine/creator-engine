@@ -1,0 +1,141 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/orchestrator-checkpoint.schema.yaml"
+title: "Creator Engine Orchestrator Checkpoint Record"
+description: |
+  Runtime checkpoint for the governed CE Orchestrator Agent. The design source
+  names this as the durable resume snapshot for objective, lifecycle state,
+  active worker claims, gate posture, operator decisions, and the next action.
+
+  This schema keeps the design-level fields required so a checkpoint can be
+  replayed deterministically. String refs are intentionally opaque path, issue,
+  PR, branch, or record references; this slice validates record shape only and
+  does not resolve them.
+type: object
+required:
+  - kind
+  - version
+  - checkpoint_id
+  - created_at
+  - controller_id
+  - objective
+  - lifecycle_state
+  - refs
+  - active_claims
+  - territory_map_ref
+  - gate
+  - operator_decisions
+  - next_action
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: ce-orchestrator-checkpoint
+  version:
+    type: integer
+    const: 1
+  checkpoint_id:
+    type: string
+    minLength: 1
+    maxLength: 256
+  created_at:
+    type: string
+    format: date-time
+    minLength: 1
+  controller_id:
+    type: string
+    minLength: 1
+    maxLength: 256
+  objective:
+    type: string
+    minLength: 1
+  lifecycle_state:
+    type: string
+    enum:
+      - INTAKE
+      - MAP_TERRITORY
+      - DISPATCH
+      - WATCH
+      - HARVEST
+      - VERIFY_AND_REVIEW
+      - GATE
+      - CHECKPOINT
+      - NEXT_LANE
+      - BLOCKED
+      - HALT
+  refs:
+    type: object
+    required: [issues, prs, branches]
+    unevaluatedProperties: false
+    properties:
+      issues:
+        $ref: "#/$defs/string_refs"
+      prs:
+        $ref: "#/$defs/string_refs"
+      branches:
+        $ref: "#/$defs/string_refs"
+  active_claims:
+    type: array
+    items:
+      type: object
+      required: [claim_ref, worker_id, role, branch, worktree, containment, stop_line]
+      unevaluatedProperties: false
+      properties:
+        claim_ref:
+          type: string
+          minLength: 1
+        worker_id:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          enum: [architect_research, implementer, verification, reviewer]
+        branch:
+          type: string
+          minLength: 1
+        worktree:
+          type: string
+          minLength: 1
+        containment:
+          type: string
+          enum: [contained, non_contained]
+        stop_line:
+          type: string
+          minLength: 1
+  territory_map_ref:
+    description: |
+      Opaque reference to the territory-map record that grounded collision
+      checks for this checkpoint. Empty only if no map has been minted yet.
+    type: string
+    minLength: 1
+  gate:
+    type: object
+    required: [validation, independent_review, declared_work_class, ratification]
+    unevaluatedProperties: false
+    properties:
+      validation:
+        type: string
+        enum: [unknown, pending, green, red]
+      independent_review:
+        type: string
+        enum: [missing, pending, satisfied, changes_requested]
+      declared_work_class:
+        type: string
+        enum: [tiny, story, feature, epic, unknown]
+      ratification:
+        type: string
+        enum: [missing, satisfied, not_required]
+  operator_decisions:
+    description: |
+      References to operator-decision queue records related to this checkpoint.
+      The decision bodies remain separate records so they can be resolved
+      independently of checkpoint snapshots.
+    $ref: "#/$defs/string_refs"
+  next_action:
+    type: string
+    minLength: 1
+$defs:
+  string_refs:
+    type: array
+    items:
+      type: string
+      minLength: 1

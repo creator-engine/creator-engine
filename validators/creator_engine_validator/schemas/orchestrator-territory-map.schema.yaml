@@ -1,0 +1,101 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/orchestrator-territory-map.schema.yaml"
+title: "Creator Engine Orchestrator Territory Map Record"
+description: |
+  Runtime map of active Orchestrator territory: path patterns, owning worker,
+  issue/PR/branch refs, claim refs, lock state, changed paths, and explicit
+  collision-check outcomes.
+
+  Path and forge references are validated as opaque non-empty strings. The
+  Orchestrator resolves them against live claims and PRs outside this schema.
+type: object
+required:
+  - kind
+  - version
+  - map_id
+  - created_at
+  - base_ref
+  - entries
+  - collision_checks
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: ce-orchestrator-territory-map
+  version:
+    type: integer
+    const: 1
+  map_id:
+    type: string
+    minLength: 1
+    maxLength: 256
+  created_at:
+    type: string
+    format: date-time
+    minLength: 1
+  base_ref:
+    type: string
+    minLength: 1
+  entries:
+    type: array
+    items:
+      type: object
+      required:
+        - path_pattern
+        - owner_worker
+        - issue_ref
+        - pr_ref
+        - branch
+        - claim_ref
+        - lock_status
+        - changed_paths
+      unevaluatedProperties: false
+      properties:
+        path_pattern:
+          type: string
+          minLength: 1
+        owner_worker:
+          type: string
+          minLength: 1
+        issue_ref:
+          type: string
+          minLength: 1
+        pr_ref:
+          type: string
+          minLength: 1
+        branch:
+          type: string
+          minLength: 1
+        claim_ref:
+          type: string
+          minLength: 1
+        lock_status:
+          type: string
+          enum: [clear, locked, stale, contested]
+        changed_paths:
+          $ref: "#/$defs/non_empty_strings"
+  collision_checks:
+    type: array
+    items:
+      type: object
+      required: [candidate_ref, result, reason]
+      unevaluatedProperties: false
+      properties:
+        candidate_ref:
+          type: string
+          minLength: 1
+        result:
+          type: string
+          enum: [clear, collision, blocked]
+        reason:
+          description: |
+            Human-readable explanation of the collision result. Required even
+            for clear checks so audit readers know what evidence was inspected.
+          type: string
+          minLength: 1
+$defs:
+  non_empty_strings:
+    type: array
+    items:
+      type: string
+      minLength: 1

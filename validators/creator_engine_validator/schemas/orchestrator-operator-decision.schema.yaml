@@ -1,0 +1,96 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/orchestrator-operator-decision.schema.yaml"
+title: "Creator Engine Orchestrator Operator Decision Record"
+description: |
+  Runtime queue record for an Operator-reserved Orchestrator decision. It
+  captures the request, authority basis, concrete options, recommended option,
+  halt posture, and eventual resolution.
+
+  Resolution fields are nullable so pending decisions can be represented
+  without inventing placeholder identities or timestamps.
+type: object
+required:
+  - kind
+  - version
+  - decision_id
+  - created_at
+  - requested_by
+  - authority_basis
+  - request
+  - options
+  - recommended_option
+  - halt_until_resolved
+  - resolution
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: ce-orchestrator-operator-decision
+  version:
+    type: integer
+    const: 1
+  decision_id:
+    type: string
+    minLength: 1
+    maxLength: 256
+  created_at:
+    type: string
+    format: date-time
+    minLength: 1
+  requested_by:
+    type: string
+    minLength: 1
+  authority_basis:
+    type: string
+    enum: [autonomous, reserved, unknown]
+  request:
+    type: string
+    minLength: 1
+  options:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, label, consequence]
+      unevaluatedProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+        label:
+          type: string
+          minLength: 1
+        consequence:
+          type: string
+          minLength: 1
+  recommended_option:
+    description: |
+      Option id recommended by the Orchestrator. Cross-field membership is
+      enforced by runtime code in a later slice, not by this shape schema.
+    type: string
+    minLength: 1
+  halt_until_resolved:
+    type: boolean
+  resolution:
+    type: object
+    required: [status, resolved_by, resolved_at, notes]
+    unevaluatedProperties: false
+    properties:
+      status:
+        type: string
+        enum: [pending, approved, rejected, superseded]
+      resolved_by:
+        oneOf:
+          - type: "null"
+          - type: string
+            minLength: 1
+      resolved_at:
+        oneOf:
+          - type: "null"
+          - type: string
+            format: date-time
+            minLength: 1
+      notes:
+        oneOf:
+          - type: "null"
+          - type: string
