@@ -1,8 +1,10 @@
 import json
 import logging
+import os
 import socket
 import subprocess
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -233,6 +235,104 @@ def test_approve_allowed_in_strangeloop_mode_with_valid_envelope():
 
     assert request.event == "APPROVE"
     assert request.reviewer_authority_envelope is not None
+
+
+def test_approve_loads_reviewer_authority_ref_from_pane_env(tmp_path, monkeypatch):
+    ref = tmp_path / "reviewer-authority.ce.yml"
+    ref.write_text(json.dumps(_reviewer_authority_envelope()), encoding="utf-8")
+    monkeypatch.setenv(broker.CE_REVIEWER_AUTHORITY_ENV, str(ref))
+
+    request = broker.parse_request(_payload(event="APPROVE"), run_mode="strangeLoop")
+
+    assert request.event == "APPROVE"
+    assert request.reviewer_authority_envelope == _reviewer_authority_envelope()
+
+
+def test_approve_refuses_invalid_reviewer_authority_ref_from_pane_env(tmp_path, monkeypatch):
+    ref = tmp_path / "reviewer-authority.ce.yml"
+    ref.write_text(
+        json.dumps(_reviewer_authority_envelope(mechanic="merge")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(broker.CE_REVIEWER_AUTHORITY_ENV, str(ref))
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(_payload(event="APPROVE"), run_mode="strangeLoop")
+
+    assert "invalid reviewer-authority-envelope ref" in str(exc.value)
+
+
+def _assert_payload_ref_refused_without_open(monkeypatch, host_ref, payload_ref, payload_key):
+    opened_host_refs = []
+    original_open = Path.open
+    host_resolved = host_ref.resolve()
+
+    def spy_open(self, *args, **kwargs):
+        if self.resolve() == host_resolved:
+            opened_host_refs.append(self)
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", spy_open)
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(
+            {**_payload(event="APPROVE"), payload_key: payload_ref},
+            run_mode="strangeLoop",
+        )
+
+    assert "reviewer-authority-envelope ref must" in str(exc.value)
+    assert opened_host_refs == []
+
+
+@pytest.mark.parametrize(
+    "payload_key",
+    ["reviewer_authority_ref", "reviewer_authority_envelope_ref"],
+)
+def test_approve_refuses_absolute_payload_reviewer_authority_ref_without_open(
+    tmp_path, monkeypatch, payload_key
+):
+    host_ref = tmp_path / "host-reviewer-authority.ce.yml"
+    host_ref.write_text(json.dumps(_reviewer_authority_envelope()), encoding="utf-8")
+
+    _assert_payload_ref_refused_without_open(
+        monkeypatch,
+        host_ref,
+        str(host_ref),
+        payload_key,
+    )
+
+
+@pytest.mark.parametrize(
+    "payload_key",
+    ["reviewer_authority_ref", "reviewer_authority_envelope_ref"],
+)
+def test_approve_refuses_escaping_payload_reviewer_authority_ref_without_open(
+    tmp_path, monkeypatch, payload_key
+):
+    host_ref = tmp_path / "host-reviewer-authority.ce.yml"
+    host_ref.write_text(json.dumps(_reviewer_authority_envelope()), encoding="utf-8")
+    escaping_ref = os.path.relpath(host_ref, Path(broker._REPO_ROOT))
+    assert escaping_ref.startswith("../")
+
+    _assert_payload_ref_refused_without_open(
+        monkeypatch,
+        host_ref,
+        escaping_ref,
+        payload_key,
+    )
+
+
+def test_inline_envelope_wins_over_invalid_pane_env_ref(tmp_path, monkeypatch):
+    ref = tmp_path / "reviewer-authority.ce.yml"
+    ref.write_text("not: the authority envelope\n", encoding="utf-8")
+    monkeypatch.setenv(broker.CE_REVIEWER_AUTHORITY_ENV, str(ref))
+
+    request = broker.parse_request(
+        {**_payload(event="APPROVE"), "reviewer_authority_envelope": _reviewer_authority_envelope()},
+        run_mode="strangeLoop",
+    )
+
+    assert request.reviewer_authority_envelope == _reviewer_authority_envelope()
 
 
 def test_submit_self_review_approve_refused_in_dev_mode():

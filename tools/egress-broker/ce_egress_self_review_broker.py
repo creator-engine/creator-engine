@@ -75,6 +75,7 @@ DEFAULT_MAX_REQUEST_BYTES = 64 * 1024
 REVIEW_PERMISSIONS = {"metadata": "read", "pull_requests": "write"}
 REVIEW_TTL_SECONDS = 600
 REVIEW_SECRET_NAME = "forge_self_review"
+CE_REVIEWER_AUTHORITY_ENV = "CE_REVIEWER_AUTHORITY_REF"
 ALLOWED_EVENTS = frozenset({"COMMENT", "REQUEST_CHANGES"})
 STRANGELOOP_ALLOWED_EVENTS = ALLOWED_EVENTS | frozenset({"APPROVE"})
 
@@ -350,7 +351,10 @@ def parse_request(payload: Mapping[str, Any], run_mode: str | None = None) -> Se
     if event not in _allowed_events(run_mode):
         raise SelfReviewRefused(_event_refusal_message(run_mode))
     body = str(payload.get("body") or "")
-    reviewer_authority_envelope = _request_reviewer_authority_envelope(payload)
+    reviewer_authority_envelope = _request_reviewer_authority_envelope(
+        payload,
+        allow_env_ref=event == "APPROVE",
+    )
     containment_substrate = (
         str(payload.get("containment_substrate")).strip()
         if payload.get("containment_substrate") is not None
@@ -377,12 +381,78 @@ def parse_request(payload: Mapping[str, Any], run_mode: str | None = None) -> Se
     )
 
 
-def _request_reviewer_authority_envelope(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+def _request_reviewer_authority_envelope(
+    payload: Mapping[str, Any],
+    *,
+    allow_env_ref: bool = False,
+) -> Mapping[str, Any] | None:
     for key in ("reviewer_authority_envelope", "reviewer_authority"):
         value = payload.get(key)
         if isinstance(value, Mapping):
             return value
+    if allow_env_ref:
+        for key in ("reviewer_authority_ref", "reviewer_authority_envelope_ref"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return _load_payload_reviewer_authority_ref(value.strip())
+        env_ref = os.environ.get(CE_REVIEWER_AUTHORITY_ENV, "").strip()
+        if env_ref:
+            return _load_reviewer_authority_ref(env_ref)
     return None
+
+
+def _load_payload_reviewer_authority_ref(ref: str) -> Mapping[str, Any]:
+    raw = Path(ref)
+    if raw.is_absolute():
+        raise SelfReviewRefused(
+            "APPROVE refused: reviewer-authority-envelope ref must be repo-root-relative"
+        )
+    repo_root = Path(_REPO_ROOT).resolve()
+    resolved = (repo_root / raw).resolve()
+    try:
+        resolved.relative_to(repo_root)
+    except ValueError:
+        raise SelfReviewRefused(
+            "APPROVE refused: reviewer-authority-envelope ref must stay within repo root"
+        ) from None
+    return _load_reviewer_authority_ref(str(resolved))
+
+
+def _load_reviewer_authority_ref(ref: str) -> Mapping[str, Any]:
+    candidates = [Path(ref)]
+    if not Path(ref).is_absolute():
+        candidates.extend([Path.cwd() / ref, Path(_REPO_ROOT) / ref])
+    resolved = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if resolved is None:
+        raise SelfReviewRefused(
+            "APPROVE refused: reviewer-authority-envelope ref is missing"
+        )
+    try:
+        from creator_engine_validator.checks.reviewer_authority_envelope import (
+            validate_reviewer_authority_envelope_record,
+        )
+        from creator_engine_validator.loader import load_yaml
+    except Exception as exc:  # pragma: no cover - import/environment guard
+        raise SelfReviewRefused(
+            "APPROVE refused: reviewer-authority-envelope validator unavailable"
+        ) from exc
+
+    try:
+        data = load_yaml(resolved)
+    except Exception as exc:
+        raise SelfReviewRefused(
+            "APPROVE refused: reviewer-authority-envelope ref is unreadable"
+        ) from exc
+    errors = validate_reviewer_authority_envelope_record(data, resolved)
+    if errors:
+        raise SelfReviewRefused(
+            "APPROVE refused: invalid reviewer-authority-envelope ref"
+        )
+    if not isinstance(data, Mapping):
+        raise SelfReviewRefused(
+            "APPROVE refused: invalid reviewer-authority-envelope ref"
+        )
+    return data
 
 
 def bounded_json_load(data: bytes, *, max_bytes: int = DEFAULT_MAX_REQUEST_BYTES) -> Mapping[str, Any]:
