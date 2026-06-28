@@ -213,11 +213,15 @@
     ],
     "subagent_model_routing": {
       "controller": "claude-code effort:high",
-      "codex_work_seat": "codex gpt-5.5 effort:high (default)",
-      "codex_hardest": "codex gpt-5.5 effort:xhigh (hardest only)",
+      "codex_work_seat": "codex effort:high (default)",
+      "codex_hardest": "codex effort:xhigh (hardest only)",
+      "claude_subagent_mechanical": "Haiku — fleet_recon / ops_triage / liveness / verification",
+      "claude_subagent_substantive": "Sonnet — architect_research / implementer / reviewer / harvest_intake",
+      "claude_subagent_controller_only": "Opus — controller/main loop ONLY; NEVER a subagent",
       "architect_research_worker": "claude-sonnet",
       "implementer_worker": "codex (preferred) or claude-code implementer role",
       "verification_worker": "codex or claude-code verification role",
+      "forks": "FORBIDDEN for execution — use restricted custom roles, never context-inheriting fork",
       "policy": "codex handles all work seats by default; effort:xhigh is reserved for hardest codex work only; Claude controllers use effort:high, not xhigh."
     },
     "preflight_discipline": [

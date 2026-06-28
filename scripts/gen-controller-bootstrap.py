@@ -33,6 +33,7 @@ REQUIRED_SECTIONS = (
     "vocabulary_mapping",
     "worker_selection_policy",
     "controller_knowledge_overlay",
+    "acceptance_safety_notes",
     "harness_outputs",
 )
 
@@ -78,7 +79,13 @@ def validate_ssot(ssot: Any) -> None:
             raise SystemExit(f"invalid SSOT: missing required section {section!r}")
 
     metadata = require_mapping(root["metadata"], "$.metadata")
-    for key in ("schema_version", "source", "status", "preview_warning"):
+    for key in (
+        "schema_version",
+        "source",
+        "status",
+        "preview_warning",
+        "ratification_status",
+    ):
         require_text(metadata.get(key), f"$.metadata.{key}")
 
     roles = require_mapping(root["canonical_roles"], "$.canonical_roles")

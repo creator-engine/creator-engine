@@ -76,6 +76,7 @@ def test_overlay_content_in_rendered_output():
 
 def test_generator_refuses_live_paths():
     for path in (
+        REPO_ROOT / "AGENTS.md",
         REPO_ROOT / "CLAUDE.md",
         REPO_ROOT / ".claude" / "agents",
         REPO_ROOT,
