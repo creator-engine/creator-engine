@@ -117,8 +117,11 @@ Options:
 | `--scope-json` | no |  | override corrected assertion scope as a JSON object |
 | `--source` | yes |  | repeatable Markdown file or directory source |
 | `--db` | no |  | recall SQLite DB path (default: <state-root>/brain/recall.sqlite) |
-| `--embedder` | no | `deterministic, embeddinggemma` | embedding adapter (default: deterministic offline fake) |
+| `--embedder` | no | `deterministic, embeddinggemma, vllm-openai` | embedding adapter (default: deterministic offline fake) |
 | `--model-path` | no |  | local model path for --embedder embeddinggemma |
+| `--endpoint` | no |  | override /v1/embeddings URL for --embedder vllm-openai (default: http://127.0.0.1:8989/v1/embeddings) |
+| `--endpoint-model-id` | no |  | override model name for --embedder vllm-openai (default: Qwen/Qwen3-Embedding-8B) |
+| `--endpoint-dim` | no |  | override expected embedding dimension for --embedder vllm-openai (default: 4096) |
 | `--allow-confidential-egress` | no |  | permit egress-requiring embedders to process confidential recall chunks |
 | `--as-of` | no |  | snapshot timestamp for produced records (YYYY-MM-DDTHH:MM:SSZ; deterministic default) |
 | `--json` | no |  | emit machine-readable JSON |
@@ -161,8 +164,11 @@ Options:
 | --- | --- | --- | --- |
 | `--state-root` | no |  | CE local state root (default: .ce/state) |
 | `--db` | no |  | recall SQLite DB path (default: <state-root>/brain/recall.sqlite) |
-| `--embedder` | no | `deterministic, embeddinggemma` | embedding adapter to query with — MUST match the embedder the store was ingested with (default: deterministic offline fake) |
+| `--embedder` | no | `deterministic, embeddinggemma, vllm-openai` | embedding adapter to query with — MUST match the embedder the store was ingested with (default: deterministic offline fake) |
 | `--model-path` | no |  | local model path for --embedder embeddinggemma (must match ingest) |
+| `--endpoint` | no |  | override /v1/embeddings URL for --embedder vllm-openai (default: http://127.0.0.1:8989/v1/embeddings) |
+| `--endpoint-model-id` | no |  | override model name for --embedder vllm-openai (default: Qwen/Qwen3-Embedding-8B) |
+| `--endpoint-dim` | no |  | override expected embedding dimension for --embedder vllm-openai (default: 4096) |
 | `--top-k` | no |  | max items per tier |
 | `--scope` | no |  | restrict recall to this scope string |
 | `--as-of` | no |  | exclude recall records stamped after this as_of (YYYY-MM-DDTHH:MM:SSZ) |
