@@ -11,3 +11,4 @@ issue: ce-ops#354
 - Scrub contributing and playbook docs for product-lens support corpus use.
 - Remove those docs from the confidentiality pending ratchet.
 - Re-add both docs to the support corpus allowlist.
+- Add support-agent coverage for pending-doc exclusion and cleaned-doc corpus eligibility.

@@ -90,11 +90,44 @@ def test_run_check_fails_closed_on_unclean_entry(tmp_path: Path):
         sc.manifest_path = orig  # type: ignore[assignment]
 
 
-def test_known_pending_doc_excluded_from_corpus():
-    """contributing-to-ce.md is on KNOWN_PENDING, so it must not be eligible."""
-    assert "docs/guide/contributing-to-ce.md" in confidentiality.KNOWN_PENDING
+def test_known_pending_doc_excluded_from_corpus(tmp_path: Path):
+    """A product-lens doc on KNOWN_PENDING must not be corpus-eligible."""
+    rel = "docs/architecture/cockpit.md"
+    assert rel in confidentiality.KNOWN_PENDING
+
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True)
+    path.write_text("Public-facing placeholder content.\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        f"version: 1\nfamilies:\n  x:\n    serve:\n      - {rel}\n",
+        encoding="utf-8",
+    )
+
+    import creator_engine_validator.support_corpus as sc
+
+    orig = sc.manifest_path
+    sc.manifest_path = lambda: manifest  # type: ignore[assignment]
+    try:
+        result = sc.evaluate(repo_root=tmp_path)
+        assert result.eligible == ()
+        assert result.rejected == ((rel, "on the confidentiality KNOWN_PENDING debt ratchet"),)
+    finally:
+        sc.manifest_path = orig  # type: ignore[assignment]
+
+
+def test_cleaned_contributing_and_playbook_docs_are_corpus_eligible():
+    """Cleaned product-lens docs that left KNOWN_PENDING are eligible."""
+    cleaned = {
+        "docs/guide/contributing-to-ce.md",
+        "docs/contracts/playbook-format.md",
+    }
+    patterns = set(support_corpus.product_lens_patterns())
+    assert cleaned <= patterns
+    assert cleaned.isdisjoint(confidentiality.KNOWN_PENDING)
+
     result = support_corpus.evaluate()
-    assert "docs/guide/contributing-to-ce.md" not in result.eligible
+    assert cleaned <= set(result.eligible)
 
 
 def test_corpus_roots_are_static_prefixes():
