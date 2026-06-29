@@ -386,6 +386,13 @@ def _write_decision(tmp_path: Path, payload) -> Path:
     return path
 
 
+def _write_live_automerge_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    path = automerge_policy_state_path(tmp_path / ".ce" / "state")
+    save_automerge_policy_state(path, state_with_flags("docs", run_mode="ceo"))
+    return path
+
+
 def test_actuate_caller_dormant_in_dev_run_mode_makes_no_gh_calls(tmp_path: Path) -> None:
     gh = FakeActuateGh()
 
@@ -395,12 +402,15 @@ def test_actuate_caller_dormant_in_dev_run_mode_makes_no_gh_calls(tmp_path: Path
     )
 
     assert result.dormant is True
-    assert result.reason == "run_mode_dev"
+    assert result.reason == "run_mode_not_armed"
     assert result.acted is False
     assert gh.calls == []
 
 
-def test_actuate_caller_mutates_only_after_actuator_predicates_pass(tmp_path: Path) -> None:
+def test_actuate_caller_mutates_only_after_actuator_predicates_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_automerge_policy(tmp_path, monkeypatch)
     red_gh = FakeActuateGh(check_conclusion="failure")
 
     refused = actuate_decision(

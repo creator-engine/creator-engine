@@ -3,13 +3,20 @@ from __future__ import annotations
 
 import json
 import re
-from importlib import import_module
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from .automerge_policy import (
+    AutoMergePolicyStateError,
+    automerge_policy_state_path,
+    load_automerge_policy_state,
+)
+
 _AUTO_DECISION = "AUTO"
+_ARMING_RUN_MODES = frozenset({"ceo"})
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _GREEN = {"success", "successful", "passed", "green", "completed"}
 
@@ -58,11 +65,8 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
         return loaded
     payload = loaded
 
-    run_mode = payload.get("run_mode")
-    if not isinstance(run_mode, str) or not run_mode:
-        return _refuse("run_mode_missing_or_invalid")
-    if run_mode == "dev":
-        return ActuationResult(status="Dormant", reason="run_mode_dev", acted=False)
+    if not _run_mode_armed(payload.get("run_mode")):
+        return _dormant("run_mode_not_armed")
 
     if payload.get("decision") != _AUTO_DECISION:
         return _refuse("decision_not_auto")
@@ -85,6 +89,14 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
 
     if gh_runner is None:
         return _refuse("gh_runner_missing")
+
+    live_policy = _live_policy_state()
+    if isinstance(live_policy, ActuationResult):
+        return live_policy
+    if not _run_mode_armed(live_policy.run_mode):
+        return _dormant("live_run_mode_not_armed")
+    if live_policy.kill_switch:
+        return _refuse("live_kill_switch_active")
 
     live = _live_required_checks_green(change, required_checks, gh_runner)
     if isinstance(live, ActuationResult):
@@ -236,6 +248,21 @@ def _status_is_green(status: Any) -> bool:
 def _enable_auto_merge(change: _ActuatorChange, gh_runner):
     auto_merge = import_module(".auto_merge", __package__)
     return auto_merge.enable_auto_merge(change, apply=True, gh_runner=gh_runner)
+
+
+def _run_mode_armed(value: Any) -> bool:
+    return isinstance(value, str) and value in _ARMING_RUN_MODES
+
+
+def _live_policy_state():
+    try:
+        return load_automerge_policy_state(automerge_policy_state_path())
+    except AutoMergePolicyStateError as exc:
+        return _dormant(f"live_policy_unreadable:{exc}")
+
+
+def _dormant(reason: str) -> ActuationResult:
+    return ActuationResult(status="Dormant", reason=reason, acted=False)
 
 
 def _refuse(reason: str) -> ActuationResult:
