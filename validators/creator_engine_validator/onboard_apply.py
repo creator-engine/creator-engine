@@ -369,7 +369,7 @@ class ApplyDriver:
             #   * ``runtime_available: False`` + ``runtime_held_reason`` — the live
             #     sandbox is NOT available; never claimed to be.
             # The held-mechanism PREREQUISITES are surfaced informationally from the
-            # backend's own primitive list (LINUX_SANDBOX_PRIMITIVES = bwrap+proxy) —
+            # backend's own ratified primitive list (bwrap+Landlock+seccomp+proxy) —
             # documented prerequisites for the held mechanism, DISTINCT from the
             # installable, no-sudo deps plan (which legitimately has neither).
             prereqs = (

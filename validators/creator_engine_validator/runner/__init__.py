@@ -64,7 +64,9 @@ from .gvisor_proxy_backend import (
 from .os_native_backend import BACKEND_KEY as OS_NATIVE_BACKEND_KEY
 from .os_native_backend import (
     LINUX_SANDBOX_PRIMITIVES,
+    OsNativeCapability,
     OsNativeBackend,
+    probe_os_native_capability,
 )
 from .openshell_backend import BACKEND_KEY as OPENSHELL_BACKEND_KEY
 from .openshell_backend import (
@@ -141,6 +143,7 @@ __all__ = [
     "LocalNoopBackend",
     "MountSpec",
     "OS_NATIVE_BACKEND_KEY",
+    "OsNativeCapability",
     "OsNativeBackend",
     "NetworkRule",
     "OPENSHELL_BACKEND_KEY",
@@ -170,6 +173,7 @@ __all__ = [
     "build_runtime",
     "get_backend",
     "guarded_env",
+    "probe_os_native_capability",
     "register_backend",
     "render_install_script",
     "render_posix_tool_shim",

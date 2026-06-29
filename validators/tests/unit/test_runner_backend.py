@@ -19,6 +19,7 @@ from creator_engine_validator.runner import (
     OPENSHELL_BACKEND_KEY,
     OS_NATIVE_BACKEND_KEY,
     OpenShellBackend,
+    OsNativeCapability,
     OsNativeBackend,
     PolicyRejected,
     ProvisionRequest,
@@ -57,6 +58,28 @@ def valid_policy() -> dict:
         "grant_extensible": False,
         "grant_authority": "controller",
     }
+
+
+def os_native_capability_available() -> OsNativeCapability:
+    return OsNativeCapability(
+        platform_name="Linux",
+        bwrap_path="/usr/bin/bwrap",
+        landlock_abi=4,
+        seccomp_available=True,
+        proxy_path="/usr/bin/proxy",
+        missing=(),
+    )
+
+
+def os_native_capability_missing(*missing: str) -> OsNativeCapability:
+    return OsNativeCapability(
+        platform_name="Linux",
+        bwrap_path=None if "bwrap" in missing else "/usr/bin/bwrap",
+        landlock_abi=None if "landlock" in missing else 4,
+        seccomp_available="seccomp" not in missing,
+        proxy_path=None if "proxy" in missing else "/usr/bin/proxy",
+        missing=tuple(missing),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -211,16 +234,54 @@ def test_os_native_registered():
     assert isinstance(backend, RunnerBackend)
 
 
-def test_os_native_is_fail_closed_on_a_clean_record():
-    # The deny surface passes (clean record), but the sandbox MECHANISM is HELD →
-    # the scaffold refuses to provision a live runtime rather than run unsandboxed.
-    backend = get_backend("os-native")
+def test_os_native_fails_closed_when_required_linux_primitives_are_missing():
+    backend = OsNativeBackend(
+        capability_probe=lambda: os_native_capability_missing("bwrap", "landlock", "proxy")
+    )
     clean = valid_policy()
     clean["isolation_backend"] = "os-native"
     with pytest.raises(BackendUnavailable) as exc:
         backend.provision(ProvisionRequest(runtime_policy=clean, run_id="run-osn"))
-    # fail-closed names the missing/required primitives (req-5 default)
-    assert "os-native" in str(exc.value)
+    message = str(exc.value)
+    assert "os-native" in message
+    assert "missing: bwrap, landlock, proxy" in message
+    assert "falling back to unsandboxed execution or gvisor-proxy" in message
+
+
+def test_os_native_fails_closed_on_non_linux_host():
+    backend = OsNativeBackend(
+        capability_probe=lambda: OsNativeCapability(
+            platform_name="Darwin",
+            bwrap_path=None,
+            landlock_abi=None,
+            seccomp_available=False,
+            proxy_path=None,
+            missing=("linux",),
+        )
+    )
+    clean = valid_policy()
+    clean["isolation_backend"] = "os-native"
+    with pytest.raises(BackendUnavailable) as exc:
+        backend.provision(ProvisionRequest(runtime_policy=clean, run_id="run-osn-darwin"))
+    assert "Linux bwrap + Landlock + seccomp" in str(exc.value)
+    assert "refusing rather than falling back to unsandboxed execution" in str(exc.value)
+
+
+def test_os_native_provisions_scaffold_when_option_a_primitives_are_available():
+    backend = OsNativeBackend(capability_probe=os_native_capability_available)
+    clean = valid_policy()
+    clean["isolation_backend"] = "os-native"
+
+    handle = backend.provision(ProvisionRequest(runtime_policy=clean, run_id="run-osn-ready"))
+
+    assert handle.backend_key == "os-native"
+    assert handle.ref == "os-native-scaffold:run-osn-ready"
+    evidence = backend.collect(handle)
+    assert evidence.records[0]["mechanism"] == "bwrap+landlock+seccomp+proxy"
+    assert evidence.records[0]["execution"] == "follow-on"
+    with pytest.raises(BackendUnavailable, match="refusing to run a command rather than launching unsandboxed"):
+        backend.run(handle, RunRequest(command=("echo", "hi")))
+    assert backend.teardown(handle).released is True
 
 
 def test_every_registered_backend_rejects_a_dirty_record():
