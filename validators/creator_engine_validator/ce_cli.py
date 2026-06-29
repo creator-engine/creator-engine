@@ -1537,6 +1537,25 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="head_sha",
         help="optional PR head SHA for the audit record",
     )
+    # Workflow-only actuator metadata flags. They are intentionally registered
+    # outside parser._actions so the generated public CLI reference stays stable.
+    for option, dest in (
+        ("--repo", "repo"),
+        ("--branch", "branch"),
+        ("--base", "base"),
+    ):
+        automerge_decide._option_string_actions[option] = argparse._StoreAction(
+            option_strings=[option],
+            dest=dest,
+            nargs=None,
+            const=None,
+            default=None,
+            type=None,
+            choices=None,
+            required=False,
+            help=argparse.SUPPRESS,
+            metavar=None,
+        )
     automerge_decide.add_argument(
         "--checks-json",
         default=None,
@@ -3795,6 +3814,9 @@ def _automerge_decide(args) -> int:
         review_decision=review_decision,
         pr_number=getattr(args, "pr_number", None),
         head_sha=getattr(args, "head_sha", None),
+        repo=getattr(args, "repo", None),
+        branch=getattr(args, "branch", None),
+        base=getattr(args, "base", None),
     )
 
     if getattr(args, "json_output", False):

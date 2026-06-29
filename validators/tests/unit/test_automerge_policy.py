@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from creator_engine_validator.checks.work_sizing_floor import ChangeStat
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
@@ -19,11 +20,13 @@ from creator_engine_validator.forge.automerge_policy import (
     decide_automerge,
     emit_automerge_dry_run_decision,
     load_automerge_policy_state,
+    materialize_automerge_policy_state_from_variables,
     save_automerge_policy_state,
 )
 from creator_engine_validator.work_sizing import size_ceremony
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
 REQUIRED_CHECK = "Validate governance artifacts"
 HEAD_SHA = "d" * 40
 POLICY_SHA = "a" * 64
@@ -90,6 +93,57 @@ def test_absent_policy_state_loads_default(tmp_path) -> None:
     assert load_automerge_policy_state(tmp_path / "missing.json").run_mode == "dev"
 
 
+def test_variable_materialization_defaults_to_dormant_dev(tmp_path: Path) -> None:
+    path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(path)
+
+    loaded = load_automerge_policy_state(path)
+    assert state == loaded
+    assert loaded.run_mode == "dev"
+    assert loaded.kill_switch is False
+    assert loaded.enabling_decision_ref is None
+    assert all(not policy.auto_merge for policy in loaded.classes.values())
+
+
+@pytest.mark.parametrize("run_mode", ["", "CEO", "ceo ", "dev", "prod", "true"])
+def test_variable_materialization_malformed_run_mode_stays_dormant(
+    tmp_path: Path,
+    run_mode: str,
+) -> None:
+    path = tmp_path / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(
+        path,
+        run_mode_variable=run_mode,
+        enabling_ref_variable="ce-ops#313-enable",
+    )
+
+    assert state.run_mode == "dev"
+    assert state.kill_switch is False
+    assert all(not policy.auto_merge for policy in state.classes.values())
+
+
+def test_variable_materialization_ceo_arms_docs_only(tmp_path: Path) -> None:
+    path = tmp_path / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(
+        path,
+        run_mode_variable="ceo",
+        enabling_ref_variable="ce-ops#313-enable",
+    )
+
+    assert state.run_mode == "ceo"
+    assert state.kill_switch is False
+    assert state.enabling_decision_ref == "ce-ops#313-enable"
+    assert state.class_flag("docs") is True
+    assert all(
+        not policy.auto_merge
+        for class_name, policy in state.classes.items()
+        if class_name != "docs"
+    )
+
+
 def test_state_rejects_invalid_payload() -> None:
     with pytest.raises(AutoMergePolicyStateError):
         AutoMergePolicyState.from_payload({"run_mode": "dev", "kill_switch": "false"})
@@ -110,11 +164,18 @@ def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce/docs",
+        base="main",
     )
     assert decision.mutation_class == "docs"
     assert decision.gates == tuple(size_ceremony("tiny", "docs")["ratification_gates"])
     assert decision.decision == AUTOMERGE_DECISION_AUTO
     assert decision.to_payload()["class"] == "tiny"
+    assert decision.to_payload()["repo"] == "creator-engine/creator-engine"
+    assert decision.to_payload()["branch"] == "ce/docs"
+    assert decision.to_payload()["base"] == "main"
+    assert decision.to_payload()["required_checks"] == [REQUIRED_CHECK]
     assert len(decision.policy_sha) == 64
 
 
@@ -290,6 +351,9 @@ def test_dry_run_writes_decision_and_merges_nothing(tmp_path, monkeypatch) -> No
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
         output_dir=tmp_path,
+        repo="creator-engine/creator-engine",
+        branch="ce/docs",
+        base="main",
     )
 
     assert decision.decision == AUTOMERGE_DECISION_AUTO
@@ -298,6 +362,9 @@ def test_dry_run_writes_decision_and_merges_nothing(tmp_path, monkeypatch) -> No
     assert payload["decision"] == "AUTO"
     assert payload["mutation_class"] == "docs"
     assert payload["checks_snapshot"][REQUIRED_CHECK] == "success"
+    assert payload["repo"] == "creator-engine/creator-engine"
+    assert payload["branch"] == "ce/docs"
+    assert payload["base"] == "main"
 
 
 class FakeActuateGh:
@@ -434,3 +501,104 @@ def test_actuate_caller_mutates_only_after_actuator_predicates_pass(
     assert actuated.reason == "all_predicates_green"
     assert actuated.acted is True
     assert len(green_gh.mutation_calls()) == 1
+
+
+def test_materialized_decision_reaches_actuator_with_change_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    policy_path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+    state = materialize_automerge_policy_state_from_variables(
+        policy_path,
+        run_mode_variable="ceo",
+        enabling_ref_variable="ce-ops#313-enable",
+    )
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="tiny",
+        policy_state=state,
+        checks=GREEN_CHECKS,
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="strange-loop/creator-engine",
+        branch="ce-arm-automerge-actuate",
+        base="main",
+    )
+    payload = decision.to_payload()
+    assert payload["decision"] == AUTOMERGE_DECISION_AUTO
+    assert payload["repo"] == "strange-loop/creator-engine"
+    assert payload["branch"] == "ce-arm-automerge-actuate"
+    assert payload["base"] == "main"
+
+    gh = FakeActuateGh(check_conclusion="success")
+    result = actuate_decision(_write_decision(tmp_path, payload), gh_runner=gh)
+
+    assert result.actuated is True
+    assert result.reason == "all_predicates_green"
+    assert len(gh.mutation_calls()) == 1
+
+
+def test_unset_variable_policy_keeps_actuator_dormant(tmp_path: Path) -> None:
+    policy_path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+    state = materialize_automerge_policy_state_from_variables(policy_path)
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="tiny",
+        policy_state=state,
+        checks=GREEN_CHECKS,
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="strange-loop/creator-engine",
+        branch="ce-arm-automerge-actuate",
+        base="main",
+    )
+
+    gh = FakeActuateGh(check_conclusion="success")
+    result = actuate_decision(_write_decision(tmp_path, decision.to_payload()), gh_runner=gh)
+
+    assert result.dormant is True
+    assert result.reason == "run_mode_not_armed"
+    assert result.acted is False
+    assert gh.calls == []
+
+
+def test_automerge_workflows_materialize_policy_before_validator_invocation() -> None:
+    decide = _workflow_steps(REPO_ROOT / ".github/workflows/automerge-decide.yml")
+    actuate = _workflow_steps(REPO_ROOT / ".github/workflows/automerge-actuate.yml")
+
+    _assert_materialize_step_before(
+        decide,
+        later_step="Run automerge decision",
+    )
+    _assert_materialize_step_before(
+        actuate,
+        later_step="Actuate if ready",
+    )
+
+
+def _workflow_steps(path: Path) -> list[dict]:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    jobs = loaded["jobs"]
+    assert isinstance(jobs, dict)
+    job = next(iter(jobs.values()))
+    assert isinstance(job, dict)
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    return steps
+
+
+def _assert_materialize_step_before(steps: list[dict], *, later_step: str) -> None:
+    step_names = [step.get("name") for step in steps]
+    materialize_index = step_names.index("Materialize automerge policy")
+    assert materialize_index < step_names.index(later_step)
+    step = steps[materialize_index]
+    assert step["env"] == {
+        "CE_AUTOMERGE_RUN_MODE": "${{ vars.CE_AUTOMERGE_RUN_MODE || '' }}",
+        "CE_AUTOMERGE_ENABLING_REF": "${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}",
+    }
+    run = step["run"]
+    assert "materialize_automerge_policy_state_from_variables" in run
+    assert 'Path(".ce/state/automerge/policy.json")' in run

@@ -29,6 +29,28 @@ jobs:
       - name: Install validator
         run: python -m pip install -e validators
 
+      - name: Materialize automerge policy
+        env:
+          CE_AUTOMERGE_RUN_MODE: ${{ vars.CE_AUTOMERGE_RUN_MODE || '' }}
+          CE_AUTOMERGE_ENABLING_REF: ${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from creator_engine_validator.forge.automerge_policy import (
+              materialize_automerge_policy_state_from_variables,
+          )
+
+          materialize_automerge_policy_state_from_variables(
+              Path(".ce/state/automerge/policy.json"),
+              run_mode_variable=os.environ.get("CE_AUTOMERGE_RUN_MODE"),
+              enabling_ref_variable=os.environ.get("CE_AUTOMERGE_ENABLING_REF"),
+          )
+          PY
+
       - name: Resolve changed paths
         id: inputs
         env:
@@ -36,7 +58,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref || '' }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref || '' }}
         run: |
           set -euo pipefail
 
@@ -45,12 +71,16 @@ jobs:
           paths_file="${work_dir}/changed-paths.txt"
           pr_number=""
           head_sha=""
+          branch=""
+          base_ref=""
           review_decision=""
 
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             pr_number="${PR_NUMBER}"
             head_sha="${PR_HEAD_SHA}"
             base_sha="${PR_BASE_SHA}"
+            branch="${PR_HEAD_REF}"
+            base_ref="${PR_BASE_REF}"
 
             if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
               git fetch --no-tags --depth=1 origin "${base_sha}" || true
@@ -63,6 +93,8 @@ jobs:
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
             head_sha="${GITHUB_SHA}"
             base_sha="${MERGE_GROUP_BASE_SHA}"
+            branch="${MERGE_GROUP_HEAD_REF}"
+            base_ref="${MERGE_GROUP_BASE_REF}"
 
             if [[ -n "${base_sha}" ]] && ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
               git fetch --no-tags --depth=1 origin "${base_sha}" || true
@@ -87,6 +119,8 @@ jobs:
             echo "paths-file=${paths_file}"
             echo "pr-number=${pr_number}"
             echo "head-sha=${head_sha}"
+            echo "branch=${branch}"
+            echo "base=${base_ref}"
             echo "review-decision=${review_decision}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -96,6 +130,8 @@ jobs:
           PATHS_FILE: ${{ steps.inputs.outputs.paths-file }}
           PR_NUMBER: ${{ steps.inputs.outputs.pr-number }}
           HEAD_SHA: ${{ steps.inputs.outputs.head-sha }}
+          BRANCH: ${{ steps.inputs.outputs.branch }}
+          BASE: ${{ steps.inputs.outputs.base }}
           REVIEW_DECISION: ${{ steps.inputs.outputs.review-decision }}
         run: |
           set -euo pipefail
@@ -113,6 +149,9 @@ jobs:
             --declared-work-class story
             --repo-root .
             --head-sha "${HEAD_SHA}"
+            --repo "${GITHUB_REPOSITORY}"
+            --branch "${BRANCH}"
+            --base "${BASE}"
             # Advisory only: do not query live checks or mutate repo/PR state; absent check evidence fails closed.
             --checks-json '{"checks":{}}'
             --review-decision "${REVIEW_DECISION}"

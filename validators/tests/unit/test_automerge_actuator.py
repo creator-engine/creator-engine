@@ -193,6 +193,25 @@ def test_actuates_only_when_all_green(tmp_path: Path, monkeypatch: pytest.Monkey
     assert result.auto_merge_result.enabled is True
 
 
+def test_actuates_with_decision_top_level_change_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch)
+    gh = FakeActuatorGh()
+    payload = _decision(
+        repo=_REPO,
+        branch="ce-automerge-actuator",
+        base="main",
+    )
+    del payload["change"]
+
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.actuated is True
+    assert result.reason == "all_predicates_green"
+    assert len(gh.mutation_calls()) == 1
+
+
 def test_refuses_empty_required_checks(tmp_path: Path) -> None:
     """required_checks present but empty must refuse fail-closed, not vacuously pass."""
     gh = FakeActuatorGh()
