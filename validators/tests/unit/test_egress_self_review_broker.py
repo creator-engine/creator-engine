@@ -87,6 +87,33 @@ def _token(value=_SECRET):
     )
 
 
+def test_import_bootstrap_prefers_configured_stable_broker_home(tmp_path, monkeypatch):
+    stable = tmp_path / "stable" / "creator-engine"
+    stable_validators = stable / "validators"
+    stable_egress = stable / "tools" / "egress-broker"
+    seat = tmp_path / "seat" / "creator-engine"
+    seat_validators = seat / "validators"
+    stable_validators.mkdir(parents=True)
+    stable_egress.mkdir(parents=True)
+    seat_validators.mkdir(parents=True)
+
+    monkeypatch.chdir(seat)
+    monkeypatch.syspath_prepend(str(seat_validators))
+
+    resolved = broker._resolve_broker_repo_root(
+        env={broker.CE_BROKER_HOME_ENV: str(stable)},
+        script_file=seat / "tools" / "egress-broker" / "ce_egress_self_review_broker.py",
+    )
+    egress_path, validators_path = broker._configure_stable_import_paths(resolved)
+
+    assert resolved == stable.resolve()
+    assert egress_path == stable_egress
+    assert validators_path == stable_validators
+    assert str(stable_validators) in os.sys.path[:2]
+    assert str(stable_egress) in os.sys.path[:2]
+    assert os.sys.path.index(str(stable_validators)) < os.sys.path.index(str(seat_validators))
+
+
 def _reviewer_authority_envelope(**overrides):
     envelope = {
         "envelope_id": "rva-test-reviewer-approve",

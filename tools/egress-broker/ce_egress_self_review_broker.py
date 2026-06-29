@@ -31,14 +31,48 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-# Match ce_egress_broker.py: make sibling package + validators importable when
-# run directly from an operator shell.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
-sys.path.insert(0, _HERE)
-_VALIDATORS = os.path.join(_REPO_ROOT, "validators")
-if os.path.isdir(_VALIDATORS):
-    sys.path.insert(0, _VALIDATORS)
+CE_BROKER_HOME_ENV = "CE_BROKER_HOME"
+DEFAULT_CE_BROKER_HOME = "/opt/ce-broker/creator-engine"
+
+
+def _resolve_broker_repo_root(
+    *,
+    env: Mapping[str, str] | None = None,
+    script_file: str | Path | None = None,
+) -> Path:
+    """Resolve the stable broker checkout used for import bootstrap."""
+    source = env if env is not None else os.environ
+    configured = str(source.get(CE_BROKER_HOME_ENV) or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve(strict=False)
+    here = Path(script_file or __file__).resolve()
+    return here.parents[2]
+
+
+def _prepend_sys_path(path: Path) -> None:
+    text = str(path)
+    try:
+        sys.path.remove(text)
+    except ValueError:
+        pass
+    sys.path.insert(0, text)
+
+
+def _configure_stable_import_paths(repo_root: Path) -> tuple[Path, Path]:
+    """Prefer the configured stable checkout over CWD or a seat checkout."""
+    egress_tools = repo_root / "tools" / "egress-broker"
+    validators = repo_root / "validators"
+    _prepend_sys_path(egress_tools)
+    if validators.is_dir():
+        _prepend_sys_path(validators)
+    return egress_tools, validators
+
+
+_REPO_ROOT_PATH = _resolve_broker_repo_root()
+_EGRESS_TOOLS, _VALIDATORS_PATH = _configure_stable_import_paths(_REPO_ROOT_PATH)
+_HERE = str(_EGRESS_TOOLS)
+_REPO_ROOT = str(_REPO_ROOT_PATH)
+_VALIDATORS = str(_VALIDATORS_PATH)
 
 from creator_engine_validator.forge.cred_injection_proxy import (  # noqa: E402
     ContainedSeatReview,
