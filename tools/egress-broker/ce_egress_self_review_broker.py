@@ -112,6 +112,12 @@ def _event_refusal_message(run_mode: str | None) -> str:
     return "review event must be COMMENT or REQUEST_CHANGES"
 
 
+def _run_mode_choices() -> tuple[str, ...]:
+    if _RunMode is not None:
+        return tuple(mode.value for mode in _RunMode)
+    return ("dev", "strangeLoop")
+
+
 def _approle_token_supplier(
     role_id: str,
     secret_id: str,
@@ -773,6 +779,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--socket", default=DEFAULT_SOCKET, help="Unix socket path")
     parser.add_argument("--config", help="broker config JSON path (required for daemon mode)")
     parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
+    parser.add_argument(
+        "--run-mode",
+        choices=_run_mode_choices(),
+        default="dev",
+        help="broker run mode; defaults to dev so APPROVE remains refused unless explicitly armed",
+    )
     parser.add_argument("--verbose", action="store_true", help="enable INFO logging")
 
     mode = parser.add_mutually_exclusive_group()
@@ -837,6 +849,7 @@ def main(argv: list[str] | None = None) -> int:
             config=config,
             max_request_bytes=args.max_request_bytes,
             activated_socket=systemd_activated_unix_socket(),
+            run_mode=args.run_mode,
         )
     except KeyboardInterrupt:
         return EXIT_OK

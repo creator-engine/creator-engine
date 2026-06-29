@@ -13,12 +13,14 @@ Type=simple
 # BROKER_APPROLE_SECRET_ID — the broker fails closed (no fallback to disk) if any
 # required vault var is missing for a secret_ref seat.
 EnvironmentFile=%h/.config/creator-engine/ce-egress-self-review.env
+Environment=CE_EGRESS_RUN_MODE=dev
 WorkingDirectory=/workspace/creator-engine
 Sockets=ce-egress-self-review.socket
 ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_review_broker.py \
   --serve \
   --socket "$CE_EGRESS_SELF_REVIEW_SOCKET" \
-  --config "$CE_EGRESS_SELF_REVIEW_CONFIG"
+  --config "$CE_EGRESS_SELF_REVIEW_CONFIG" \
+  --run-mode ${CE_EGRESS_RUN_MODE}
 Restart=on-failure
 RestartSec=30s
 
