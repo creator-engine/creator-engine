@@ -262,7 +262,7 @@ def test_os_native_selected_then_fails_closed_without_required_primitives(monkey
     assert "gvisor-proxy" in message  # only named as a forbidden silent fallback
 
 
-def test_os_native_selected_with_primitives_available_reaches_execution_gate(monkeypatch):
+def test_os_native_selected_with_primitives_available_still_fails_closed_without_contract(monkeypatch):
     from creator_engine_validator.runner import os_native_backend
 
     monkeypatch.setattr(
@@ -280,8 +280,10 @@ def test_os_native_selected_with_primitives_available_reaches_execution_gate(mon
 
     with pytest.raises(BackendUnavailable) as exc:
         run_plan(valid_policy("os-native"), "run-1", ("echo", "hi"), approved())
-    assert "capability probe passed" in str(exc.value)
-    assert "refusing to run a command rather than launching unsandboxed" in str(exc.value)
+    message = str(exc.value)
+    assert "capability probe passed" in message
+    assert "no concrete deny-by-default host-proxy enforcement contract" in message
+    assert "restrictive seccomp policy" in message
 
 
 def test_gvisor_subprocess_runner_available_when_registered_runtime_present(monkeypatch, tmp_path):

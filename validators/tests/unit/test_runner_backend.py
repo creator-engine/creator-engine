@@ -82,6 +82,20 @@ def os_native_capability_missing(*missing: str) -> OsNativeCapability:
     )
 
 
+class FakeOsNativeRunner:
+    def __init__(self, available: bool = True):
+        self._available = available
+        self.calls: list[tuple[str, object]] = []
+
+    def available(self, capability: OsNativeCapability) -> bool:
+        self.calls.append(("available", capability))
+        return self._available
+
+    def run(self, argv, *, preexec_fn, pass_fds):
+        self.calls.append(("run", list(argv)))
+        return subprocess.CompletedProcess(list(argv), 0, stdout="ok", stderr="")
+
+
 # ---------------------------------------------------------------------------
 # ABC
 # ---------------------------------------------------------------------------
@@ -267,21 +281,20 @@ def test_os_native_fails_closed_on_non_linux_host():
     assert "refusing rather than falling back to unsandboxed execution" in str(exc.value)
 
 
-def test_os_native_provisions_scaffold_when_option_a_primitives_are_available():
-    backend = OsNativeBackend(capability_probe=os_native_capability_available)
+def test_os_native_refuses_when_option_a_execution_contract_is_missing(tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    runner = FakeOsNativeRunner()
+    backend = OsNativeBackend(capability_probe=os_native_capability_available, runner=runner)
     clean = valid_policy()
     clean["isolation_backend"] = "os-native"
+    clean["mount_manifest"] = [
+        {"path": str(worktree), "mode": "rw", "write_justification": "allocated worktree"}
+    ]
 
-    handle = backend.provision(ProvisionRequest(runtime_policy=clean, run_id="run-osn-ready"))
-
-    assert handle.backend_key == "os-native"
-    assert handle.ref == "os-native-scaffold:run-osn-ready"
-    evidence = backend.collect(handle)
-    assert evidence.records[0]["mechanism"] == "bwrap+landlock+seccomp+proxy"
-    assert evidence.records[0]["execution"] == "follow-on"
-    with pytest.raises(BackendUnavailable, match="refusing to run a command rather than launching unsandboxed"):
-        backend.run(handle, RunRequest(command=("echo", "hi")))
-    assert backend.teardown(handle).released is True
+    with pytest.raises(BackendUnavailable, match="no concrete deny-by-default host-proxy"):
+        backend.provision(ProvisionRequest(runtime_policy=clean, run_id="run-osn-ready"))
+    assert runner.calls == []
 
 
 def test_every_registered_backend_rejects_a_dirty_record():
