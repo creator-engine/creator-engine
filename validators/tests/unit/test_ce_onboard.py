@@ -267,6 +267,27 @@ def test_hard_doctor_refusal_stops_immediately():
     assert result.phases[0].status == "refused"
 
 
+def test_red_g4_onboard_refusal_includes_actionable_state_path_guidance():
+    legs = _ok_legs(
+        doctor=lambda repo_root, *, require_visible_launch: ce_onboard.DoctorLegResult(
+            ok=False, refused_clauses=["RED-G-4"], detail="ungoverned state path",
+        ),
+    )
+    result = ce_onboard.run_onboard(
+        _config(install_mode="skip", repo_root="/tmp/user-repo"), legs=legs
+    )
+
+    assert not result.ok
+    doctor = result.phases[0]
+    assert doctor.status == "refused"
+    assert doctor.verify["refused_clauses"] == ["RED-G-4"]
+    assert ".hermes/" in doctor.data["guidance"]
+    assert ".gitignore" in doctor.data["guidance"]
+    assert "ce init --repo-root /tmp/user-repo" in doctor.data["guidance"]
+    assert "ce onboard --repo-root /tmp/user-repo" in doctor.data["guidance"]
+    assert "Add `.hermes/` to .gitignore" in doctor.data["next_steps"]
+
+
 def test_user_project_onboard_not_blocked_by_packaging_clause(tmp_path: Path, monkeypatch):
     def git(args):
         import subprocess

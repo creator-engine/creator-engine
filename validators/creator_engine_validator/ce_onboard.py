@@ -77,6 +77,12 @@ GITHUB_APP_OPERATOR_INPUT = {
     ),
 }
 
+STATE_PATH_GUIDANCE = (
+    ".hermes/ must be git-ignored before CE writes local governed state. "
+    "Add a .gitignore line containing `.hermes/`, run `ce init --repo-root {repo_root}`, "
+    "then re-run `ce onboard --repo-root {repo_root}`."
+)
+
 
 class OnboardError(Exception):
     """A hard, fail-closed onboard refusal (never a silent proceed)."""
@@ -499,6 +505,17 @@ def _run_install_detect(
     return _run_leg("install", func, repo_root)
 
 
+def _state_path_guidance(repo_root: str) -> dict[str, Any]:
+    return {
+        "guidance": STATE_PATH_GUIDANCE.format(repo_root=repo_root),
+        "next_steps": [
+            "Add `.hermes/` to .gitignore",
+            f"Run `ce init --repo-root {repo_root}`",
+            f"Re-run `ce onboard --repo-root {repo_root}`",
+        ],
+    }
+
+
 def _fail_result(result: OnboardResult, exc: OnboardError) -> OnboardResult:
     phase_id = exc.phase_id
     if phase_id in _PHASE_BY_ID:
@@ -540,10 +557,16 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
         # is a hard stop.
         non_tmux = [c for c in doctor.refused_clauses if c != "PCO-049"]
         if non_tmux:
+            guidance_data = (
+                _state_path_guidance(config.repo_root)
+                if "RED-G-4" in doctor.refused_clauses
+                else {}
+            )
             result.phases.append(_record(
                 "doctor", status=STATUS_REFUSED,
                 detail=f"doctor refused: {', '.join(doctor.refused_clauses)}",
                 verify={"refused_clauses": doctor.refused_clauses},
+                data=guidance_data,
             ))
             result.ok = False
             result.reason = "doctor refused (ungoverned host)"
@@ -743,6 +766,14 @@ def _render_human(result: OnboardResult) -> str:
     lines = [head]
     for phase in result.phases:
         lines.append(f"  [{phase.status}] {phase.id}: {phase.detail}")
+        guidance = phase.data.get("guidance")
+        if guidance:
+            lines.append(f"    guidance: {guidance}")
+        next_steps = phase.data.get("next_steps")
+        if next_steps:
+            lines.append("    next steps:")
+            for step in next_steps:
+                lines.append(f"      - {step}")
     if not result.ok and result.reason:
         lines.append(f"  reason: {result.reason}")
     return "\n".join(lines)

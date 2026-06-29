@@ -43,6 +43,32 @@ def test_onboard_nonzero_exit_on_incomplete(monkeypatch):
     assert ce_cli.main(["onboard", "--install-mode", "skip"]) == 1
 
 
+def test_onboard_human_surface_prints_red_g4_guidance(monkeypatch, capsys):
+    fake = ce_onboard.OnboardResult(
+        ok=False,
+        install_mode="skip",
+        reason="doctor refused (ungoverned host)",
+        phases=[
+            ce_onboard._record(
+                "doctor",
+                status="refused",
+                detail="doctor refused: RED-G-4",
+                verify={"refused_clauses": ["RED-G-4"]},
+                data=ce_onboard._state_path_guidance("."),
+            ),
+        ],
+    )
+    monkeypatch.setattr(ce_onboard, "run_onboard", lambda config, **k: fake)
+
+    assert ce_cli.main(["onboard", "--install-mode", "skip"]) == 1
+    out = capsys.readouterr().out
+    assert "guidance:" in out
+    assert ".hermes/" in out
+    assert ".gitignore" in out
+    assert "ce init --repo-root ." in out
+    assert "ce onboard --repo-root ." in out
+
+
 def test_onboard_rejects_bad_install_mode():
     # argparse choices guard rejects an unknown mode before dispatch.
     with pytest.raises(SystemExit):
