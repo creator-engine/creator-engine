@@ -18,7 +18,6 @@ CE_TRUST_ANCHOR_SOURCE="${CE_TRUST_ANCHOR_SOURCE:-dns-txt:_ce-root-v1.creator-en
 CE_JSON=0
 CE_INVENTORY_ONLY=1
 CE_FIX_PATH=1
-UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
 downloaded=0
 reused=0
@@ -29,6 +28,7 @@ failed=0
 
 TMPDIR_CE=""
 LOCK_DIR=""
+VERIFIED_INPUTS_DIR=""
 
 say() { printf '◆ CE · %s\n' "$*" >&2; }
 
@@ -296,7 +296,7 @@ Fedora/RHEL/CentOS:
 Alpine:
   sudo apk add ca-certificates curl openssh-client tar coreutils sed awk grep
 
-Python 3.14 and uv are remediated after stock ssh-keygen verifies the signed spec: CE installs uv with the official Astral installer when needed, then runs uv python install 3.14 in user space if no compatible Python is already present. If auto-provisioning is not possible, the installer prints the exact command to run and fails closed."
+Python 3.14 and uv are remediated after stock ssh-keygen verifies the signed spec: CE fetches the manifest-pinned uv artifact, verifies its SHA256 before extraction, then runs uv python install 3.14 in user space if no compatible Python is already present. If auto-provisioning is not possible, the installer prints the exact command to run and fails closed."
   fi
 }
 
@@ -599,54 +599,69 @@ prepend_path_dir() {
   esac
 }
 
-find_uv() {
-  for candidate in "${UV:-}" uv "${BOOTSTRAP_ROOT:-}/bin/uv" "${HOME:-}/.local/bin/uv" "${HOME:-}/.cargo/bin/uv"; do
-    [ -n "$candidate" ] || continue
-    if command -v "$candidate" >/dev/null 2>&1; then
-      command -v "$candidate"
-      return 0
-    fi
-    if [ -x "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  return 1
+versioned_uv_path() {
+  printf '%s/bin/uv-%s-%s\n' "$BOOTSTRAP_ROOT" "$UV_VERSION" "$PLATFORM_TAG"
 }
 
 uv_remediation() {
-  if [ -n "${HOME:-}" ]; then
-    printf "curl --proto '=https' --tlsv1.2 -LsSf %s | sh; export PATH=\"%s/.local/bin:\$PATH\"; uv --version\n" "$UV_INSTALLER_URL" "$HOME"
-  else
-    printf "curl --proto '=https' --tlsv1.2 -LsSf %s | sh; uv --version\n" "$UV_INSTALLER_URL"
-  fi
+  printf 're-run this installer after network access to the manifest-pinned uv artifact is available: %s\n' "$UV_URL"
 }
 
 ensure_uv_available() {
-  UV_BIN="$(find_uv || true)"
-  if [ -n "$UV_BIN" ]; then
-    prepend_path_dir "$(dirname "$UV_BIN")"
-    return 0
-  fi
   [ -n "${BOOTSTRAP_ROOT:-}" ] || fail uv_acquisition_failed "internal error: BOOTSTRAP_ROOT not set before uv acquisition"
+  [ -n "${ARTIFACT_CACHE:-}" ] || fail uv_acquisition_failed "internal error: ARTIFACT_CACHE not set before uv acquisition"
+  [ -n "${UV_URL:-}" ] || fail uv_acquisition_failed "signed manifest did not provide uv url"
+  [ -n "${UV_SHA:-}" ] || fail uv_acquisition_failed "signed manifest did not provide uv sha256"
+  [ -n "${UV_VERSION:-}" ] || fail uv_acquisition_failed "signed manifest did not provide uv version"
+  [ -n "${UV_BIN_REL:-}" ] || fail uv_acquisition_failed "internal error: UV_BIN_REL not set before uv acquisition"
   UV_INSTALL_DIR="${BOOTSTRAP_ROOT}/bin"
   mkdir -p "$UV_INSTALL_DIR" \
     || fail uv_acquisition_failed "failed to create uv install directory $UV_INSTALL_DIR. Remediation: $(uv_remediation)"
-  say "uv not found; installing uv with the official Astral installer"
-  err="${TMPDIR_CE}/uv-installer.err"
-  rm -f "$err"
-  set +e
-  UV_INSTALL_DIR="$UV_INSTALL_DIR" sh -c "curl --proto '=https' --tlsv1.2 -LsSf '$UV_INSTALLER_URL' | sh" 2>"$err"
-  status="$?"
-  set -e
-  if [ "$status" -ne 0 ]; then
-    detail="$(tr '\n' ' ' <"$err" | sed 's/[[:space:]]\+/ /g')"
-    fail uv_acquisition_failed "uv is missing and official installer failed. Remediation: $(uv_remediation) detail=${detail:-uv installer failed}"
+  mkdir -p "$ARTIFACT_CACHE" \
+    || fail uv_acquisition_failed "failed to create artifact cache $ARTIFACT_CACHE. Remediation: $(uv_remediation)"
+
+  uv_archive="${ARTIFACT_CACHE}/uv-${UV_VERSION}-${PLATFORM_TAG}.tar.gz"
+  if [ -f "$uv_archive" ]; then
+    verify_hash "$UV_SHA" "$uv_archive" "uv ${UV_VERSION} archive"
+    say "reusing verified uv archive: ${uv_archive}"
+  else
+    tmp_archive="${TMPDIR_CE}/uv-${UV_VERSION}-${PLATFORM_TAG}.tar.gz"
+    say "fetching manifest-pinned uv ${UV_VERSION}: ${UV_URL}"
+    fetch_url "$UV_URL" "$tmp_archive" network_fetch_failed
+    verify_hash "$UV_SHA" "$tmp_archive" "uv ${UV_VERSION} archive"
+    cp "$tmp_archive" "$uv_archive" \
+      || fail uv_acquisition_failed "failed to cache verified uv archive at $uv_archive"
   fi
-  UV_BIN="$(find_uv || true)"
-  [ -n "$UV_BIN" ] \
-    || fail uv_acquisition_failed "official uv installer completed but uv is not discoverable. Remediation: export PATH=\"${UV_INSTALL_DIR}:\$PATH\"; uv --version"
-  prepend_path_dir "$(dirname "$UV_BIN")"
+
+  uv_extract_dir="${TMPDIR_CE}/uv-extract"
+  rm -rf "$uv_extract_dir"
+  mkdir -p "$uv_extract_dir" \
+    || fail uv_acquisition_failed "failed to create uv extraction directory"
+  tar -xzf "$uv_archive" -C "$uv_extract_dir" "$UV_BIN_REL" \
+    || fail uv_acquisition_failed "verified uv archive did not contain $UV_BIN_REL"
+  extracted_uv="${uv_extract_dir}/${UV_BIN_REL}"
+  [ -f "$extracted_uv" ] \
+    || fail uv_acquisition_failed "verified uv archive extraction did not produce $UV_BIN_REL"
+
+  versioned_uv="$(versioned_uv_path)"
+  tmp_uv="${versioned_uv}.tmp.$$"
+  cp "$extracted_uv" "$tmp_uv" \
+    || fail uv_acquisition_failed "failed to stage verified uv binary at $tmp_uv"
+  chmod 755 "$tmp_uv" \
+    || fail uv_acquisition_failed "failed to make verified uv binary executable"
+  mv -f "$tmp_uv" "$versioned_uv" \
+    || fail uv_acquisition_failed "failed to install verified uv binary at $versioned_uv"
+
+  tmp_link="${UV_INSTALL_DIR}/uv.tmp.$$"
+  rm -f "$tmp_link"
+  ln -s "$(basename "$versioned_uv")" "$tmp_link" \
+    || fail uv_acquisition_failed "failed to prepare uv convenience symlink"
+  mv -Tf "$tmp_link" "${UV_INSTALL_DIR}/uv" \
+    || fail uv_acquisition_failed "failed to promote uv convenience symlink"
+
+  UV_BIN="$versioned_uv"
+  prepend_path_dir "$UV_INSTALL_DIR"
+  say "installed verified uv: ${UV_BIN}"
 }
 
 state_value() {
@@ -750,6 +765,41 @@ write_state() {
     printf 'timestamp=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } >"$tmp_state"
   mv "$tmp_state" "$STATE_FILE"
+}
+
+persist_verified_inputs() {
+  VERIFIED_INPUTS_DIR="${BOOTSTRAP_ROOT}/verified-inputs/${SPEC_CANONICAL_SHA}"
+  mkdir -p "$VERIFIED_INPUTS_DIR" \
+    || fail verified_inputs_persist_failed "failed to create durable verified-inputs directory $VERIFIED_INPUTS_DIR"
+  cp "$SPEC_FILE" "$VERIFIED_INPUTS_DIR/llms-install.md.tmp.$$" \
+    || fail verified_inputs_persist_failed "failed to persist verified install spec"
+  mv -f "$VERIFIED_INPUTS_DIR/llms-install.md.tmp.$$" "$VERIFIED_INPUTS_DIR/llms-install.md" \
+    || fail verified_inputs_persist_failed "failed to promote verified install spec"
+  cp "$TRUST_ROOT_FILE" "$VERIFIED_INPUTS_DIR/ce-root-v1.tmp.$$" \
+    || fail verified_inputs_persist_failed "failed to persist verified trust root"
+  mv -f "$VERIFIED_INPUTS_DIR/ce-root-v1.tmp.$$" "$VERIFIED_INPUTS_DIR/ce-root-v1" \
+    || fail verified_inputs_persist_failed "failed to promote verified trust root"
+  cp "$TRUST_ANCHOR_FILE" "$VERIFIED_INPUTS_DIR/trust-anchor.txt.tmp.$$" \
+    || fail verified_inputs_persist_failed "failed to persist verified trust anchor"
+  mv -f "$VERIFIED_INPUTS_DIR/trust-anchor.txt.tmp.$$" "$VERIFIED_INPUTS_DIR/trust-anchor.txt" \
+    || fail verified_inputs_persist_failed "failed to promote verified trust anchor"
+  cp "$SCHEMA_FILE" "$VERIFIED_INPUTS_DIR/install-answers.schema.yaml.tmp.$$" \
+    || fail verified_inputs_persist_failed "failed to persist verified answers schema"
+  mv -f "$VERIFIED_INPUTS_DIR/install-answers.schema.yaml.tmp.$$" "$VERIFIED_INPUTS_DIR/install-answers.schema.yaml" \
+    || fail verified_inputs_persist_failed "failed to promote verified answers schema"
+}
+
+onboard_plan_command() {
+  spec_path="${VERIFIED_INPUTS_DIR}/llms-install.md"
+  trust_root_path="${VERIFIED_INPUTS_DIR}/ce-root-v1"
+  trust_anchor_arg="${CE_TRUST_ANCHOR_SOURCE}=${VERIFIED_INPUTS_DIR}/trust-anchor.txt"
+  schema_path="${VERIFIED_INPUTS_DIR}/install-answers.schema.yaml"
+  printf '%s onboard --spec %s --trust-root %s --trust-anchor %s --answers-schema %s --answers <file> --plan' \
+    "$(shell_quote "${VENV_DIR}/bin/cev3")" \
+    "$(shell_quote "$spec_path")" \
+    "$(shell_quote "$trust_root_path")" \
+    "$(shell_quote "$trust_anchor_arg")" \
+    "$(shell_quote "$schema_path")"
 }
 
 install_cli_shim() {
@@ -1011,6 +1061,7 @@ fi
 
 fetch_url "$ANSWERS_SCHEMA_URL" "$SCHEMA_FILE" network_fetch_failed
 verify_hash "$ANSWERS_SCHEMA_SHA" "$SCHEMA_FILE" "install-answers.schema.yaml"
+persist_verified_inputs
 
 mkdir -p "$ARTIFACT_CACHE"
 WHEELS_TSV="$TMPDIR_CE/wheels.tsv"
@@ -1147,4 +1198,4 @@ say "state file: ${STATE_FILE}"
 say "summary: downloaded=${downloaded} reused=${reused} verified=${verified} installed=${installed} skipped_already_current=${skipped_already_current} failed=${failed}"
 say "next: reload PATH in this shell with '. ~/.profile && hash -r', or open a new shell, so ce/cev3 are available"
 say "note: git is required for first-value and is checked in inventory"
-say "next: prepare ce-install.answers.yaml, then run ${VENV_DIR}/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --answers <file> --plan"
+say "next: prepare ce-install.answers.yaml, then run $(onboard_plan_command)"

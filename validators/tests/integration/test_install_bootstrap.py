@@ -5,11 +5,14 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -58,6 +61,17 @@ def _sign_with_test_key(spec_text: str, tmp_path: Path) -> tuple[str, str]:
     return signed, trust_root
 
 
+def _resign_site_spec(tmp_path: Path, site: Path, spec: str, name: str) -> None:
+    signing_root = tmp_path / name
+    signing_root.mkdir()
+    signed, trust_root = _sign_with_test_key(spec, signing_root)
+    (site / "llms-install.md").write_text(signed, encoding="utf-8")
+    (site / "keys" / "ce-root-v1").write_text(trust_root, encoding="utf-8")
+    key_id = _signature_key_id(signed)
+    fingerprint = v3_installer.public_key_fingerprint(trust_root)
+    (site / "trust" / "ce-root-v1.txt").write_text(f"{key_id}={fingerprint}\n", encoding="utf-8")
+
+
 def _make_site(tmp_path: Path, repo_root: Path, *, tamper: bool = False) -> Path:
     site = tmp_path / "site"
     (site / "keys").mkdir(parents=True)
@@ -75,6 +89,44 @@ def _make_site(tmp_path: Path, repo_root: Path, *, tamper: bool = False) -> Path
     fingerprint = v3_installer.public_key_fingerprint(trust_root)
     (site / "trust" / "ce-root-v1.txt").write_text(f"{key_id}={fingerprint}\n", encoding="utf-8")
     return site
+
+
+def _make_uv_archive(tmp_path: Path, *, relpath: str = "uv-x86_64-unknown-linux-gnu/uv") -> Path:
+    archive = tmp_path / "uv-test.tar.gz"
+    payload = b"#!/usr/bin/env sh\nprintf 'fake uv must not execute in this test\\n' >&2\nexit 99\n"
+    info = tarfile.TarInfo(relpath)
+    info.mode = 0o755
+    info.size = len(payload)
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.addfile(info, io.BytesIO(payload))
+    return archive
+
+
+def _patch_site_uv_acquisition(
+    tmp_path: Path,
+    site: Path,
+    *,
+    url: str,
+    sha256: str,
+    platform: str = "linux-x86_64-cp314",
+) -> None:
+    spec_path = site / "llms-install.md"
+    spec = spec_path.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"(?m)(    - platform: {re.escape(platform)}\n"
+        r"      tool: uv\n"
+        r"      version: .+\n"
+        r"      url: ).*(\n"
+        r"      sha256: ).*(\n"
+        r"      command: uv python install 3\.14)"
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{url}{match.group(2)}{sha256}{match.group(3)}"
+
+    spec, count = pattern.subn(replace, spec, count=1)
+    assert count == 1
+    _resign_site_spec(tmp_path, site, spec, "resigned-uv-site")
 
 
 def _wheel_digest(data: bytes) -> str:
@@ -174,6 +226,14 @@ fi
 case "$url" in
   https://creator-engine.dev/*) rel="${url#https://creator-engine.dev/}" ;;
   "https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT") rel="trust/ce-root-v1.txt" ;;
+  https://github.com/astral-sh/uv/releases/download/*)
+    if [ -z "${FAKE_UV_ARCHIVE:-}" ]; then
+      echo "fake curl: missing FAKE_UV_ARCHIVE for $url" >&2
+      exit 2
+    fi
+    cp "$FAKE_UV_ARCHIVE" "$out"
+    exit 0
+    ;;
   *) echo "fake curl: unsupported URL $url" >&2; exit 2 ;;
 esac
 if [ "${FAKE_404_DOWNLOAD:-}" = "1" ] && [[ "$rel" == downloads/* ]]; then
@@ -292,6 +352,14 @@ def _assert_clean_install_refusal(proc: subprocess.CompletedProcess[str], failur
     return combined
 
 
+def _next_onboard_plan_command(stderr: str) -> list[str]:
+    for line in stderr.splitlines():
+        marker = "next: prepare ce-install.answers.yaml, then run "
+        if marker in line:
+            return shlex.split(line.split(marker, 1)[1])
+    raise AssertionError("printed onboard --plan next-step command not found")
+
+
 @requires_ssh_keygen
 def test_install_sh_ordering_refuses_before_artifacts_on_signature_failure(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root, tamper=True)
@@ -345,6 +413,32 @@ def test_install_sh_wheelhouse_hash_gate_leaves_venv_untouched(tmp_path: Path, r
 
 
 @requires_ssh_keygen
+def test_install_sh_uv_hash_mismatch_fails_closed_before_execution(tmp_path: Path, repo_root: Path):
+    site = _make_site(tmp_path, repo_root)
+    uv_archive = _make_uv_archive(tmp_path)
+    uv_url = "https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz"
+    _patch_site_uv_acquisition(tmp_path, site, url=uv_url, sha256="0" * 64)
+    install_root = tmp_path / "install-root"
+
+    proc = _run_install(
+        tmp_path,
+        repo_root,
+        site=site,
+        install_root=install_root,
+        missing_commands={"python3.14", "python3", "python", "uv"},
+        extra_env={"FAKE_UV_ARCHIVE": str(uv_archive)},
+    )
+
+    combined = _assert_clean_install_refusal(proc, "artifact_hash_mismatch")
+    assert "uv 0.11.21 archive expected=" in combined
+    assert "fake uv must not execute" not in combined
+    assert not (install_root / "bin" / "uv").exists()
+    if (install_root / "bin").exists():
+        assert not list((install_root / "bin").glob("uv-0.11.21-*"))
+    assert uv_url in _curl_urls(tmp_path / "curl.log")
+
+
+@requires_ssh_keygen
 def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: Path, repo_root: Path):
     site = _make_site(tmp_path, repo_root)
     install_root = tmp_path / "install-root"
@@ -376,6 +470,40 @@ def test_install_sh_creates_venv_runs_inventory_and_idempotent_rerun(tmp_path: P
     assert f"updated shell profile PATH block: {profile}" in first.stderr
     assert "reload PATH in this shell with '. ~/.profile && hash -r', or open a new shell" in first.stderr
     assert "git is required for first-value and is checked in inventory" in first.stderr
+    next_cmd = _next_onboard_plan_command(first.stderr)
+    assert next_cmd[1:3] == ["onboard", "--spec"]
+    assert "--plan" in next_cmd
+    path_flags = {"--spec", "--trust-root", "--answers-schema"}
+    for index, value in enumerate(next_cmd):
+        if value in path_flags:
+            path = Path(next_cmd[index + 1])
+            assert path.is_file()
+            assert install_root in path.parents
+            assert "verified-inputs" in path.parts
+    trust_anchor = next_cmd[next_cmd.index("--trust-anchor") + 1]
+    trust_anchor_path = Path(trust_anchor.split("=", 1)[1])
+    assert trust_anchor_path.is_file()
+    assert install_root in trust_anchor_path.parents
+    assert "verified-inputs" in trust_anchor_path.parts
+
+    plan_answers = tmp_path / "plan-answers.yaml"
+    plan_answers.write_text(answers.read_text(encoding="utf-8"), encoding="utf-8")
+    executable_cmd = [
+        str(plan_answers) if token == "<file>" else token
+        for token in next_cmd
+    ]
+    plan_env = {**os.environ, "HOME": str(tmp_path / "home")}
+    plan_env.pop("PYTHONPATH", None)
+    plan_proc = subprocess.run(
+        [*executable_cmd, "--json"],
+        cwd=repo_root,
+        env=plan_env,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    assert plan_proc.returncode == 0, plan_proc.stderr
+    assert json.loads(plan_proc.stdout)["action"] == "onboard"
 
     second = _run_install(tmp_path, repo_root, site=site, install_root=install_root, answers=answers)
     assert second.returncode == 0, second.stderr
@@ -609,8 +737,12 @@ def test_install_sh_fetch_hardening_and_uv_path_are_declared(repo_root: Path):
     script = (repo_root / "docs" / "install.sh").read_text(encoding="utf-8")
     assert "CURL_FLAGS=(--proto '=https' --tlsv1.2 -fsSL)" in script
     assert "mktemp -d" in script and "chmod 700" in script
-    assert "UV_INSTALLER_URL=\"https://astral.sh/uv/install.sh\"" in script
-    assert "curl --proto '=https' --tlsv1.2 -LsSf '$UV_INSTALLER_URL' | sh" in script
-    assert "official uv installer completed but uv is not discoverable" in script
+    assert "https://astral.sh/uv/install.sh" not in script
+    assert "curl --proto '=https' --tlsv1.2 -LsSf '$UV_INSTALLER_URL' | sh" not in script
+    assert "uv-${UV_VERSION}-${PLATFORM_TAG}.tar.gz" in script
+    assert 'fetch_url "$UV_URL" "$tmp_archive" network_fetch_failed' in script
+    assert 'verify_hash "$UV_SHA" "$tmp_archive" "uv ${UV_VERSION} archive"' in script
+    assert 'tar -xzf "$uv_archive" -C "$uv_extract_dir" "$UV_BIN_REL"' in script
+    assert "installed verified uv" in script
     assert "uv python install 3.14" in script
     assert "Remediation: uv python find 3.14" in script
