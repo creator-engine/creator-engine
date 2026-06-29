@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
 
 _REPO = "creator-engine/creator-engine"
@@ -97,12 +99,36 @@ def _write(tmp_path: Path, payload) -> Path:
     return path
 
 
-def test_dormant_in_dev_makes_no_mutating_gh_calls(tmp_path: Path) -> None:
+def _write_live_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    run_mode: str = "ceo",
+    kill_switch: bool = False,
+) -> Path:
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "run_mode": run_mode,
+        "kill_switch": kill_switch,
+        "classes": {},
+        "enabling_decision_ref": "ce-ops#313-enable",
+    }
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "run_mode",
+    ["dev", "unknown", "Dev", "CEO", "", None, " ", "\t", 42, [], {}],
+)
+def test_unarmed_decision_run_modes_go_dormant_without_gh_calls(tmp_path: Path, run_mode) -> None:
     gh = FakeActuatorGh()
-    result = actuate_if_ready(_write(tmp_path, _decision(run_mode="dev")), gh_runner=gh)
+    result = actuate_if_ready(_write(tmp_path, _decision(run_mode=run_mode)), gh_runner=gh)
 
     assert result.dormant is True
-    assert result.reason == "run_mode_dev"
+    assert result.reason == "run_mode_not_armed"
     assert result.acted is False
     assert gh.calls == []
 
@@ -145,7 +171,8 @@ def test_refuses_missing_enabling_ref(tmp_path: Path) -> None:
     assert gh.mutation_calls() == []
 
 
-def test_refuses_red_required_check(tmp_path: Path) -> None:
+def test_refuses_red_required_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_live_policy(tmp_path, monkeypatch)
     gh = FakeActuatorGh(check_conclusion="failure")
     result = actuate_if_ready(_write(tmp_path, _decision()), gh_runner=gh)
 
@@ -154,7 +181,8 @@ def test_refuses_red_required_check(tmp_path: Path) -> None:
     assert gh.mutation_calls() == []
 
 
-def test_actuates_only_when_all_green(tmp_path: Path) -> None:
+def test_actuates_only_when_all_green(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_live_policy(tmp_path, monkeypatch)
     gh = FakeActuatorGh()
     result = actuate_if_ready(_write(tmp_path, _decision()), gh_runner=gh)
 
@@ -178,30 +206,71 @@ def test_refuses_empty_required_checks(tmp_path: Path) -> None:
     assert gh.mutation_calls() == []
 
 
-def test_refuses_run_mode_absent(tmp_path: Path) -> None:
-    """Absent run_mode must refuse with run_mode_missing_or_invalid, not go Dormant."""
+def test_dormant_run_mode_absent(tmp_path: Path) -> None:
+    """Absent run_mode must go dormant fail-closed before any gh call."""
     gh = FakeActuatorGh()
     payload = _decision()
     del payload["run_mode"]
     result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
 
-    assert result.refused is True
-    assert result.reason == "run_mode_missing_or_invalid"
+    assert result.dormant is True
+    assert result.reason == "run_mode_not_armed"
     assert result.acted is False
-    assert gh.mutation_calls() == []
+    assert gh.calls == []
 
 
-def test_refuses_run_mode_non_string(tmp_path: Path) -> None:
-    """Non-string run_mode must refuse, not go Dormant."""
+def test_dormant_run_mode_non_string(tmp_path: Path) -> None:
+    """Non-string run_mode must go dormant fail-closed before any gh call."""
     gh = FakeActuatorGh()
     result = actuate_if_ready(
         _write(tmp_path, _decision(run_mode=42)), gh_runner=gh
     )
 
-    assert result.refused is True
-    assert result.reason == "run_mode_missing_or_invalid"
+    assert result.dormant is True
+    assert result.reason == "run_mode_not_armed"
     assert result.acted is False
-    assert gh.mutation_calls() == []
+    assert gh.calls == []
+
+
+def test_stale_decision_armed_but_live_policy_dev_goes_dormant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, run_mode="dev")
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(_write(tmp_path, _decision(run_mode="ceo")), gh_runner=gh)
+
+    assert result.dormant is True
+    assert result.reason == "live_run_mode_not_armed"
+    assert result.acted is False
+    assert gh.calls == []
+
+
+def test_stale_decision_armed_but_live_policy_kill_switch_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, run_mode="ceo", kill_switch=True)
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(
+        _write(tmp_path, _decision(run_mode="ceo", kill_switch=False)), gh_runner=gh
+    )
+
+    assert result.refused is True
+    assert result.reason == "live_kill_switch_active"
+    assert result.acted is False
+    assert gh.calls == []
+
+
+def test_missing_live_policy_goes_dormant_without_gh_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(_write(tmp_path, _decision(run_mode="ceo")), gh_runner=gh)
+
+    assert result.dormant is True
+    assert result.reason == "live_run_mode_not_armed"
+    assert result.acted is False
+    assert gh.calls == []
 
 
 def test_refuses_policy_sha_absent(tmp_path: Path) -> None:
