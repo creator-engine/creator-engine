@@ -196,6 +196,27 @@ def detect_ce_dogfood_posture(
     }
 
 
+_CE_SOURCE_TREE_MARKERS = (
+    Path("validators") / "creator_engine_validator" / "__init__.py",
+    Path("validators") / "creator_engine_validator" / "doctor_runtime.py",
+    Path("validators") / "creator_engine_validator" / "packaging_runtime.py",
+    Path("validators") / "tests" / "conftest.py",
+    Path("docs") / "governance" / "V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md",
+)
+
+
+def is_ce_source_tree_context(repo_root: Path | str) -> bool:
+    """True when ``repo_root`` is the Creator Engine source checkout.
+
+    RED-G-6 is a CE developer/source-tree packaging contract. The signal avoids
+    the packaging files under test (``validators/pyproject.toml``,
+    ``validators/wheelhouse``, ``validators/uv.lock``) so real packaging drift
+    still refuses inside the CE checkout.
+    """
+    root = Path(repo_root)
+    return all((root / marker).is_file() for marker in _CE_SOURCE_TREE_MARKERS)
+
+
 def detect_environment(
     repo_root: Path | str,
     *,
@@ -212,7 +233,8 @@ def detect_environment(
     tmux_available = adapter.is_available()
     podman_available, podman_rootless = _podman_status(podman_runner)
     is_git = _git_tracks_repo(root)
-    packaging = verify_packaging_contract(root)
+    ce_source_tree = is_ce_source_tree_context(root)
+    packaging = verify_packaging_contract(root) if ce_source_tree else None
     awl_root = root / ".hermes" / "active-work-ledger"
     dogfood = detect_ce_dogfood_posture(root, argv0=argv0)
     return guard.EnvironmentFacts(
@@ -229,6 +251,7 @@ def detect_environment(
         ce_invocation=str(dogfood["invocation"]),
         ce_package_origin=str(dogfood["package_origin"]),
         ce_dogfood_installed=bool(dogfood["installed_ce"]),
+        ce_source_tree_context=ce_source_tree,
     )
 
 
@@ -333,6 +356,7 @@ def run_doctor(
         "ce_dogfood_invocation": facts.ce_invocation,
         "ce_package_origin": facts.ce_package_origin,
         "ce_dogfood_installed": facts.ce_dogfood_installed,
+        "ce_source_tree_context": facts.ce_source_tree_context,
         "target_python": str(resolved_target_python),
         "target_python_exists": resolved_target_python.is_file(),
         "controller_seat_app_installed": (
