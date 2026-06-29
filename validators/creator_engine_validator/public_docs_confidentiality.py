@@ -91,7 +91,6 @@ KNOWN_PENDING: frozenset[str] = frozenset(
         "docs/contracts/devops-privileged-action-broker.md",
         "docs/contracts/installer.md",
         "docs/contracts/plain-join.md",
-        "docs/contracts/playbook-format.md",
         "docs/contracts/README.md",
         "docs/contracts/runtime-policy.md",
         "docs/decisions/0005-openbao-secret-identity-backend.md",
@@ -105,7 +104,6 @@ KNOWN_PENDING: frozenset[str] = frozenset(
         "docs/devops/openbao-operator-bringup.md",
         "docs/devops/openbao-production-golive.md",
         "docs/downloads/0.2.0/scanners/scanner-mirror.fragment.yaml",
-        "docs/guide/contributing-to-ce.md",
         "docs/security/ce234-approval-capability-wall.md",
     }
 )
