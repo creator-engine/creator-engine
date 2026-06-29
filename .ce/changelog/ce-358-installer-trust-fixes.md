@@ -10,4 +10,5 @@ issue: ce-ops#358
 
 - Fetch uv from the signed manifest URL, verify the archive SHA256 before extraction, and install a versioned bootstrap uv binary.
 - Persist verified installer inputs under the bootstrap root so the printed onboard plan command remains executable after temp cleanup.
+- Sync the served installer, versioned release mirrors, and staged install manifest hashes for the updated bootstrap script.
 - Cover uv hash mismatch fail-closed behavior and the durable next-step command in installer integration tests.
