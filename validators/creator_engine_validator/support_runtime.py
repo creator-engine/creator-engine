@@ -22,9 +22,9 @@ import subprocess
 import sys
 from typing import Protocol
 
-from . import public_docs_confidentiality as confidentiality
 from . import support_bundle
 from . import support_corpus
+from . import support_leak_rules
 from . import support_profile
 
 MODEL_ID = "configured-command"
@@ -35,14 +35,6 @@ DEFAULT_USAGE_LOG_REL = Path("support-agent/usage.ndjson")
 
 # Retained for callers/tests that still assert the P0 scaffold message exists.
 SCAFFOLD_NOTICE = "support agent answering path available"
-
-_INTERNAL_OUTPUT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("internal merge queue", re.compile(r"\bmerge[- ]queue\b", re.IGNORECASE)),
-    ("internal integrator", re.compile(r"\bintegrator\b", re.IGNORECASE)),
-    ("internal approval wall", re.compile(r"\bapproval[- ]wall\b", re.IGNORECASE)),
-    ("internal fleet topology", re.compile(r"\bdev[- ]fleet\b", re.IGNORECASE)),
-)
-
 
 @dataclass(frozen=True)
 class SupportRequest:
@@ -191,10 +183,7 @@ def _extract_runner_answer(raw: str | dict) -> str:
 
 
 def _leak_reason(answer: str) -> str | None:
-    for label, pattern in confidentiality.FORBIDDEN_PATTERNS:
-        if pattern.search(answer):
-            return label
-    for label, pattern in _INTERNAL_OUTPUT_PATTERNS:
+    for label, pattern in support_leak_rules.DEFAULT_LEAK_RULES:
         if pattern.search(answer):
             return label
     return None
