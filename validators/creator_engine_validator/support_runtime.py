@@ -27,9 +27,11 @@ from . import support_bundle
 from . import support_corpus
 from . import support_profile
 
-MODEL_ID = "claude-sonnet-4-6"
+MODEL_ID = "configured-command"
 REFUSAL_ANSWER = "I don't know"
 SYSTEM_PROMPT = Path(__file__).resolve().parent / "support_system_prompt.md"
+DEFAULT_STATE_DIR = Path(".ce/state")
+DEFAULT_USAGE_LOG_REL = Path("support-agent/usage.ndjson")
 
 # Retained for callers/tests that still assert the P0 scaffold message exists.
 SCAFFOLD_NOTICE = "support agent answering path available"
@@ -72,9 +74,10 @@ class SupportAnswer:
     reason: str
     model: str
     corpus_sha256: str
+    token_spend: int | float | None = None
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "answer": self.answer,
             "citations": list(self.citations),
             "accepted": self.accepted,
@@ -82,6 +85,9 @@ class SupportAnswer:
             "model": self.model,
             "corpus_sha256": self.corpus_sha256,
         }
+        if self.token_spend is not None:
+            payload["token_spend"] = self.token_spend
+        return payload
 
 
 class ModelRunner(Protocol):
@@ -89,8 +95,18 @@ class ModelRunner(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class _ModelOutput:
+    answer: str
+    token_spend: int | float | None = None
+
+
 def _load_system_prompt() -> str:
     return SYSTEM_PROMPT.read_text(encoding="utf-8")
+
+
+def configured_model_id() -> str:
+    return os.environ.get(ConfiguredCommandModelRunner.ENV_MODEL_ID, "").strip() or MODEL_ID
 
 
 def _profile_contract(*, repo_root: Path) -> dict:
@@ -128,19 +144,50 @@ def _profile_contract(*, repo_root: Path) -> dict:
     }
 
 
-def _extract_runner_answer(raw: str | dict) -> str:
+def _extract_token_spend(raw: object) -> int | float | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int | float):
+        return raw
+    if not isinstance(raw, dict):
+        return None
+    total = raw.get("total_tokens")
+    if isinstance(total, bool):
+        return None
+    if isinstance(total, int | float):
+        return total
+    input_tokens = raw.get("input_tokens")
+    output_tokens = raw.get("output_tokens")
+    if (
+        isinstance(input_tokens, int | float)
+        and not isinstance(input_tokens, bool)
+        and isinstance(output_tokens, int | float)
+        and not isinstance(output_tokens, bool)
+    ):
+        return input_tokens + output_tokens
+    return None
+
+
+def _extract_runner_output(raw: str | dict) -> _ModelOutput:
     if isinstance(raw, dict):
         value = raw.get("answer") or raw.get("text") or raw.get("content") or ""
-        return str(value).strip()
+        token_spend = _extract_token_spend(raw.get("token_spend"))
+        if token_spend is None:
+            token_spend = _extract_token_spend(raw.get("usage"))
+        return _ModelOutput(str(value).strip(), token_spend)
     text = str(raw).strip()
     if text.startswith("{"):
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            return text
+            return _ModelOutput(text)
         if isinstance(parsed, dict):
-            return _extract_runner_answer(parsed)
-    return text
+            return _extract_runner_output(parsed)
+    return _ModelOutput(text)
+
+
+def _extract_runner_answer(raw: str | dict) -> str:
+    return _extract_runner_output(raw).answer
 
 
 def _leak_reason(answer: str) -> str | None:
@@ -184,7 +231,10 @@ class ConfiguredCommandModelRunner:
     """Model boundary backed by an explicit JSON-over-stdin command."""
 
     ENV_CMD = "CE_SUPPORT_AGENT_MODEL_CMD"
+    ENV_MODEL_ID = "CE_SUPPORT_AGENT_MODEL_ID"
     ENV_TIMEOUT = "CE_SUPPORT_AGENT_MODEL_TIMEOUT"
+    ENV_STATE_DIR = "CE_SUPPORT_AGENT_STATE_DIR"
+    ENV_USAGE_LOG = "CE_SUPPORT_AGENT_USAGE_LOG"
 
     def __call__(self, request: SupportRequest) -> str | dict:
         command = os.environ.get(self.ENV_CMD, "").strip()
@@ -211,6 +261,63 @@ class ConfiguredCommandModelRunner:
         return result.stdout.strip()
 
 
+def _usage_log_path(*, repo_root: Path) -> Path:
+    configured = os.environ.get(ConfiguredCommandModelRunner.ENV_USAGE_LOG, "").strip()
+    if configured:
+        path = Path(configured)
+        return path if path.is_absolute() else repo_root / path
+
+    state_dir_value = os.environ.get(ConfiguredCommandModelRunner.ENV_STATE_DIR, "").strip()
+    state_dir = Path(state_dir_value) if state_dir_value else DEFAULT_STATE_DIR
+    if not state_dir.is_absolute():
+        state_dir = repo_root / state_dir
+    return state_dir / DEFAULT_USAGE_LOG_REL
+
+
+def _question_category(question: str) -> str:
+    text = question.lower()
+    if not text:
+        return "empty"
+    tokens = set(re.findall(r"[a-z0-9]+", text))
+    if tokens & {"install", "setup", "bootstrap", "onboard"}:
+        return "install"
+    if tokens & {"error", "fail", "failed", "broken", "debug", "troubleshoot"}:
+        return "troubleshooting"
+    if tokens & {"contribute", "contributing", "review", "change", "changes"} or "pull request" in text:
+        return "contribution"
+    if tokens & {"govern", "governance", "policy", "profile", "refuse", "refusal"} or "read-only" in text:
+        return "governance"
+    if tokens & {"architecture", "design", "concept"} or "what is" in text:
+        return "concept"
+    return "usage"
+
+
+def _append_usage_log(
+    *,
+    repo_root: Path,
+    question_category: str,
+    corpus_sha256: str,
+    model_id: str,
+    accepted: bool,
+    reason: str,
+    token_spend: int | float | None,
+) -> None:
+    record = {
+        "question_category": question_category,
+        "corpus_sha256": corpus_sha256,
+        "model_id": model_id,
+        "accepted": accepted,
+        "reason": reason,
+    }
+    if token_spend is not None:
+        record["token_spend"] = token_spend
+    path = _usage_log_path(repo_root=repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, sort_keys=True, separators=(",", ":")))
+        f.write("\n")
+
+
 def answer_question(
     question: str,
     *,
@@ -221,44 +328,68 @@ def answer_question(
     clean_question = question.strip()
     root = (repo_root or support_corpus.repo_root()).resolve()
     bundle = support_bundle.build_support_bundle(repo_root=root)
+    model_id = configured_model_id()
+    question_category = _question_category(clean_question)
     if not clean_question:
-        return SupportAnswer(
+        answer = SupportAnswer(
             answer=REFUSAL_ANSWER,
             citations=(),
             accepted=False,
             reason="empty-question",
-            model=MODEL_ID,
+            model=model_id,
             corpus_sha256=bundle.corpus_sha256,
         )
+        _append_usage_log(
+            repo_root=root,
+            question_category=question_category,
+            corpus_sha256=bundle.corpus_sha256,
+            model_id=model_id,
+            accepted=answer.accepted,
+            reason=answer.reason,
+            token_spend=answer.token_spend,
+        )
+        return answer
 
     request = SupportRequest(
         question=clean_question,
-        model=MODEL_ID,
+        model=model_id,
         system_prompt=_load_system_prompt(),
         bundle=bundle,
         profile_contract=_profile_contract(repo_root=root),
     )
     runner = model_runner or ConfiguredCommandModelRunner()
     raw = runner(request)
-    raw_answer = _extract_runner_answer(raw)
-    answer, citations, accepted, reason = _validate_answer(raw_answer, bundle=bundle)
-    return SupportAnswer(
+    output = _extract_runner_output(raw)
+    answer, citations, accepted, reason = _validate_answer(output.answer, bundle=bundle)
+    result = SupportAnswer(
         answer=answer,
         citations=citations,
         accepted=accepted,
         reason=reason,
-        model=MODEL_ID,
+        model=model_id,
         corpus_sha256=bundle.corpus_sha256,
+        token_spend=output.token_spend,
     )
+    _append_usage_log(
+        repo_root=root,
+        question_category=question_category,
+        corpus_sha256=bundle.corpus_sha256,
+        model_id=model_id,
+        accepted=result.accepted,
+        reason=result.reason,
+        token_spend=result.token_spend,
+    )
+    return result
 
 
 def _build_status() -> dict:
     result = support_corpus.evaluate()
     bundle = support_bundle.build_support_bundle()
+    model_id = configured_model_id()
     return {
         "status": "available",
         "wired": True,
-        "model": MODEL_ID,
+        "model": model_id,
         "model_boundary": ConfiguredCommandModelRunner.ENV_CMD,
         "corpus_sha256": bundle.corpus_sha256,
         "foundations": {
@@ -281,7 +412,7 @@ def _build_status() -> dict:
             "missing_not_yet_present": list(result.missing),
         },
         "deferrals": [
-            "live Claude Code seat invocation is behind CE_SUPPORT_AGENT_MODEL_CMD",
+            "live model invocation is behind CE_SUPPORT_AGENT_MODEL_CMD",
             "Phase-2 eval harness (accuracy / zero-leak / refusal)",
             "external public graduation and containment hardening",
         ],
@@ -345,5 +476,6 @@ __all__ = [
     "SupportRequest",
     "ConfiguredCommandModelRunner",
     "answer_question",
+    "configured_model_id",
     "run_cli",
 ]
