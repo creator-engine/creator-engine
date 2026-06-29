@@ -385,6 +385,32 @@ def _workflow_permissions_audit(repo_root: Path) -> None:
     print("OK: no write permissions found in YAML structure")
 
 
+def _install_spec_signature_advisory(
+    config: PreflightConfig,
+    py: str,
+    py_env: Mapping[str, str],
+    *,
+    runner: Runner,
+    out: TextIO,
+    err: TextIO,
+) -> str:
+    print("==> Install-spec signature guard - advisory/non-blocking", file=out)
+    result = runner(
+        [py, "-m", "creator_engine_validator", "scan-install-spec-signature", "."],
+        config.repo_root,
+        py_env,
+    )
+    _print_streams(result, out, err)
+    if result.returncode == 0:
+        return "install-spec signature scan passed"
+    print(
+        "WARNING: install-spec signature scan is advisory/non-blocking until the "
+        "controller re-signs docs/llms-install.md and flips this to a required gate.",
+        file=err,
+    )
+    return f"advisory findings present (exit {result.returncode}); not blocking this PR"
+
+
 def _run_check(name: str, func: Callable[[], str | None], out: TextIO, err: TextIO) -> CheckDetail:
     print(f"==> {name}", file=out)
     try:
@@ -502,6 +528,21 @@ def run_preflight(
                 ),
                 "no public-doc confidentiality leaks",
             )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "Install-spec signature guard (advisory/non-blocking)",
+            lambda: _install_spec_signature_advisory(
+                config,
+                py,
+                py_env,
+                runner=runner,
+                out=out,
+                err=err,
+            ),
             out,
             err,
         )

@@ -14,6 +14,8 @@ class FakeRunner:
         *,
         dirty: str = "",
         malformed_returncode: int = 1,
+        install_spec_signature_returncode: int = 0,
+        install_spec_signature_stdout: str = "ok\n",
         path_manifest_returncode: int = 0,
         path_manifest_stdout: str = "ok\n",
         head_test_result: pr_preflight.CommandResult | None = None,
@@ -23,6 +25,8 @@ class FakeRunner:
         self.repo_root = repo_root
         self.dirty = dirty
         self.malformed_returncode = malformed_returncode
+        self.install_spec_signature_returncode = install_spec_signature_returncode
+        self.install_spec_signature_stdout = install_spec_signature_stdout
         self.path_manifest_returncode = path_manifest_returncode
         self.path_manifest_stdout = path_manifest_stdout
         self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "ok\n", "")
@@ -55,6 +59,8 @@ class FakeRunner:
             return self.head_test_result
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "examples/malformed/" in argv:
             return pr_preflight.CommandResult(self.malformed_returncode, "malformed rejected\n", "")
+        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "scan-install-spec-signature" in argv:
+            return pr_preflight.CommandResult(self.install_spec_signature_returncode, self.install_spec_signature_stdout, "")
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "verify-path-manifest" in argv:
             return pr_preflight.CommandResult(self.path_manifest_returncode, self.path_manifest_stdout, "")
         return pr_preflight.CommandResult(0, "ok\n", "")
@@ -131,6 +137,13 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
         sys.executable,
         "-m",
         "creator_engine_validator",
+        "scan-install-spec-signature",
+        ".",
+    ] in calls
+    assert [
+        sys.executable,
+        "-m",
+        "creator_engine_validator",
         "verify-work-sizing-floor",
         "--base",
         "abc1234",
@@ -151,6 +164,27 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
         "dev4-night-lane0-pr-preflight",
         "--require-carrier",
     ] in calls
+
+
+def test_preflight_keeps_install_spec_signature_guard_advisory(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    runner = FakeRunner(
+        tmp_path,
+        install_spec_signature_returncode=1,
+        install_spec_signature_stdout="FAIL install_spec_signature_placeholder\n",
+    )
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=err)
+
+    assert rc == 0
+    assert "[PASS] Install-spec signature guard (advisory/non-blocking)" in out.getvalue()
+    assert "advisory findings present (exit 1); not blocking this PR" in out.getvalue()
+    assert "controller re-signs docs/llms-install.md" in err.getvalue()
 
 
 def test_preflight_reports_missing_required_carrier(tmp_path: Path, monkeypatch):

@@ -129,6 +129,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "path", nargs="?", default=".", help="repo root to scan (default: .)"
     )
 
+    scan_install_spec_signature = sub.add_parser(
+        "scan-install-spec-signature",
+        help=(
+            "fail-closed install-spec SSHSIG scan: rejects placeholder values, "
+            "invalid base64, content_sha mismatch, and non-verifying signatures"
+        ),
+    )
+    scan_install_spec_signature.add_argument(
+        "path", nargs="?", default=".", help="repo root to scan (default: .)"
+    )
+
     scan_support_corpus = sub.add_parser(
         "scan-support-corpus",
         help=(
@@ -637,6 +648,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-public-docs-confidentiality":
         from .public_docs_confidentiality import run as _run_public_docs_confidentiality
         result = _run_public_docs_confidentiality([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-install-spec-signature":
+        from .checks.install_spec_signature_guard import CHECK_NAME, validate_repo
+
+        result = CheckResult(name=CHECK_NAME, errors=tuple(validate_repo(Path(args.path))))
         return _emit_results([result], args.json_output)
     if subcommand == "scan-support-corpus":
         from .support_corpus import run as _run_support_corpus
