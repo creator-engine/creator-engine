@@ -20,12 +20,12 @@ The baseline authority matrix has exactly seven `role_category` values (`schemas
 | `verifier` | Author tests, validators, and verification artifacts (`docs/contracts/authority-matrix.yml:108-121`, `docs/contracts/authority-matrix.md:36`). | Cannot treat passing tests as authority; CI/verifier evidence does not ratify. |
 | `observer` | Write notes, issues, observations, and handoff material (`docs/contracts/authority-matrix.yml:123-133`). | Cannot author tracked implementation, approve, merge, or ratify. |
 
-### Governed Seat Hard Denials
+### Governed Contributor Hard Denials
 
-A governed seat does not get ambient forge authority.
+A governed contributor environment does not get ambient platform authority.
 
 - `git push` is classified as the restricted `deploy` mechanic (`validators/creator_engine_validator/hook_check.py:198-204`). Under governed posture, restricted mechanics that are not covered are hard-denied (`validators/creator_engine_validator/hook_check.py:318-327`, `validators/creator_engine_validator/hook_check.py:551-563`).
-- `gh pr review` is classified as the restricted `pr_review` mechanic (`validators/creator_engine_validator/hook_check.py:210-214`). A reviewer-authority envelope can authorize exactly one `pr_review` mechanic on exactly one PR, and everything else fails closed (`docs/operations/REVIEWER_VENUE_AUTHORITY.md:23-35`).
+- `gh pr review` is classified as the restricted `pr_review` mechanic (`validators/creator_engine_validator/hook_check.py:210-214`). A reviewer-authority envelope can authorize exactly one review action on exactly one PR, and everything else fails closed.
 - Secret-looking reads are denied. The hook recognizes `.env`, key files, PEM/key suffixes, `.ssh`, `.gnupg`, `.aws`, and credential-like names (`validators/creator_engine_validator/hook_check.py:160-190`), and returns a credential-path denial without reading secret bytes (`validators/creator_engine_validator/hook_check.py:330-334`).
 - Branch-protection settings, repository settings, and constitution changes remain privileged. Live branch-protection mutation requires a separate Source ratification envelope and is not performed by CI, PR, merge, or agent action (`.github/BRANCH_PROTECTION_POLICY.md:56-67`). `CONTRIBUTING.md` tells contributors not to change branch protection, history, the constitution, or canonical governance docs without explicit authorization (`CONTRIBUTING.md:70-83`).
 
@@ -92,7 +92,7 @@ fi
 
 Those names and commands mirror the workflow steps in `.github/workflows/validate.yml:43-46`, `.github/workflows/validate.yml:83-94`. For smaller documentation PRs, the existing `CONTRIBUTING.md` also asks contributors to run `git diff --check`, `check-examples`, and `scan-no-limitless` locally (`CONTRIBUTING.md:108-125`).
 
-> **Running from an isolated worktree (creator-engine#82)?** Set
+> **Running from an isolated worktree?** Set
 > `CE_VALIDATOR_PYTHON` to the dependency interpreter. See [`../../validators/README.md`](../../validators/README.md).
 
 ## 4. The Governed Cycle
@@ -142,11 +142,11 @@ Checklist for the first PR:
 
 You cannot self-approve.
 
-The CODEOWNERS file says the non-author approver is a CE-managed reviewer identity, and GitHub's author-cannot-approve-own-PR rule is part of the enforcement model (`.github/CODEOWNERS:1-9`). Branch-protection policy requires at least one reviewer approval and author/approver separation for every PR targeting `main` (`.github/BRANCH_PROTECTION_POLICY.md:18-36`).
+The CODEOWNERS file requires a non-author reviewer, and GitHub's author-cannot-approve-own-PR rule is part of the enforcement model (`.github/CODEOWNERS:1-9`). Branch-protection policy requires at least one reviewer approval and author/approver separation for every PR targeting `main` (`.github/BRANCH_PROTECTION_POLICY.md:18-36`).
 
-Peer authority also enforces this at the governance-data level. The `peer_authority` check says the author's or running seat's human never counts as a ratifier (`validators/creator_engine_validator/checks/peer_authority.py:173-181`), and the implementation skips any approver resolving to the author/seat human (`validators/creator_engine_validator/checks/peer_authority.py:204-219`).
+Peer authority also enforces this at the governance-data level. The `peer_authority` check says the author's or active contributor's human never counts as a ratifier (`validators/creator_engine_validator/checks/peer_authority.py:173-181`), and the implementation skips any approver resolving to the author human (`validators/creator_engine_validator/checks/peer_authority.py:204-219`).
 
-Reviewer venues are distinct seats. A reviewer authority ref is valid only for a distinct reviewer venue, launched as role `reviewer` and lane kind `review` (`validators/creator_engine_validator/lane_runtime.py:361-372`, `validators/creator_engine_validator/lane_runtime.py:620-630`). The reviewer venue gets only the envelope-authorized `pr_review` mechanic for one PR; it cannot push or merge (`validators/creator_engine_validator/v3_seat_bridge.py:952-984`).
+Reviewer authority is distinct from author authority. A reviewer authority reference is valid only for a distinct reviewer role and review-scoped session (`validators/creator_engine_validator/lane_runtime.py:361-372`, `validators/creator_engine_validator/lane_runtime.py:620-630`). That reviewer session gets only the envelope-authorized `pr_review` mechanic for one PR; it cannot push or merge (`validators/creator_engine_validator/v3_seat_bridge.py:952-984`).
 
 ## 7. Boundaries
 
@@ -157,7 +157,7 @@ These require explicit Operator/maintainer authorization before implementation:
 - Large architecture changes.
 - New mutation classes.
 - Changes to the constitution.
-- Changes to Feature 001 governance substrate or Feature 002 operating model.
+- Changes to the foundational governance substrate or operating model.
 - Anything crossing a privileged-class boundary (`CONTRIBUTING.md:46-52`).
 
 Never-touch list for ordinary contributor PRs:
@@ -174,7 +174,7 @@ The governance on-ramp lists these privileged repo/platform operations and says 
 
 ## 8. Legal: Apache-2.0 And DCO
 
-Current `CONTRIBUTING.md` says contributions are licensed under Apache License, Version 2.0 (`CONTRIBUTING.md:150-158`). ce-ops#63 M2 is Operator-approved for DCO, so this D1 guide should add the DCO mechanics rather than pretending they already exist in the live file.
+Current `CONTRIBUTING.md` says contributions are licensed under Apache License, Version 2.0 (`CONTRIBUTING.md:150-158`). This guide documents the Developer Certificate of Origin mechanics that contributors should follow for auditable commit provenance.
 
 Contributor rule:
 
@@ -226,7 +226,7 @@ Observer to contributor, for implementer or verifier work:
 Contributor to trusted implementer or trusted reviewer:
 
 - At least five merged PRs spanning at least two mutation classes, such as `docs` plus `code`, or `code` plus `test`.
-- At least two of those PRs were reviewed by an existing trusted human reviewer who was independent of the author. Peer authority's no-self-approval rule means the author's or running seat's human never counts as the reviewer or ratifier for the same decision (`docs/contracts/peer-authority.md:57-58`).
+- At least two of those PRs were reviewed by an existing trusted human reviewer who was independent of the author. Peer authority's no-self-approval rule means the author's human never counts as the reviewer or ratifier for the same decision (`docs/contracts/peer-authority.md:57-58`).
 - Every commit in those PRs carries a DCO `Signed-off-by:` trailer.
 - No conduct or policy violation remains open, and no unresolved privileged-class boundary crossing remains on the record.
 
@@ -236,7 +236,7 @@ Trusted implementer or trusted reviewer to area owner or peer ratifier:
 - At least three consecutive calendar months of active contribution, where active means at least one merged PR in each month.
 - Demonstrated independent-review evidence: at least five review comments or PR reviews that a maintainer, area owner, or ratifier cited as useful evidence.
 - An identity entry for the contributor is present and resolved in `.ce/coordination.yml` `identity_map` before the first privileged ratification record counts.
-- The area-owner or peer-ratifier update is recorded as a privileged governance decision in `.ce/coordination.yml`. Once the identity map resolves two or more humans, that decision needs two distinct humans under peer authority (`docs/contracts/peer-authority.md:15-20`). If the map still resolves exactly one human, the honest N1-CARVEOUT solo path must record `quorum: n1_solo`; it is not quorum two and it expires automatically when the map resolves two or more humans (`docs/contracts/peer-authority.md:55-76`).
+- The area-owner or peer-ratifier update is recorded as a privileged governance decision in `.ce/coordination.yml`. Once the identity map resolves two or more humans, that decision needs two distinct humans under peer authority (`docs/contracts/peer-authority.md:15-20`). If the map still resolves exactly one human, the documented solo fallback must record `quorum: n1_solo`; it is not quorum two and it expires automatically when the map resolves two or more humans (`docs/contracts/peer-authority.md:55-76`).
 - The contributor has a DCO-clean record across all counted contributions.
 
 These criteria define the observable bar for graduation. They do not add schema enforcement, alter CODEOWNERS, bypass branch protection, or replace the peer-authority contract.

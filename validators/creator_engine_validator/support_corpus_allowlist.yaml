@@ -44,26 +44,16 @@ families:
       - CONTRIBUTING.md
       - CODE_OF_CONDUCT.md
       - SECURITY.md
+      - docs/guide/contributing-to-ce.md
       - docs/guide/zero-to-governed-seat-quickstart.md
       - docs/guide/understanding-ce.md
       - docs/guide/pilot-runbook.md
       - docs/guide/first-value-mythos.md
-      # NOTE: docs/guide/contributing-to-ce.md is product-lens INTENT but is
-      # currently on the confidentiality guard's KNOWN_PENDING ratchet, so the
-      # intersection will EXCLUDE it until it is cleaned. It is intentionally
-      # NOT listed here to keep the manifest honest (listing it would make the
-      # fail-closed eligibility test fail). Re-add once it leaves KNOWN_PENDING.
 
   usage:
     description: Usage of the shipped engine + governance concepts (product-lens).
     serve:
-      # NOTE: docs/contracts/playbook-format.md is product-lens INTENT (usage of
-      # `ce playbook run`) but is currently on the confidentiality guard's
-      # KNOWN_PENDING ratchet, so the fail-closed intersection EXCLUDES it. It is
-      # intentionally NOT listed here to keep the manifest honest (listing an
-      # unclean doc fails scan-support-corpus). Re-add once it leaves
-      # KNOWN_PENDING.
-      #
+      - docs/contracts/playbook-format.md
       # PLAYBOOK.md (public dual-use authoring layer) — served once present in
       # the working tree; absent paths are skipped, not an error.
       - PLAYBOOK.md
