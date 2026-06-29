@@ -183,13 +183,21 @@ render_unit() {
   local src="$1"
   local dst="$2"
   local env_path="${3:-}"
+  local unit_name
   local tmp
   local rendered_repo_root
   local rendered_env_file
+  unit_name="$(basename -- "$src")"
   rendered_repo_root="$(printf '%s' "$repo_root" | sed 's/[&#]/\\&/g')"
   rendered_env_file="$(printf '%s' "$env_path" | sed 's/[&#]/\\&/g')"
   tmp="$(mktemp)"
-  if [[ -n "$rendered_env_file" ]]; then
+  if [[ "$unit_name" == "ce-egress-self-review.service" && -n "$rendered_env_file" ]]; then
+    sed \
+      -e "s#^EnvironmentFile=.*#EnvironmentFile=$rendered_env_file#g" \
+      "$src" > "$tmp"
+  elif [[ "$unit_name" == "ce-egress-self-review.service" ]]; then
+    cat "$src" > "$tmp"
+  elif [[ -n "$rendered_env_file" ]]; then
     sed \
       -e "s#^WorkingDirectory=.*#WorkingDirectory=$rendered_repo_root#g" \
       -e "s#^EnvironmentFile=.*#EnvironmentFile=$rendered_env_file#g" \

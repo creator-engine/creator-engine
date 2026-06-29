@@ -207,7 +207,27 @@ def test_egress_self_review_unit_socket_is_parametric(repo_root: Path):
 
     assert "$CE_EGRESS_SELF_REVIEW_SOCKET" in exec_start
     assert "$CE_EGRESS_SELF_REVIEW_CONFIG" in exec_start
+    assert "${CE_BROKER_HOME:-/opt/ce-broker/creator-engine}" in exec_start
     assert "/run/ce-egress/dev-3-review.sock" not in exec_start
+
+
+def test_egress_self_review_unit_uses_stable_broker_checkout(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_SELF_REVIEW_UNIT)
+    service = unit["Service"]
+    exec_start = service["ExecStart"]
+
+    assert service["WorkingDirectory"] == "/opt/ce-broker/creator-engine"
+    assert "CE_BROKER_HOME=/opt/ce-broker/creator-engine" in service["Environment"]
+    assert 'broker_home="${CE_BROKER_HOME:-/opt/ce-broker/creator-engine}"' in exec_start
+    assert 'cd "$broker_home"' in exec_start
+    assert "$broker_home/tools/egress-broker/ce_egress_self_review_broker.py" in exec_start
+
+    unit_text = (repo_root / "deploy" / "systemd" / EGRESS_SELF_REVIEW_UNIT).read_text(
+        encoding="utf-8"
+    )
+    assert "/workspace/creator-engine" not in unit_text
+    assert "/home/ce-dev-" not in unit_text
+    assert "/home/cedev" not in unit_text
 
 
 def test_egress_self_review_unit_run_mode_is_env_driven_and_default_dev(repo_root: Path):
@@ -215,9 +235,9 @@ def test_egress_self_review_unit_run_mode_is_env_driven_and_default_dev(repo_roo
     service = unit["Service"]
     exec_start = service["ExecStart"]
 
-    assert service["Environment"] == "CE_EGRESS_RUN_MODE=dev"
+    assert "CE_EGRESS_RUN_MODE=dev" in service["Environment"]
     assert service["EnvironmentFile"].endswith("ce-egress-self-review.env")
-    assert "--run-mode ${CE_EGRESS_RUN_MODE}" in exec_start
+    assert '--run-mode "${CE_EGRESS_RUN_MODE}"' in exec_start
     assert "strangeLoop" not in service["Environment"]
 
 
@@ -301,8 +321,10 @@ def test_installer_renders_egress_service_specific_env_files(tmp_path: Path, rep
     rendered_gate = _read_unit_path(unit_dir / "ce-integrator-daemon.service")
 
     assert rendered_review["Service"]["EnvironmentFile"] == str(egress_self_review_env)
-    assert rendered_review["Service"]["Environment"] == "CE_EGRESS_RUN_MODE=dev"
-    assert "--run-mode ${CE_EGRESS_RUN_MODE}" in rendered_review["Service"]["ExecStart"]
+    assert rendered_review["Service"]["WorkingDirectory"] == "/opt/ce-broker/creator-engine"
+    assert "CE_EGRESS_RUN_MODE=dev" in rendered_review["Service"]["Environment"]
+    assert "CE_BROKER_HOME=/opt/ce-broker/creator-engine" in rendered_review["Service"]["Environment"]
+    assert '--run-mode "${CE_EGRESS_RUN_MODE}"' in rendered_review["Service"]["ExecStart"]
     assert rendered_broker["Service"]["EnvironmentFile"] == str(egress_broker_env)
     assert rendered_gate["Service"]["EnvironmentFile"] == str(gate_env)
     assert "start " not in systemctl_calls.read_text(encoding="utf-8")
