@@ -209,6 +209,49 @@ def test_approve_refused_when_run_mode_none():
     assert "APPROVE is controller approval-wall only" in str(exc.value)
 
 
+def test_main_default_run_mode_dev_reaches_serve_and_approve_stays_refused(monkeypatch):
+    seen = {}
+
+    def fake_serve(**kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(broker, "load_broker_config", lambda path: _config())
+    monkeypatch.setattr(broker, "systemd_activated_unix_socket", lambda: None)
+    monkeypatch.setattr(broker, "serve", fake_serve)
+
+    assert broker.main(["--serve", "--config", "broker.json"]) == broker.EXIT_OK
+
+    assert seen["run_mode"] == "dev"
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(_payload(event="APPROVE"), run_mode=seen["run_mode"])
+    assert "APPROVE is controller approval-wall only" in str(exc.value)
+
+
+def test_main_strangeloop_run_mode_reaches_serve(monkeypatch):
+    seen = {}
+
+    def fake_serve(**kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(broker, "load_broker_config", lambda path: _config())
+    monkeypatch.setattr(broker, "systemd_activated_unix_socket", lambda: None)
+    monkeypatch.setattr(broker, "serve", fake_serve)
+
+    assert (
+        broker.main(["--serve", "--config", "broker.json", "--run-mode", "strangeLoop"])
+        == broker.EXIT_OK
+    )
+
+    assert seen["run_mode"] == "strangeLoop"
+
+
+def test_main_invalid_run_mode_rejects_fail_closed():
+    with pytest.raises(SystemExit) as exc:
+        broker.main(["--serve", "--config", "broker.json", "--run-mode", "solo"])
+
+    assert exc.value.code == 2
+
+
 @pytest.mark.parametrize("run_mode", ["solo", "team"])
 def test_approve_refused_in_current_solo_team_modes(run_mode):
     with pytest.raises(broker.SelfReviewRefused) as exc:
