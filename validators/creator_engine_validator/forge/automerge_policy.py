@@ -27,6 +27,8 @@ AUTOMERGE_DECISION_AUTO: Final[str] = "AUTO"
 AUTOMERGE_DECISION_GESTURE: Final[str] = "GESTURE"
 DEFAULT_AUTOMERGE_POLICY_STATE_RELATIVE: Final[Path] = Path("automerge") / "policy.json"
 DEFAULT_AUTOMERGE_DECISIONS_RELATIVE: Final[Path] = Path("automerge") / "decisions"
+AUTOMERGE_RUN_MODE_CEO: Final[str] = "ceo"
+AUTOMERGE_RUN_MODE_DEV: Final[str] = "dev"
 
 
 class AutoMergePolicyStateError(Exception):
@@ -136,10 +138,15 @@ class AutoMergeDecision:
     run_mode: str
     kill_switch: bool
     class_flag: bool
+    enabling_decision_ref: str | None = None
     review_decision: str | None = None
     checks_green: bool = False
     pr_number: int | None = None
     head_sha: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    base: str | None = None
+    required_checks: tuple[str, ...] = ()
 
     @property
     def is_auto(self) -> bool:
@@ -167,10 +174,15 @@ class AutoMergeDecision:
             "run_mode": self.run_mode,
             "kill_switch": self.kill_switch,
             "class_flag": self.class_flag,
+            "enabling_decision_ref": self.enabling_decision_ref,
             "reviewDecision": self.review_decision,
             "checks_green": self.checks_green,
             "pr_number": self.pr_number,
             "head_sha": self.head_sha,
+            "repo": self.repo,
+            "branch": self.branch,
+            "base": self.base,
+            "required_checks": list(self.required_checks),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -242,6 +254,41 @@ def save_automerge_policy_state(path: str | Path, state: AutoMergePolicyState) -
         raise AutoMergePolicyStateError(str(exc)) from exc
 
 
+def materialize_automerge_policy_state_from_variables(
+    path: str | Path,
+    *,
+    run_mode_variable: str | None = None,
+    enabling_ref_variable: str | None = None,
+) -> AutoMergePolicyState:
+    """Write fail-safe automerge policy state from repository variable values.
+
+    Only an explicit lowercase ``ceo`` run mode enables the docs class. Every
+    unset, empty, or otherwise malformed run-mode value materializes as the
+    dormant dev policy.
+    """
+
+    run_mode = (
+        AUTOMERGE_RUN_MODE_CEO
+        if run_mode_variable == AUTOMERGE_RUN_MODE_CEO
+        else AUTOMERGE_RUN_MODE_DEV
+    )
+    docs_auto_merge = run_mode == AUTOMERGE_RUN_MODE_CEO
+    enabling_ref = _non_empty_string_or_none(enabling_ref_variable)
+    state = AutoMergePolicyState(
+        run_mode=run_mode,
+        kill_switch=False,
+        classes={
+            class_name: AutoMergeClassPolicy(
+                auto_merge=class_name == "docs" and docs_auto_merge
+            )
+            for class_name in MUTATION_CLASSES
+        },
+        enabling_decision_ref=enabling_ref,
+    )
+    save_automerge_policy_state(path, state)
+    return state
+
+
 def decide_automerge(
     numstat: Iterable[ChangeStat | Mapping[str, Any]] | None = None,
     paths: Sequence[str] | None = None,
@@ -255,6 +302,9 @@ def decide_automerge(
     review_decision: str | None = None,
     pr_number: int | None = None,
     head_sha: str | None = None,
+    repo: str | None = None,
+    branch: str | None = None,
+    base: str | None = None,
 ) -> AutoMergeDecision:
     """Return an ``AUTO`` or ``GESTURE`` decision without side effects."""
 
@@ -298,6 +348,9 @@ def decide_automerge(
             False,
             pr_number,
             head_sha,
+            repo,
+            branch,
+            base,
         )
 
     checks_green = _checks_all_green(checks, required_checks=resolved_policy.required_checks)
@@ -345,6 +398,9 @@ def decide_automerge(
             checks_green,
             pr_number,
             head_sha,
+            repo,
+            branch,
+            base,
         )
 
     if mutation_class not in AUTO_CLASSES:
@@ -364,6 +420,9 @@ def decide_automerge(
             checks_green,
             pr_number,
             head_sha,
+            repo,
+            branch,
+            base,
         )
 
     rationale.append("all_auto_guards_passed")
@@ -382,6 +441,9 @@ def decide_automerge(
         checks_green,
         pr_number,
         head_sha,
+        repo,
+        branch,
+        base,
     )
 
 
@@ -396,6 +458,9 @@ def emit_automerge_dry_run_decision(
     checks: Mapping[str, Any] | None,
     policy: MutationPolicy | None = None,
     output_dir: str | Path | None = None,
+    repo: str | None = None,
+    branch: str | None = None,
+    base: str | None = None,
 ) -> AutoMergeDecision:
     """Write a dry-run decision JSON record and return the decision."""
 
@@ -410,6 +475,9 @@ def emit_automerge_dry_run_decision(
         policy=resolved_policy,
         pr_number=pr_number,
         head_sha=head_sha,
+        repo=repo,
+        branch=branch,
+        base=base,
     )
     decisions_dir = Path(output_dir) if output_dir is not None else Path(resolved_policy.decisions_dir)
     decisions_dir.mkdir(parents=True, exist_ok=True)
@@ -439,6 +507,9 @@ def _decision(
     checks_green: bool,
     pr_number: int | None,
     head_sha: str | None,
+    repo: str | None,
+    branch: str | None,
+    base: str | None,
 ) -> AutoMergeDecision:
     return AutoMergeDecision(
         decision=decision,
@@ -453,10 +524,15 @@ def _decision(
         run_mode=state.run_mode,
         kill_switch=state.kill_switch,
         class_flag=state.class_flag(mutation_class),
+        enabling_decision_ref=state.enabling_decision_ref,
         review_decision=review_decision,
         checks_green=checks_green,
         pr_number=pr_number,
         head_sha=head_sha,
+        repo=repo,
+        branch=branch,
+        base=base,
+        required_checks=tuple(policy.required_checks),
     )
 
 
@@ -534,6 +610,13 @@ def _review_decision(
         return legacy_review_decision
     value = checks.get("reviewDecision", checks.get("review_decision"))
     return str(value) if value is not None else legacy_review_decision
+
+
+def _non_empty_string_or_none(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _jsonable(value: Any) -> Any:
