@@ -205,6 +205,7 @@ Start there once these four steps make sense.
 | Understand the workflow and its words | [`understanding-ce.md`](./understanding-ce.md) |
 | Map your Agile/SCRUM habits onto CE's SDLC | [`agile-to-ce-sdlc.md`](./agile-to-ce-sdlc.md) |
 | Get to a governed seat fast | [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md) |
+| Run CE from a Mac today | [`onboarding-macos-container.md`](./onboarding-macos-container.md) |
 | Walk the full install-to-ship pilot | [`pilot-runbook.md`](./pilot-runbook.md) |
 | Contribute to CE itself | [`contributing-to-ce.md`](./contributing-to-ce.md) |
 | See the whole project at a glance | [`README`](../../README.md) · [`GOVERNANCE.md`](../../GOVERNANCE.md) |
