@@ -145,6 +145,18 @@ def test_red_g6_packaging_not_enforced_when_unchecked():
     assert result.ok
 
 
+def test_red_g6_packaging_not_applicable_outside_ce_source_tree():
+    drifted = PackagingContractResult(ok=False, violations=["missing wheelhouse"], details={})
+    result = guard.evaluate(
+        _governed_facts(packaging=drifted, ce_source_tree_context=False),
+        check_packaging=True,
+    )
+    packaging = next(c for c in result.checks if c.clause == guard.CLAUSE_PACKAGING)
+    assert result.ok
+    assert packaging.applicable is False
+    assert guard.CLAUSE_PACKAGING not in _refusal_clauses(result)
+
+
 # ---------------------------------------------------------------------------
 # Serialization for ce doctor --json
 # ---------------------------------------------------------------------------

@@ -44,6 +44,7 @@ class EnvironmentFacts:
     ce_invocation: str = "unknown"
     ce_package_origin: str = "unknown"
     ce_dogfood_installed: bool = False
+    ce_source_tree_context: bool = True
 
 
 @dataclass(frozen=True)
@@ -183,8 +184,11 @@ def evaluate(
 
     # RED-G-6 — packaging drift from the Option B contract.
     packaging = facts.packaging
+    packaging_applicable = check_packaging and facts.ce_source_tree_context
     packaging_ok = bool(packaging.ok) if packaging is not None else False
-    if packaging is None:
+    if not facts.ce_source_tree_context:
+        packaging_detail = "packaging contract applies only in CE source-tree developer context"
+    elif packaging is None:
         packaging_detail = "packaging contract not evaluated"
     elif packaging_ok:
         packaging_detail = "packaging posture matches the Option B contract"
@@ -194,7 +198,7 @@ def evaluate(
         GuardCheck(
             clause=CLAUSE_PACKAGING,
             name="packaging-contract",
-            applicable=check_packaging,
+            applicable=packaging_applicable,
             ok=packaging_ok,
             detail=packaging_detail,
         )

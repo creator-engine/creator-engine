@@ -267,6 +267,41 @@ def test_hard_doctor_refusal_stops_immediately():
     assert result.phases[0].status == "refused"
 
 
+def test_user_project_onboard_not_blocked_by_packaging_clause(tmp_path: Path, monkeypatch):
+    def git(args):
+        import subprocess
+
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    monkeypatch.delenv("CE_INSTALL_AGENT", raising=False)
+    git(["init", "--initial-branch=main"])
+    (tmp_path / ".gitignore").write_text(".hermes/\n", encoding="utf-8")
+    legs = _ok_legs(doctor=ce_onboard._default_doctor_leg)
+
+    result = ce_onboard.run_onboard(
+        _config(
+            install_mode="skip",
+            no_fix_path=True,
+            no_launch=True,
+            repo_root=str(tmp_path),
+            state_root=str(tmp_path / ".ce" / "state"),
+        ),
+        legs=legs,
+    )
+
+    assert result.ok
+    doctor = result.phases[0]
+    assert doctor.id == "doctor"
+    assert doctor.status == "ok"
+    assert "RED-G-6" not in doctor.verify["refused_clauses"]
+
+
 # --- install absent → human action -------------------------------------------
 def test_install_absent_yields_human_action_gate():
     legs = _ok_legs(
