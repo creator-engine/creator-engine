@@ -6,7 +6,10 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
-(nothing yet — use this section for features landing after 0.3.0 while waiting for the next tag)
+### Fixed
+
+- Mac-container onboarding guide now runs `ce brain init`, `ce onboard`, and
+  `ce launch` from the mounted repo in order, with RED-G-4 remediation guidance
 
 ## v0.3.0 — clean-install milestone (2026-06-27)
 
