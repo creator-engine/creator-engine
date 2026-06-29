@@ -13,8 +13,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQ0ZsTHNqK1d1NUdBOGlhd3ZEWGlhTVcwaXpXVS9UeHNlTHRLS3ZMVkd0S1FEaTMxWitoNzVTMTEKTmROcG5ub1dDSkRoSHQ4YWpuZjVYTnJGQ2Q0N2dDCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: 9fb30d53eb2b5594e5bf0b05188036a3246ad6be33cd61dee5356bd122a736e1
+  value: <RESIGN-REQUIRED-ce-root-v1>
+  content_sha256: 1dad3bb45351ed48ee24d0ee7c2cca2ece96aeb24bf22bc8d5a43e2e6eeb98e3
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -23,7 +23,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.3.0
   sha256s_url: https://creator-engine.dev/downloads/0.3.0/SHA256SUMS
-  sha256s_sha256: bc6affdb1f67d240b971c6f3d54d1b5a075d241768d2046505e1d9240c945842
+  sha256s_sha256: 46668cfe3e879f5f923544774dc06b2fed30cbc53b3d61fd3d3e47cb0d6291f1
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
