@@ -141,6 +141,15 @@ jobs:
         run: |
           PYTHONPATH=validators python -m creator_engine_validator --list-checks
 
+      - name: Creator Engine validator — install-spec signature guard (advisory)
+        run: |
+          set -euo pipefail
+          if PYTHONPATH=validators python -m creator_engine_validator scan-install-spec-signature .; then
+            echo "OK: install-spec signature guard passed"
+          else
+            echo "::warning::install-spec signature guard is advisory/non-blocking until the controller re-signs docs/llms-install.md; this flips to a required blocking gate after re-sign"
+          fi
+
       - name: Creator Engine validator — brain drift check
         run: |
           PYTHONPATH=validators python -m creator_engine_validator.ce_cli \
