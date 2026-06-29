@@ -1,5 +1,5 @@
 ---
-slug: ce-353-tranche2-osnative-exec
+slug: ce-353-tranche2-osnative-exec-harvest
 date: 2026-06-29
 kind: feature
 scope: runner os-native backend
