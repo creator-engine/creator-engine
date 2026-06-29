@@ -57,7 +57,7 @@ present.
    match the fetched trust-root key fingerprint, and refuse before persistent
    mutation on any failure.
 3. Parse the signature-covered artifact manifest from `llms-install.md`.
-4. Fetch `downloads/0.2.0/SHA256SUMS`, verify its signed-manifest hash, and
+4. Fetch `downloads/0.3.0/SHA256SUMS`, verify its signed-manifest hash, and
    fetch/hash-check every required wheel and the answers schema.
 5. If CPython `>=3.14` is absent, fetch the manifest-pinned uv 0.11.21 tarball,
    hash-check it before extraction/execution, and run `uv python install 3.14`
@@ -77,7 +77,7 @@ the later governed-seat path: prepare/confirm the host and GitHub answers, run
 `ce onboard --plan`, have the operator review the plan, and only then run the
 explicit governed `ce onboard --apply`.
 
-The Pages mirror lives under `docs/downloads/0.2.0/`. Its `SHA256SUMS` publishes
+The Pages mirror lives under `docs/downloads/0.3.0/`. Its `SHA256SUMS` publishes
 the wheel hashes and the `install.sh` hash; the signed spec pins the
 `SHA256SUMS` hash and the answers-schema hash.
 
@@ -357,7 +357,7 @@ after the Operator offline-key signing act.
 `llms-install.md` §0.5 states the supported acquisition paths for `ce` itself —
 the served **one-liner** (`curl …/install.sh | bash`) and **clone + offline
 wheelhouse** — each with an **honest** integrity note: transport integrity is TLS
-(+ the published hash for `install.sh` in `docs/downloads/0.2.0/SHA256SUMS`);
+(+ the published hash for `install.sh` in `docs/downloads/0.3.0/SHA256SUMS`);
 the cryptographically **verified** trust anchor for the install *procedure* is
 this signed spec (§0), not the one-liner. `install.sh`'s own posture is stated,
 not overstated — it asserts no signature over its own body beyond TLS + the

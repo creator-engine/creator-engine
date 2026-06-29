@@ -166,6 +166,14 @@ command -v cev3
 ce --help
 ```
 
+Initialize CE's local knowledge ledger. This is required once per working
+directory before your first `ce launch`; otherwise, `ce launch` refuses with
+`G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED`.
+
+```bash
+ce brain init
+```
+
 Then launch your CE session from the mounted repo:
 
 ```bash
@@ -189,6 +197,9 @@ solo container path should start with the everyday `ce launch` flow.
 - Allocate enough CPU, memory, and disk to the runtime VM. The CE install volume,
   Python runtime, verified artifacts, and project dependencies all consume space
   inside the runtime's storage.
+- `ce launch` spawns a Claude Code (`claude`) session, so that harness must be
+  installed and authenticated inside the container before the session is
+  productive.
 - Bind-mounted files may use Mac-side ownership and permissions. If a tool
   inside the container cannot write a repo file, adjust the mount, user, or file
   ownership rather than reinstalling CE.
