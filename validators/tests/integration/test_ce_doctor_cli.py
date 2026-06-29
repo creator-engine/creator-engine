@@ -23,6 +23,19 @@ def _git(args, cwd: Path):
     return subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True)
 
 
+def _copy_ce_source_tree_markers(repo: Path, repo_root: Path) -> None:
+    for rel in (
+        "validators/creator_engine_validator/__init__.py",
+        "validators/creator_engine_validator/doctor_runtime.py",
+        "validators/creator_engine_validator/packaging_runtime.py",
+        "validators/tests/conftest.py",
+        "docs/governance/V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md",
+    ):
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repo_root / rel, target)
+
+
 @pytest.fixture()
 def governed_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
@@ -89,16 +102,7 @@ def test_doctor_refuses_packaging_drift_in_ce_source_tree_context(
     _git(["init", "--initial-branch=main"], repo)
     (repo / ".gitignore").write_text(".hermes/\n", encoding="utf-8")
 
-    for rel in (
-        "validators/creator_engine_validator/__init__.py",
-        "validators/creator_engine_validator/doctor_runtime.py",
-        "validators/creator_engine_validator/packaging_runtime.py",
-        "validators/tests/conftest.py",
-        "docs/governance/V1_GOVERNED_ENVIRONMENT_GUARD_REQUIREMENT.md",
-    ):
-        target = repo / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(repo_root / rel, target)
+    _copy_ce_source_tree_markers(repo, repo_root)
 
     ret = ce_cli.main(["doctor", "--json", "--repo-root", str(repo)])
 
@@ -125,6 +129,7 @@ def test_doctor_reports_first_party_app_wheel_separately_from_dependency_wheelho
     for filename in ("pyproject.toml", "requirements.txt", "uv.lock"):
         shutil.copy2(source_validators / filename, validators / filename)
     shutil.copytree(source_validators / "wheelhouse", validators / "wheelhouse")
+    _copy_ce_source_tree_markers(repo, repo_root)
     (validators / "wheelhouse" / "creator_engine_validator-0.2.0-py3-none-any.whl").write_bytes(
         b"reintroduced first-party app wheel"
     )
