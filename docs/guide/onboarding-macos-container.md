@@ -166,18 +166,33 @@ command -v cev3
 ce --help
 ```
 
-Initialize CE's local knowledge ledger. This is required once per working
-directory before your first `ce launch`; otherwise, `ce launch` refuses with
-`G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED`.
+Enter the mounted repo before initializing local state:
+
+```bash
+cd /workspace/your-repo
+```
+
+Initialize CE's local knowledge ledger in that repo. This is required once per
+working directory before your first `ce launch`; otherwise, `ce launch` refuses
+with `G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED`.
 
 ```bash
 ce brain init
 ```
 
+Run the one-shot onboarder from the same repo before the first launch:
+
+```bash
+ce onboard
+```
+
+If `ce onboard` reports RED-G-4 for an ungoverned state path, follow the
+actionable guidance it prints: gitignore `.hermes/`, run `ce init`, then re-run
+`ce onboard`.
+
 Then launch your CE session from the mounted repo:
 
 ```bash
-cd /workspace/your-repo
 ce launch
 ```
 
