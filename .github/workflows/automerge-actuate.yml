@@ -1,0 +1,82 @@
+name: CE Automerge Actuate
+
+on:
+  workflow_run:
+    workflows: ["CE Automerge Decide"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  actuate:
+    name: Gated automerge actuation
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success' &&
+        (
+          github.event.workflow_run.event == 'pull_request' ||
+          github.event.workflow_run.event == 'merge_group'
+        )
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout actuator caller
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator
+        run: python -m pip install -e validators
+
+      - name: Download automerge decision
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+
+          decision_dir="${RUNNER_TEMP}/ce-automerge-decision"
+          mkdir -p "${decision_dir}"
+
+          gh run download "${RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "ce-automerge-decision-*" \
+            --dir "${decision_dir}"
+
+          mapfile -t decisions < <(find "${decision_dir}" -type f -name '*.json' | sort)
+          if [[ "${#decisions[@]}" -ne 1 ]]; then
+            printf 'expected exactly one automerge decision JSON, found %s\n' "${#decisions[@]}" >&2
+            printf '%s\n' "${decisions[@]:-}" >&2
+            exit 1
+          fi
+
+          echo "decision-file=${decisions[0]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Actuate if ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DECISION_FILE: ${{ steps.decision.outputs.decision-file }}
+        run: |
+          set -euo pipefail
+
+          # The workflow is live wiring only. The actuator re-verifies run_mode,
+          # kill_switch, class flags, enabling_decision_ref, and live required
+          # checks; with the shipped dev run_mode it returns Dormant and makes no
+          # merge mutation.
+          PYTHONPATH=validators python -m creator_engine_validator.forge.automerge_actuate_cli \
+            "${DECISION_FILE}" \
+            --json | tee "${RUNNER_TEMP}/ce-automerge-actuation.json"

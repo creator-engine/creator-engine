@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import socket
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from creator_engine_validator.checks.work_sizing_floor import ChangeStat
+from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.automerge_policy import (
     AUTOMERGE_DECISION_AUTO,
     AUTOMERGE_DECISION_GESTURE,
@@ -22,6 +24,10 @@ from creator_engine_validator.forge.automerge_policy import (
 from creator_engine_validator.work_sizing import size_ceremony
 
 
+REQUIRED_CHECK = "Validate governance artifacts"
+HEAD_SHA = "d" * 40
+POLICY_SHA = "a" * 64
+
 ALL_CLASSES = (
     "none",
     "docs",
@@ -36,7 +42,7 @@ ALL_CLASSES = (
 )
 
 GREEN_CHECKS = {
-    "validate": "success",
+    REQUIRED_CHECK: "success",
     "unit": "success",
     "reviewDecision": "APPROVED",
 }
@@ -291,4 +297,130 @@ def test_dry_run_writes_decision_and_merges_nothing(tmp_path, monkeypatch) -> No
     payload = json.loads(written.read_text(encoding="utf-8"))
     assert payload["decision"] == "AUTO"
     assert payload["mutation_class"] == "docs"
-    assert payload["checks_snapshot"]["validate"] == "success"
+    assert payload["checks_snapshot"][REQUIRED_CHECK] == "success"
+
+
+class FakeActuateGh:
+    def __init__(self, *, check_conclusion: str = "success") -> None:
+        self.check_conclusion = check_conclusion
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, input_text=None):
+        self.calls.append(list(argv))
+        if argv[:3] == ["gh", "pr", "checks"]:
+            payload = [{"name": REQUIRED_CHECK, "conclusion": self.check_conclusion}]
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+
+        query = next((str(arg) for arg in argv if str(arg).startswith("query=")), "")
+        if "enablePullRequestAutoMerge" in query:
+            payload = {
+                "data": {
+                    "enablePullRequestAutoMerge": {
+                        "pullRequest": {
+                            "autoMergeRequest": {
+                                "enabledAt": "now",
+                                "mergeMethod": "SQUASH",
+                            }
+                        }
+                    }
+                }
+            }
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+
+        payload = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "id": "PR_kwDO_strangeLoop",
+                        "autoMergeRequest": None,
+                    }
+                }
+            }
+        }
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+
+    def mutation_calls(self) -> list[list[str]]:
+        return [
+            call
+            for call in self.calls
+            if any("enablePullRequestAutoMerge" in str(arg) for arg in call)
+        ]
+
+
+def _strange_loop_decision(**overrides):
+    payload = {
+        "class": "story",
+        "size_band": "target_advisory",
+        "minimum_work_class": "story",
+        "mutation_class": "docs",
+        "gates": ["auto_back_gate"],
+        "decision": "AUTO",
+        "rationale": ["all_auto_guards_passed"],
+        "policy_sha": POLICY_SHA,
+        "checks_snapshot": {"required_checks": [REQUIRED_CHECK]},
+        "required_checks": [REQUIRED_CHECK],
+        "run_mode": "ceo",
+        "kill_switch": False,
+        "class_flag": True,
+        "enabling_decision_ref": "ce-ops#313-enable",
+        "reviewDecision": "APPROVED",
+        "checks_green": True,
+        "pr_number": 313,
+        "head_sha": HEAD_SHA,
+        "change": {
+            "repo": "strange-loop/creator-engine",
+            "branch": "ce-arm-automerge-actuate",
+            "base": "main",
+            "pr_number": 313,
+            "head_sha": HEAD_SHA,
+            "manifest_paths": [".ce/pr-manifests/ce-arm-automerge-actuate.md"],
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _write_decision(tmp_path: Path, payload) -> Path:
+    path = tmp_path / "decision.json"
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def test_actuate_caller_dormant_in_dev_run_mode_makes_no_gh_calls(tmp_path: Path) -> None:
+    gh = FakeActuateGh()
+
+    result = actuate_decision(
+        _write_decision(tmp_path, _strange_loop_decision(run_mode="dev")),
+        gh_runner=gh,
+    )
+
+    assert result.dormant is True
+    assert result.reason == "run_mode_dev"
+    assert result.acted is False
+    assert gh.calls == []
+
+
+def test_actuate_caller_mutates_only_after_actuator_predicates_pass(tmp_path: Path) -> None:
+    red_gh = FakeActuateGh(check_conclusion="failure")
+
+    refused = actuate_decision(
+        _write_decision(tmp_path, _strange_loop_decision()),
+        gh_runner=red_gh,
+    )
+
+    assert refused.refused is True
+    assert refused.reason == "required_checks_not_green"
+    assert refused.acted is False
+    assert red_gh.mutation_calls() == []
+
+    green_gh = FakeActuateGh(check_conclusion="success")
+
+    actuated = actuate_decision(
+        _write_decision(tmp_path, _strange_loop_decision()),
+        gh_runner=green_gh,
+    )
+
+    assert actuated.actuated is True
+    assert actuated.reason == "all_predicates_green"
+    assert actuated.acted is True
+    assert len(green_gh.mutation_calls()) == 1

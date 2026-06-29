@@ -13,7 +13,8 @@ class_order:
   - security
   - attestation
   - redaction
-required_checks: []
+required_checks:
+  - "Validate governance artifacts"
 path_predicates:
   docs:
     - "docs/**"
