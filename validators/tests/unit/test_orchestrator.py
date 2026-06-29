@@ -32,6 +32,7 @@ from creator_engine_validator.forge import open_change
 from creator_engine_validator.runner import (
     BackendUnavailable,
     CollectedEvidence,
+    OsNativeCapability,
     PolicyRejected,
     ProvisionedHandle,
     ProvisionRequest,
@@ -235,6 +236,52 @@ def test_gvisor_backend_unavailable_raises_backend_unavailable(monkeypatch):
     monkeypatch.setattr(gvisor_proxy_backend.shutil, "which", lambda _binary: None)
     with pytest.raises(BackendUnavailable):
         run_plan(valid_policy("gvisor-proxy"), "run-1", ("echo", "hi"), approved())
+
+
+def test_os_native_selected_then_fails_closed_without_required_primitives(monkeypatch):
+    from creator_engine_validator.runner import os_native_backend
+
+    monkeypatch.setattr(
+        os_native_backend,
+        "probe_os_native_capability",
+        lambda: OsNativeCapability(
+            platform_name="Linux",
+            bwrap_path=None,
+            landlock_abi=None,
+            seccomp_available=True,
+            proxy_path="/usr/bin/proxy",
+            missing=("bwrap", "landlock"),
+        ),
+    )
+
+    with pytest.raises(BackendUnavailable) as exc:
+        run_plan(valid_policy("os-native"), "run-1", ("echo", "hi"), approved())
+    message = str(exc.value)
+    assert "required Linux primitives" in message
+    assert "missing: bwrap, landlock" in message
+    assert "gvisor-proxy" in message  # only named as a forbidden silent fallback
+
+
+def test_os_native_selected_with_primitives_available_reaches_execution_gate(monkeypatch):
+    from creator_engine_validator.runner import os_native_backend
+
+    monkeypatch.setattr(
+        os_native_backend,
+        "probe_os_native_capability",
+        lambda: OsNativeCapability(
+            platform_name="Linux",
+            bwrap_path="/usr/bin/bwrap",
+            landlock_abi=4,
+            seccomp_available=True,
+            proxy_path="/usr/bin/proxy",
+            missing=(),
+        ),
+    )
+
+    with pytest.raises(BackendUnavailable) as exc:
+        run_plan(valid_policy("os-native"), "run-1", ("echo", "hi"), approved())
+    assert "capability probe passed" in str(exc.value)
+    assert "refusing to run a command rather than launching unsandboxed" in str(exc.value)
 
 
 def test_gvisor_subprocess_runner_available_when_registered_runtime_present(monkeypatch, tmp_path):

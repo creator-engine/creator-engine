@@ -508,9 +508,14 @@ def test_solo_pilot_materializes_os_native_with_no_runsc_or_proxy(tmp_path):
     assert verification.get("privileged_runtime_required") is False
     # the gVisor-only privileged runtime never appears for os-native
     assert "runsc" not in json.dumps(verification)
-    # MAJOR-3: the held-mechanism PREREQUISITES surface informationally (bwrap+proxy)
+    # MAJOR-3: the held-mechanism PREREQUISITES surface informationally (OQ-1 Option A)
     # — distinct from the no-sudo installable deps plan, which has neither.
-    assert set(verification["held_mechanism_prerequisites"]) == {"bwrap", "proxy"}
+    assert set(verification["held_mechanism_prerequisites"]) == {
+        "bwrap",
+        "landlock",
+        "seccomp",
+        "proxy",
+    }
 
     # the host-dependency plan is backend-driven: NO privileged runsc/proxy step
     host_leg = _leg(summary, "host_dependencies")

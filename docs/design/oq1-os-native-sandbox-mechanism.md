@@ -1,6 +1,6 @@
 # OQ-1 OS-Native Sandbox Mechanism
 
-Status: proposed decision package
+Status: ratified 2026-06-29 (Option A)
 
 ## Problem Statement
 
@@ -11,13 +11,12 @@ default: `gvisor-proxy` remains the conservative default backend for runtime
 policy records and shared-host deployments.
 
 The Tranche 1 scaffold is already registered as `BACKEND_KEY = "os-native"`.
-Its current behavior is fail-closed: a dirty runtime-policy record is rejected
-by `RunnerBackend.provision` before backend-specific provisioning runs; a clean
-record reaches `_provision`, then `os-native` raises `BackendUnavailable` because
-the mechanism decision is still held. The current Linux primitive names are
-exactly `("bwrap", "proxy")`. They are documented and probed prerequisites, not
-auto-installed dependencies. For a privileged runtime today, the existing held
-path directs users to `gvisor-proxy`.
+Its behavior is fail-closed: a dirty runtime-policy record is rejected by
+`RunnerBackend.provision` before backend-specific provisioning runs; a clean
+record reaches `_provision`, then `os-native` probes the ratified Linux
+primitive set `("bwrap", "landlock", "seccomp", "proxy")`. They are documented
+and probed prerequisites, not auto-installed dependencies. For a privileged
+runtime today, records that omit a backend still resolve to `gvisor-proxy`.
 
 The decision needed now is narrower than "make os-native the default." The
 decision is: which mechanism should a user-elected Tier-1 `os-native` backend
@@ -233,9 +232,9 @@ Fail-closed behavior:
 - Partial setup failure: tear down created state and report no live runtime.
 - Evidence ambiguity: report not enforced rather than inferred enforcement.
 
-## Ratification Ask
+## Ratified Decision
 
-Please ratify this precise decision:
+The following precise decision is ratified:
 
 > For OQ-1, the live `os-native` Tier-1 backend will use native OS primitives
 > through a CE adapter contract: Linux `bwrap` + Landlock + seccomp plus a
