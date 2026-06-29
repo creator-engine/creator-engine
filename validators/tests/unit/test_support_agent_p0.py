@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,14 @@ from creator_engine_validator import (
 )
 
 _PKG = Path(support_corpus.__file__).resolve().parent
+
+
+@pytest.fixture(autouse=True)
+def _isolated_usage_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(
+        support_runtime.ConfiguredCommandModelRunner.ENV_USAGE_LOG,
+        str(tmp_path / "support-usage.ndjson"),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -203,6 +213,7 @@ def test_ask_and_support_registered_and_internal():
 
 
 def test_ask_without_configured_model_refuses_no_faked_answer(capsys, monkeypatch):
+    log_path = Path(os.environ[support_runtime.ConfiguredCommandModelRunner.ENV_USAGE_LOG])
     monkeypatch.delenv(support_runtime.ConfiguredCommandModelRunner.ENV_CMD, raising=False)
     rc = ce_cli.main(["ask", "how", "do", "I", "install"])
     assert rc == 0
@@ -211,6 +222,19 @@ def test_ask_without_configured_model_refuses_no_faked_answer(capsys, monkeypatc
     # It must NOT fabricate an answer (no invented install command).
     assert "curl" not in out
     assert "pip install" not in out
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    assert len(records) == 1
+    assert records[0]["accepted"] is True
+    assert records[0]["model_id"] == support_runtime.MODEL_ID
+    assert records[0]["question_category"] == "install"
+    assert records[0]["reason"] == "model-refusal"
+    assert set(records[0]) == {
+        "accepted",
+        "corpus_sha256",
+        "model_id",
+        "question_category",
+        "reason",
+    }
 
 
 def test_ask_support_alias_dispatches():
