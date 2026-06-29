@@ -3,7 +3,7 @@
 Covers the four P0 deliverables built in this slice:
   * P0.1 corpus allowlist + confidentiality intersection (support_corpus)
   * P0.3 read-only PreToolUse profile (support_profile)
-  * P0.4 honest `ce ask` scaffold (support_runtime + ce_cli registration)
+  * P0.4/P1 dev-gated `ce ask` runtime (support_runtime + ce_cli registration)
   * P0.5 system-prompt contract asset
 """
 from __future__ import annotations
@@ -169,12 +169,12 @@ def test_ask_and_support_registered_and_internal():
     assert {"ask", "support"} <= ce_cli.INTERNAL_COMMAND_GROUPS
 
 
-def test_ask_scaffold_is_honest_no_faked_answer(capsys):
+def test_ask_without_configured_model_refuses_no_faked_answer(capsys, monkeypatch):
+    monkeypatch.delenv(support_runtime.ConfiguredCommandModelRunner.ENV_CMD, raising=False)
     rc = ce_cli.main(["ask", "how", "do", "I", "install"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert support_runtime.SCAFFOLD_NOTICE in out
-    assert "not answered" in out or "scaffold" in out.lower()
+    assert out.strip() == support_runtime.REFUSAL_ANSWER
     # It must NOT fabricate an answer (no invented install command).
     assert "curl" not in out
     assert "pip install" not in out
@@ -185,7 +185,7 @@ def test_ask_support_alias_dispatches():
     assert rc == 0
 
 
-def test_ask_json_status_reports_unwired():
+def test_ask_json_status_reports_wired_runtime():
     import json as _json
 
     buf = io.StringIO()
@@ -195,10 +195,12 @@ def test_ask_json_status_reports_unwired():
         rc = ce_cli.main(["ask", "--json"])
     assert rc == 0
     payload = _json.loads(buf.getvalue())
-    assert payload["wired"] is False
-    assert payload["status"] == "scaffold"
+    assert payload["wired"] is True
+    assert payload["status"] == "available"
+    assert payload["model"] == support_runtime.MODEL_ID
     # foundations must surface the eligible corpus (real, computed)
     assert "eligible_corpus_files" in payload["foundations"]
+    assert "bundle_skills" in payload["foundations"]
 
 
 # --------------------------------------------------------------------------
