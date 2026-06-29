@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=8
 
-AUTHORIZED_PATHS_SHA256=0d663b14b1631b98bc60f21d3da8224b6c1c717ff5202fb39cbd10481be28a47
+AUTHORIZED_PATHS_SHA256=114a7cfba372e4417cbf1da09466444bd0376dbbc38da32fcfab7aa136594ccd
 
 ```text
 .ce/changelog/ce-corpus-scrub-contributing.md
@@ -18,4 +18,5 @@ docs/guide/contributing-to-ce.md
 validators/creator_engine_validator/public_docs_confidentiality.py
 validators/creator_engine_validator/support_corpus_allowlist.yaml
 validators/tests/unit/test_support_agent_p0.py
+validators/tests/unit/test_support_agent_phase1.py
 ```

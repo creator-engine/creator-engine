@@ -25,10 +25,10 @@ def test_projector_yields_deterministic_bundle_from_eligible_corpus():
 
 
 def test_projector_excludes_known_pending_even_if_manifest_lists_it(tmp_path: Path, monkeypatch):
-    (tmp_path / "docs" / "guide").mkdir(parents=True)
+    (tmp_path / "docs" / "contracts").mkdir(parents=True)
     (tmp_path / "README.md").write_text("Creator Engine install docs\n", encoding="utf-8")
-    pending = tmp_path / "docs" / "guide" / "contributing-to-ce.md"
-    pending.write_text("Product-looking doc still pending cleanup\n", encoding="utf-8")
+    pending = tmp_path / "docs" / "contracts" / "devops-privileged-action-broker.md"
+    pending.write_text("Internal broker contract still pending cleanup\n", encoding="utf-8")
     manifest = tmp_path / "support_corpus_allowlist.yaml"
     manifest.write_text(
         "\n".join(
@@ -39,10 +39,10 @@ def test_projector_excludes_known_pending_even_if_manifest_lists_it(tmp_path: Pa
                 "    description: Install docs.",
                 "    serve:",
                 "      - README.md",
-                "  onboarding:",
-                "    description: Pending doc.",
+                "  contracts:",
+                "    description: Pending contract doc.",
                 "    serve:",
-                "      - docs/guide/contributing-to-ce.md",
+                "      - docs/contracts/devops-privileged-action-broker.md",
                 "",
             ]
         ),
@@ -53,9 +53,9 @@ def test_projector_excludes_known_pending_even_if_manifest_lists_it(tmp_path: Pa
     bundle = support_bundle.build_support_bundle(repo_root=tmp_path)
 
     assert "README.md" in bundle.citation_paths()
-    assert "docs/guide/contributing-to-ce.md" not in bundle.citation_paths()
+    assert "docs/contracts/devops-privileged-action-broker.md" not in bundle.citation_paths()
     assert any(
-        rel == "docs/guide/contributing-to-ce.md" and "KNOWN_PENDING" in reason
+        rel == "docs/contracts/devops-privileged-action-broker.md" and "KNOWN_PENDING" in reason
         for rel, reason in bundle.rejected
     )
 
