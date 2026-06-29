@@ -7,13 +7,16 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# This EnvironmentFile must provide CE_EGRESS_SELF_REVIEW_SOCKET and
-# CE_EGRESS_SELF_REVIEW_CONFIG. For vault-backed seats (secret_ref) it MUST also
-# carry BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT, BROKER_APPROLE_ROLE_ID, and
-# BROKER_APPROLE_SECRET_ID — the broker fails closed (no fallback to disk) if any
-# required vault var is missing for a secret_ref seat.
-EnvironmentFile=%h/.config/creator-engine/ce-egress-self-review.env
+# Default inert: APPROVE is refused unless the EnvironmentFile overrides this
+# with CE_EGRESS_RUN_MODE=strangeLoop and the Operator restarts the unit.
 Environment=CE_EGRESS_RUN_MODE=dev
+# This EnvironmentFile must provide CE_EGRESS_SELF_REVIEW_SOCKET,
+# CE_EGRESS_SELF_REVIEW_CONFIG, and CE_EGRESS_RUN_MODE=dev by default. For
+# vault-backed seats (secret_ref) it MUST also carry BAO_ADDR/VAULT_ADDR,
+# BAO_CACERT/VAULT_CACERT, BROKER_APPROLE_ROLE_ID, and BROKER_APPROLE_SECRET_ID
+# — the broker fails closed (no fallback to disk) if any required vault var is
+# missing for a secret_ref seat.
+EnvironmentFile=%h/.config/creator-engine/ce-egress-self-review.env
 WorkingDirectory=/workspace/creator-engine
 Sockets=ce-egress-self-review.socket
 ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_review_broker.py \

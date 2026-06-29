@@ -57,6 +57,30 @@ explicit ambient-auth flag. Set optional `CE_BELT_LABELS` to pass one scoped
 `--label` filter such as `enhancement`; leave it unset to observe the default
 pickup queries.
 
+## Egress Self-Review Broker Run Mode
+
+`ce-egress-self-review.service` uses its own environment file, not
+`gate-daemons.env`:
+
+- user: `~/.config/creator-engine/ce-egress-self-review.env`
+- system: `/etc/creator-engine/ce-egress-self-review.env`
+
+Keep the committed and deployed default inert:
+
+```sh
+CE_EGRESS_SELF_REVIEW_SOCKET=/run/ce-egress/dev-3-review.sock
+CE_EGRESS_SELF_REVIEW_CONFIG=/etc/ce-egress/broker-dev3.json
+CE_EGRESS_RUN_MODE=dev
+```
+
+With `CE_EGRESS_RUN_MODE=dev`, the broker starts with `--run-mode dev` and
+autonomous `APPROVE` remains refused. To arm Surface-B later, the Operator must
+set `CE_EGRESS_RUN_MODE=strangeLoop` in that environment file and restart the
+self-review broker unit. To roll back/disarm, set `CE_EGRESS_RUN_MODE=dev` and
+restart the same unit. This repository change only wires regenerated units for
+that future env-flip plus restart; it does not perform the env flip, restart,
+redeploy, or any live arming act.
+
 ## Detached Codex Seat Template
 
 `ce-codex-seat@.service` is a system-level template for contained Codex seats.

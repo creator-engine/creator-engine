@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import os
 import subprocess
 from pathlib import Path
 
@@ -14,8 +15,11 @@ SEAT_UNIT_NAME = "ce-codex-seat@.service"
 
 
 def _read_unit(repo_root: Path, name: str) -> configparser.ConfigParser:
+    return _read_unit_path(repo_root / "deploy" / "systemd" / name)
+
+
+def _read_unit_path(path: Path) -> configparser.ConfigParser:
     parser = configparser.ConfigParser(interpolation=None)
-    path = repo_root / "deploy" / "systemd" / name
     with path.open(encoding="utf-8") as fh:
         parser.read_file(fh)
     return parser
@@ -204,6 +208,104 @@ def test_egress_self_review_unit_socket_is_parametric(repo_root: Path):
     assert "$CE_EGRESS_SELF_REVIEW_SOCKET" in exec_start
     assert "$CE_EGRESS_SELF_REVIEW_CONFIG" in exec_start
     assert "/run/ce-egress/dev-3-review.sock" not in exec_start
+
+
+def test_egress_self_review_unit_run_mode_is_env_driven_and_default_dev(repo_root: Path):
+    unit = _read_unit(repo_root, EGRESS_SELF_REVIEW_UNIT)
+    service = unit["Service"]
+    exec_start = service["ExecStart"]
+
+    assert service["Environment"] == "CE_EGRESS_RUN_MODE=dev"
+    assert service["EnvironmentFile"].endswith("ce-egress-self-review.env")
+    assert "--run-mode ${CE_EGRESS_RUN_MODE}" in exec_start
+    assert "strangeLoop" not in service["Environment"]
+
+
+def test_installer_renders_egress_service_specific_env_files(tmp_path: Path, repo_root: Path):
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").mkdir()
+    fake_python = fake_repo / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+
+    env_dir = tmp_path / "env"
+    env_dir.mkdir()
+    gate_env = env_dir / "gate-daemons.env"
+    egress_broker_env = env_dir / "ce-egress-broker.env"
+    egress_self_review_env = env_dir / "ce-egress-self-review.env"
+    gate_env.write_text(
+        "CE_GATE_REPO=creator-engine/creator-engine\n"
+        "CE_GATE_AUTHORIZED_REVIEWERS=ce-dev-1\n"
+        "CE_BELT_IDENTITY=ce-dev-4\n",
+        encoding="utf-8",
+    )
+    egress_broker_env.write_text(
+        "CE_EGRESS_BROKER_SOCKET=/run/ce-egress/dev-3.sock\n"
+        "CE_EGRESS_BROKER_SEAT=dev-3\n"
+        "CE_EGRESS_BROKER_REPO=/workspace/creator-engine\n"
+        "CE_EGRESS_BROKER_CONFIG=/etc/ce-egress/broker-dev3.json\n",
+        encoding="utf-8",
+    )
+    egress_self_review_env.write_text(
+        "CE_EGRESS_SELF_REVIEW_SOCKET=/run/ce-egress/dev-3-review.sock\n"
+        "CE_EGRESS_SELF_REVIEW_CONFIG=/etc/ce-egress/broker-dev3.json\n"
+        "CE_EGRESS_RUN_MODE=dev\n",
+        encoding="utf-8",
+    )
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    systemctl_calls = tmp_path / "systemctl.calls"
+    fake_systemctl = fake_bin / "systemctl"
+    fake_systemctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$SYSTEMCTL_CALLS\"\n",
+        encoding="utf-8",
+    )
+    fake_systemctl.chmod(0o755)
+
+    unit_dir = tmp_path / "units"
+    script = repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "SYSTEMCTL_CALLS": str(systemctl_calls),
+    }
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            "--repo-root",
+            str(fake_repo),
+            "--unit-dir",
+            str(unit_dir),
+            "--env-file",
+            str(gate_env),
+            "--egress-broker-env-file",
+            str(egress_broker_env),
+            "--egress-self-review-env-file",
+            str(egress_self_review_env),
+            "--no-start",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    rendered_review = _read_unit_path(unit_dir / EGRESS_SELF_REVIEW_UNIT)
+    rendered_broker = _read_unit_path(unit_dir / EGRESS_BROKER_UNIT)
+    rendered_gate = _read_unit_path(unit_dir / "ce-integrator-daemon.service")
+
+    assert rendered_review["Service"]["EnvironmentFile"] == str(egress_self_review_env)
+    assert rendered_review["Service"]["Environment"] == "CE_EGRESS_RUN_MODE=dev"
+    assert "--run-mode ${CE_EGRESS_RUN_MODE}" in rendered_review["Service"]["ExecStart"]
+    assert rendered_broker["Service"]["EnvironmentFile"] == str(egress_broker_env)
+    assert rendered_gate["Service"]["EnvironmentFile"] == str(gate_env)
+    assert "start " not in systemctl_calls.read_text(encoding="utf-8")
 
 
 def test_egress_socket_units_own_default_run_paths(repo_root: Path):
