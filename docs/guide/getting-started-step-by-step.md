@@ -21,6 +21,14 @@ see and what each step produces.*
 
 ---
 
+> **Prerequisite (external installs).** CE verifies its signed install spec with
+> `ssh-keygen` (from OpenSSH). If it isn't already present, install it first —
+> Debian/Ubuntu: `sudo apt-get install -y openssh-client`; Fedora/RHEL:
+> `sudo dnf install -y openssh-clients`; macOS ships it. The install refuses
+> early with this hint if it's missing.
+
+---
+
 ## Phase 0 — Orientation (read this once, then start)
 
 ### What Creator Engine is, in one paragraph
