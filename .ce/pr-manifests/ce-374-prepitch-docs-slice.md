@@ -1,0 +1,18 @@
+# PR path manifest — ce-374-prepitch-docs-slice · Rendered Creator Engine overview docs page
+
+This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-374-prepitch-docs-slice` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
+
+- **Declared work class:** `story`
+
+Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
+
+AUTHORIZED_PATHS_COUNT=4
+
+AUTHORIZED_PATHS_SHA256=390a1813d9af029ccb52631f89e176a34e4d329d160a4f4392770e86071f27f5
+
+```text
+.ce/changelog/ce-374-prepitch-docs-slice.md
+.ce/pr-manifests/ce-374-prepitch-docs-slice.md
+docs/index.html
+docs/what-is-creator-engine.html
+```
