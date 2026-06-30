@@ -418,6 +418,17 @@ def _run_check(name: str, func: Callable[[], str | None], out: TextIO, err: Text
     return CheckDetail(name=name, ok=True, detail=detail)
 
 
+def _fleet_manifest_guard(repo_root: Path, out: TextIO) -> str:
+    from .checks.fleet_manifest_guard import run as run_fleet_manifest_guard
+
+    result = run_fleet_manifest_guard([repo_root])
+    if result.errors:
+        for error in result.errors:
+            print(error.format(), file=out)
+        raise RuntimeError(f"{len(result.errors)} fleet manifest violation(s)")
+    return "fleet manifests are schema-valid and free of CE-internal identifiers"
+
+
 def _print_summary(checks: Sequence[CheckDetail], out: TextIO) -> None:
     ok = all(check.ok for check in checks)
     print(f"{'PASS' if ok else 'FAIL'}: PR preflight", file=out)
@@ -557,6 +568,14 @@ def run_preflight(
                 ),
                 "support corpus is a subset of the confidentiality-clean surface",
             )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "Fleet manifest schema and CE-internal identifier guard",
+            lambda: _fleet_manifest_guard(config.repo_root, out),
             out,
             err,
         )
