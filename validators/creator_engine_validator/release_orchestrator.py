@@ -41,6 +41,21 @@ from .release_publish import (
 INTENDED_PUBLIC_ANCHOR = "ce-root-v1"
 _PARTS = ("major", "minor", "patch")
 _VERSION_ASSIGNMENT_RE = re.compile(r'^__version__ = "([^"]+)"$', re.MULTILINE)
+_DEFAULT_RELEASE_TAG_TEST_COMMAND = (
+    sys.executable,
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "validators/tests/",
+    "-m",
+    "not wheel_bake_gate",
+    "-q",
+    "-n",
+    "auto",
+    "--dist",
+    "loadgroup",
+)
 
 
 class ReleaseOrchestrationError(RuntimeError):
@@ -192,7 +207,12 @@ def _resolve_requested_version(
     return next_version(baseline, part)
 
 
-def _default_validate_pr_runner(repo_root: Path) -> ValidatePrResult:
+def _default_validate_pr_runner(
+    repo_root: Path,
+    *,
+    preflight_head_ref: str | None,
+    preflight_declared_work_class: str | None,
+) -> ValidatePrResult:
     command = (
         sys.executable,
         "-m",
@@ -201,8 +221,28 @@ def _default_validate_pr_runner(repo_root: Path) -> ValidatePrResult:
         "--repo-root",
         str(repo_root),
     )
+    if preflight_head_ref:
+        command += ("--head-ref", preflight_head_ref)
+    if preflight_declared_work_class:
+        command += ("--declared-work-class", preflight_declared_work_class)
     proc = subprocess.run(command, check=False, capture_output=True, text=True)
     return ValidatePrResult(command=command, returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
+
+
+def _default_release_tag_runner(repo_root: Path) -> ValidatePrResult:
+    proc = subprocess.run(
+        _DEFAULT_RELEASE_TAG_TEST_COMMAND,
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return ValidatePrResult(
+        command=_DEFAULT_RELEASE_TAG_TEST_COMMAND,
+        returncode=proc.returncode,
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+    )
 
 
 def _coerce_validate_pr_result(
@@ -229,18 +269,36 @@ def _run_preflight(
     requested_version: str,
     require_clean_head: bool,
     validate_pr_runner: ValidatePrRunner | None,
+    preflight_mode: str,
+    preflight_head_ref: str | None,
+    preflight_declared_work_class: str | None,
 ) -> PreflightResult:
     head = _head_sha(repo_root)
     if require_clean_head:
         _assert_clean_head(repo_root)
-    runner = validate_pr_runner or _default_validate_pr_runner
-    default_command = ("ce", "validate-pr", "--repo-root", str(repo_root))
-    validate_pr = _coerce_validate_pr_result(runner(repo_root), default_command=default_command)
+    if preflight_mode not in {"validate-pr", "release-tag"}:
+        raise ReleaseOrchestrationError(
+            f"invalid release preflight mode {preflight_mode!r}; expected 'validate-pr' or 'release-tag'"
+        )
+    if validate_pr_runner is not None:
+        default_command = ("ce", "validate-pr", "--repo-root", str(repo_root))
+        validate_pr = _coerce_validate_pr_result(
+            validate_pr_runner(repo_root),
+            default_command=default_command,
+        )
+    elif preflight_mode == "release-tag":
+        validate_pr = _default_release_tag_runner(repo_root)
+    else:
+        validate_pr = _default_validate_pr_runner(
+            repo_root,
+            preflight_head_ref=preflight_head_ref,
+            preflight_declared_work_class=preflight_declared_work_class,
+        )
     if validate_pr.returncode != 0:
         detail = (validate_pr.stderr or validate_pr.stdout).strip()
         suffix = f": {detail}" if detail else ""
         raise ReleaseOrchestrationError(
-            f"ce validate-pr preflight failed with exit {validate_pr.returncode}{suffix}"
+            f"release preflight failed with exit {validate_pr.returncode}{suffix}"
         )
     return PreflightResult(
         requested_version=requested_version,
@@ -263,6 +321,9 @@ def orchestrate_release(
     force: bool = False,
     dry_run: bool = False,
     require_clean_head: bool = True,
+    preflight_mode: str = "validate-pr",
+    preflight_head_ref: str | None = None,
+    preflight_declared_work_class: str | None = None,
     validate_pr_runner: ValidatePrRunner | None = None,
     stage_release: StageReleaseFn | None = None,
     build_wheel=None,
@@ -287,6 +348,9 @@ def orchestrate_release(
         requested_version=requested_version,
         require_clean_head=require_clean_head,
         validate_pr_runner=validate_pr_runner,
+        preflight_mode=preflight_mode,
+        preflight_head_ref=preflight_head_ref,
+        preflight_declared_work_class=preflight_declared_work_class,
     )
 
     try:

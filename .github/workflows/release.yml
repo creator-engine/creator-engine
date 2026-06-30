@@ -112,6 +112,8 @@ jobs:
             --out "${stage_dir}"
             --changelog-out "${packet_dir}/RELEASE-NOTES.md"
             --github-out "${packet_dir}/GITHUB-RELEASE-BODY.md"
+            --preflight-mode release-tag
+            --preflight-head-ref "${TAG_NAME}"
             --force
           )
           if [[ "${DRY_RUN}" == "true" ]]; then
@@ -156,6 +158,17 @@ jobs:
                       "```bash",
                       payload["signing_command"],
                       "```",
+                      "",
+                      "Verified post-sign finalize command:",
+                      "",
+                      "```bash",
+                      "python -m creator_engine_validator --json release-finalize "
+                      f"--stage staged-release --signature-file llms-install.md.sig.b64 "
+                      f"--out signed-release-{payload['version']} --force",
+                      "```",
+                      "",
+                      "This finalize seam verifies the supplied public SSHSIG against ce-root-v1 "
+                      "and prepares publishable bytes. It does not sign, publish Pages, or mutate the draft release.",
                       "",
                       "Release body:",
                       "",

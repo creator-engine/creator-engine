@@ -336,6 +336,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run build/parity/staging verification without promoting the output directory",
     )
 
+    release_finalize = sub.add_parser(
+        "release-finalize",
+        help="verify an Operator SSHSIG and prepare publishable signed release artifacts; no sign/publish",
+    )
+    release_finalize.add_argument("--stage", required=True, help="staged release directory from `release`")
+    sig_src = release_finalize.add_mutually_exclusive_group(required=True)
+    sig_src.add_argument("--signature-base64", help="base64-encoded SSHSIG over llms-install.canonical")
+    sig_src.add_argument("--signature-file", help="file containing the base64-encoded SSHSIG")
+    release_finalize.add_argument("--out", required=True, help="explicit output directory for signed publishable artifacts")
+    release_finalize.add_argument(
+        "--force",
+        action="store_true",
+        help="replace a non-empty explicit output directory atomically",
+    )
+
     release_bump = sub.add_parser(
         "release-bump",
         help="drive the canonical version sources to a release target (staged only; no commit/sign/publish)",
@@ -392,6 +407,26 @@ def _build_parser() -> argparse.ArgumentParser:
     release.add_argument("--changelog-out", default=None, help="also write aggregated release notes to this file")
     release.add_argument("--github-out", default=None, help="also write the GitHub release body markdown to this file")
     release.add_argument("--force", action="store_true", help="replace a non-empty output directory atomically")
+    release.add_argument(
+        "--preflight-mode",
+        choices=["validate-pr", "release-tag"],
+        default="validate-pr",
+        help=(
+            "preflight gate to run before staging; release-tag avoids PR-diff carrier "
+            "assumptions for detached release tag checkouts"
+        ),
+    )
+    release.add_argument(
+        "--preflight-head-ref",
+        default=None,
+        help="explicit head ref for validate-pr preflight when the checkout is detached",
+    )
+    release.add_argument(
+        "--preflight-declared-work-class",
+        default=None,
+        choices=["tiny", "story", "feature", "epic"],
+        help="explicit work class for validate-pr preflight when carrier discovery is not desired",
+    )
     release.add_argument(
         "--dry-run",
         action="store_true",
@@ -703,6 +738,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _pco_release(args)
     if subcommand == "release-stage":
         return _release_stage(args)
+    if subcommand == "release-finalize":
+        return _release_finalize(args)
     if subcommand == "release-bump":
         return _release_bump(args)
     if subcommand == "release-changelog":
@@ -753,6 +790,49 @@ def _release_stage(args) -> int:
         print(f"canonical spec: {result.canonical_spec_sha256}")
         print(f"signature placeholder: {result.signature_placeholder}")
         print(f"operator signing command: {result.signing_command}")
+    return 0
+
+
+def _release_finalize(args) -> int:
+    from .release_publish import ReleasePublishError, finalize_signed_release
+
+    if args.signature_file:
+        try:
+            signature_base64 = Path(args.signature_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            print(f"ERROR: release-finalize refused: could not read signature file: {exc}", file=sys.stderr)
+            return 1
+    else:
+        signature_base64 = args.signature_base64
+
+    try:
+        result = finalize_signed_release(
+            stage=args.stage,
+            signature_base64=signature_base64,
+            out=args.out,
+            force=args.force,
+        )
+    except ReleasePublishError as exc:
+        print(f"ERROR: release-finalize refused: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "out_dir": str(result.out_dir),
+        "version": result.version,
+        "canonical_spec_sha256": result.canonical_spec_sha256,
+        "signed_spec_sha256": result.signed_spec_sha256,
+        "signature_sha256": result.signature_sha256,
+        "signing_key_id": result.signing_key_id,
+        "artifacts": [artifact.__dict__ for artifact in result.artifacts],
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"release-finalize: verified signed artifacts at {result.out_dir}")
+        print(f"version: {result.version}")
+        print(f"canonical spec sha256: {result.canonical_spec_sha256}")
+        print(f"signed spec sha256: {result.signed_spec_sha256}")
+        print(f"signature sha256: {result.signature_sha256}")
+        print("publish seam: upload this directory only after normal release ratification")
     return 0
 
 
@@ -861,6 +941,9 @@ def _release(args) -> int:
             github_out=args.github_out,
             force=args.force,
             dry_run=args.dry_run,
+            preflight_mode=args.preflight_mode,
+            preflight_head_ref=args.preflight_head_ref,
+            preflight_declared_work_class=args.preflight_declared_work_class,
         )
     except ReleaseOrchestrationError as exc:
         print(f"ERROR: release refused: {exc}", file=sys.stderr)

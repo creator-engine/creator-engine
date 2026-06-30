@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 from . import version as version_runtime
+from .checks import install_spec_signature_guard
 from .wheel_bake import WheelManifest, build_app_wheel_from_source
 from .wheel_source_parity import verify_wheel_matches_source
 
@@ -34,6 +35,7 @@ SIGNING_NAMESPACE = "ce-spec-v1"
 TRUST_ROOT_ID = "ce-root-v1"
 ALLOWED_SIGNING_KEY_IDS = ("ce-root-v1", "ce-dev1-root-v1")
 SHA256SUMS = "SHA256SUMS"
+INSTALL_SH = "install.sh"
 
 SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -61,6 +63,17 @@ class ReleaseStageResult:
     canonical_spec_sha256: str
     signature_placeholder: str
     signing_command: str
+    artifacts: tuple[StagedArtifact, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class ReleaseFinalizeResult:
+    out_dir: Path
+    version: str
+    canonical_spec_sha256: str
+    signed_spec_sha256: str
+    signature_sha256: str
+    signing_key_id: str
     artifacts: tuple[StagedArtifact, ...] = field(default_factory=tuple)
 
 
@@ -462,12 +475,80 @@ def _stage_manifest(
     return "".join(lines)
 
 
+def _finalize_manifest(
+    *,
+    version: str,
+    canonical_spec_sha256: str,
+    signed_spec_sha256: str,
+    signature_sha256: str,
+    signing_key_id: str,
+    artifacts: tuple[StagedArtifact, ...],
+) -> str:
+    lines = [
+        "kind: ce-release-finalize-manifest\n",
+        'schema_version: "1"\n',
+        f"package_version: {version}\n",
+        f"canonical_spec_sha256: {canonical_spec_sha256}\n",
+        f"signed_spec_sha256: {signed_spec_sha256}\n",
+        f"signature_sha256: {signature_sha256}\n",
+        f"signing_key_id: {signing_key_id}\n",
+        f"signing_namespace: {SIGNING_NAMESPACE}\n",
+        "artifacts:\n",
+    ]
+    for artifact in artifacts:
+        lines.extend(
+            [
+                f"  - path: {artifact.path}\n",
+                f"    sha256: {artifact.sha256}\n",
+                f"    size: {artifact.size}\n",
+            ]
+        )
+    return "".join(lines)
+
+
 def _collect_artifacts(root: Path) -> tuple[StagedArtifact, ...]:
     artifacts: list[StagedArtifact] = []
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         rel = path.relative_to(root).as_posix()
         artifacts.append(StagedArtifact(path=rel, sha256=_sha256(path), size=path.stat().st_size))
     return tuple(artifacts)
+
+
+def _collect_publish_artifacts(root: Path) -> tuple[StagedArtifact, ...]:
+    return tuple(
+        artifact
+        for artifact in _collect_artifacts(root)
+        if artifact.path != "release-finalize-manifest.yml"
+    )
+
+
+def _manifest_value(text: str, key: str) -> str:
+    match = re.search(rf"^{re.escape(key)}: (.+)$", text, flags=re.MULTILINE)
+    if match is None:
+        raise ReleasePublishError(f"release-stage-manifest.yml missing {key!r}")
+    return match.group(1).strip()
+
+
+def _verify_stage_install_parity(stage_root: Path, version: str) -> None:
+    served = stage_root / INSTALL_SH
+    mirrored = stage_root / "downloads" / version / INSTALL_SH
+    sums = stage_root / "downloads" / version / SHA256SUMS
+    for path, label in (
+        (served, "staged root install.sh"),
+        (mirrored, "staged mirrored install.sh"),
+        (sums, "staged SHA256SUMS"),
+    ):
+        _require_file(path, label)
+    served_sha = _sha256(served)
+    mirrored_sha = _sha256(mirrored)
+    entries = _parse_sha256s(sums)
+    entry_sha = entries.get(INSTALL_SH)
+    if entry_sha != served_sha or mirrored_sha != served_sha:
+        raise ReleasePublishError(
+            "install artifact parity failed: "
+            f"install.sh={served_sha}, downloads/{version}/install.sh={mirrored_sha}, "
+            f"SHA256SUMS[{INSTALL_SH}]={entry_sha}"
+        )
 
 
 def _ensure_output_target(out: Path, *, force: bool) -> None:
@@ -666,3 +747,108 @@ def stage_signed_release(
             version_file.unlink(missing_ok=True)
         else:
             version_file.write_bytes(original_version_bytes)
+
+
+def finalize_signed_release(
+    *,
+    stage: Path | str,
+    signature_base64: str,
+    out: Path | str,
+    force: bool = False,
+    verifier: install_spec_signature_guard.Verifier | None = None,
+) -> ReleaseFinalizeResult:
+    """Verify an Operator SSHSIG and promote a publishable signed stage.
+
+    This is the post-sign seam only: it accepts public signature bytes, verifies
+    them against the pinned ``ce-root-v1`` public trust root, replaces exactly
+    one staged placeholder, and emits a publishable directory. It never reads a
+    private key, signs, pushes, publishes Pages, or edits GitHub releases.
+    """
+    stage_root = Path(stage).resolve()
+    output = Path(out).resolve()
+    if not stage_root.is_dir():
+        raise ReleasePublishError(f"staged release directory does not exist: {stage_root}")
+    _ensure_output_target(output, force=force)
+
+    manifest_path = stage_root / "release-stage-manifest.yml"
+    canonical_path = stage_root / "llms-install.canonical"
+    staged_spec_path = stage_root / "llms-install.md"
+    _require_file(manifest_path, "stage manifest")
+    _require_file(canonical_path, "canonical install spec")
+    _require_file(staged_spec_path, "staged install spec")
+
+    manifest = manifest_path.read_text(encoding="utf-8")
+    version = _manifest_value(manifest, "package_version")
+    signing_key_id = _manifest_value(manifest, "signing_key_id")
+    if signing_key_id != SIGNING_KEY_ID:
+        raise ReleasePublishError(
+            f"post-sign finalize only accepts public {SIGNING_KEY_ID}; staged signer is {signing_key_id!r}"
+        )
+    expected_canonical_sha = _manifest_value(manifest, "canonical_spec_sha256")
+    canonical = canonical_path.read_bytes()
+    actual_canonical_sha = hashlib.sha256(canonical).hexdigest()
+    if expected_canonical_sha != actual_canonical_sha:
+        raise ReleasePublishError(
+            f"canonical spec sha mismatch: manifest={expected_canonical_sha}, actual={actual_canonical_sha}"
+        )
+
+    signature = signature_base64.strip()
+    if not signature:
+        raise ReleasePublishError("signature_base64 must not be empty")
+    try:
+        signature_bytes = signature.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ReleasePublishError("signature_base64 must be ASCII") from exc
+    signature_sha = hashlib.sha256(signature_bytes).hexdigest()
+
+    staged_spec = staged_spec_path.read_text(encoding="utf-8")
+    placeholder_count = staged_spec.count(PLACEHOLDER_SIGNATURE)
+    if placeholder_count != 1:
+        raise ReleasePublishError(
+            f"expected exactly one placeholder signature in staged spec, found {placeholder_count}"
+        )
+    signed_spec = staged_spec.replace(PLACEHOLDER_SIGNATURE, signature, 1)
+    if hashlib.sha256(install_spec_signature_guard.canonical_spec_bytes(signed_spec)).hexdigest() != actual_canonical_sha:
+        raise ReleasePublishError("signed spec canonical bytes do not match staged canonical bytes")
+
+    with tempfile.TemporaryDirectory(prefix="ce-release-finalize-") as tmp:
+        temp_root = Path(tmp) / "publish"
+        shutil.copytree(stage_root, temp_root)
+        (temp_root / "llms-install.md").write_text(signed_spec, encoding="utf-8")
+
+        signature_errors = install_spec_signature_guard.validate_file(
+            temp_root / "llms-install.md",
+            verifier=verifier,
+        )
+        if signature_errors:
+            detail = "; ".join(error.format() for error in signature_errors)
+            raise ReleasePublishError(f"signed install spec verification failed: {detail}")
+
+        verify_stage_hashes(temp_root / "downloads" / version)
+        _verify_stage_install_parity(temp_root, version)
+
+        signed_spec_sha = _sha256(temp_root / "llms-install.md")
+        finalize_artifacts = _collect_publish_artifacts(temp_root)
+        (temp_root / "release-finalize-manifest.yml").write_text(
+            _finalize_manifest(
+                version=version,
+                canonical_spec_sha256=actual_canonical_sha,
+                signed_spec_sha256=signed_spec_sha,
+                signature_sha256=signature_sha,
+                signing_key_id=signing_key_id,
+                artifacts=finalize_artifacts,
+            ),
+            encoding="utf-8",
+        )
+        final_artifacts = _collect_artifacts(temp_root)
+        _promote_stage(temp_root, output)
+
+    return ReleaseFinalizeResult(
+        out_dir=output,
+        version=version,
+        canonical_spec_sha256=actual_canonical_sha,
+        signed_spec_sha256=signed_spec_sha,
+        signature_sha256=signature_sha,
+        signing_key_id=signing_key_id,
+        artifacts=final_artifacts,
+    )

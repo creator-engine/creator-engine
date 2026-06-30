@@ -89,6 +89,8 @@ def test_release_workflow_runs_release_orchestrator_to_runner_temp_only():
     assert '--out "${stage_dir}"' in run
     assert '--changelog-out "${packet_dir}/RELEASE-NOTES.md"' in run
     assert '--github-out "${packet_dir}/GITHUB-RELEASE-BODY.md"' in run
+    assert "--preflight-mode release-tag" in run
+    assert '--preflight-head-ref "${TAG_NAME}"' in run
     assert "args+=(--dry-run)" in run
 
 
@@ -124,6 +126,9 @@ def test_release_workflow_creates_awaiting_operator_issue_with_signing_surface()
     assert "canonical_spec_sha256" in packet_run
     assert "signing_command" in packet_run
     assert "Exact offline signing command:" in packet_run
+    assert "Verified post-sign finalize command:" in packet_run
+    assert "release-finalize" in packet_run
+    assert "--signature-file llms-install.md.sig.b64" in packet_run
     assert 'gh issue create' in issue_run
     assert 'AWAITING-OPERATOR ${TAG_NAME} signing surface' in issue_run
     assert '--body-file "${ISSUE_BODY}"' in issue_run

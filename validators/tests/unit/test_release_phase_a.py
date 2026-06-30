@@ -648,7 +648,7 @@ def test_orchestrate_fails_closed_on_validate_pr_preflight(tmp_path: Path):
     root = tmp_path / "repo"
     _full_repo(root, "0.2.0")
 
-    with pytest.raises(ReleaseOrchestrationError, match="ce validate-pr preflight failed"):
+    with pytest.raises(ReleaseOrchestrationError, match="release preflight failed"):
         orchestrate_release(
             repo_root=root,
             out=tmp_path / "stage",
@@ -657,6 +657,72 @@ def test_orchestrate_fails_closed_on_validate_pr_preflight(tmp_path: Path):
             build_wheel=_fake_builder,
             verify_parity=lambda r: [],
         )
+
+
+def test_default_validate_pr_preflight_accepts_explicit_detached_head_context(tmp_path: Path, monkeypatch):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    captured: dict[str, object] = {}
+    real_run = release_orchestrator.subprocess.run
+
+    def _fake_run(command, **kwargs):
+        if command and command[0] == "git":
+            return real_run(command, **kwargs)
+        captured["command"] = tuple(command)
+        captured["cwd"] = kwargs.get("cwd")
+        return subprocess.CompletedProcess(command, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(release_orchestrator.subprocess, "run", _fake_run)
+
+    result = release_orchestrator._run_preflight(
+        repo_root=root,
+        requested_version="0.2.0",
+        require_clean_head=True,
+        validate_pr_runner=None,
+        preflight_mode="validate-pr",
+        preflight_head_ref="release/v0.2.0",
+        preflight_declared_work_class="story",
+    )
+
+    assert result.validate_pr.returncode == 0
+    command = captured["command"]
+    assert "validate-pr" in command
+    assert "--head-ref" in command
+    assert "release/v0.2.0" in command
+    assert "--declared-work-class" in command
+    assert "story" in command
+
+
+def test_release_tag_preflight_uses_release_safe_test_gate_not_pr_diff_validator(tmp_path: Path, monkeypatch):
+    root = tmp_path / "repo"
+    _full_repo(root, "0.2.0")
+    captured: dict[str, object] = {}
+    real_run = release_orchestrator.subprocess.run
+
+    def _fake_run(command, **kwargs):
+        if command and command[0] == "git":
+            return real_run(command, **kwargs)
+        captured["command"] = tuple(command)
+        captured["cwd"] = kwargs.get("cwd")
+        return subprocess.CompletedProcess(command, 0, stdout="tests passed\n", stderr="")
+
+    monkeypatch.setattr(release_orchestrator.subprocess, "run", _fake_run)
+
+    result = release_orchestrator._run_preflight(
+        repo_root=root,
+        requested_version="0.2.0",
+        require_clean_head=True,
+        validate_pr_runner=None,
+        preflight_mode="release-tag",
+        preflight_head_ref="release/v0.2.0",
+        preflight_declared_work_class=None,
+    )
+
+    assert result.validate_pr.returncode == 0
+    command = captured["command"]
+    assert "pytest" in command
+    assert "validate-pr" not in command
+    assert captured["cwd"] == root
 
 
 def test_orchestrate_uses_injected_stage_function_and_preserves_placeholder_only(tmp_path: Path):
