@@ -42,6 +42,9 @@ INTERNAL_LITERAL_TOKENS = (
     "ce-kv/",
     "forge/",
     "ce-overwatch",
+    "cedev1",
+    "cedev3",
+    "ubuntuaws745-cmyk",
 )
 
 
