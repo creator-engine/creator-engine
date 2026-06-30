@@ -897,7 +897,7 @@ def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
     parser.add_argument("--base", default="origin/main", help="base branch/ref to fetch and merge-base against (default: origin/main)")
     parser.add_argument(
         "--declared-work-class",
-        choices=WORK_CLASSES,
+        choices=WORK_CLASS_INPUTS,
         help="declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body",
     )
     parser.add_argument("--head-ref", default=None, help="PR head branch name for carrier slug (default: current branch)")

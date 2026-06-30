@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator import pr_preflight
 from creator_engine_validator.checks import test_coupling as coupling_chk
 
@@ -303,6 +305,34 @@ def test_preflight_discovers_legacy_declared_work_class_from_carrier(tmp_path: P
 
     assert rc == 0
     assert "[PASS] declared work class: M" in out.getvalue()
+
+
+def test_preflight_build_parser_accepts_canonical_and_legacy_work_class_inputs():
+    parser = pr_preflight.build_parser()
+
+    for declared, expected in {
+        "XS": "XS",
+        "S": "S",
+        "M": "M",
+        "L": "L",
+        "tiny": "XS",
+        "story": "S",
+        "feature": "M",
+        "epic": "L",
+    }.items():
+        args = parser.parse_args(["--declared-work-class", declared])
+
+        assert args.declared_work_class == declared
+        assert pr_preflight.normalize_work_class(args.declared_work_class) == expected
+
+
+def test_preflight_build_parser_still_rejects_bogus_work_class():
+    parser = pr_preflight.build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["--declared-work-class", "Z"])
+
+    assert exc_info.value.code == 2
 
 
 def test_preflight_fails_when_declared_work_class_line_missing(tmp_path: Path, monkeypatch):
