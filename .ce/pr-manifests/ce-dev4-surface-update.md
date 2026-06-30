@@ -4,9 +4,9 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=a7da1bd34a7c552dd731151833994e351751c7fa212fea7a2bf7214ac7ac3a75
+AUTHORIZED_PATHS_SHA256=240be097ca3f060c72bf3057719f5e5226bbfc2182da623a655d9f2eb5551c78
 
 ```text
 .ce/changelog/ce-dev4-surface-update.md
@@ -15,4 +15,5 @@ deploy/dgx-runsc/Dockerfile
 deploy/dgx-runsc/build-image.sh
 deploy/dgx-runsc/run-codex-runsc.sh
 surfaces/manifest.yaml
+validators/tests/unit/test_surface_build_wiring.py
 ```

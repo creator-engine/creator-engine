@@ -36,7 +36,7 @@ NON_OCI_BUILD_SCRIPTS = {
     },
     "deploy/dgx-runsc/build-image.sh": {
         "dockerfile": "deploy/dgx-runsc/Dockerfile",
-        "image": "creator-engine/codex-runsc:0.141.0-aarch64",
+        "image": "creator-engine/codex-runsc:0.142.4-aarch64",
         "context": "deploy/dgx-runsc",
         "user_arg": "CE_DGX_USER=",
     },
