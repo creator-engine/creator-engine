@@ -233,6 +233,47 @@ def test_rebuild_from_source_derives_wikilink_graph_edges_byte_identically(tmp_p
     assert [hit.record.source_path for hit in expanded] == ["docs/target.md"]
 
 
+def test_rebuild_invariant_preserves_graph_edges_and_keyword_results(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    source = _chunk(
+        source_path="docs/source.md",
+        chunk_ref="heading:source",
+        content="Controller launch hydration follows [[Target Page]] for deterministic recall.",
+    )
+    chunks = [
+        source,
+        _chunk(
+            source_path="docs/target.md",
+            chunk_ref="heading:target-page",
+            content="Target Page documents the deterministic launch hydration convention.",
+        ),
+        _chunk(
+            source_path="docs/other.md",
+            chunk_ref="heading:other",
+            content="Unrelated operational note.",
+        ),
+    ]
+    try:
+        store.rebuild_from_source(chunks, DeterministicFakeEmbedder())
+        keyword_before = store.keyword_search("launch hydration deterministic", top_k=3)
+        graph_before = store.graph_expand(
+            (brain_recall.RecallHit(record=source.record, score=1.0),),
+            top_k=3,
+        )
+
+        store.rebuild_from_source(chunks, DeterministicFakeEmbedder())
+        keyword_after = store.keyword_search("launch hydration deterministic", top_k=3)
+        graph_after = store.graph_expand(
+            (brain_recall.RecallHit(record=source.record, score=1.0),),
+            top_k=3,
+        )
+    finally:
+        store.close()
+
+    assert keyword_before == keyword_after
+    assert graph_before == graph_after
+
+
 def test_privacy_refuses_confidential_scope_with_egress_embedder_without_consent(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:

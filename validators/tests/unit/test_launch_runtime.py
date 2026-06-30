@@ -16,7 +16,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import brain_bootstrap, brain_runtime, launch_runtime
+from creator_engine_validator import brain_bootstrap, brain_recall, brain_runtime, launch_runtime
+from creator_engine_validator.brain_sqlite_vec import SqliteVecStore
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
@@ -454,6 +455,65 @@ def test_controller_brain_bootstrap_adds_advisory_recall_when_available(tmp_path
     assert payload["recall"]["embedder"] == "vllm-openai"
     assert payload["recall"]["allow_confidential_egress"] is False
     assert payload["recall"]["recall"][0]["tier"] == "recall"
+
+
+def test_controller_brain_bootstrap_falls_back_to_deterministic_when_vllm_unavailable(
+    tmp_path, monkeypatch, caplog
+):
+    real_open_surface = launch_runtime.brain_recall_surface.open_surface
+    state_root = tmp_path / ".ce" / "state"
+    chunks = [
+        brain_recall.RecallChunk(
+            record=brain_recall.RecallRecord(
+                source_path="docs/controller.md",
+                chunk_ref="heading:controller-launch",
+                content_hash=hashlib.sha256(b"controller-launch").hexdigest(),
+                as_of="2026-06-30T00:00:00Z",
+                scope="public",
+                requires_egress=False,
+            ),
+            text="Controller launch brain hydration must load [[Launch Convention]] recall.",
+        ),
+        brain_recall.RecallChunk(
+            record=brain_recall.RecallRecord(
+                source_path="docs/launch-convention.md",
+                chunk_ref="heading:launch-convention",
+                content_hash=hashlib.sha256(b"launch-convention").hexdigest(),
+                as_of="2026-06-30T00:00:00Z",
+                scope="public",
+                requires_egress=False,
+            ),
+            text="Launch Convention keeps controller foreman startup recall available.",
+        ),
+    ]
+    store = SqliteVecStore(state_root=state_root)
+    try:
+        store.rebuild_from_source(chunks, brain_recall.DeterministicFakeEmbedding())
+    finally:
+        store.close()
+
+    calls = []
+
+    def open_surface(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("embedder_name") == "vllm-openai":
+            raise RuntimeError("vllm endpoint unavailable")
+        return real_open_surface(**kwargs)
+
+    monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
+    caplog.set_level("WARNING", logger=launch_runtime.__name__)
+
+    payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
+
+    assert "recall" in payload
+    assert payload["recall"]["advisory"] is True
+    assert payload["recall"]["embedder"] == "deterministic"
+    assert payload["recall"]["recall"]
+    assert "vllm-openai" in caplog.text
+    assert calls == [
+        {"state_root": state_root, "embedder_name": "vllm-openai"},
+        {"state_root": state_root},
+    ]
 
 
 def test_controller_brain_bootstrap_falls_back_to_ssot_when_recall_unavailable(
