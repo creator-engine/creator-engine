@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import os
 import platform
 import re
@@ -18,7 +19,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +47,10 @@ SSH_SIG_NAMESPACE = "ce-spec-v1"
 SSH_ED25519_ALGO = "ssh-ed25519"
 SIGNATURE_PLACEHOLDER = "<published-with-this-spec>"
 PUBLISHED_INSTALL_SPEC_URL = "https://creator-engine.dev/llms-install.md"
+STARTUP_UPDATE_CACHE_TTL_SECONDS = 6 * 60 * 60
+STARTUP_UPDATE_FETCH_TIMEOUT_SECONDS = 0.75
+STARTUP_UPDATE_CACHE_ENV = "CE_UPDATE_CHECK_CACHE"
+STARTUP_UPDATE_DISABLE_ENV = "CE_UPDATE_CHECK"
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _OPENSSH_SHA256_FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 
@@ -168,6 +175,27 @@ class UpdateResult:
         return payload
 
 
+@dataclass(frozen=True)
+class SpecOnlyRelease:
+    semver: str
+    app_wheel: str
+    app_wheel_sha256: str
+    canonical_spec_sha256: str
+    trust_root_sha256: str
+    trust_anchor_sha256: str
+    trust_anchor: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class StartupUpdateCheck:
+    update_available: bool
+    available_semver: str | None = None
+    reason: str = "no update"
+    from_cache: bool = False
+    notice_due: bool = False
+    cache_path: Path | None = None
+
+
 def installed_identity() -> InstalledIdentity:
     return InstalledIdentity(
         semver=str(_version.SEMVER),
@@ -175,8 +203,8 @@ def installed_identity() -> InstalledIdentity:
     )
 
 
-def default_fetcher(url: str) -> bytes:
-    with _stdlib_urlopen(url) as response:
+def default_fetcher(url: str, *, timeout: float | None = None) -> bytes:
+    with _stdlib_urlopen(url, timeout=timeout) as response:
         return response.read()
 
 
@@ -703,6 +731,189 @@ def resolve_latest_signed_release(
         trust_anchor=trust_anchor.to_record(),
         artifact_verification=artifact_verification,
     )
+
+
+def resolve_latest_signed_release_spec_only(
+    *,
+    site: str = DEFAULT_SITE,
+    trust_anchor_url: str = DEFAULT_TRUST_ANCHOR_URL,
+    trust_anchor_source: str = DEFAULT_TRUST_ANCHOR_SOURCE,
+    fetcher: UrlFetcher | None = None,
+    sshsig_runner: SshsigRunner | None = None,
+) -> SpecOnlyRelease:
+    fetch = fetcher or default_fetcher
+    base = _normalize_site(site)
+    spec_url = urljoin(base, "llms-install.md")
+    trust_root_url = urljoin(base, "keys/ce-root-v1")
+    spec_bytes = fetch(spec_url)
+    trust_root_bytes = fetch(trust_root_url)
+    trust_anchor_raw = fetch(trust_anchor_url)
+    trust_root_text = trust_root_bytes.decode("utf-8")
+    signed, _verified, trust_anchor = _verify_ssh_signature(
+        spec_bytes=spec_bytes,
+        trust_root_text=trust_root_text,
+        trust_anchor_raw=trust_anchor_raw,
+        trust_anchor_source=trust_anchor_source,
+        install_spec_source=spec_url,
+        sshsig_runner=sshsig_runner,
+    )
+    try:
+        manifest = parse_bootstrap_manifest(spec_bytes, error_cls=UpdateRefused)
+    except BootstrapManifestError as exc:
+        raise UpdateRefused(str(exc)) from exc
+    app_wheel = manifest.wheel_by_filename().get(manifest.app_wheel)
+    if app_wheel is None:
+        raise UpdateRefused("startup_update_refused: signed app wheel row missing from manifest")
+    return SpecOnlyRelease(
+        semver=manifest.package_version,
+        app_wheel=app_wheel.filename,
+        app_wheel_sha256=app_wheel.sha256,
+        canonical_spec_sha256=signed.canonical_sha256,
+        trust_root_sha256=_sha256(trust_root_bytes),
+        trust_anchor_sha256=_sha256(trust_anchor_raw),
+        trust_anchor=trust_anchor.to_record(),
+    )
+
+
+def _startup_cache_path() -> Path:
+    override = os.environ.get(STARTUP_UPDATE_CACHE_ENV)
+    if override:
+        return Path(override).expanduser()
+    cache_home = os.environ.get("XDG_CACHE_HOME")
+    if cache_home:
+        return Path(cache_home).expanduser() / "creator-engine" / "update-check.json"
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home).expanduser() / ".cache" / "creator-engine" / "update-check.json"
+    return Path(tempfile.gettempdir()) / "creator-engine-update-check.json"
+
+
+def startup_update_check_disabled(env: Mapping[str, str] | None = None) -> bool:
+    source = env if env is not None else os.environ
+    value = str(source.get(STARTUP_UPDATE_DISABLE_ENV, "")).strip().lower()
+    return value in {"0", "false", "no", "off", "disable", "disabled"}
+
+
+def _is_stable_release_identity(identity: InstalledIdentity) -> bool:
+    return re.fullmatch(r"\d+\.\d+\.\d+", identity.semver.strip()) is not None
+
+
+def _fetch_with_timeout(fetcher: UrlFetcher, url: str, timeout_seconds: float) -> bytes:
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(fetcher, url)
+    try:
+        return future.result(timeout=timeout_seconds)
+    except FutureTimeout as exc:
+        future.cancel()
+        raise TimeoutError(f"timed out fetching {url}") from exc
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _read_startup_update_cache(path: Path, *, now: float, ttl_seconds: int) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    checked_at = payload.get("checked_at")
+    if not isinstance(checked_at, (int, float)) or now - float(checked_at) >= ttl_seconds:
+        return None
+    return payload
+
+
+def _write_startup_update_cache(path: Path, payload: Mapping[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(dict(payload), sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        return
+
+
+def mark_startup_update_notice_shown(cache_path: Path | None = None) -> None:
+    path = cache_path or _startup_cache_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(payload, dict):
+        return
+    payload["notice_shown"] = True
+    _write_startup_update_cache(path, payload)
+
+
+def check_startup_update_notice(
+    *,
+    site: str = DEFAULT_SITE,
+    trust_anchor_url: str = DEFAULT_TRUST_ANCHOR_URL,
+    trust_anchor_source: str = DEFAULT_TRUST_ANCHOR_SOURCE,
+    fetcher: UrlFetcher | None = None,
+    sshsig_runner: SshsigRunner | None = None,
+    installed: InstalledIdentity | None = None,
+    cache_path: Path | None = None,
+    cache_ttl_seconds: int = STARTUP_UPDATE_CACHE_TTL_SECONDS,
+    fetch_timeout_seconds: float = STARTUP_UPDATE_FETCH_TIMEOUT_SECONDS,
+    now: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> StartupUpdateCheck:
+    current = installed or installed_identity()
+    path = cache_path or _startup_cache_path()
+    if startup_update_check_disabled(env):
+        return StartupUpdateCheck(False, reason="disabled", cache_path=path)
+    if not _is_stable_release_identity(current):
+        return StartupUpdateCheck(False, reason="not stable release", cache_path=path)
+
+    now_value = time.time() if now is None else now
+    cached = _read_startup_update_cache(path, now=now_value, ttl_seconds=cache_ttl_seconds)
+    if cached is not None:
+        update_available = bool(cached.get("update_available"))
+        available_semver = cached.get("available_semver")
+        semver = available_semver if isinstance(available_semver, str) else None
+        notice_due = update_available and cached.get("notice_shown") is not True
+        return StartupUpdateCheck(
+            update_available=update_available,
+            available_semver=semver,
+            reason="cached",
+            from_cache=True,
+            notice_due=notice_due,
+            cache_path=path,
+        )
+
+    base_fetcher = fetcher or (lambda url: default_fetcher(url, timeout=fetch_timeout_seconds))
+
+    def timed_fetcher(url: str) -> bytes:
+        return _fetch_with_timeout(base_fetcher, url, fetch_timeout_seconds)
+
+    try:
+        release = resolve_latest_signed_release_spec_only(
+            site=site,
+            trust_anchor_url=trust_anchor_url,
+            trust_anchor_source=trust_anchor_source,
+            fetcher=timed_fetcher,
+            sshsig_runner=sshsig_runner,
+        )
+        available = _semver_key(release.semver) > _semver_key(current.semver)
+        payload = {
+            "checked_at": now_value,
+            "installed_semver": current.semver,
+            "available_semver": release.semver,
+            "update_available": available,
+            "notice_shown": False,
+            "canonical_spec_sha256": release.canonical_spec_sha256,
+        }
+        _write_startup_update_cache(path, payload)
+        return StartupUpdateCheck(
+            update_available=available,
+            available_semver=release.semver,
+            reason="update available" if available else "installed CE is current",
+            notice_due=available,
+            cache_path=path,
+        )
+    except Exception:
+        return StartupUpdateCheck(False, reason="fail open", cache_path=path)
 
 
 def check_for_update(

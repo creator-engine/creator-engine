@@ -107,6 +107,7 @@ from . import (
     doctor_runtime,
     fanin_runtime,
     forge_triage,
+    hook_check,
     init_runtime,
     integration_queue_dry_run,
     lane_runtime,
@@ -4484,6 +4485,24 @@ _HERDR_DISPATCH = {
 }
 
 
+def _maybe_print_startup_update_notice(args) -> None:
+    if getattr(args, "json_output", False):
+        return
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return
+        denied, _reason = hook_check.startup_toolchain_self_update_denied(cwd=Path.cwd())
+        if denied:
+            return
+        result = update_runtime.check_startup_update_notice()
+        if not (result.notice_due and result.available_semver):
+            return
+        print(f"ce {result.available_semver} available - run 'ce update'", file=sys.stderr)
+        update_runtime.mark_startup_update_notice_shown(result.cache_path)
+    except Exception:
+        return
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -4491,6 +4510,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _conveyor_bridge(argv[1:])
     parser = _build_parser()
     args = parser.parse_args(argv)
+    _maybe_print_startup_update_notice(args)
 
     if args.group == "dequeue":
         return _dequeue(args)
