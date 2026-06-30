@@ -19,7 +19,7 @@ Detached mode:
                             run --rm and block the caller's terminal.
 
 Environment:
-  CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
+  CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.142.4-aarch64)
   CE_DGX_RUNTIME            Docker runtime (default: runsc-gvproxy-ptrace)
   CE_DGX_DOCKER_NETWORK     Optional Docker --network value (default: unset)
   CE_DGX_NETWORK            Deprecated alias for CE_DGX_DOCKER_NETWORK
@@ -109,7 +109,7 @@ if [ "${1:-}" = "tui" ] || [ "${1:-}" = "exec" ]; then
   shift
 fi
 
-CE_DGX_IMAGE="${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.141.0-aarch64}"
+CE_DGX_IMAGE="${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.142.4-aarch64}"
 CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"

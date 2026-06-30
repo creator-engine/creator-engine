@@ -61,6 +61,7 @@ RUN set -eux; \
       bash \
       ca-certificates \
       git \
+      openssh-client \
       procps \
       python-is-python3 \
       python3 \
@@ -91,6 +92,7 @@ RUN set -eux; \
       packaging==26.2 \
       pluggy==1.6.0 \
       Pygments==2.20.0 \
+      PyNaCl==1.5.0 \
       pyproject_hooks==1.2.0 \
       pytest==9.0.2 \
       pytest-xdist==3.8.0 \

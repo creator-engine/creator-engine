@@ -1,11 +1,11 @@
 surfaces:
   - name: codex
-    version: "0.141.0"
+    version: "0.142.4"
     commit_or_digest: null
     source: npm:@openai/codex
     custody: rented
     update_policy: downstream digest capture pending
-    last_evaluated: "2026-06-26"
+    last_evaluated: "2026-06-30"
 
   - name: VPS runsc image
     version: "x86_64"
