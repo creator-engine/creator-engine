@@ -7,5 +7,5 @@ Committed BEFORE the wheel build so the wheel==source byte-parity contract
 is the gate's merge-parent HEAD — the baked fallback a no-git wheel install uses.
 """
 
-SEMVER = "0.3.0"
-BUILD_GIT_SHA = "9b8a51d9604188d7d2dbf84465295e7ec7dcc116"
+SEMVER = "0.3.1"
+BUILD_GIT_SHA = "daded5023cfc20ca1fbcfde4b17fdc5c8063716a"

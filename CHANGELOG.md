@@ -6,10 +6,38 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
+(nothing yet — use this section for features landing after 0.3.1 while waiting for the next tag)
+
+## v0.3.1 — spec-kit retirement (2026-06-30)
+
+Spec-kit is fully retired. This release removes the vendored spec-kit skill
+files and `.specify/` tree, amends constitution Principle X to the CE-Native
+Spec Substrate doctrine, and ships follow-on onboarding, egress, and
+validator-gate improvements that landed between 0.3.0 and 0.3.1.
+
+### Removed
+
+- Vendored spec-kit skills (14 `.claude/skills/speckit-*` + 9 `.agents/skills/speckit-*` directories) — Phase 1 retirement
+- `.specify/` tree (Phase 2) — `.specify/memory/constitution.md` moved to the amended constitution location
+
+### Changed
+
+- Constitution Principle X amended from "Spec Kit Compatibility" to "CE-Native Spec Substrate" (version 1.1.0 → 2.0.0); source ratified 2026-06-30
+
+### Added
+
+- macOS container onboarding runbook via Linux container on Docker Desktop
+- Verified origin/main HEAD artifact resolver and clean-install path
+- Option C OpenShell egress delegation: os-native egress policies delegate to OpenShell when available, fail closed otherwise
+- CE-native test-coupling `validate-pr` gate that blocks non-test source changes when the PR changes no tests
+
 ### Fixed
 
-- Mac-container onboarding guide now runs `ce brain init`, `ce onboard`, and
-  `ce launch` from the mounted repo in order, with RED-G-4 remediation guidance
+- `ce doctor` packaging check scoped to CE source-tree context — normal user repos skip the developer packaging-contract check
+- Install-spec signature guard is now a blocking CI gate
+- Onboarding docs updated: `ce brain init` documented as a required one-time launch prerequisite for mounted macOS container workspaces
+- Mac-container onboarding guide now runs `ce brain init`, `ce onboard`, and `ce launch` from the mounted repo in order, with RED-G-4 remediation guidance
+- Completion-report evidence-chain and spend inspect hints now call `ce artifacts <scope_id> --run-id <run_id>` instead of passing the run id as the required scope positional
 
 ## v0.3.0 — clean-install milestone (2026-06-27)
 
