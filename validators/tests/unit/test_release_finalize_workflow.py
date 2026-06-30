@@ -47,7 +47,6 @@ def test_release_finalize_workflow_dispatch_inputs_and_permissions():
     assert doc["permissions"] == {
         "contents": "write",
         "pull-requests": "write",
-        "issues": "write",
     }
 
 
