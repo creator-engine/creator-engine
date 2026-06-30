@@ -239,6 +239,13 @@ Properties:
 | `checks_green` | boolean | yes |  |  |
 | `pr_number` | integer \| null | no |  |  |
 | `head_sha` | string \| null | no |  |  |
+| `repo` | string \| null | no |  |  |
+| `branch` | string \| null | no |  |  |
+| `base` | string \| null | no |  |  |
+| `required_checks` | array | no |  |  |
+| `enabling_decision_ref` | string \| null | no |  |  |
+| `author_login` | string \| null | no |  |  |
+| `approver_login` | string \| null | no |  |  |
 
 ### `schemas/automerge-policy.schema.yaml`
 

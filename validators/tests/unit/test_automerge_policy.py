@@ -63,6 +63,10 @@ def state_with_flags(*enabled: str, run_mode: str = "ceo", kill_switch: bool = F
     )
 
 
+def canary_identity() -> dict[str, str]:
+    return {"author_login": "author-dev", "approver_login": "reviewer-dev"}
+
+
 def numstat_for(paths: list[str], additions: int = 1, deletions: int = 0) -> list[ChangeStat]:
     return [
         ChangeStat(path=path, additions=additions, deletions=deletions, binary=False)
@@ -144,6 +148,41 @@ def test_variable_materialization_ceo_arms_docs_only(tmp_path: Path) -> None:
     )
 
 
+def test_variable_materialization_strangeloop_arms_docs_only(tmp_path: Path) -> None:
+    path = tmp_path / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(
+        path,
+        run_mode_variable="strangeLoop",
+        enabling_ref_variable="ce-ops#313-enable",
+    )
+
+    assert state.run_mode == "strangeLoop"
+    assert state.kill_switch is False
+    assert state.enabling_decision_ref == "ce-ops#313-enable"
+    assert state.class_flag("docs") is True
+    assert all(
+        not policy.auto_merge
+        for class_name, policy in state.classes.items()
+        if class_name != "docs"
+    )
+
+
+def test_variable_materialization_kill_switch_halts_even_when_strangeloop(tmp_path: Path) -> None:
+    path = tmp_path / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(
+        path,
+        run_mode_variable="strangeLoop",
+        enabling_ref_variable="ce-ops#313-enable",
+        kill_switch_variable="true",
+    )
+
+    assert state.run_mode == "strangeLoop"
+    assert state.kill_switch is True
+    assert state.class_flag("docs") is True
+
+
 def test_state_rejects_invalid_payload() -> None:
     with pytest.raises(AutoMergePolicyStateError):
         AutoMergePolicyState.from_payload({"run_mode": "dev", "kill_switch": "false"})
@@ -167,6 +206,7 @@ def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
         repo="creator-engine/creator-engine",
         branch="ce/docs",
         base="main",
+        **canary_identity(),
     )
     assert decision.mutation_class == "docs"
     assert decision.gates == tuple(size_ceremony("tiny", "docs")["ratification_gates"])
@@ -176,6 +216,8 @@ def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
     assert decision.to_payload()["branch"] == "ce/docs"
     assert decision.to_payload()["base"] == "main"
     assert decision.to_payload()["required_checks"] == [REQUIRED_CHECK]
+    assert decision.to_payload()["author_login"] == "author-dev"
+    assert decision.to_payload()["approver_login"] == "reviewer-dev"
     assert len(decision.policy_sha) == 64
 
 
@@ -186,6 +228,7 @@ def test_composes_classifier_with_size_ceremony_for_schema_gesture() -> None:
         declared_work_class="story",
         policy_state=state_with_flags("schema"),
         checks=GREEN_CHECKS,
+        **canary_identity(),
     )
     assert decision.mutation_class == "schema"
     assert decision.gates == tuple(size_ceremony("story", "schema")["ratification_gates"])
@@ -200,6 +243,7 @@ def test_dev_mode_returns_gesture_even_for_docs_with_flag_on() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs", run_mode="dev"),
         checks=GREEN_CHECKS,
+        **canary_identity(),
     )
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert "run_mode_dev" in decision.rationale
@@ -212,6 +256,7 @@ def test_kill_switch_returns_gesture() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs", kill_switch=True),
         checks=GREEN_CHECKS,
+        **canary_identity(),
     )
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert "kill_switch" in decision.rationale
@@ -224,6 +269,7 @@ def test_class_flag_false_blocks_auto() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags(),
         checks=GREEN_CHECKS,
+        **canary_identity(),
     )
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert "class_auto_merge_false" in decision.rationale
@@ -236,6 +282,7 @@ def test_changes_requested_blocks_auto() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs"),
         checks={**GREEN_CHECKS, "reviewDecision": "CHANGES_REQUESTED"},
+        **canary_identity(),
     )
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert "reviewDecision_CHANGES_REQUESTED" in decision.rationale
@@ -248,6 +295,7 @@ def test_legacy_review_decision_keyword_blocks_and_exposes_compat_property() -> 
         policy_state=state_with_flags("docs"),
         checks={"validate": "success"},
         review_decision="CHANGES_REQUESTED",
+        **canary_identity(),
     )
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert decision.review_decision == "CHANGES_REQUESTED"
@@ -262,6 +310,7 @@ def test_failing_check_blocks_auto() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs"),
         checks={"validate": "failure", "reviewDecision": "APPROVED"},
+        **canary_identity(),
     )
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert "required_checks_not_green" in decision.rationale
@@ -279,6 +328,7 @@ def test_check_run_conclusion_failure_overrides_completed_status() -> None:
             ],
             "reviewDecision": "APPROVED",
         },
+        **canary_identity(),
     )
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert decision.checks_green is False
@@ -292,6 +342,7 @@ def test_split_required_blocks_auto() -> None:
         declared_work_class="epic",
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
+        **canary_identity(),
     )
     assert decision.size_band == "split_required"
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
@@ -304,6 +355,7 @@ def test_fail_closed_unknown_path_gesture() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("redaction"),
         checks=GREEN_CHECKS,
+        **canary_identity(),
     )
     assert decision.mutation_class == "redaction"
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
@@ -329,6 +381,7 @@ def test_gesture_class_never_returns_auto_even_if_flag_is_on(mutation_class: str
         declared_work_class="story",
         policy_state=state_with_flags(mutation_class),
         checks=GREEN_CHECKS,
+        **canary_identity(),
     )
     assert decision.mutation_class == mutation_class
     assert decision.class_flag is True
@@ -354,6 +407,7 @@ def test_dry_run_writes_decision_and_merges_nothing(tmp_path, monkeypatch) -> No
         repo="creator-engine/creator-engine",
         branch="ce/docs",
         base="main",
+        **canary_identity(),
     )
 
     assert decision.decision == AUTOMERGE_DECISION_AUTO
@@ -365,6 +419,8 @@ def test_dry_run_writes_decision_and_merges_nothing(tmp_path, monkeypatch) -> No
     assert payload["repo"] == "creator-engine/creator-engine"
     assert payload["branch"] == "ce/docs"
     assert payload["base"] == "main"
+    assert payload["author_login"] == "author-dev"
+    assert payload["approver_login"] == "reviewer-dev"
 
 
 class FakeActuateGh:
@@ -376,6 +432,14 @@ class FakeActuateGh:
         self.calls.append(list(argv))
         if argv[:3] == ["gh", "pr", "checks"]:
             payload = [{"name": REQUIRED_CHECK, "conclusion": self.check_conclusion}]
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+        if argv[:3] == ["gh", "pr", "view"]:
+            payload = {
+                "author": {"login": "author-dev"},
+                "latestReviews": [
+                    {"author": {"login": "reviewer-dev"}, "state": "APPROVED"}
+                ],
+            }
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
 
         query = next((str(arg) for arg in argv if str(arg).startswith("query=")), "")
@@ -434,6 +498,8 @@ def _strange_loop_decision(**overrides):
         "checks_green": True,
         "pr_number": 313,
         "head_sha": HEAD_SHA,
+        "author_login": "author-dev",
+        "approver_login": "reviewer-dev",
         "change": {
             "repo": "strange-loop/creator-engine",
             "branch": "ce-arm-automerge-actuate",
@@ -441,6 +507,8 @@ def _strange_loop_decision(**overrides):
             "pr_number": 313,
             "head_sha": HEAD_SHA,
             "manifest_paths": [".ce/pr-manifests/ce-arm-automerge-actuate.md"],
+            "author_login": "author-dev",
+            "approver_login": "reviewer-dev",
         },
     }
     payload.update(overrides)
@@ -524,6 +592,7 @@ def test_materialized_decision_reaches_actuator_with_change_ref(
         repo="strange-loop/creator-engine",
         branch="ce-arm-automerge-actuate",
         base="main",
+        **canary_identity(),
     )
     payload = decision.to_payload()
     assert payload["decision"] == AUTOMERGE_DECISION_AUTO
@@ -553,6 +622,7 @@ def test_unset_variable_policy_keeps_actuator_dormant(tmp_path: Path) -> None:
         repo="strange-loop/creator-engine",
         branch="ce-arm-automerge-actuate",
         base="main",
+        **canary_identity(),
     )
 
     gh = FakeActuateGh(check_conclusion="success")
@@ -562,6 +632,51 @@ def test_unset_variable_policy_keeps_actuator_dormant(tmp_path: Path) -> None:
     assert result.reason == "run_mode_not_armed"
     assert result.acted is False
     assert gh.calls == []
+
+
+def test_decision_requires_author_approver_separation_for_auto() -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="tiny",
+        policy_state=state_with_flags("docs", run_mode="strangeLoop"),
+        checks=GREEN_CHECKS,
+        author_login="same-dev",
+        approver_login="same-dev",
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert "author_approver_not_distinct" in decision.rationale
+
+
+def test_decision_refuses_feature_work_class_outside_canary() -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="feature",
+        policy_state=state_with_flags("docs", run_mode="strangeLoop"),
+        checks=GREEN_CHECKS,
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert "work_class_outside_canary" in decision.rationale
+
+
+def test_run_mode_cli_override_is_advisory_without_class_flag() -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="tiny",
+        policy_state=AutoMergePolicyState.default(),
+        checks=GREEN_CHECKS,
+        run_mode="strangeLoop",
+        **canary_identity(),
+    )
+
+    assert decision.run_mode == "strangeLoop"
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert "class_auto_merge_false" in decision.rationale
 
 
 def test_automerge_workflows_materialize_policy_before_validator_invocation() -> None:
@@ -598,7 +713,9 @@ def _assert_materialize_step_before(steps: list[dict], *, later_step: str) -> No
     assert step["env"] == {
         "CE_AUTOMERGE_RUN_MODE": "${{ vars.CE_AUTOMERGE_RUN_MODE || '' }}",
         "CE_AUTOMERGE_ENABLING_REF": "${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}",
+        "CE_AUTOMERGE_KILL_SWITCH": "${{ vars.CE_AUTOMERGE_KILL_SWITCH || '' }}",
     }
     run = step["run"]
     assert "materialize_automerge_policy_state_from_variables" in run
     assert 'Path(".ce/state/automerge/policy.json")' in run
+    assert "kill_switch_variable" in run

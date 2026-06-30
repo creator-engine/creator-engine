@@ -33,6 +33,7 @@ jobs:
         env:
           CE_AUTOMERGE_RUN_MODE: ${{ vars.CE_AUTOMERGE_RUN_MODE || '' }}
           CE_AUTOMERGE_ENABLING_REF: ${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}
+          CE_AUTOMERGE_KILL_SWITCH: ${{ vars.CE_AUTOMERGE_KILL_SWITCH || '' }}
         run: |
           set -euo pipefail
 
@@ -48,6 +49,7 @@ jobs:
               Path(".ce/state/automerge/policy.json"),
               run_mode_variable=os.environ.get("CE_AUTOMERGE_RUN_MODE"),
               enabling_ref_variable=os.environ.get("CE_AUTOMERGE_ENABLING_REF"),
+              kill_switch_variable=os.environ.get("CE_AUTOMERGE_KILL_SWITCH"),
           )
           PY
 
@@ -60,6 +62,7 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login || '' }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
           MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref || '' }}
           MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref || '' }}
@@ -74,6 +77,8 @@ jobs:
           branch=""
           base_ref=""
           review_decision=""
+          author_login=""
+          approver_login=""
 
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             pr_number="${PR_NUMBER}"
@@ -81,6 +86,7 @@ jobs:
             base_sha="${PR_BASE_SHA}"
             branch="${PR_HEAD_REF}"
             base_ref="${PR_BASE_REF}"
+            author_login="${PR_AUTHOR_LOGIN}"
 
             if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
               git fetch --no-tags --depth=1 origin "${base_sha}" || true
@@ -122,6 +128,8 @@ jobs:
             echo "branch=${branch}"
             echo "base=${base_ref}"
             echo "review-decision=${review_decision}"
+            echo "author-login=${author_login}"
+            echo "approver-login=${approver_login}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Run automerge decision
@@ -133,6 +141,9 @@ jobs:
           BRANCH: ${{ steps.inputs.outputs.branch }}
           BASE: ${{ steps.inputs.outputs.base }}
           REVIEW_DECISION: ${{ steps.inputs.outputs.review-decision }}
+          AUTHOR_LOGIN: ${{ steps.inputs.outputs.author-login }}
+          APPROVER_LOGIN: ${{ steps.inputs.outputs.approver-login }}
+          AUTOREVIEW_RUN_MODE: ${{ vars.CE_AUTOREVIEW_RUN_MODE || '' }}
         run: |
           set -euo pipefail
 
@@ -155,8 +166,13 @@ jobs:
             # Advisory only: do not query live checks or mutate repo/PR state; absent check evidence fails closed.
             --checks-json '{"checks":{}}'
             --review-decision "${REVIEW_DECISION}"
+            --author-login "${AUTHOR_LOGIN}"
+            --approver-login "${APPROVER_LOGIN}"
             --json
           )
+          if [[ -n "${AUTOREVIEW_RUN_MODE}" ]]; then
+            args+=(--run-mode "${AUTOREVIEW_RUN_MODE}")
+          fi
           if [[ -n "${PR_NUMBER}" ]]; then
             args+=(--pr "${PR_NUMBER}")
           fi

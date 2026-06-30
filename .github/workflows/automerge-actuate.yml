@@ -45,6 +45,7 @@ jobs:
         env:
           CE_AUTOMERGE_RUN_MODE: ${{ vars.CE_AUTOMERGE_RUN_MODE || '' }}
           CE_AUTOMERGE_ENABLING_REF: ${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}
+          CE_AUTOMERGE_KILL_SWITCH: ${{ vars.CE_AUTOMERGE_KILL_SWITCH || '' }}
         run: |
           set -euo pipefail
 
@@ -60,6 +61,7 @@ jobs:
               Path(".ce/state/automerge/policy.json"),
               run_mode_variable=os.environ.get("CE_AUTOMERGE_RUN_MODE"),
               enabling_ref_variable=os.environ.get("CE_AUTOMERGE_ENABLING_REF"),
+              kill_switch_variable=os.environ.get("CE_AUTOMERGE_KILL_SWITCH"),
           )
           PY
 
@@ -89,6 +91,7 @@ jobs:
           echo "decision-file=${decisions[0]}" >> "${GITHUB_OUTPUT}"
 
       - name: Actuate if ready
+        id: actuate
         env:
           GH_TOKEN: ${{ github.token }}
           DECISION_FILE: ${{ steps.decision.outputs.decision-file }}
@@ -99,6 +102,17 @@ jobs:
           # kill_switch, class flags, enabling_decision_ref, and live required
           # checks; with the shipped dev run_mode it returns Dormant and makes no
           # merge mutation.
+          audit_log="${RUNNER_TEMP}/ce-automerge-actuation-audit.jsonl"
           PYTHONPATH=validators python -m creator_engine_validator.forge.automerge_actuate_cli \
             "${DECISION_FILE}" \
+            --audit-log "${audit_log}" \
             --json | tee "${RUNNER_TEMP}/ce-automerge-actuation.json"
+
+          echo "audit-log=${audit_log}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload actuation audit artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ce-automerge-actuation-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.actuate.outputs.audit-log }}
+          if-no-files-found: error
