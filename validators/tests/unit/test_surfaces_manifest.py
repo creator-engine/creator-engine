@@ -65,6 +65,31 @@ def _consistent_doc() -> dict[str, object]:
             surface["source"] = f"host:{name}"  # type: ignore[index]
             surface["custody"] = "host-only"  # type: ignore[index]
             surface["update_policy"] = "host inventory required before pinning"  # type: ignore[index]
+    doc["surfaces"].extend(  # type: ignore[union-attr]
+        [
+            _surface(
+                "rust",
+                version="1-bookworm",
+                commit_or_digest={
+                    "amd64": "sha256:" + "a" * 64,
+                    "arm64": "sha256:" + "c" * 64,
+                },
+            ),
+            _surface(
+                "debian",
+                version="bookworm-slim",
+                commit_or_digest={
+                    "amd64": "sha256:" + "b" * 64,
+                    "arm64": "sha256:" + "d" * 64,
+                },
+            ),
+        ]
+    )
+    for surface in doc["surfaces"]:  # type: ignore[index]
+        if surface["name"] in {"rust", "debian"}:  # type: ignore[index]
+            surface["source"] = f"docker.io/library/{surface['name']}:{surface['version']}"  # type: ignore[index]
+            surface["custody"] = "docker-base-image"  # type: ignore[index]
+            surface["update_policy"] = "per-architecture digest pin required before Dockerfile use"  # type: ignore[index]
     return doc
 
 
@@ -94,6 +119,18 @@ def _write_consistent_repo(root: Path, doc: dict[str, object] | None = None) -> 
                 "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef",
                 "ARG ZIG_VERSION=0.15.2",
                 "FROM debian:bookworm-slim@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb AS runtime",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dgx = root / "deploy" / "dgx-runsc" / "Dockerfile"
+    dgx.parent.mkdir(parents=True, exist_ok=True)
+    dgx.write_text(
+        "\n".join(
+            [
+                "FROM rust:1-bookworm@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc AS herdr-builder",
+                "FROM debian:bookworm-slim@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd AS runtime",
                 "",
             ]
         ),
@@ -224,6 +261,19 @@ def test_consistent_manifest_missing_dockerfile_digest_fails(tmp_path: Path):
     result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
 
     assert chk.CODE_DOCKERFILE_FROM_MISSING_DIGEST in _codes(result)
+
+
+def test_consistent_manifest_dual_arch_base_missing_arm64_digest_fails(tmp_path: Path):
+    doc = _consistent_doc()
+    for surface in doc["surfaces"]:  # type: ignore[index]
+        if surface["name"] == "rust":  # type: ignore[index]
+            surface["commit_or_digest"] = {"amd64": "sha256:" + "a" * 64}  # type: ignore[index]
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_BASE_IMAGE_ARCH_DIGEST_MISSING in _codes(result)
+    assert any("rust.commit_or_digest.arm64" in error.path for error in result.errors)
 
 
 def test_consistent_manifest_mismatched_dockerfile_digest_fails(tmp_path: Path):

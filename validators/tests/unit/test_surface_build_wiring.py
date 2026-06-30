@@ -95,16 +95,16 @@ def test_dockerfiles_use_unset_defaults_for_manifest_controlled_inputs(repo_root
 
 
 def test_non_oci_build_wrappers_use_rendered_surface_build_args(repo_root: Path):
-    expected = subprocess.run(
-        [sys.executable, "surfaces/render.py", "build-args"],
-        cwd=repo_root,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    ).stdout.splitlines()
-
     for script, contract in NON_OCI_BUILD_SCRIPTS.items():
+        arch = "amd64" if "vps-runsc" in script else "arm64"
+        expected = subprocess.run(
+            [sys.executable, "surfaces/render.py", "--arch", arch, "build-args"],
+            cwd=repo_root,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout.splitlines()
         syntax = subprocess.run(["bash", "-n", script], cwd=repo_root, text=True, capture_output=True)
         assert syntax.returncode == 0, f"{script}: {syntax.stderr}"
 

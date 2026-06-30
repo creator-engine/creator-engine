@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shlex
 import sys
@@ -22,6 +23,14 @@ from creator_engine_validator.loader import LoaderError, load_yaml  # noqa: E402
 
 DEFAULT_MANIFEST = REPO_ROOT / "surfaces" / "manifest.yaml"
 PENDING_DIGEST_SURFACES = frozenset({"codex", "pyyaml", "jsonschema", "textual"})
+ARCH_ALIASES = {
+    "amd64": "amd64",
+    "x86_64": "amd64",
+    "linux/amd64": "amd64",
+    "arm64": "arm64",
+    "aarch64": "arm64",
+    "linux/arm64": "arm64",
+}
 
 
 class RenderError(ValueError):
@@ -79,6 +88,29 @@ def _is_docker_image_source(source: object) -> bool:
     return isinstance(source, str) and source.startswith("docker.io/")
 
 
+def _is_base_image_surface(surface: Mapping[str, Any]) -> bool:
+    custody = str(surface.get("custody", "")).lower()
+    return "docker-base-image" in custody and _is_docker_image_source(surface.get("source"))
+
+
+def _normal_arch(value: object) -> str | None:
+    if value is None:
+        return None
+    return ARCH_ALIASES.get(str(value).strip().lower())
+
+
+def _digest_value(surface_name: object, arch: object, payload: object) -> str:
+    if isinstance(payload, str):
+        digest = payload
+    elif isinstance(payload, Mapping):
+        digest = payload.get("sha256")
+    else:
+        digest = None
+    if not isinstance(digest, str) or not digest:
+        raise RenderError(f"{surface_name}: commit_or_digest.{arch} must be a sha256 digest")
+    return digest
+
+
 def _digest_entries(
     prefix: str,
     digest: object,
@@ -86,6 +118,8 @@ def _digest_entries(
     *,
     build_args: bool,
     source: object,
+    target_arch: str | None,
+    base_image: bool,
 ) -> tuple[tuple[str, str], ...]:
     if isinstance(digest, str):
         if not digest:
@@ -94,12 +128,25 @@ def _digest_entries(
             digest = digest.removeprefix("sha256:")
         return ((f"{prefix}_COMMIT_OR_DIGEST", digest),)
     if isinstance(digest, Mapping):
+        if base_image and target_arch is not None:
+            for arch, payload in digest.items():
+                if _normal_arch(arch) != target_arch:
+                    continue
+                sha256 = _digest_value(surface_name, arch, payload)
+                if build_args and _is_docker_image_source(source):
+                    sha256 = sha256.removeprefix("sha256:")
+                return ((f"{prefix}_COMMIT_OR_DIGEST", sha256),)
+            raise RenderError(f"{surface_name}: commit_or_digest missing target architecture {target_arch!r}")
+
         entries: list[tuple[str, str]] = []
         for arch, payload in sorted(digest.items(), key=lambda item: str(item[0])):
-            sha256 = payload.get("sha256") if isinstance(payload, Mapping) else None
-            if not isinstance(sha256, str) or not sha256:
-                raise RenderError(f"{surface_name}: commit_or_digest.{arch}.sha256 must be set")
-            entries.append((f"{prefix}_{_env_key(arch)}_SHA256", sha256))
+            sha256 = _digest_value(surface_name, arch, payload)
+            if isinstance(payload, Mapping):
+                entries.append((f"{prefix}_{_env_key(arch)}_SHA256", sha256))
+            else:
+                if build_args and _is_docker_image_source(source):
+                    sha256 = sha256.removeprefix("sha256:")
+                entries.append((f"{prefix}_{_env_key(arch)}_COMMIT_OR_DIGEST", sha256))
         if not entries:
             raise RenderError(f"{surface_name}: commit_or_digest mapping must not be empty")
         return tuple(entries)
@@ -116,7 +163,12 @@ def _source_value(surface: Mapping[str, Any], *, build_args: bool) -> str | None
     return source
 
 
-def _base_entries(surface: Mapping[str, Any], *, build_args: bool) -> tuple[tuple[str, str], ...]:
+def _base_entries(
+    surface: Mapping[str, Any],
+    *,
+    build_args: bool,
+    target_arch: str | None,
+) -> tuple[tuple[str, str], ...]:
     prefix = _env_key(surface["name"])
     entries: list[tuple[str, str]] = []
     version = surface.get("version")
@@ -133,6 +185,8 @@ def _base_entries(surface: Mapping[str, Any], *, build_args: bool) -> tuple[tupl
             surface["name"],
             build_args=build_args,
             source=raw_source,
+            target_arch=target_arch,
+            base_image=_is_base_image_surface(surface),
         )
     )
     return tuple(entries)
@@ -142,7 +196,12 @@ def _null_digest_warning(surface: Mapping[str, Any]) -> str:
     return f"{surface['name']}: commit_or_digest is null; no digest/ref value emitted"
 
 
-def _collect_values(surfaces: Iterable[Mapping[str, Any]], *, build_args: bool) -> Rendered:
+def _collect_values(
+    surfaces: Iterable[Mapping[str, Any]],
+    *,
+    build_args: bool,
+    target_arch: str | None,
+) -> Rendered:
     values: list[tuple[str, str]] = []
     warnings: list[str] = []
 
@@ -173,25 +232,25 @@ def _collect_values(surfaces: Iterable[Mapping[str, Any]], *, build_args: bool) 
             if build_args:
                 continue
 
-        values.extend(_base_entries(surface, build_args=build_args))
+        values.extend(_base_entries(surface, build_args=build_args, target_arch=target_arch))
 
     return Rendered(values=tuple(sorted(values)), warnings=tuple(warnings))
 
 
-def render_build_args(manifest: str | Path = DEFAULT_MANIFEST) -> Rendered:
+def render_build_args(manifest: str | Path = DEFAULT_MANIFEST, *, arch: str | None = None) -> Rendered:
     """Return ``--build-arg KEY=VAL`` lines for manifest-pinned surfaces."""
 
-    rendered = _collect_values(_load_surfaces(Path(manifest)), build_args=True)
+    rendered = _collect_values(_load_surfaces(Path(manifest)), build_args=True, target_arch=_normal_arch(arch))
     return Rendered(
         values=tuple(("--build-arg", f"{key}={value}") for key, value in rendered.values),
         warnings=rendered.warnings,
     )
 
 
-def render_launch_env(manifest: str | Path = DEFAULT_MANIFEST) -> Rendered:
+def render_launch_env(manifest: str | Path = DEFAULT_MANIFEST, *, arch: str | None = None) -> Rendered:
     """Return shell export lines for all renderable manifest values."""
 
-    rendered = _collect_values(_load_surfaces(Path(manifest)), build_args=False)
+    rendered = _collect_values(_load_surfaces(Path(manifest)), build_args=False, target_arch=_normal_arch(arch))
     return Rendered(
         values=tuple(("export", f"{key}={shlex.quote(value)}") for key, value in rendered.values),
         warnings=rendered.warnings,
@@ -210,6 +269,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MANIFEST,
         help="path to surfaces/manifest.yaml",
     )
+    parser.add_argument(
+        "--arch",
+        default=os.environ.get("TARGETARCH") or os.environ.get("CE_TARGETARCH"),
+        help="target architecture for per-arch base-image digests (amd64 or arm64)",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("build-args", help="emit docker build --build-arg lines")
     subparsers.add_parser("launch-env", help="emit shell export lines")
@@ -219,7 +283,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        rendered = render_build_args(args.manifest) if args.command == "build-args" else render_launch_env(args.manifest)
+        rendered = (
+            render_build_args(args.manifest, arch=args.arch)
+            if args.command == "build-args"
+            else render_launch_env(args.manifest, arch=args.arch)
+        )
     except RenderError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
