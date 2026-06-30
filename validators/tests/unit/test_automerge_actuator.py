@@ -184,9 +184,10 @@ def test_refuses_missing_enabling_ref(tmp_path: Path) -> None:
     assert gh.mutation_calls() == []
 
 
-def test_refuses_work_class_outside_canary(tmp_path: Path) -> None:
+@pytest.mark.parametrize("work_class", ["M", "L", "feature", "epic"])
+def test_refuses_work_class_outside_canary(tmp_path: Path, work_class: str) -> None:
     gh = FakeActuatorGh()
-    result = actuate_if_ready(_write(tmp_path, _decision(**{"class": "M"})), gh_runner=gh)
+    result = actuate_if_ready(_write(tmp_path, _decision(**{"class": work_class})), gh_runner=gh)
 
     assert result.refused is True
     assert result.reason == "work_class_outside_canary"
@@ -246,6 +247,24 @@ def test_actuates_only_when_all_green(tmp_path: Path, monkeypatch: pytest.Monkey
     assert result.audit_record["single_pr"] is True
     assert result.audit_record["author_login"] == "author-dev"
     assert result.audit_record["approver_login"] == "reviewer-dev"
+
+
+@pytest.mark.parametrize("work_class", ["XS", "S", "tiny", "story"])
+def test_actuator_accepts_canary_work_class_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    work_class: str,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch)
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(
+        _write(tmp_path, _decision(**{"class": work_class})),
+        gh_runner=gh,
+    )
+
+    assert result.actuated is True
+    assert result.reason == "all_predicates_green"
+    assert len(gh.mutation_calls()) == 1
 
 
 def test_actuate_cli_appends_audit_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

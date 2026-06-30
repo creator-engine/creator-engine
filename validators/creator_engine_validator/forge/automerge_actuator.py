@@ -9,8 +9,10 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from ..work_sizing import normalize_work_class
 from .automerge_policy import (
     AUTOMERGE_ARMING_RUN_MODES,
+    AUTOMERGE_CANARY_WORK_CLASSES,
     AutoMergePolicyStateError,
     automerge_policy_state_path,
     load_automerge_policy_state,
@@ -78,7 +80,7 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
         return _refuse("kill_switch_not_false", payload)
     if payload.get("class_flag") is not True:
         return _refuse("class_flag_not_true", payload)
-    if payload.get("class") not in {"XS", "S"}:
+    if _normalized_work_class(payload.get("class")) not in AUTOMERGE_CANARY_WORK_CLASSES:
         return _refuse("work_class_outside_canary", payload)
 
     enabling_ref = payload.get("enabling_decision_ref")
@@ -324,6 +326,15 @@ def _enable_auto_merge(change: _ActuatorChange, gh_runner):
 
 def _run_mode_armed(value: Any) -> bool:
     return isinstance(value, str) and value in _ARMING_RUN_MODES
+
+
+def _normalized_work_class(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return normalize_work_class(value)
+    except ValueError:
+        return None
 
 
 def _live_policy_state():
