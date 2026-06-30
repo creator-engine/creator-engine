@@ -28,7 +28,7 @@ Options:
 | `--repo-root` | no |  | repo root for default policy state path (default: current directory) |
 | `--pr` | no |  | optional PR number for the audit record |
 | `--head-sha` | no |  | optional PR head SHA for the audit record |
-| `--checks-json` | no |  | optional JSON object mapping check-name to status (e.g. '{"ci": "success"}') |
+| `--checks-json` | no |  | optional JSON object mapping check-name to status, or @FILE containing one (e.g. '{"ci": "success"}') |
 | `--review-decision` | no | `, APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED` | optional GitHub reviewDecision for the PR |
 | `--json` | no |  | emit machine-readable JSON decision record |
 
