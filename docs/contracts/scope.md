@@ -1,7 +1,8 @@
 # Contract: Scope — the coordination-layer atom (G-6)
 
-**Status:** Canonical. Enforced by the `ce_scope` check; the pure coordination
-substrate is `creator_engine_validator/coordination.py`.
+**Status:** Canonical. Enforced by the `ce_scope` check and the warning-only
+`ce_scope_impact` check; the pure coordination substrate is
+`creator_engine_validator/coordination.py`.
 
 ## Purpose
 
@@ -26,9 +27,28 @@ finding-schema/discard-on-drift gate are named deferred follow-ons.
   per-run spend cap (below).
 - `mutation_class` — the risk tier (drives the back gate).
 - `ratification` — the betting-table attestation (value-free opaque digests).
+- `downstream_refs?` — optional value-free typed references to downstream
+  artifacts affected by drift in ratified Scope content.
 - `skill_refs?` / `crosswalk_parent?` — optional forward/up refs (Skill axis +
   crosswalk traceability are deferred / light).
 - `state` — the conserved mechanical spec-lifecycle (below).
+
+## Ratified Scope Digest
+
+`ratification.ratified_scope_sha` pins the ratifier's bet to the ratified Scope
+content. The digest is `sha256` over canonical bytes derived from the parsed YAML
+mapping:
+
+```python
+json.dumps(scope_dict, sort_keys=True, ensure_ascii=True).encode("ascii")
+```
+
+Before serialization, every mapping field named `value` or `ratified_scope_sha` is
+replaced with the literal placeholder string
+`__CE_SCOPE_RATIFICATION_PLACEHOLDER__`. This keeps the digest stable while
+excluding the digest field itself and any value-bearing attestation slot from the
+content being pinned. The `ce_scope_impact` check uses this canonicalization to
+recompute ratified Scope drift deterministically.
 
 ## Stage vocabulary (CANON — conserve the machine, derive the skin)
 
@@ -94,6 +114,15 @@ A check over Scope records (`kind: scope-record`). Predicates:
 
 Green-on-day-one (no Scope artifacts in the repo yet → trivially green). A draft
 Scope being framed/shaped may omit the DoR fields (mirrors `definition_of_ready`).
+
+## The Impact Guard — `ce_scope_impact`
+
+`ce_scope_impact` is warning-only. It scans ratified-state Scope records, recomputes
+the canonical digest above, and compares it to `ratification.ratified_scope_sha`.
+On mismatch it emits `IMPACT-SCOPE-CONTENT-DRIFT`. If the drifting Scope carries
+`downstream_refs`, it also emits one `IMPACT-DOWNSTREAM-AFFECTED` warning per
+reference naming the affected artifact. The check never emits errors and never
+mutates downstream artifacts; CI stays green while humans get the impact flags.
 
 ## Value-free invariant
 
