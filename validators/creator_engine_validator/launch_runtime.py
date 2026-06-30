@@ -358,25 +358,31 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
         raise BrainBootstrapLaunchRefused(
             f"refusing Controller launch before spawn: {details}"
         ) from exc
-    try:
-        surface = brain_recall_surface.open_surface(
-            state_root=_brain_state_root(repo_root),
-            embedder_name="vllm-openai",
-        )
-        hydration = surface.hydrate_session(
-            _controller_recall_context(repo_root, payload),
-            top_k=5,
-            allow_confidential_egress=False,
-        )
-        recall_payload = hydration.to_dict()
-        recall_payload["advisory"] = True
-        recall_payload["source"] = "brain_recall_surface.hydrate_session"
-        recall_payload["embedder"] = "vllm-openai"
-        recall_payload["top_k"] = 5
-        recall_payload["allow_confidential_egress"] = False
-        payload["recall"] = recall_payload
-    except Exception as exc:
-        LOGGER.warning("Controller brain semantic recall hydration skipped: %s", exc)
+    for embedder_name, label in (("vllm-openai", "vllm-openai"), (None, "deterministic")):
+        open_kwargs: dict[str, Any] = {"state_root": _brain_state_root(repo_root)}
+        if embedder_name is not None:
+            open_kwargs["embedder_name"] = embedder_name
+        try:
+            surface = brain_recall_surface.open_surface(**open_kwargs)
+            hydration = surface.hydrate_session(
+                _controller_recall_context(repo_root, payload),
+                top_k=5,
+                allow_confidential_egress=False,
+            )
+            recall_payload = hydration.to_dict()
+            recall_payload["advisory"] = True
+            recall_payload["source"] = "brain_recall_surface.hydrate_session"
+            recall_payload["embedder"] = label
+            recall_payload["top_k"] = 5
+            recall_payload["allow_confidential_egress"] = False
+            payload["recall"] = recall_payload
+            break
+        except Exception as exc:
+            LOGGER.warning(
+                "Controller brain semantic recall hydration skipped for %s: %s",
+                label,
+                exc,
+            )
     return payload
 
 
