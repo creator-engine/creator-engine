@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../assets/ce-favicon-v2.svg"/>
+<title>Solo + Dev Mode Onboarding &#x2014; Creator Engine</title>
+<style>
+  :root{
+    --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
+    --violet-soft:rgba(160,107,255,.16);
+    --ink:#0C0B0A;--panel:#16140F;--panel-2:#191712;--line:rgba(255,255,255,.10);
+    --paper:#FAF8F1;--muted:#9A968C;--moss:#7FB069;--oxide:#E08B4C;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--ink);color:var(--paper);font-family:var(--sans);
+       line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  .wrap-full{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* Nav */
+  .nav{display:flex;justify-content:space-between;align-items:center;
+       padding:22px 28px;max-width:1180px;margin:0 auto}
+  .logo{display:flex;align-items:center;gap:11px;font-family:var(--mono);
+        font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+        text-decoration:none;color:var(--paper)}
+  .logo-mark{width:30px;height:30px;display:block}
+  .nav a{display:inline-flex;align-items:center;color:var(--muted);
+         text-decoration:none;font-size:13px;margin-left:26px;transition:color .15s}
+  .nav a:hover{color:var(--paper)}
+  .nav-ico{width:14px;height:14px;margin-right:6px;flex:none}
+
+  /* Page header */
+  .page-header{padding:40px 0 32px;border-bottom:1px solid var(--line)}
+  .page-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+                text-transform:uppercase;color:var(--violet);display:block;margin-bottom:12px}
+  .page-header h1{font-size:clamp(26px,5vw,44px);font-weight:700;letter-spacing:-.02em;
+                  line-height:1.08;color:var(--paper)}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+             font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+             color:var(--muted);text-decoration:none;margin-bottom:20px;
+             transition:color .15s}
+  .back-link:hover{color:var(--violet)}
+  .back-link svg{width:12px;height:12px}
+
+  /* Article body */
+  .article{padding:44px 0 80px}
+  .article h1{font-size:clamp(22px,4vw,36px);font-weight:700;letter-spacing:-.02em;
+              line-height:1.1;margin:36px 0 14px;color:var(--paper)}
+  .article h2{font-size:clamp(18px,3vw,26px);font-weight:700;letter-spacing:-.01em;
+              line-height:1.12;margin:36px 0 12px;color:var(--paper);
+              padding-top:8px;border-top:1px solid var(--line)}
+  .article h3{font-size:clamp(15px,2.4vw,20px);font-weight:700;margin:28px 0 10px;
+              color:var(--paper)}
+  .article h4{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--violet-bright)}
+  .article h5,.article h6{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--muted)}
+  .article p{margin:0 0 18px;font-size:15.5px;color:#d8d4cc;line-height:1.65}
+  .article a{color:var(--violet);text-decoration:none;
+             border-bottom:1px solid rgba(160,107,255,.3);
+             transition:color .15s,border-color .15s}
+  .article a:hover{color:var(--violet-bright);border-bottom-color:var(--violet)}
+  .article strong{color:var(--paper);font-weight:700}
+  .article em{color:#c8c2b4;font-style:italic}
+  .article code{font-family:var(--mono);font-size:13px;background:var(--panel);
+                border:1px solid var(--line);border-radius:4px;padding:2px 6px;
+                color:var(--violet-bright)}
+  .article pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+               padding:18px 20px;overflow-x:auto;margin:0 0 24px}
+  .article pre code{background:transparent;border:none;padding:0;
+                    font-size:13px;color:#d0c9be;line-height:1.6}
+  .article hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .article ul,.article ol{margin:0 0 18px;padding-left:22px}
+  .article li{margin-bottom:8px;font-size:15.5px;color:#d8d4cc;line-height:1.6}
+  .article li code{font-size:12.5px}
+  .article blockquote{border-left:3px solid var(--violet);margin:0 0 18px;
+                      padding:12px 18px;background:rgba(160,107,255,.06);
+                      border-radius:0 8px 8px 0}
+  .article blockquote p{margin:0;color:var(--muted)}
+  .article table{width:100%;border-collapse:collapse;margin:0 0 24px;
+                 font-size:14px;overflow-x:auto;display:block}
+  .article th{background:var(--panel);color:var(--paper);font-weight:700;
+              text-align:left;padding:10px 14px;border:1px solid var(--line);
+              font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+              text-transform:uppercase}
+  .article td{padding:10px 14px;border:1px solid var(--line);
+              color:#d8d4cc;vertical-align:top}
+  .article tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+  footer{border-top:1px solid var(--line);padding:30px 0;
+         text-align:center;color:var(--muted);font-size:13px}
+  @media (max-width:640px){
+    .nav{padding:16px 18px}
+    .nav a{margin-left:16px}
+    .article{padding:28px 0 60px}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div>
+      <a class="logo" href="../index.html">
+        <img class="logo-mark" src="../assets/ce-logo-v2-weldarm-transparent.svg" alt="Creator Engine logo" width="30" height="30"/>
+        Creator&nbsp;Engine
+      </a>
+    </div>
+    <div>
+      <a href="../index.html#install">Install</a>
+      <a href="../index.html#scope">How it works</a>
+      <a href="../index.html#docs"><svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 1.7h5L13 5v9.3H4z" stroke-linejoin="round"/><path d="M9 1.7V5h4M6 8.2h5M6 11h5" stroke-linecap="round"/></svg>Docs</a>
+      <a href="https://github.com/creator-engine/creator-engine"><svg class="nav-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.9c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <div class="page-header">
+      <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
+      <span class="page-eyebrow">Guide</span>
+      <h1>Solo + Dev Mode Onboarding</h1>
+    </div>
+    <article class="article">
+<h1 id="solo-dev-mode-onboarding">Solo + Dev Mode Onboarding</h1>
+<p><em>This guide is for a solo developer who has chosen </em><em>Dev mode</em><em>: you drive the pipeline yourself by typing <code>ce</code> commands inside your governed agent session. You hold the Frame + Shape decisions directly at each step. If you prefer the agent to drive the pipeline under the hood while you frame intent and ratify gates, see <a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a> instead.</em></p>
+<blockquote>
+<p><strong>You are in: Solo + Dev mode.</strong> In this cell you type <code>ce</code> commands</p>
+<p>explicitly to move work through the pipeline: you file the Scope, optionally</p>
+<p>run the grill-me to sharpen it, ratify the bet, launch the build, review the</p>
+<p>artifacts, and gate the merge. Each gesture is a deliberate shell command —</p>
+<p>you see exactly what the governed pipeline is doing at every step.</p>
+</blockquote>
+<hr>
+<h2 id="how-dev-mode-fits-the-five-stage-loop">How Dev mode fits the five-stage loop</h2>
+<p>Every piece of CE work follows the same loop: <strong>Frame → Shape → Build → Review → Ship</strong>. In Dev mode you drive each stage explicitly with shell commands:</p>
+<table>
+<thead><tr><th>Stage</th><th>What you do</th><th>Command</th></tr></thead>
+<tbody>
+<tr><td><strong>Frame</strong></td><td>Describe the problem conversationally with the agent</td><td><em>(conversation)</em></td></tr>
+<tr><td><strong>Shape</strong></td><td>File a Scope; optionally run the grill-me to sharpen it</td><td><code>ce scope</code>, <code>ce shape</code></td></tr>
+<tr><td><strong>Build</strong></td><td>Ratify the Scope; launch the governed run</td><td><code>ce ratify</code>, <code>ce drive --spawn</code></td></tr>
+<tr><td><strong>Review</strong></td><td>Inspect the run&#x27;s artifacts against your Done-when</td><td><code>ce artifacts</code>, <code>ce show</code></td></tr>
+<tr><td><strong>Ship</strong></td><td>Read the merge gate; apply the gated merge</td><td><code>ce merge</code>, <code>ce merge --apply</code></td></tr>
+</tbody></table>
+<hr>
+<h2 id="prerequisites">Prerequisites</h2>
+<p>You need a CE install and a governed session. If you have not done either, follow <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a> first. Once installed, <code>ce launch</code> is your daily entry point.</p>
+<hr>
+<h2 id="phase-0-launch-your-governed-session">Phase 0 — Launch your governed session</h2>
+<pre><code class="language-bash">ce launch</code></pre>
+<p>This opens your coding agent in a governed terminal pane. Everything flows through the agent conversation, with CE&#x27;s governance layer around it. You can confirm the install is healthy with <code>ce status</code> — it will show an empty scope list on a fresh workspace.</p>
+<hr>
+<h2 id="phase-1-frame-your-intent-conversational">Phase 1 — Frame your intent (conversational)</h2>
+<p>In your governed session, describe what you want to build in plain language. This is a conversational act — no commands to type here. For example:</p>
+<blockquote>
+<p>&quot;I want to add rate limiting to the public login API: per-IP throttling with</p>
+<p>configurable limits and a clear 429 response for authenticated traffic.&quot;</p>
+</blockquote>
+<p>The agent will ask any clarifying questions it needs. Answer them. This is the <strong>Frame</strong> stage: you are helping the agent understand the problem well enough for you to write a precise Scope.</p>
+<hr>
+<h2 id="phase-2-shape-file-the-scope">Phase 2 — Shape: file the Scope</h2>
+<p>Once you have framed the problem, file a Scope — the governed unit of work. Choose a stable slug (a short kebab-case identifier) for this piece of work:</p>
+<pre><code class="language-bash">ce scope rate-limit-login \
+  --goal &quot;Add per-IP rate limiting to the public login API with configurable limits and 429 responses&quot; \
+  --done-when &quot;Rate limiter returns 429 with Retry-After header when per-IP limit exceeded&quot; \
+  --done-when &quot;Limit thresholds are configurable via environment variable without code change&quot; \
+  --done-when &quot;Tests cover the limit boundary and the 429 response shape&quot; \
+  --budget 5 \
+  --change-type code</code></pre>
+<p><strong>Scope fields:</strong></p>
+<table>
+<thead><tr><th>Field</th><th>Flag</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>Slug</td><td>positional</td><td>Stable identifier for this piece of work (kebab-case)</td></tr>
+<tr><td>Goal</td><td><code>--goal</code></td><td>What you are building, in one line</td></tr>
+<tr><td>Done-when</td><td><code>--done-when</code> (repeatable)</td><td>Acceptance criteria the grader will check at Review time</td></tr>
+<tr><td>Budget</td><td><code>--budget</code></td><td>Effort cap — the governed run cannot exceed this</td></tr>
+<tr><td>Change-type</td><td><code>--change-type</code></td><td>Kind of change: <code>code</code>, <code>docs</code>, <code>schema</code>, <code>deploy</code>, etc.</td></tr>
+</tbody></table>
+<p><strong>The Done-when criteria are the most important part.</strong> Write them as testable statements. They become the grader&#x27;s checklist at Review — not a description of what the agent did, but a description of what you would accept as done.</p>
+<h3 id="optional-sharpen-the-scope-with-the-grill-me">Optional: sharpen the Scope with the grill-me</h3>
+<p>If the Scope has gaps or you are unsure about any field, run the Shape grill-me. It asks targeted questions and surfaces missing criteria:</p>
+<pre><code class="language-bash">ce shape rate-limit-login</code></pre>
+<p>Read the output and revise the Scope if the grill-me surfaces important gaps. You can also inspect the Scope at any time with:</p>
+<pre><code class="language-bash">ce show rate-limit-login</code></pre>
+<p>When the Scope reads <strong>Ready</strong>, move to Phase 3.</p>
+<hr>
+<h2 id="phase-3-ratify-the-scope-your-yes-build-this">Phase 3 — Ratify the Scope (your &quot;yes, build this&quot;)</h2>
+<p><strong>Read the Scope carefully</strong> before ratifying. Once ratified, the governed run is authorized to build inside the Scope&#x27;s envelope. Generate a fresh approver ref and pass it to <code>ce ratify</code>:</p>
+<pre><code class="language-bash">ce ratify rate-limit-login --approver-ref $(openssl rand -hex 32)</code></pre>
+<p>The <code>--approver-ref</code> is a value-free fingerprint. It records that a human ratified this Scope without encoding who or any credential. The governed run binds to this ratification: the agent cannot change the Scope or exceed the Budget after ratification, and it cannot self-ratify on your behalf.</p>
+<blockquote>
+<p><strong>Nothing builds until a Ready Scope is ratified.</strong> Ratification is your</p>
+<p>explicit authorization — the gate between planning and execution.</p>
+</blockquote>
+<hr>
+<h2 id="phase-4-drive-launch-the-governed-run">Phase 4 — Drive: launch the governed run</h2>
+<p>First do a dry-run to confirm the dispatch envelope looks right:</p>
+<pre><code class="language-bash">ce drive rate-limit-login</code></pre>
+<p>This prints the governed dispatch envelope without launching anything. When it looks right, spawn the run:</p>
+<pre><code class="language-bash">ce drive rate-limit-login --spawn</code></pre>
+<p>This launches the governed seat in the background. You can follow progress in the governed session pane. The seat works within the ratified envelope — it cannot push to a remote or access credentials without the gate surfacing that hold for you.</p>
+<hr>
+<h2 id="phase-5-review-inspect-the-artifacts">Phase 5 — Review: inspect the artifacts</h2>
+<p>When the run finishes and the pull request is open, review what was produced. The run identifier appears in the session output when the run completes.</p>
+<p>Enumerate the artifacts:</p>
+<pre><code class="language-bash">ce artifacts rate-limit-login --run-id &lt;run-id&gt;</code></pre>
+<p>This lists the evidence chain: the diff, test output, the coverage file, and any other artifacts the run produced.</p>
+<p>Inspect the Scope state after the run:</p>
+<pre><code class="language-bash">ce show rate-limit-login</code></pre>
+<p><strong>Now judge the artifacts.</strong> Read the PR diff and test evidence. Ask yourself: do the changes satisfy the Done-when criteria you wrote in Phase 2? You are reading a real diff against criteria you set — not evaluating a summary.</p>
+<hr>
+<h2 id="phase-6-gate-the-merge">Phase 6 — Gate the merge</h2>
+<p>When the PR looks right and CI is green, read the merge gate:</p>
+<pre><code class="language-bash">ce merge rate-limit-login --run &lt;run-id&gt;</code></pre>
+<p>Without <code>--apply</code>, this command reads the gate and tells you exactly what is satisfied and what is blocking. Run it plan-only as many times as you like. When everything is green, apply the gated merge:</p>
+<pre><code class="language-bash">ce merge rate-limit-login --run &lt;run-id&gt; --apply</code></pre>
+<p><strong>The merge gate checks:</strong> ratification bound to this Scope, independent review on the PR, CI green. Green CI is required but never sufficient — ratification is what authorizes the merge.</p>
+<hr>
+<h2 id="phase-7-completion-report-evidence-not-memory">Phase 7 — Completion report (evidence, not memory)</h2>
+<p>After the merge, render the Completion Report:</p>
+<pre><code class="language-bash">ce report rate-limit-login --run-id &lt;run-id&gt;</code></pre>
+<p>This renders a compact record of what was delivered: how it scored against your Done-when criteria, that tests were green, that the change stayed in scope, and what fraction of the Budget it used. Save this as your sprint-review artifact — the evidence is durable and replayable from a git clone.</p>
+<hr>
+<h2 id="your-daily-rhythm-in-dev-mode">Your daily rhythm in Dev mode</h2>
+<p>Once you have done the first Scope, every piece of work follows the same shape:</p>
+<ol>
+<li><strong>Frame</strong> — describe what you want to build conversationally with the agent.</li>
+<li><strong>Scope</strong> — <code>ce scope &lt;slug&gt; --goal &quot;...&quot; --done-when &quot;...&quot; --budget N --change-type &lt;type&gt;</code>.</li>
+<li><strong>Shape (optional)</strong> — <code>ce shape &lt;slug&gt;</code> to sharpen criteria if needed.</li>
+<li><strong>Ratify</strong> — <code>ce ratify &lt;slug&gt; --approver-ref $(openssl rand -hex 32)</code> — your &quot;yes, build this.&quot;</li>
+<li><strong>Drive</strong> — <code>ce drive &lt;slug&gt; --spawn</code> — launch the governed run.</li>
+<li><strong>Review</strong> — <code>ce artifacts &lt;slug&gt; --run-id &lt;run-id&gt;</code> — read the diff against your Done-when.</li>
+<li><strong>Merge</strong> — <code>ce merge &lt;slug&gt; --run &lt;run-id&gt; --apply</code> — gate and apply.</li>
+<li><strong>Report</strong> — <code>ce report &lt;slug&gt; --run-id &lt;run-id&gt;</code> — capture the evidence.</li>
+</ol>
+<p>Check what is in flight at any time with <code>ce status</code>. Check items awaiting your attention with <code>ce inbox --repo &lt;owner/repo&gt;</code>.</p>
+<hr>
+<h2 id="your-irreducible-gestures-what-the-agent-cannot-do-for-you">Your irreducible gestures — what the agent cannot do for you</h2>
+<p>CE is designed so that a small set of decisions always stays with you:</p>
+<table>
+<thead><tr><th>You always decide</th><th>The agent handles</th></tr></thead>
+<tbody>
+<tr><td>The <strong>Done-when</strong> criteria on every Scope</td><td>Goal drafting, plan, tasks, code, and test execution</td></tr>
+<tr><td>The <strong>Budget</strong> on every Scope</td><td>Spending within the ratified cap</td></tr>
+<tr><td><strong>Ratifying</strong> the Scope (<code>ce ratify</code>)</td><td>Running the build inside the ratified envelope</td></tr>
+<tr><td>Making a change <strong>riskier</strong></td><td>Making a change safer within its envelope</td></tr>
+<tr><td><strong>Judging the artifacts</strong> at Review</td><td>Producing the artifacts and the Completion Report</td></tr>
+<tr><td>The <strong>gated merge</strong> (<code>ce merge --apply</code>)</td><td>Opening the PR and reading the merge gate</td></tr>
+<tr><td>Authorizing <strong>privileged surfaces</strong></td><td>Refusing privileged actions and surfacing the reason</td></tr>
+</tbody></table>
+<p>In Dev mode you drive each gesture explicitly. You see every step of the pipeline. The governance layer is what checks the envelope — it is outside the agent, so it cannot be reasoned around.</p>
+<hr>
+<h2 id="a-note-on-spec-kit">A note on spec-kit</h2>
+<p>An earlier version of CE used <code>/speckit-*</code> slash commands to drive the Frame and Shape stages. Spec-kit is being retired. The <code>ce scope</code> / <code>ce shape</code> loop replaces it: it is the same conceptual pipeline with a governed shell interface instead of slash commands. If you have an existing project with spec-kit artifacts, they remain valid inputs to the agent conversation; you do not need to migrate them.</p>
+<hr>
+<h2 id="where-to-go-next">Where to go next</h2>
+<table>
+<thead><tr><th>You want to…</th><th>Read</th></tr></thead>
+<tbody>
+<tr><td>The front door and big picture</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>welcome.md</code></a></td></tr>
+<tr><td>The plain-language vocabulary tour</td><td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td></tr>
+<tr><td>The Solo + CEO path (agent drives; you ratify)</td><td><a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a></td></tr>
+<tr><td>A worked SCRUM-to-CE mapping</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td></tr>
+<tr><td>The full install-to-ship pilot runbook</td><td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td></tr>
+<tr><td>Contribute to CE itself</td><td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td></tr>
+</tbody></table>
+    </article>
+  </div>
+  <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
+</body>
+</html>

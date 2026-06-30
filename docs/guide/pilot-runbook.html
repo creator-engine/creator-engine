@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../assets/ce-favicon-v2.svg"/>
+<title>Pilot Runbook &#x2014; Creator Engine</title>
+<style>
+  :root{
+    --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
+    --violet-soft:rgba(160,107,255,.16);
+    --ink:#0C0B0A;--panel:#16140F;--panel-2:#191712;--line:rgba(255,255,255,.10);
+    --paper:#FAF8F1;--muted:#9A968C;--moss:#7FB069;--oxide:#E08B4C;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--ink);color:var(--paper);font-family:var(--sans);
+       line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  .wrap-full{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* Nav */
+  .nav{display:flex;justify-content:space-between;align-items:center;
+       padding:22px 28px;max-width:1180px;margin:0 auto}
+  .logo{display:flex;align-items:center;gap:11px;font-family:var(--mono);
+        font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+        text-decoration:none;color:var(--paper)}
+  .logo-mark{width:30px;height:30px;display:block}
+  .nav a{display:inline-flex;align-items:center;color:var(--muted);
+         text-decoration:none;font-size:13px;margin-left:26px;transition:color .15s}
+  .nav a:hover{color:var(--paper)}
+  .nav-ico{width:14px;height:14px;margin-right:6px;flex:none}
+
+  /* Page header */
+  .page-header{padding:40px 0 32px;border-bottom:1px solid var(--line)}
+  .page-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+                text-transform:uppercase;color:var(--violet);display:block;margin-bottom:12px}
+  .page-header h1{font-size:clamp(26px,5vw,44px);font-weight:700;letter-spacing:-.02em;
+                  line-height:1.08;color:var(--paper)}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+             font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+             color:var(--muted);text-decoration:none;margin-bottom:20px;
+             transition:color .15s}
+  .back-link:hover{color:var(--violet)}
+  .back-link svg{width:12px;height:12px}
+
+  /* Article body */
+  .article{padding:44px 0 80px}
+  .article h1{font-size:clamp(22px,4vw,36px);font-weight:700;letter-spacing:-.02em;
+              line-height:1.1;margin:36px 0 14px;color:var(--paper)}
+  .article h2{font-size:clamp(18px,3vw,26px);font-weight:700;letter-spacing:-.01em;
+              line-height:1.12;margin:36px 0 12px;color:var(--paper);
+              padding-top:8px;border-top:1px solid var(--line)}
+  .article h3{font-size:clamp(15px,2.4vw,20px);font-weight:700;margin:28px 0 10px;
+              color:var(--paper)}
+  .article h4{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--violet-bright)}
+  .article h5,.article h6{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--muted)}
+  .article p{margin:0 0 18px;font-size:15.5px;color:#d8d4cc;line-height:1.65}
+  .article a{color:var(--violet);text-decoration:none;
+             border-bottom:1px solid rgba(160,107,255,.3);
+             transition:color .15s,border-color .15s}
+  .article a:hover{color:var(--violet-bright);border-bottom-color:var(--violet)}
+  .article strong{color:var(--paper);font-weight:700}
+  .article em{color:#c8c2b4;font-style:italic}
+  .article code{font-family:var(--mono);font-size:13px;background:var(--panel);
+                border:1px solid var(--line);border-radius:4px;padding:2px 6px;
+                color:var(--violet-bright)}
+  .article pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+               padding:18px 20px;overflow-x:auto;margin:0 0 24px}
+  .article pre code{background:transparent;border:none;padding:0;
+                    font-size:13px;color:#d0c9be;line-height:1.6}
+  .article hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .article ul,.article ol{margin:0 0 18px;padding-left:22px}
+  .article li{margin-bottom:8px;font-size:15.5px;color:#d8d4cc;line-height:1.6}
+  .article li code{font-size:12.5px}
+  .article blockquote{border-left:3px solid var(--violet);margin:0 0 18px;
+                      padding:12px 18px;background:rgba(160,107,255,.06);
+                      border-radius:0 8px 8px 0}
+  .article blockquote p{margin:0;color:var(--muted)}
+  .article table{width:100%;border-collapse:collapse;margin:0 0 24px;
+                 font-size:14px;overflow-x:auto;display:block}
+  .article th{background:var(--panel);color:var(--paper);font-weight:700;
+              text-align:left;padding:10px 14px;border:1px solid var(--line);
+              font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+              text-transform:uppercase}
+  .article td{padding:10px 14px;border:1px solid var(--line);
+              color:#d8d4cc;vertical-align:top}
+  .article tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+  footer{border-top:1px solid var(--line);padding:30px 0;
+         text-align:center;color:var(--muted);font-size:13px}
+  @media (max-width:640px){
+    .nav{padding:16px 18px}
+    .nav a{margin-left:16px}
+    .article{padding:28px 0 60px}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div>
+      <a class="logo" href="../index.html">
+        <img class="logo-mark" src="../assets/ce-logo-v2-weldarm-transparent.svg" alt="Creator Engine logo" width="30" height="30"/>
+        Creator&nbsp;Engine
+      </a>
+    </div>
+    <div>
+      <a href="../index.html#install">Install</a>
+      <a href="../index.html#scope">How it works</a>
+      <a href="../index.html#docs"><svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 1.7h5L13 5v9.3H4z" stroke-linejoin="round"/><path d="M9 1.7V5h4M6 8.2h5M6 11h5" stroke-linecap="round"/></svg>Docs</a>
+      <a href="https://github.com/creator-engine/creator-engine"><svg class="nav-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.9c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <div class="page-header">
+      <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
+      <span class="page-eyebrow">Pilot</span>
+      <h1>Pilot Runbook</h1>
+    </div>
+    <article class="article">
+<h1 id="creator-engine-pilot-runbook-v31-pilot-ready">Creator Engine — Pilot Runbook (v3.1 pilot-ready)</h1>
+<p><em>The end-to-end pilot onboarding path: install CE, provision a repo + the GitHub App, file work as a Scope, and get governed, cost-safe PRs + merges — all under the branded <code>cev3 session</code> frame, on your own agent. Brand new? Begin at the <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>Welcome / Start Here</code></a> front door. Plain-language intro: <a href="understanding-ce.html"><code>understanding-ce.md</code></a>. The mechanics live in the cited contracts/designs. For the shortest command sequence, see <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>.</em></p>
+<blockquote>
+<p><strong>Pilot scope.</strong> The E1 one-liner now performs a real authenticated inventory</p>
+<p>bootstrap: it verifies the signed spec, installs CE into a user-local venv from</p>
+<p>hash-pinned artifacts, and runs <code>onboard --inventory</code>. Runtime provisioning and</p>
+<p>the interactive GitHub-App click remain later human-approved apply seams.</p>
+</blockquote>
+<h2 id="0-what-you-need">0. What you need</h2>
+<ul>
+<li>A coding agent you already use (Claude Code or Codex) — CE governs <em>your</em> agent.</li>
+<li>A greenfield (or existing) GitHub repository you want CE to drive work on.</li>
+<li>Permission to install dependencies (sudo) and to authorize a GitHub App.</li>
+</ul>
+<h2 id="1-install-one-engine-two-modes-operator-typeless">1. Install (one engine, two modes — operator-typeless)</h2>
+<p>You type nothing during setup; you approve only <strong>sudo</strong> (privileged dependency installs) and the <strong>GitHub-App authorization click</strong>. Contract: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/installer.md"><code>../contracts/installer.md</code></a>.</p>
+<ul>
+<li><strong>One-liner</strong> — <code>curl --proto &#x27;=https&#x27; --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash</code>.</li>
+</ul>
+<p>It fetches the signed spec and trust root, verifies the SSHSIG before any   persistent mutation, fetches the Pages mirror wheelhouse and answers schema   from signed-manifest-pinned hashes, creates/reuses a user-local venv, and runs   authenticated <code>onboard --inventory</code>. It does not run sudo, provision the   runtime, mutate GitHub, or create/adopt a project.</p>
+<ul>
+<li><strong>Agent-native</strong> — point your agent at <code>https://creator-engine.dev/llms-install.md</code>.</li>
+</ul>
+<p>Your agent fetches the <strong>signed</strong> install spec, <strong>verifies it against the pinned   CE public key before executing</strong>, and assists the GitHub-App step.</p>
+<p>Both modes are the SAME journey; the only difference is <em>where answers come from</em> (<code>interactive &gt; answers-file &gt; detected &gt; default</code>). You can prepare every answer <strong>upfront, IaC-style</strong>, in a committable <code>ce-install.answers.yaml</code> (schema: <a href="https://github.com/creator-engine/creator-engine/blob/main/schemas/install-answers.schema.yaml"><code>../../schemas/install-answers.schema.yaml</code></a>) — or answer interactively as each journey step batches its asks. The agent loop:</p>
+<pre><code># the one-liner runs this once with verified absolute paths:
+&lt;venv&gt;/bin/cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --inventory
+# prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
+# sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
+cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --answers ce-install.answers.yaml --plan
+cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --answers ce-install.answers.yaml --apply --non-interactive</code></pre>
+<p><code>--plan</code> shows the full plan plus the <em>exact remaining asks</em>; <code>--apply --non-interactive</code> is fail-closed — it refuses with that list instead of ever asking (unattended/VPS runs). The one-liner passes a file through too: <code>CE_ANSWERS=ce-install.answers.yaml curl … | bash</code> (or <code>bash -s -- --answers &lt;file&gt;</code>). An answers value can configure anything <strong>except a weaker grader</strong> — weakening (the cost opt-out, protections below the CE floor) requires your explicit ratified binding, educate-first.</p>
+<p>The E1 venv installs both <code>ce</code> and <code>cev3</code>; the bootstrap invokes <code>cev3</code> by absolute path. Durable user-facing <code>ce</code> exposure is user-local and belongs to the later apply path, not a system-wide E1 symlink.</p>
+<h3 id="cost-safety-the-1-pilot-question">Cost safety (the #1 pilot question)</h3>
+<p>Cost-runaway protection is <strong>on by default</strong> (<code>spend_cap_enforcement: enforce</code>). You may opt out of the per-run / per-fleet <strong>budget caps</strong> only with an explicit, ratified choice — and CE educates you first:</p>
+<blockquote>
+<p>Turning this off won&#x27;t speed up your runs; it only removes per-run / per-fleet</p>
+<p>budget friction. The runaway-detection net (global ceiling + anomaly → escalate)</p>
+<p>stays on.</p>
+</blockquote>
+<p>So even opted-out, you are never blind — see <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/spend-envelope.md"><code>../contracts/spend-envelope.md</code></a>.</p>
+<h2 id="2-provision-the-repo-the-github-app">2. Provision the repo + the GitHub App</h2>
+<p>The later apply path provisions the Plane-C runtime box (gVisor <code>runsc</code> + a deny-by-default egress proxy) and the <strong>GitHub App</strong> (its private key lives on tmpfs and mints a JIT scoped token only at open/merge, then revokes — never in the box). You complete the <strong>GitHub-App authorization click</strong> in your browser. CE opens and merges as the <strong>App bot identity</strong> (≠ you), so on a solo repo <strong>you are the reviewer</strong> and no-self-approval holds.</p>
+<p>The GitHub leg is fully decomposed and <strong>re-run convergent</strong>:</p>
+<ul>
+<li>The <strong>click is first-run-only</strong> — a detected (or declared</li>
+</ul>
+<p><code>github.app.installation_id</code>) installation skips it; the converged state is   fully declarative.</p>
+<ul>
+<li>Your one-time <strong>bootstrap token</strong> enters only as a SecretRef</li>
+</ul>
+<p>(<code>prompt://github-bootstrap-token</code> asks at the moment of use); its minimal   scopes are <em>verified by probe, not asked</em>, and it is never stored.</p>
+<ul>
+<li><strong>Branch protections reconcile as a desired-state diff</strong> against the CE</li>
+</ul>
+<p>reference floor (required CE check · strict up-to-date · dismiss-stale ·   enforce-admins · reviews ≥ 1 · squash-only): read current → diff → apply   ONLY the drift, shown to you first. Same answers, second run → empty plan.</p>
+<p>For a brand-new project, set <code>github.mode: new</code>, <code>github.repo</code>, <code>project.name</code> (optional; defaults to the repo basename), and <code>project.scaffold.kind: minimal</code> in the answers file. <code>cev3 onboard --plan</code> then shows <code>first_project</code>: the project root under <code>host.workspace_root</code>, the minimal scaffold input supplied to E2&#x27;s <code>workspace_checkout</code> leg, and the Frame→Ship flags that remain false until your first real Scope ships. The bootstrap README and initial branch are onboarding evidence only; they do not count as first ship.</p>
+<p>For an existing repo, <code>cev3 onboard --inventory</code> and <code>--plan</code> also report <code>brownfield</code> / <code>brownfield_adoption</code>: workflows and checks to preserve, detected test commands, Git history posture, branch/commit conventions, scrub preflight, project skill artifacts, and a first Scope seed. These paths are read-only until E2&#x27;s <code>onboard_apply</code> brownfield extension legs perform the writes; a build without those legs refuses apply with <code>e2_brownfield_seam_unavailable</code>.</p>
+<h2 id="3-drive-work-as-a-scope-frame-shape-build-review-ship">3. Drive work as a Scope (Frame → Shape → Build → Review → Ship)</h2>
+<p>Launch the session frame:</p>
+<pre><code>cev3 session
+◆ Creator Engine · governed session · repo &lt;owner/repo&gt; · transport cc-hooks · backend gvisor · state .ce/state
+◆ CE · Frame 0 · Shape 0 · Build 0 · Review 0 · Ship 0  │  ctx 8%  │  spend —</code></pre>
+<p>The status line shows your <strong>stage</strong> (the canon Frame→Shape→Build→Review→Ship over the conserved machine), plus a <strong>unified context + spend meter</strong> with a boundary-aware checkpoint/<code>/clear</code> nudge. Vocabulary canon: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>../architecture/stage-vocabulary.md</code></a>.</p>
+<ol>
+<li><strong>Frame</strong> — just chat with your agent about what you want. Nothing is tracked.</li>
+<li><strong>Shape</strong> — when a concrete change emerges, CE offers to crystallize it into a</li>
+</ol>
+<p><strong>Scope</strong> (the chat→Scope detect-and-offer; cheap, inline, cancel-safe). The    Scope card fills in the canon labels — <strong>Goal · Done-when · Budget ·    Change-type · Ready</strong>. You set the <strong>Budget</strong> (your call); the agent drafts the    rest and may make a change <em>safer</em> on its own but only <em>you</em> can make it    riskier. Shaping design: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/shaping-ux.md"><code>../architecture/shaping-ux.md</code></a>.    When the card reads <strong>Ready ✓</strong>, place the bet: <code>cev3 ratify &lt;scope&gt;</code>.</p>
+<ol>
+<li><strong>Build</strong> — <code>cev3 drive &lt;scope&gt;</code> dispatches one governed, boxed run (the front</li>
+</ol>
+<p>gate refuses unless Ready + ratified; the appetite becomes the run&#x27;s spend cap).</p>
+<ol>
+<li><strong>Review</strong> — read the <strong>◆ CE Completion Report</strong>: <code>cev3 report &lt;scope&gt;</code>:</li>
+</ol>
+<pre><code>┌─ ◆ CE COMPLETION REPORT · run r-91a · Scope cs-4f2 ──────────────────
+│ Outcome   PR opened → #7
+│ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S
+│ Next      → Review PR #7  (Change-type code → your approval)
+│ Inspect   gh pr view 7   |   cev3 show cs-4f2   |   cev3 artifacts r-91a
+└──────────────────────────────────────────────────────────</code></pre>
+<p>You judge <strong>artifacts</strong> (the PR, the manifest-scoped diff, the evidence) — not a    transcript. The grader lives outside the agent.</p>
+<ol>
+<li><strong>Ship</strong> — approve and merge the PR (the back gate is <code>mutation_class</code>-tiered;</li>
+</ol>
+<p>branch protection enforces independent review). <code>Ship</code> is plural — a merged PR,    delivered research, or a ratified &quot;no change.&quot;</p>
+<h2 id="4-inspect-anything">4. Inspect anything</h2>
+<p><code>cev3 artifacts &lt;run&gt;</code> and <code>cev3 show &lt;scope&gt;</code> enumerate every artifact (PR · Scope · ratification · closed manifest · evidence-chain · spend) with its inspect command. For the plain-language tour, run <code>cev3 guide</code>.</p>
+<h2 id="5-greenfield-oss-quickstart">5. Greenfield-OSS quickstart</h2>
+<p>For a fresh open-source repo: prepare answers with <code>github.mode: new</code>, run <code>cev3 onboard --spec llms-install.md --answers ce-install.answers.yaml --plan</code>, then apply after the plan is clean:</p>
+<pre><code>cev3 onboard --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive</code></pre>
+<p>Authorize the App when prompted, then open <code>cev3 session</code>. Chat in Frame, confirm a real first Scope, set the Budget, ratify it, drive the Build, review the PR in a distinct venue, and merge through <code>cev3 merge --apply</code>. From there, every change is a governed, cost-safe, evidence-backed Scope.</p>
+<h2 id="deferred-after-e1">Deferred (after E1)</h2>
+<p>Runtime provisioning · the interactive GitHub-App click · live status-line tap · live run dispatch. These are the human-gated live seams the authenticated inventory bootstrap prepares but does not claim.</p>
+<h2 id="companions">Companions</h2>
+<p><a href="understanding-ce.html"><code>understanding-ce.md</code></a> · <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/pilot-uiux-model.md"><code>../architecture/pilot-uiux-model.md</code></a> · <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/pilot-deployment-transport.md"><code>../architecture/pilot-deployment-transport.md</code></a> · <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/installer.md"><code>../contracts/installer.md</code></a> · <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/scope.md"><code>../contracts/scope.md</code></a> · the project README&#x27;s <strong>Current Status</strong> section.</p>
+    </article>
+  </div>
+  <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
+</body>
+</html>

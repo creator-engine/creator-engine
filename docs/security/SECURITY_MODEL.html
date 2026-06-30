@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../assets/ce-favicon-v2.svg"/>
+<title>Creator Engine Security Model &#x2014; Creator Engine</title>
+<style>
+  :root{
+    --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
+    --violet-soft:rgba(160,107,255,.16);
+    --ink:#0C0B0A;--panel:#16140F;--panel-2:#191712;--line:rgba(255,255,255,.10);
+    --paper:#FAF8F1;--muted:#9A968C;--moss:#7FB069;--oxide:#E08B4C;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--ink);color:var(--paper);font-family:var(--sans);
+       line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  .wrap-full{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* Nav */
+  .nav{display:flex;justify-content:space-between;align-items:center;
+       padding:22px 28px;max-width:1180px;margin:0 auto}
+  .logo{display:flex;align-items:center;gap:11px;font-family:var(--mono);
+        font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+        text-decoration:none;color:var(--paper)}
+  .logo-mark{width:30px;height:30px;display:block}
+  .nav a{display:inline-flex;align-items:center;color:var(--muted);
+         text-decoration:none;font-size:13px;margin-left:26px;transition:color .15s}
+  .nav a:hover{color:var(--paper)}
+  .nav-ico{width:14px;height:14px;margin-right:6px;flex:none}
+
+  /* Page header */
+  .page-header{padding:40px 0 32px;border-bottom:1px solid var(--line)}
+  .page-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+                text-transform:uppercase;color:var(--violet);display:block;margin-bottom:12px}
+  .page-header h1{font-size:clamp(26px,5vw,44px);font-weight:700;letter-spacing:-.02em;
+                  line-height:1.08;color:var(--paper)}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+             font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+             color:var(--muted);text-decoration:none;margin-bottom:20px;
+             transition:color .15s}
+  .back-link:hover{color:var(--violet)}
+  .back-link svg{width:12px;height:12px}
+
+  /* Article body */
+  .article{padding:44px 0 80px}
+  .article h1{font-size:clamp(22px,4vw,36px);font-weight:700;letter-spacing:-.02em;
+              line-height:1.1;margin:36px 0 14px;color:var(--paper)}
+  .article h2{font-size:clamp(18px,3vw,26px);font-weight:700;letter-spacing:-.01em;
+              line-height:1.12;margin:36px 0 12px;color:var(--paper);
+              padding-top:8px;border-top:1px solid var(--line)}
+  .article h3{font-size:clamp(15px,2.4vw,20px);font-weight:700;margin:28px 0 10px;
+              color:var(--paper)}
+  .article h4{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--violet-bright)}
+  .article h5,.article h6{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--muted)}
+  .article p{margin:0 0 18px;font-size:15.5px;color:#d8d4cc;line-height:1.65}
+  .article a{color:var(--violet);text-decoration:none;
+             border-bottom:1px solid rgba(160,107,255,.3);
+             transition:color .15s,border-color .15s}
+  .article a:hover{color:var(--violet-bright);border-bottom-color:var(--violet)}
+  .article strong{color:var(--paper);font-weight:700}
+  .article em{color:#c8c2b4;font-style:italic}
+  .article code{font-family:var(--mono);font-size:13px;background:var(--panel);
+                border:1px solid var(--line);border-radius:4px;padding:2px 6px;
+                color:var(--violet-bright)}
+  .article pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+               padding:18px 20px;overflow-x:auto;margin:0 0 24px}
+  .article pre code{background:transparent;border:none;padding:0;
+                    font-size:13px;color:#d0c9be;line-height:1.6}
+  .article hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .article ul,.article ol{margin:0 0 18px;padding-left:22px}
+  .article li{margin-bottom:8px;font-size:15.5px;color:#d8d4cc;line-height:1.6}
+  .article li code{font-size:12.5px}
+  .article blockquote{border-left:3px solid var(--violet);margin:0 0 18px;
+                      padding:12px 18px;background:rgba(160,107,255,.06);
+                      border-radius:0 8px 8px 0}
+  .article blockquote p{margin:0;color:var(--muted)}
+  .article table{width:100%;border-collapse:collapse;margin:0 0 24px;
+                 font-size:14px;overflow-x:auto;display:block}
+  .article th{background:var(--panel);color:var(--paper);font-weight:700;
+              text-align:left;padding:10px 14px;border:1px solid var(--line);
+              font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+              text-transform:uppercase}
+  .article td{padding:10px 14px;border:1px solid var(--line);
+              color:#d8d4cc;vertical-align:top}
+  .article tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+  footer{border-top:1px solid var(--line);padding:30px 0;
+         text-align:center;color:var(--muted);font-size:13px}
+  @media (max-width:640px){
+    .nav{padding:16px 18px}
+    .nav a{margin-left:16px}
+    .article{padding:28px 0 60px}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div>
+      <a class="logo" href="../index.html">
+        <img class="logo-mark" src="../assets/ce-logo-v2-weldarm-transparent.svg" alt="Creator Engine logo" width="30" height="30"/>
+        Creator&nbsp;Engine
+      </a>
+    </div>
+    <div>
+      <a href="../index.html#install">Install</a>
+      <a href="../index.html#scope">How it works</a>
+      <a href="../index.html#docs"><svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 1.7h5L13 5v9.3H4z" stroke-linejoin="round"/><path d="M9 1.7V5h4M6 8.2h5M6 11h5" stroke-linecap="round"/></svg>Docs</a>
+      <a href="https://github.com/creator-engine/creator-engine"><svg class="nav-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.9c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <div class="page-header">
+      <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
+      <span class="page-eyebrow">Security</span>
+      <h1>Creator Engine Security Model</h1>
+    </div>
+    <article class="article">
+<h1 id="creator-engine-security-model">Creator Engine Security Model</h1>
+<p><strong>Status</strong>: Canonical. Authored under Sprint 0 Execution Slice A.</p>
+<p><strong>Source-of-truth relationship</strong>: SUMMARY. Feature 001 security and redaction contracts are authoritative for record shape and validator behavior; constitution Principle XII is authoritative for treating security and privacy as design constraints. This document SUMMARIZES and LINKS; it does not redefine.</p>
+<h2 id="a-security-as-design-constraint-constitution-principle-xii">a. Security as design constraint (constitution Principle XII)</h2>
+<p>Security and privacy are design constraints, not afterthoughts.</p>
+<ul>
+<li>v0.1 does NOT implement public-export or NDA-visible-corpus</li>
+</ul>
+<p>workflows. If a later spec introduces such a pathway, redaction   gates MUST be defined and enforced before that pathway is used.</p>
+<ul>
+<li>New mutation classes that touch credentials, secrets, identity, or</li>
+</ul>
+<p>external publication MUST declare their security and privacy   posture in the spec and MUST be reviewed against that declaration   at ratification time.</p>
+<ul>
+<li>A governance substrate that leaks tenant data or weakens its own</li>
+</ul>
+<p>redaction gates is worse than no substrate at all — it   manufactures false confidence. Security treated as a late polish   step is security that fails.</p>
+<p>Operating-model implications:</p>
+<ul>
+<li>Every governed mutation has a mutation class declaration (Feature</li>
+</ul>
+<p>001 FR-006); security-sensitive work cannot be ungoverned.</p>
+<ul>
+<li>Privileged classes that touch security or identity require Source</li>
+</ul>
+<p>ratification per Feature 001 FR-008 (see §b).</p>
+<ul>
+<li>Author/approver separation (Feature 001 FR-007) applies to</li>
+</ul>
+<p>redaction approvals (Feature 001 FR-021) and to every other   security-sensitive mutation; single-actor approval is invalid.</p>
+<ul>
+<li>Constitution Principle V (Author/Approver Separation) and</li>
+</ul>
+<p>Principle VI (Human Ratification) supply the broader rules these   security mechanics implement.</p>
+<h2 id="b-security-mutation-class-definition-and-source-only-ratification">b. Security mutation class definition and Source-only ratification</h2>
+<p>The <code>security</code> mutation class is one of the six privileged classes enumerated in Feature 001 FR-008:</p>
+<ul>
+<li><code>deploy</code></li>
+<li><code>governance</code></li>
+<li><code>identity</code></li>
+<li><strong><code>security</code></strong></li>
+<li><code>attestation</code></li>
+<li><code>redaction</code></li>
+</ul>
+<p>Privileged classes MUST set <code>human_ratification_required: true</code> per Feature 001 FR-006/FR-008 and the contract at <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/mutation-class-taxonomy.md"><code>../contracts/mutation-class-taxonomy.md</code></a> §FR-008.</p>
+<p>For the <code>security</code> class specifically:</p>
+<ul>
+<li><strong>Ratifier</strong>: Source-only. Per the Feature 001 authority matrix</li>
+</ul>
+<p>contract, every authority-matrix row whose   <code>allowed_mutation_classes</code> contains <code>security</code> MUST resolve   <code>required_ratifier_role</code> to a human-eligible role (<code>source</code> or   <code>ratifier</code>).</p>
+<ul>
+<li><strong>Agent permitted actions</strong>: no reserved-restricted action (no</li>
+</ul>
+<p><code>issue_credential</code>, <code>revoke_credential</code>, <code>alter_repo_settings</code>,   <code>alter_tenant_settings</code>, <code>alter_org_settings</code>, etc.) per the   Reading A strict rule.</p>
+<ul>
+<li><strong>No silent automation</strong>: CI workflow files, branch protection,</li>
+</ul>
+<p>and <code>.github/</code> content that touch security posture are themselves   <code>security</code> (and often <code>governance</code> and <code>deploy</code>) class mutations   requiring Source ratification.</p>
+<p>The future security agent (Feature 004 deferred) MUST NOT ratify the <code>security</code> mutation class (Source-only). The security agent&#x27;s allowed mutation classes are <code>docs</code> only (security finding records, vulnerability reports); never <code>code</code>, <code>schema</code>, or any privileged class. The security agent&#x27;s findings are review evidence, never ratification (Feature 001 FR-017; Feature 002 FR-013).</p>
+<h2 id="c-redaction-gate-summary-feature-001-fr-019-fr-020-fr-020a-fr-021">c. Redaction gate summary (Feature 001 FR-019, FR-020, FR-020a, FR-021)</h2>
+<p>The redaction gate is the negative policy that makes a tenant artifact ineligible for any future public or NDA-visible reference workflow unless redaction metadata and approval are present.</p>
+<p>Summary of the Feature 001 redaction-gate contract (authoritative detail lives at the planned <code>docs/contracts/redaction-gate-policy.md</code> and <code>docs/contracts/redaction-record.md</code> per <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/README.md"><code>../contracts/README.md</code></a>):</p>
+<ul>
+<li><strong>FR-019 — gate</strong>: No tenant artifact may be treated as eligible</li>
+</ul>
+<p>for a future public or NDA-visible export workflow unless required   redaction metadata and approval are present.</p>
+<ul>
+<li><strong>FR-020 — record format</strong>: A redaction record identifies the</li>
+</ul>
+<p>source artifact, the redacted fields/regions, the approving actor,   and the redaction policy version applied.</p>
+<ul>
+<li><strong>FR-020a — storage</strong>: Redaction records are YAML files, one</li>
+</ul>
+<p>record per file, under <code>redaction_storage_path</code> declared in the   tenant identity record, with filename   <code>&lt;date&gt;-&lt;record-subject-id&gt;.yml</code> where the subject id is a   redaction or artifact id declared in the record.</p>
+<ul>
+<li><strong>FR-021 — author/approver separation</strong>: The redaction approver</li>
+</ul>
+<p>MUST NOT be the author of the underlying tenant artifact.</p>
+<p>v0.1 does NOT execute export, publish, or external reference workflows. The gate is enforced as a metadata precondition: any artifact that declares future public or NDA-visible export intent must reference a valid redaction record before any later export workflow may treat it as eligible.</p>
+<p>The <code>redaction</code> mutation class is itself one of the six privileged classes (Feature 001 FR-008). Changes to the redaction gate policy, the redaction record schema, or any tenant&#x27;s redaction-policy overlay require Source ratification. Agents MAY draft redaction records as proposals; only Source (or a Source-authorized human ratifier distinct from the artifact author) may approve a redaction.</p>
+<h2 id="d-secrets-policy-summary">d. Secrets policy summary</h2>
+<p>Secrets and credentials are governed by the <code>security</code> mutation class and by the reserved-action vocabulary&#x27;s reserved-restricted actions (see <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/governance/MUTATION_CLASS_MODEL.md"><code>../governance/MUTATION_CLASS_MODEL.md</code></a> §b).</p>
+<ul>
+<li><strong>No live secrets in the repository.</strong> Credentials and tokens</li>
+</ul>
+<p>MUST NOT appear in repository artifacts beyond opaque references   (env var names, secret-store ids, public key fingerprints).</p>
+<ul>
+<li><strong>Issuance and revocation are reserved-restricted.</strong> The</li>
+</ul>
+<p>reserved-action vocabulary names <code>issue_credential</code> and   <code>revoke_credential</code> as reserved-restricted actions; per Reading A   strict, no baseline class&#x27;s <code>agent_permitted_actions</code> may include   them. Issuance and revocation are reserved for Source via the   ratification flow.</p>
+<ul>
+<li><strong>Deploy-target secrets are tenant-owned.</strong> Deploy targets that</li>
+</ul>
+<p>need credentials source them from a tenant-owned secret store at   deploy time; Creator Engine itself stores no live secrets.</p>
+<ul>
+<li><strong>Bot tokens for governed agents</strong>: tenant identity records</li>
+</ul>
+<p>reference signing policy per FR-001 but do not embed live   credentials. Token rotation is a <code>security</code>/<code>identity</code> mutation   per FR-008.</p>
+<ul>
+<li><strong>No credential env in contained launch specs.</strong> Contained Docker/runsc</li>
+</ul>
+<p>launches MUST NOT pass credential-bearing environment names or values   through container argv, Docker <code>--env</code>/<code>-e</code>, opaque env files, or OCI   <code>Config.Env</code>. Names such as <code>GH_TOKEN</code>, <code>GITHUB_TOKEN</code>,   <code>CLAUDE_CODE_OAUTH_TOKEN</code>, <code>BAO_TOKEN</code>, and <code>OPENAI_API_KEY</code> are   denied at the launch boundary. Contained seats that need privileged   transport must use a brokered transport-deputy handoff; onecli   transport-deputy delivery is follow-on scope and is not provided by   the runsc launcher env.</p>
+<p>The full secrets contract is owned by Feature 001 (and any tenant secret-store overlay). This document references rather than restates.</p>
+<h2 id="e-credentials-rotation-policy-summary">e. Credentials rotation policy summary</h2>
+<p>Credential rotation is a <code>security</code> and <code>identity</code> mutation per Feature 001 FR-008.</p>
+<ul>
+<li><strong>Rotation cadence</strong>: tenants set rotation cadences in their own</li>
+</ul>
+<p>identity / security policy artifacts. Creator Engine does not   prescribe a global cadence; constitution Principle XII demands   that rotation be specified somewhere, not that it follow a   uniform schedule.</p>
+<ul>
+<li><strong>Rotation authorization</strong>: every credential rotation MUST be</li>
+</ul>
+<p>authorized by a Source-ratified ratification record per FR-016 and   FR-020a. The ratification record names the credential or token   identifier (opaque, never the live secret), the rotation   rationale, and the ratifier.</p>
+<ul>
+<li><strong>Post-rotation evidence</strong>: rotation produces an evidence trail</li>
+</ul>
+<p>linked to the affected identity record; prior attestations   referencing the rotated identity remain auditable per Feature 001   Edge Case (&quot;An agent identity that is removed or rotated&quot;).</p>
+<ul>
+<li><strong>Emergency rotation</strong>: an emergency rotation (suspected secret</li>
+</ul>
+<p>compromise) is still a Source-ratified mutation; ratification   MAY be retroactive only when Source&#x27;s authorization is recorded in   a repository artifact ahead of the rotation event, even if the   formal record is committed shortly after.</p>
+<h2 id="f-security-finding-record-schema-reference-feature-004-deferral">f. Security-finding-record schema reference (Feature 004 deferral)</h2>
+<p>The security-finding-record schema is deferred to Feature 004 (Independent Review / QA Agent Evidence). Per Feature 002 FR-021, this document flags the dependency rather than inventing a competing contract.</p>
+<p>Until Feature 004 lands, security findings are captured in repository-visible artifacts per constitution Principle VIII:</p>
+<ul>
+<li>Vulnerability reports authored as <code>docs</code>-class records (e.g.,</li>
+</ul>
+<p>Markdown files under a tenant-declared security findings root, or   attached to a Creator-Engine-governed spec).</p>
+<ul>
+<li>Tenant-identifier leak scan outputs from `python -m</li>
+</ul>
+<p>creator<em>engine</em>validator scan-no-limitless` (current command name   retained from Feature 001).</p>
+<ul>
+<li>Redaction-gate scan results.</li>
+<li>PR review comments recorded as review evidence; review evidence</li>
+</ul>
+<p>is NEVER ratification for the <code>security</code> class per FR-017.</p>
+<p>Post-Feature-004, the security-finding record will be a YAML file under the tenant&#x27;s Feature 004-declared security-findings path (analogous to the attestation / ratification / redaction record stores at FR-020a) and will link to the SDLC transition the finding affects (typically T16 or T17 as Feature 004 specifies).</p>
+<h2 id="g-escalation-paths">g. Escalation paths</h2>
+<p>Security incidents and security-policy conflicts follow the operating-model escalation path summarized in <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/agent-interaction-model.md"><code>./../architecture/agent-interaction-model.md</code></a> §g.</p>
+<ul>
+<li><strong>Detected by</strong>: validator output (e.g., tenant-identifier leak</li>
+</ul>
+<p>scan failures, redaction-gate failures), reviewer findings, CI   evidence, or operator observation.</p>
+<ul>
+<li><strong>Classification</strong>: every security-policy conflict is an</li>
+</ul>
+<p><code>authority</code> conflict per Feature 002 FR-018 — that is, any   attempt to mutate the security mutation class, redaction gate,   identity record, or attestation gate absent ratification hard-   stops work.</p>
+<ul>
+<li><strong>Resolver</strong>: Source. Work HALTS pending Source ratification.</li>
+<li><strong>Required evidence</strong>: the offending change is reverted unless</li>
+</ul>
+<p>Source ratifies it; a ratification record (or revert record) is   committed before any downstream transition advances.</p>
+<ul>
+<li><strong>Post-incident</strong>: the response produces repository-visible</li>
+</ul>
+<p>artifacts — the incident summary, the chosen mitigation, the   rollback or revert evidence, and any post-incident attestation   amendments per FR-004.</p>
+<p>Constitution Principle V (Author/Approver Separation) and Principle VI (Human Ratification) supply the broader rules these escalation mechanics implement. A &quot;go ahead&quot; message on a non-designated surface does NOT authorize any privileged security mutation per FR-018.</p>
+<h2 id="acceptance-posture-for-this-document">Acceptance posture for this document</h2>
+<p>This SECURITY_MODEL.md satisfies Feature 002 Canonical Document Specification #17: Principle XII is cited; the <code>security</code> mutation class is explicit as Source-only (Feature 001 FR-008); the redaction gate summary is present (FR-019, FR-020, FR-020a, FR-021); the secrets policy summary is present; the credentials rotation policy summary is present; the security-finding-record schema deferral to Feature 004 is explicit; escalation paths are linked.</p>
+    </article>
+  </div>
+  <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
+</body>
+</html>
