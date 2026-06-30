@@ -1509,6 +1509,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="declared PR work class (default: story)",
     )
     automerge_decide.add_argument(
+        "--run-mode",
+        default=None,
+        dest="run_mode",
+        choices=["dev", "strangeLoop", "ceo"],
+        help=(
+            "advisory run mode override for AutoReview/automerge policy evaluation; "
+            "defaults to the policy state, whose shipped default is dev"
+        ),
+    )
+    automerge_decide.add_argument(
         "--policy-state",
         default=None,
         dest="policy_state_path",
@@ -1543,6 +1553,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ("--repo", "repo"),
         ("--branch", "branch"),
         ("--base", "base"),
+        ("--author-login", "author_login"),
+        ("--approver-login", "approver_login"),
     ):
         automerge_decide._option_string_actions[option] = argparse._StoreAction(
             option_strings=[option],
@@ -3817,6 +3829,9 @@ def _automerge_decide(args) -> int:
         repo=getattr(args, "repo", None),
         branch=getattr(args, "branch", None),
         base=getattr(args, "base", None),
+        run_mode=getattr(args, "run_mode", None),
+        author_login=getattr(args, "author_login", None),
+        approver_login=getattr(args, "approver_login", None),
     )
 
     if getattr(args, "json_output", False):

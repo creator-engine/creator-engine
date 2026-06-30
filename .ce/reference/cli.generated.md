@@ -23,6 +23,7 @@ Options:
 | `--paths` | no |  | repeatable: repo-relative path changed in the PR (from git diff --name-only) |
 | `--paths-file` | no |  | path to a newline-separated file of changed paths (alternative to --paths) |
 | `--declared-work-class` | no | `epic, feature, story, tiny` | declared PR work class (default: story) |
+| `--run-mode` | no | `ceo, dev, strangeLoop` | advisory run mode override for AutoReview/automerge policy evaluation; defaults to the policy state, whose shipped default is dev |
 | `--policy-state` | no |  | path to the automerge policy state JSON (default: .ce/state/automerge/policy.json relative to --repo-root) |
 | `--repo-root` | no |  | repo root for default policy state path (default: current directory) |
 | `--pr` | no |  | optional PR number for the audit record |

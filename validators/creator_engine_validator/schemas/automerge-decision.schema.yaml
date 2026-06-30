@@ -92,3 +92,31 @@ properties:
     type:
       - string
       - "null"
+  repo:
+    type:
+      - string
+      - "null"
+  branch:
+    type:
+      - string
+      - "null"
+  base:
+    type:
+      - string
+      - "null"
+  required_checks:
+    type: array
+    items:
+      type: string
+  enabling_decision_ref:
+    type:
+      - string
+      - "null"
+  author_login:
+    type:
+      - string
+      - "null"
+  approver_login:
+    type:
+      - string
+      - "null"

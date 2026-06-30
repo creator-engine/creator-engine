@@ -30,7 +30,7 @@ $defs:
     properties:
       run_mode:
         type: string
-        description: "dev means classify-only gesture mode; non-dev may emit AUTO only when all guards pass."
+        description: "dev means classify-only gesture mode; strangeLoop (or retained ceo override) may emit AUTO only when all guards pass."
       kill_switch:
         type: boolean
       enabling_decision_ref:

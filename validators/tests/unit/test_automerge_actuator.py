@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
 
 _REPO = "creator-engine/creator-engine"
@@ -22,6 +23,14 @@ class FakeActuatorGh:
         self.calls.append(list(argv))
         if argv[:3] == ["gh", "pr", "checks"]:
             payload = [{"name": "validate", "conclusion": self.check_conclusion}]
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+        if argv[:3] == ["gh", "pr", "view"]:
+            payload = {
+                "author": {"login": "author-dev"},
+                "latestReviews": [
+                    {"author": {"login": "reviewer-dev"}, "state": "APPROVED"}
+                ],
+            }
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
 
         query = next((str(arg) for arg in argv if str(arg).startswith("query=")), "")
@@ -80,6 +89,8 @@ def _decision(**overrides):
         "checks_green": True,
         "pr_number": 313,
         "head_sha": _HEAD,
+        "author_login": "author-dev",
+        "approver_login": "reviewer-dev",
         "change": {
             "repo": _REPO,
             "branch": "ce-automerge-actuator",
@@ -87,6 +98,8 @@ def _decision(**overrides):
             "pr_number": 313,
             "head_sha": _HEAD,
             "manifest_paths": [".ce/pr-manifests/ce-automerge-actuator.md"],
+            "author_login": "author-dev",
+            "approver_login": "reviewer-dev",
         },
     }
     payload.update(overrides)
@@ -171,6 +184,44 @@ def test_refuses_missing_enabling_ref(tmp_path: Path) -> None:
     assert gh.mutation_calls() == []
 
 
+def test_refuses_work_class_outside_canary(tmp_path: Path) -> None:
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(_write(tmp_path, _decision(**{"class": "feature"})), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "work_class_outside_canary"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_missing_author_approver_evidence(tmp_path: Path) -> None:
+    gh = FakeActuatorGh()
+    payload = _decision()
+    del payload["author_login"]
+    del payload["change"]["author_login"]
+
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "author_approver_not_distinct"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_self_approval_evidence(tmp_path: Path) -> None:
+    gh = FakeActuatorGh()
+    payload = _decision(author_login="same-dev", approver_login="same-dev")
+    payload["change"]["author_login"] = "same-dev"
+    payload["change"]["approver_login"] = "same-dev"
+
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "author_approver_not_distinct"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
 def test_refuses_red_required_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_live_policy(tmp_path, monkeypatch)
     gh = FakeActuatorGh(check_conclusion="failure")
@@ -191,6 +242,28 @@ def test_actuates_only_when_all_green(tmp_path: Path, monkeypatch: pytest.Monkey
     assert result.reason == "all_predicates_green"
     assert len(gh.mutation_calls()) == 1
     assert result.auto_merge_result.enabled is True
+    assert result.audit_record["status"] == "Actuated"
+    assert result.audit_record["single_pr"] is True
+    assert result.audit_record["author_login"] == "author-dev"
+    assert result.audit_record["approver_login"] == "reviewer-dev"
+
+
+def test_actuate_cli_appends_audit_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_live_policy(tmp_path, monkeypatch)
+    audit_log = tmp_path / "audit" / "actuation.jsonl"
+
+    result = actuate_decision(
+        _write(tmp_path, _decision()),
+        gh_runner=FakeActuatorGh(),
+        audit_log_path=audit_log,
+    )
+
+    records = [json.loads(line) for line in audit_log.read_text(encoding="utf-8").splitlines()]
+    assert result.actuated is True
+    assert len(records) == 1
+    assert records[0]["status"] == "Actuated"
+    assert records[0]["acted"] is True
+    assert records[0]["single_pr"] is True
 
 
 def test_actuates_with_decision_top_level_change_ref(

@@ -29,6 +29,11 @@ DEFAULT_AUTOMERGE_POLICY_STATE_RELATIVE: Final[Path] = Path("automerge") / "poli
 DEFAULT_AUTOMERGE_DECISIONS_RELATIVE: Final[Path] = Path("automerge") / "decisions"
 AUTOMERGE_RUN_MODE_CEO: Final[str] = "ceo"
 AUTOMERGE_RUN_MODE_DEV: Final[str] = "dev"
+AUTOMERGE_RUN_MODE_STRANGE_LOOP: Final[str] = "strangeLoop"
+AUTOMERGE_ARMING_RUN_MODES: Final[frozenset[str]] = frozenset(
+    {AUTOMERGE_RUN_MODE_CEO, AUTOMERGE_RUN_MODE_STRANGE_LOOP}
+)
+AUTOMERGE_CANARY_WORK_CLASSES: Final[frozenset[str]] = frozenset({"tiny", "story"})
 
 
 class AutoMergePolicyStateError(Exception):
@@ -147,6 +152,8 @@ class AutoMergeDecision:
     branch: str | None = None
     base: str | None = None
     required_checks: tuple[str, ...] = ()
+    author_login: str | None = None
+    approver_login: str | None = None
 
     @property
     def is_auto(self) -> bool:
@@ -183,6 +190,8 @@ class AutoMergeDecision:
             "branch": self.branch,
             "base": self.base,
             "required_checks": list(self.required_checks),
+            "author_login": self.author_login,
+            "approver_login": self.approver_login,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -259,24 +268,28 @@ def materialize_automerge_policy_state_from_variables(
     *,
     run_mode_variable: str | None = None,
     enabling_ref_variable: str | None = None,
+    kill_switch_variable: str | None = None,
 ) -> AutoMergePolicyState:
     """Write fail-safe automerge policy state from repository variable values.
 
-    Only an explicit lowercase ``ceo`` run mode enables the docs class. Every
-    unset, empty, or otherwise malformed run-mode value materializes as the
-    dormant dev policy.
+    Only an explicit armed run mode enables the docs class. Every unset, empty,
+    or otherwise malformed run-mode value materializes as the dormant dev policy.
+    ``ceo`` is retained as the existing dev-2 override; ``strangeLoop`` is the
+    explicit canary arming knob. The kill-switch defaults inactive but can be
+    asserted independently to halt actuation before any source-host mutation.
     """
 
     run_mode = (
-        AUTOMERGE_RUN_MODE_CEO
-        if run_mode_variable == AUTOMERGE_RUN_MODE_CEO
+        str(run_mode_variable)
+        if run_mode_variable in AUTOMERGE_ARMING_RUN_MODES
         else AUTOMERGE_RUN_MODE_DEV
     )
-    docs_auto_merge = run_mode == AUTOMERGE_RUN_MODE_CEO
+    docs_auto_merge = run_mode in AUTOMERGE_ARMING_RUN_MODES
     enabling_ref = _non_empty_string_or_none(enabling_ref_variable)
+    kill_switch = _truthy_variable(kill_switch_variable)
     state = AutoMergePolicyState(
         run_mode=run_mode,
-        kill_switch=False,
+        kill_switch=kill_switch,
         classes={
             class_name: AutoMergeClassPolicy(
                 auto_merge=class_name == "docs" and docs_auto_merge
@@ -305,11 +318,21 @@ def decide_automerge(
     repo: str | None = None,
     branch: str | None = None,
     base: str | None = None,
+    run_mode: str | None = None,
+    author_login: str | None = None,
+    approver_login: str | None = None,
 ) -> AutoMergeDecision:
     """Return an ``AUTO`` or ``GESTURE`` decision without side effects."""
 
     resolved_policy = policy or default_mutation_policy()
     resolved_state = policy_state or AutoMergePolicyState.default()
+    if run_mode is not None:
+        resolved_state = AutoMergePolicyState(
+            run_mode=str(run_mode),
+            kill_switch=resolved_state.kill_switch,
+            classes=resolved_state.classes,
+            enabling_decision_ref=resolved_state.enabling_decision_ref,
+        )
     resolved_paths = tuple(paths if paths is not None else (changed_paths or ()))
     resolved_numstat = tuple(numstat if numstat is not None else (change_stats or ()))
     if not resolved_numstat:
@@ -351,6 +374,8 @@ def decide_automerge(
             repo,
             branch,
             base,
+            author_login,
+            approver_login,
         )
 
     checks_green = _checks_all_green(checks, required_checks=resolved_policy.required_checks)
@@ -370,16 +395,22 @@ def decide_automerge(
         auto_blockers.append("reviewDecision_CHANGES_REQUESTED")
     if size_band == "split_required":
         auto_blockers.append("size_band_split_required")
+    if declared_work_class not in AUTOMERGE_CANARY_WORK_CLASSES:
+        auto_blockers.append("work_class_outside_canary")
     if mutation_class in GESTURE_CLASSES:
         auto_blockers.append("gesture_class")
     if resolved_state.kill_switch:
         auto_blockers.append("kill_switch")
     if resolved_state.run_mode == "dev":
         auto_blockers.append("run_mode_dev")
+    if resolved_state.run_mode not in AUTOMERGE_ARMING_RUN_MODES:
+        auto_blockers.append("run_mode_not_armed")
     if not class_flag:
         auto_blockers.append("class_auto_merge_false")
     if class_flag and not resolved_state.enabling_decision_ref:
         auto_blockers.append("enabling_decision_ref_missing")
+    if not _distinct_author_approver(author_login, approver_login):
+        auto_blockers.append("author_approver_not_distinct")
 
     if auto_blockers:
         rationale.extend(auto_blockers)
@@ -401,6 +432,8 @@ def decide_automerge(
             repo,
             branch,
             base,
+            author_login,
+            approver_login,
         )
 
     if mutation_class not in AUTO_CLASSES:
@@ -423,6 +456,8 @@ def decide_automerge(
             repo,
             branch,
             base,
+            author_login,
+            approver_login,
         )
 
     rationale.append("all_auto_guards_passed")
@@ -444,6 +479,8 @@ def decide_automerge(
         repo,
         branch,
         base,
+        author_login,
+        approver_login,
     )
 
 
@@ -461,6 +498,9 @@ def emit_automerge_dry_run_decision(
     repo: str | None = None,
     branch: str | None = None,
     base: str | None = None,
+    run_mode: str | None = None,
+    author_login: str | None = None,
+    approver_login: str | None = None,
 ) -> AutoMergeDecision:
     """Write a dry-run decision JSON record and return the decision."""
 
@@ -478,6 +518,9 @@ def emit_automerge_dry_run_decision(
         repo=repo,
         branch=branch,
         base=base,
+        run_mode=run_mode,
+        author_login=author_login,
+        approver_login=approver_login,
     )
     decisions_dir = Path(output_dir) if output_dir is not None else Path(resolved_policy.decisions_dir)
     decisions_dir.mkdir(parents=True, exist_ok=True)
@@ -510,6 +553,8 @@ def _decision(
     repo: str | None,
     branch: str | None,
     base: str | None,
+    author_login: str | None,
+    approver_login: str | None,
 ) -> AutoMergeDecision:
     return AutoMergeDecision(
         decision=decision,
@@ -533,6 +578,8 @@ def _decision(
         branch=branch,
         base=base,
         required_checks=tuple(policy.required_checks),
+        author_login=_non_empty_string_or_none(author_login),
+        approver_login=_non_empty_string_or_none(approver_login),
     )
 
 
@@ -617,6 +664,18 @@ def _non_empty_string_or_none(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _truthy_variable(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on", "kill", "halt"}
+
+
+def _distinct_author_approver(author_login: str | None, approver_login: str | None) -> bool:
+    author = _non_empty_string_or_none(author_login)
+    approver = _non_empty_string_or_none(approver_login)
+    return bool(author and approver and author.lower() != approver.lower())
 
 
 def _jsonable(value: Any) -> Any:
