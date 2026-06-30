@@ -42,6 +42,8 @@ class PreflightConfig:
     base: str
     declared_work_class: str | None = None
     head_ref: str | None = None
+    pr_body_file: Path | None = None
+    pr_body: str | None = None
     allow_dirty: bool = False
     test_command: str = DEFAULT_TEST_COMMAND
 
@@ -261,6 +263,40 @@ def _resolve_declared_work_class(
     return declared
 
 
+def _resolve_test_coupling_pr_body(
+    config: PreflightConfig,
+    runner: Runner,
+    out: TextIO,
+) -> str | None:
+    if config.pr_body is not None:
+        return config.pr_body
+
+    if config.pr_body_file is not None:
+        pr_body_file = config.pr_body_file
+        if not pr_body_file.is_absolute():
+            pr_body_file = config.repo_root / pr_body_file
+        try:
+            return pr_body_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"WARNING: could not read --pr-body-file for test-coupling exemption: {exc}", file=out)
+            return None
+
+    if not config.head_ref:
+        return None
+
+    result = runner(
+        ["gh", "pr", "view", config.head_ref, "--json", "body", "--jq", ".body"],
+        config.repo_root,
+        None,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        suffix = f": {detail}" if detail else ""
+        print(f"WARNING: could not read PR body via gh for test-coupling exemption{suffix}", file=out)
+        return None
+    return result.stdout
+
+
 def _test_command_argv(command: str) -> list[str]:
     try:
         argv = shlex.split(command)
@@ -452,6 +488,8 @@ def run_preflight(
             base=config.base,
             declared_work_class=config.declared_work_class,
             head_ref=config.head_ref or current_branch(repo_root, runner),
+            pr_body_file=config.pr_body_file,
+            pr_body=config.pr_body,
             allow_dirty=config.allow_dirty,
             test_command=config.test_command,
         )
@@ -465,6 +503,44 @@ def run_preflight(
     declared_work_class: dict[str, str] = {}
     py_env = _python_env(config.repo_root)
     py = sys.executable
+
+    def test_coupling_gate() -> str:
+        argv = [
+            py,
+            "-m",
+            "creator_engine_validator",
+            "verify-test-coupling",
+            "--base",
+            comparison_base["value"],
+        ]
+        pr_body = _resolve_test_coupling_pr_body(config, runner, out)
+        if pr_body is None:
+            argv.append(".")
+            _run_checked(
+                "Creator Engine validator - test-coupling PR-diff gate",
+                argv,
+                config.repo_root,
+                runner=runner,
+                env=py_env,
+                out=out,
+                err=err,
+            )
+            return "passed"
+
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="ce-validate-pr-body-", suffix=".md") as temp:
+            temp.write(pr_body)
+            temp.flush()
+            argv.extend(["--pr-body-file", temp.name, "."])
+            _run_checked(
+                "Creator Engine validator - test-coupling PR-diff gate",
+                argv,
+                config.repo_root,
+                runner=runner,
+                env=py_env,
+                out=out,
+                err=err,
+            )
+        return "passed"
 
     checks.append(
         _run_check(
@@ -750,26 +826,7 @@ def run_preflight(
     checks.append(
         _run_check(
             "Creator Engine validator - test-coupling PR-diff gate",
-            lambda: (
-                _run_checked(
-                    "Creator Engine validator - test-coupling PR-diff gate",
-                    [
-                        py,
-                        "-m",
-                        "creator_engine_validator",
-                        "verify-test-coupling",
-                        "--base",
-                        comparison_base["value"],
-                        ".",
-                    ],
-                    config.repo_root,
-                    runner=runner,
-                    env=py_env,
-                    out=out,
-                    err=err,
-                ),
-                "passed",
-            )[1],
+            test_coupling_gate,
             out,
             err,
         )
@@ -829,6 +886,17 @@ def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
     )
     parser.add_argument("--head-ref", default=None, help="PR head branch name for carrier slug (default: current branch)")
     parser.add_argument(
+        "--pr-body-file",
+        type=Path,
+        default=None,
+        help="optional PR body file for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate",
+    )
+    parser.add_argument(
+        "--pr-body",
+        default=None,
+        help="optional literal PR body for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate",
+    )
+    parser.add_argument(
         "--allow-dirty",
         action="store_true",
         help="continue despite working-tree changes; committed base..HEAD state is still what gets validated",
@@ -848,6 +916,8 @@ def run_cli(args: argparse.Namespace) -> int:
             base=args.base,
             declared_work_class=args.declared_work_class,
             head_ref=args.head_ref,
+            pr_body_file=args.pr_body_file,
+            pr_body=args.pr_body,
             allow_dirty=args.allow_dirty,
             test_command=args.test_command,
         )

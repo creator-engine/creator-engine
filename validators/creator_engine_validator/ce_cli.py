@@ -1517,6 +1517,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="PR head branch name for carrier slug (default: current branch)",
     )
     validate_pr.add_argument(
+        "--pr-body-file",
+        type=Path,
+        default=None,
+        help="optional PR body file for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate",
+    )
+    validate_pr.add_argument(
+        "--pr-body",
+        default=None,
+        help="optional literal PR body for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate",
+    )
+    validate_pr.add_argument(
         "--allow-dirty",
         action="store_true",
         help="continue despite working-tree changes; committed base..HEAD state is still what gets validated",
