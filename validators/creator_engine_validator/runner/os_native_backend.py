@@ -44,13 +44,12 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..fs_mediation import RunnerFsConfinement, landlock_abi_version, landlock_preexec
+from ..fs_mediation import landlock_abi_version
 from .backend import (
     BackendUnavailable,
     CollectedEvidence,
@@ -110,6 +109,7 @@ class OsNativeCapability:
 
 
 CapabilityProbe = Callable[[], OsNativeCapability]
+OpenShellBackendFactory = Callable[[], RunnerBackend]
 
 
 class OsNativePlanRejected(ValueError):
@@ -176,6 +176,13 @@ class OsNativePlan:
         return tuple(args)
 
 
+@dataclass
+class _OpenShellDelegation:
+    backend: RunnerBackend
+    handle: ProvisionedHandle
+    p3_verified: bool = False
+
+
 class OsNativeCommandRunner(Protocol):
     """The live bwrap execution seam. Tests inject a fake; default uses subprocess."""
 
@@ -222,6 +229,55 @@ class SubprocessOsNativeRunner:
             pass_fds=pass_fds,
             close_fds=True,
         )
+
+
+_P3_BLOCKED_HOST = "203.0.113.1"
+_P3_BLOCKED_PORT = 443
+_P3_BLOCKED_TARGET = f"{_P3_BLOCKED_HOST}:{_P3_BLOCKED_PORT}"
+_P3_BLOCKED_PROBE_COMMAND = (
+    "python3",
+    "-c",
+    (
+        "import socket, sys\n"
+        f"host = {_P3_BLOCKED_HOST!r}\n"
+        f"port = {_P3_BLOCKED_PORT!r}\n"
+        "try:\n"
+        "    sock = socket.create_connection((host, port), timeout=2)\n"
+        "except OSError:\n"
+        "    sys.exit(0)\n"
+        "else:\n"
+        "    sock.close()\n"
+        "    sys.exit(42)\n"
+    ),
+)
+
+
+def _default_openshell_backend() -> RunnerBackend:
+    """Return a live OpenShell backend only when its CLI transport is available."""
+
+    from .openshell_backend import OpenShellBackend, SubprocessSandboxClient
+
+    client = SubprocessSandboxClient()
+    if not client.available():
+        raise BackendUnavailable(
+            "policy declares a non-empty egress allowlist; os-native delegates egress "
+            "enforcement to OpenShell for OQ-1 Option C, but the OpenShell CLI is not "
+            "available. Refusing before any os-native proxy PATH probe or sandbox start."
+        )
+    return OpenShellBackend(client=client)
+
+
+def _has_p3_denial(records: tuple[dict[str, Any], ...]) -> bool:
+    for record in records:
+        if record.get("disposition") != "DENIED":
+            continue
+        target = record.get("target")
+        if target == _P3_BLOCKED_TARGET:
+            return True
+        raw = record.get("raw")
+        if isinstance(raw, dict) and raw.get("target") == _P3_BLOCKED_TARGET:
+            return True
+    return False
 
 
 def _seccomp_available() -> bool:
@@ -408,106 +464,132 @@ class OsNativeBackend(RunnerBackend):
         *,
         capability_probe: CapabilityProbe | None = None,
         runner: OsNativeCommandRunner | None = None,
+        openshell_backend_factory: OpenShellBackendFactory | None = None,
     ) -> None:
         self._capability_probe = capability_probe
         self._runner: OsNativeCommandRunner = (
             runner if runner is not None else SubprocessOsNativeRunner()
         )
-        self._capabilities: dict[str, OsNativeCapability] = {}
-        self._plans: dict[str, OsNativePlan] = {}
+        self._openshell_backend_factory = openshell_backend_factory or _default_openshell_backend
         self._egress: dict[str, EgressProxyConfig] = {}
+        self._delegations: dict[str, _OpenShellDelegation] = {}
 
     def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         # The deny surface (mapping + validate_runtime_policy → PolicyRejected) is
         # enforced by the RunnerBackend.provision template method before we get
         # here. A clean record reaches pure plan translation; all missing or
         # unsupported primitives fail closed before the live runner can start.
+        egress = translate_to_egress_proxy_config(request.runtime_policy)
+        if not egress.no_egress:
+            delegated_backend = self._openshell_backend_factory()
+            delegated_handle = delegated_backend.provision(request)
+            record = request.runtime_policy
+            policy_sha = record.get("policy_sha", "")
+            handle = ProvisionedHandle(
+                backend_key=self.backend_key,
+                run_id=request.run_id,
+                policy_sha=policy_sha if isinstance(policy_sha, str) else "",
+                ref=f"os-native:openshell:{request.run_id}",
+            )
+            self._egress[handle.ref] = egress
+            self._delegations[handle.ref] = _OpenShellDelegation(
+                backend=delegated_backend,
+                handle=delegated_handle,
+            )
+            return handle
         probe = self._capability_probe or probe_os_native_capability
         capability = probe()
         if not capability.available:
             raise BackendUnavailable(_unavailable_reason(capability))
+        # No-egress path: fail closed at provision time. Prior to Option C this
+        # refusal was deferred to run time; it now occurs at provision time so
+        # that the absence of a concrete sandbox enforcement contract is rejected
+        # before any side effect. This is an intentional, documented change
+        # (ce-ops#363 Option C).
         raise BackendUnavailable(_EXECUTION_CONTRACT_UNAVAILABLE_REASON)
-        try:
-            plan, egress = _translate_to_os_native_plan(request.runtime_policy, capability)
-        except OsNativePlanRejected as exc:
-            raise BackendUnavailable(f"invalid os-native sandbox plan: {exc}") from exc
-        if not self._runner.available(capability):
-            raise BackendUnavailable(
-                "the probed os-native primitives are not available at launch time; "
-                "refusing before sandbox start"
-            )
-        record = request.runtime_policy
-        policy_sha = record.get("policy_sha", "")
-        handle = ProvisionedHandle(
-            backend_key=self.backend_key,
-            run_id=request.run_id,
-            policy_sha=policy_sha if isinstance(policy_sha, str) else "",
-            ref=f"os-native:{request.run_id}",
-        )
-        self._capabilities[handle.ref] = capability
-        self._plans[handle.ref] = plan
-        self._egress[handle.ref] = egress
-        return handle
 
     def run(self, handle: ProvisionedHandle, request: RunRequest) -> RunResult:
-        plan = self._plans.get(handle.ref)
-        if plan is None:
-            raise BackendUnavailable(
-                f"no provisioned os-native sandbox plan for handle {handle.ref!r}; "
-                "refusing unproven handle"
+        delegation = self._delegations.get(handle.ref)
+        if delegation is not None:
+            self._verify_delegated_p3(delegation)
+            result = delegation.backend.run(delegation.handle, request)
+            return RunResult(
+                exit_code=result.exit_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                started_ref=handle.ref,
+                change_set=result.change_set,
+                runtime_probe=result.runtime_probe,
             )
-        if not request.command:
-            raise BackendUnavailable("os-native run request command must not be empty")
-        confinement = RunnerFsConfinement(workspace_read_roots=plan.read_roots)
-        preexec_fn = landlock_preexec(confinement)
-        try:
-            with tempfile.TemporaryFile() as seccomp:
-                seccomp.write(plan.seccomp_filter)
-                seccomp.flush()
-                seccomp.seek(0)
-                fd = seccomp.fileno()
-                argv = plan.bwrap_argv(request.command, seccomp_fd=fd)
-                completed = self._runner.run(argv, preexec_fn=preexec_fn, pass_fds=(fd,))
-        except OSError as exc:
-            raise BackendUnavailable(f"failed to prepare os-native sandbox launch: {exc}") from exc
-        return RunResult(
-            exit_code=completed.returncode,
-            stdout=completed.stdout or "",
-            stderr=completed.stderr or "",
-            started_ref=handle.ref,
+        raise BackendUnavailable(
+            f"no provisioned os-native delegation for handle {handle.ref!r}; "
+            "refusing unproven handle"
         )
 
+    def _verify_delegated_p3(
+        self,
+        delegation: _OpenShellDelegation,
+    ) -> None:
+        if delegation.p3_verified:
+            return
+        probe_result = delegation.backend.run(
+            delegation.handle,
+            RunRequest(command=_P3_BLOCKED_PROBE_COMMAND),
+        )
+        # exit_code != 0 catches probe-script failures only (the script exits 42
+        # when the connection *succeeds*, meaning enforcement is absent). It does
+        # NOT distinguish policy-blocked from unroutable-network: the probe
+        # target (203.0.113.1) is TEST-NET-3, a non-routable address, so a
+        # network timeout also yields exit 0. The authoritative enforcement gate
+        # is the OCSF _has_p3_denial check below: an explicit DENIED record from
+        # the OpenShell policy engine is what proves egress enforcement is active.
+        if probe_result.exit_code != 0:
+            raise BackendUnavailable(
+                "OpenShell delegated egress P3 behavioral denial probe failed before "
+                f"os-native run: probe exited {probe_result.exit_code}; refusing user command"
+            )
+        evidence = delegation.backend.collect(delegation.handle)
+        if not _has_p3_denial(evidence.records):
+            raise BackendUnavailable(
+                "OpenShell delegated egress P3 behavioral denial probe produced no "
+                f"DENIED OCSF evidence for {_P3_BLOCKED_TARGET}; refusing user command"
+            )
+        delegation.p3_verified = True
+
     def collect(self, handle: ProvisionedHandle) -> CollectedEvidence:
-        capability = self._capabilities.get(handle.ref)
-        plan = self._plans.get(handle.ref)
-        egress = self._egress.get(handle.ref)
-        records: tuple[dict[str, object], ...] = ()
-        if capability is not None and plan is not None and egress is not None:
+        delegation = self._delegations.get(handle.ref)
+        if delegation is not None:
+            evidence = delegation.backend.collect(delegation.handle)
             records = (
                 {
                     "backend_key": self.backend_key,
-                    "mechanism": "bwrap+landlock+seccomp+proxy",
-                    "platform": capability.platform_name,
-                    "landlock_abi": capability.landlock_abi,
-                    "seccomp_available": capability.seccomp_available,
-                    "execution": "enabled",
-                    "network": plan.network,
-                    "egress": "deny" if egress.no_egress else "proxy",
-                    "mounts": [
-                        {"source": mount.source, "target": mount.target, "mode": mount.mode}
-                        for mount in plan.mounts
-                    ],
+                    "mechanism": "openshell-delegated-egress",
+                    "delegated_backend": delegation.handle.backend_key,
+                    "delegated_ref": delegation.handle.ref,
+                    "egress": "openshell",
+                    "p3_behavioral_denial_verified": delegation.p3_verified,
+                    "p3_blocked_target": _P3_BLOCKED_TARGET,
                 },
+                *evidence.records,
+            )
+            return CollectedEvidence(
+                handle_ref=handle.ref,
+                records=records,
+                note=f"os-native delegated egress evidence for {handle.ref}",
+                change_set=evidence.change_set,
             )
         return CollectedEvidence(
             handle_ref=handle.ref,
-            records=records,
+            records=(),
             note=f"os-native sandbox evidence for {handle.ref}",
         )
 
     def teardown(self, handle: ProvisionedHandle) -> TeardownResult:
-        self._capabilities.pop(handle.ref, None)
-        self._plans.pop(handle.ref, None)
+        delegation = self._delegations.pop(handle.ref, None)
+        if delegation is not None:
+            result = delegation.backend.teardown(delegation.handle)
+            self._egress.pop(handle.ref, None)
+            return TeardownResult(handle_ref=handle.ref, released=result.released)
         self._egress.pop(handle.ref, None)
         return TeardownResult(handle_ref=handle.ref, released=True)
 

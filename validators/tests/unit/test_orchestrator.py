@@ -254,8 +254,10 @@ def test_os_native_selected_then_fails_closed_without_required_primitives(monkey
         ),
     )
 
+    policy = valid_policy("os-native")
+    policy["egress_allowlist"] = []
     with pytest.raises(BackendUnavailable) as exc:
-        run_plan(valid_policy("os-native"), "run-1", ("echo", "hi"), approved())
+        run_plan(policy, "run-1", ("echo", "hi"), approved())
     message = str(exc.value)
     assert "required Linux primitives" in message
     assert "missing: bwrap, landlock" in message
@@ -278,8 +280,10 @@ def test_os_native_selected_with_primitives_available_still_fails_closed_without
         ),
     )
 
+    policy = valid_policy("os-native")
+    policy["egress_allowlist"] = []
     with pytest.raises(BackendUnavailable) as exc:
-        run_plan(valid_policy("os-native"), "run-1", ("echo", "hi"), approved())
+        run_plan(policy, "run-1", ("echo", "hi"), approved())
     message = str(exc.value)
     assert "capability probe passed" in message
     assert "no concrete deny-by-default host-proxy enforcement contract" in message
