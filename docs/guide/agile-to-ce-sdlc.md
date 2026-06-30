@@ -35,15 +35,15 @@ the exact commands.
 | **Product owner breaks the PRD into stories/tasks** | The **plan + tasks** generation pipeline | `/speckit-plan` → `plan.md`; `/speckit-tasks` → `tasks.md` (dependency-ordered, grouped by user story) |
 | **Backlog refinement (clarify ambiguity, sanity-check)** | Spec **clarification** + cross-artifact **analysis** | `/speckit-clarify` (asks up to 5 targeted questions, folds answers into the spec); `/speckit-analyze` (read-only consistency check across spec/plan/tasks) |
 | **Populating the GitHub/Jira backlog** | **Tasks → GitHub issues** | `/speckit-taskstoissues` opens one issue per task in your repo |
-| **A user story / backlog task** | A **Scope** — CE's ratifiable unit of work | `cev3 scope <id> --goal … --done-when … --budget … --change-type …` |
+| **A user story / backlog task** | A **Scope** — CE's ratifiable unit of work | `ce scope <id> --goal … --done-when … --budget … --change-type …` |
 | **Definition of Ready (story is well-formed)** | The Scope reads **Ready ✓** (Goal · Done-when · Budget · Change-type all valid) | CE shows `Ready ✓` on the Scope card when the four fields are filled and valid |
-| **Sprint planning / committing to the story** | **Ratifying** the Scope — placing the bet | `cev3 ratify <id> --approver-ref <digest>` (the human-only front gate) |
+| **Sprint planning / committing to the story** | **Ratifying** the Scope — placing the bet | `ce ratify <id> --approver-ref <digest>` (the human-only front gate) |
 | **Acceptance criteria you write before coding** | **Done-when** criteria on the Scope (the graded checks) | the `--done-when` lines you set at Shape time — they are what gets graded |
-| **Sprint execution (the dev does the work)** | The governed **Build** run | `cev3 drive <id>` (assemble the gate); `cev3 drive <id> --spawn` (launch the governed agent) |
+| **Sprint execution (the dev does the work)** | The governed **Build** run | `ce drive <id>` (assemble the gate); `ce drive <id> --spawn` (launch the governed agent) |
 | **Continuous integration / automated checks** | **CI verifies** — the gate set (`ce validate-pr`) | CI runs the same checks you can run locally; *green proves well-formed, not authorized* |
-| **QA / integration / code review** | The **Review** stage: a PR + an independent reviewer | `cev3 pr` opens the PR; `cev3 review` dispatches a distinct reviewer; you judge artifacts |
-| **Definition of Done** | The **Done-when** verdict + the governed merge gate | the Completion Report shows Done-when N/N met; `cev3 merge <id> --apply` is the gated finish |
-| **Sprint review / demo** | The **◆ CE Completion Report** + the evidence chain | `cev3 report <id>` renders Outcome · Verdict · Next; `cev3 artifacts <run>` enumerates the proof |
+| **QA / integration / code review** | The **Review** stage: a PR + an independent reviewer | `ce pr` opens the PR; `ce review` dispatches a distinct reviewer; you judge artifacts |
+| **Definition of Done** | The **Done-when** verdict + the governed merge gate | the Completion Report shows Done-when N/N met; `ce merge <id> --apply` is the gated finish |
+| **Sprint review / demo** | The **◆ CE Completion Report** + the evidence chain | `ce report <id>` renders Outcome · Verdict · Next; `ce artifacts <run>` enumerates the proof |
 | **Retrospective / continuous improvement** | The compounding **evidence + learnings** loop | every run's artifacts persist under `.ce/state`; nothing relies on chat memory |
 | **The Scrum Master removing impediments / enforcing process** | **Governance from outside the agent** | the gate refuses privileged actions and holds them for a human — automatically, every run |
 
@@ -120,19 +120,19 @@ A quick re-grounding for each SCRUM ceremony, before the worked example.
   SCRUM when it's clear, estimated, and agreed. In CE, a **Scope** is Ready when
   Goal, Done-when, Budget, and Change-type are all valid — and the *commitment*
   is the explicit **ratify** gesture.
-- **Sprint planning / commit → ratify.** Committing to a story = `cev3 ratify`.
+- **Sprint planning / commit → ratify.** Committing to a story = `ce ratify`.
   This is the human-only front gate. The agent cannot place its own bet.
 - **DoD → Done-when verdict + the merge gate.** "Done" is the Done-when criteria
   met (with evidence) and a governed, independently-reviewed merge — not a
   checkbox someone ticks.
-- **Sprint execution → the Build run.** `cev3 drive` dispatches one governed,
+- **Sprint execution → the Build run.** `ce drive` dispatches one governed,
   cost-capped run. The Budget you set becomes the run's spend cap.
 - **Integration/QA → CI + the Review stage.** CI **verifies** (well-formed,
   in-policy); the PR plus an independent reviewer is the **review**. Critically,
   **CI verifies; it does not ratify** — a green build never authorizes a merge by
   itself.
-- **Sprint review/demo → the Completion Report + evidence.** `cev3 report`
-  renders the verdict and `cev3 artifacts` enumerates the proof — the PR, the
+- **Sprint review/demo → the Completion Report + evidence.** `ce report`
+  renders the verdict and `ce artifacts` enumerates the proof — the PR, the
   diff, the evidence chain, the spend.
 - **Retro → the compounding loop.** Every run's evidence persists under
   `.ce/state`; the next piece of work starts from artifacts, not from someone's
@@ -143,7 +143,7 @@ A quick re-grounding for each SCRUM ceremony, before the worked example.
 ## 3. Worked example: a PRD becomes an actionable roadmap + tickets
 
 This is the spec-driven pipeline end to end. You run these as **slash commands
-inside your `ce launch` (or `cev3 session`) agent pane** — they are the same
+inside your `ce launch` (or `ce session`) agent pane** — they are the same
 Claude Code / Codex session you already use, governed. Each command is real and
 user-invocable; the artifact it writes is named.
 
@@ -251,7 +251,7 @@ Frame → Shape → Build → Review → Ship as a **Scope**. Launch the session
 first:
 
 ```
-cev3 session
+ce session
 ◆ Creator Engine · governed session · repo <owner/repo> · state .ce/state
 ◆ CE · Frame 0 · Shape 0 · Build 0 · Review 0 · Ship 0  │  ctx 8%  │  spend —
 ```
@@ -264,7 +264,7 @@ criteria — **write them before you build**, because they are exactly what gets
 graded:
 
 ```
-cev3 scope rate-limit-login \
+ce scope rate-limit-login \
   --goal "Add per-IP rate limiting to the login API" \
   --done-when "429 returned after 100 requests/min from one IP" \
   --done-when "authenticated traffic is unaffected" \
@@ -281,7 +281,7 @@ Then **place the bet** — the human-only ratification gesture (your "commit to 
 story" moment in planning):
 
 ```
-cev3 ratify rate-limit-login --approver-ref <opaque-64-hex-digest>
+ce ratify rate-limit-login --approver-ref <opaque-64-hex-digest>
 ```
 
 Ratification pins the bet to the exact Scope content. **The agent cannot ratify
@@ -290,8 +290,8 @@ its own work** — this is the irreducible human gesture.
 ### Build — drive the governed run
 
 ```
-cev3 drive rate-limit-login            # assemble the dispatch and read the gate
-cev3 drive rate-limit-login --spawn    # launch the governed agent to do the work
+ce drive rate-limit-login            # assemble the dispatch and read the gate
+ce drive rate-limit-login --spawn    # launch the governed agent to do the work
 ```
 
 The front gate **refuses unless the Scope is Ready *and* ratified.** The Budget
@@ -304,10 +304,10 @@ Open the PR through the governed forge, then dispatch a **distinct** reviewer
 (independent review is required — you can't approve your own change):
 
 ```
-cev3 collect rate-limit-login --run <run-id> --outcome pr_opened   # fold the run into evidence
-cev3 pr rate-limit-login --run <run-id> --branch <head-branch> \
+ce collect rate-limit-login --run <run-id> --outcome pr_opened   # fold the run into evidence
+ce pr rate-limit-login --run <run-id> --branch <head-branch> \
   --manifest-path src/api/ --app-config <your-app-config> --apply  # push + open the PR
-cev3 review rate-limit-login --run <run-id> --reviewer-actor <reviewer-login> --spawn
+ce review rate-limit-login --run <run-id> --reviewer-actor <reviewer-login> --spawn
 ```
 
 Now you **judge artifacts, not a transcript**: read the PR, the manifest-scoped
@@ -318,8 +318,8 @@ diff, and the evidence. The grader lives outside the agent.
 Read the merge gate, then perform the gated, independently-reviewed merge:
 
 ```
-cev3 merge rate-limit-login --run <run-id>           # read the gate (plan-only)
-cev3 merge rate-limit-login --run <run-id> --apply   # the gated squash-merge
+ce merge rate-limit-login --run <run-id>           # read the gate (plan-only)
+ce merge rate-limit-login --run <run-id> --apply   # the gated squash-merge
 ```
 
 `--apply` is *your* gated act. Branch protection enforces the independent
@@ -328,7 +328,7 @@ review; "Ship" can also be delivered research or a ratified "no change."
 ### The demo: the Completion Report
 
 ```
-cev3 report rate-limit-login --run-id <run-id> --done-when-total 3 --done-when-met 3 \
+ce report rate-limit-login --run-id <run-id> --done-when-total 3 --done-when-met 3 \
   --ci green --in-scope --cap 5 --unit '$'
 ```
 
@@ -340,11 +340,11 @@ met, tests green, in scope, % of Budget used), and the Next step:
 │ Outcome   PR opened → #N
 │ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget
 │ Next      → Review PR #N  (Change-type code → your approval)
-│ Inspect   gh pr view N   |   cev3 show rate-limit-login   |   cev3 artifacts <run-id>
+│ Inspect   gh pr view N   |   ce show rate-limit-login   |   ce artifacts <run-id>
 └──────────────────────────────────────────────────────────
 ```
 
-`cev3 artifacts <run-id>` and `cev3 show <scope>` enumerate every artifact with
+`ce artifacts <run-id>` and `ce show <scope>` enumerate every artifact with
 its inspect command. That's your sprint review/demo and your audit trail in one.
 
 ---
@@ -353,30 +353,30 @@ its inspect command. That's your sprint review/demo and your audit trail in one.
 
 A narrative pass through a contributor's day, with the low-level commands inline.
 
-**Morning — Frame & Shape.** You open `cev3 session` and chat with your agent
+**Morning — Frame & Shape.** You open `ce session` and chat with your agent
 about the next chunk of the roadmap. For a fresh feature you run the §3 pipeline
 (`/speckit-specify` → `/speckit-clarify` → `/speckit-plan` → `/speckit-tasks` →
 `/speckit-analyze` → `/speckit-taskstoissues`) and your backlog of issues
 appears. For an already-specced feature you skip straight to picking the next
-issue. Either way you crystallize the chosen task into a Scope with `cev3 scope`,
+issue. Either way you crystallize the chosen task into a Scope with `ce scope`,
 write three or four crisp **Done-when** lines (your acceptance criteria), set a
 **Budget** you're comfortable spending, and confirm the card reads **Ready ✓**.
-You place the bet: `cev3 ratify <id> --approver-ref <digest>`.
+You place the bet: `ce ratify <id> --approver-ref <digest>`.
 
-**Midday — Build.** `cev3 drive <id> --spawn` launches the governed run. You
+**Midday — Build.** `ce drive <id> --spawn` launches the governed run. You
 watch the stage in the status line and the spend meter tick. The first time the
 agent reaches for something privileged — pushing to a remote, touching
 credentials — the gate **refuses it and names the rule**, then holds it for you.
 That's governance you can feel, on every run.
 
-**Afternoon — Review.** The run finishes; `cev3 collect` folds it into evidence
-and `cev3 pr … --apply` opens the PR. You dispatch an independent reviewer with
-`cev3 review … --spawn`, then read the PR and the manifest-scoped diff against
+**Afternoon — Review.** The run finishes; `ce collect` folds it into evidence
+and `ce pr … --apply` opens the PR. You dispatch an independent reviewer with
+`ce review … --spawn`, then read the PR and the manifest-scoped diff against
 the Done-when you wrote this morning. You're judging *artifacts* — the diff, the
 test evidence, the PR — not a chat log.
 
-**End of day — Ship & demo.** Gate looks clean: `cev3 merge <id> --apply`
-squash-merges through branch protection. `cev3 report <id>` prints the Completion
+**End of day — Ship & demo.** Gate looks clean: `ce merge <id> --apply`
+squash-merges through branch protection. `ce report <id>` prints the Completion
 Report — your demo and your record. The evidence persists under `.ce/state`, so
 tomorrow's work starts from artifacts, not from what you remember. Across the
 day you may run this loop several times for several small Scopes — a continuous
@@ -476,10 +476,10 @@ design — these are the gestures CE will never make on your behalf:
 | You always decide | The agent automates |
 | --- | --- |
 | The **Budget** on every Scope (your spend cap) | Drafting the Goal, Done-when, plan, tasks, and code |
-| **Ratifying** the bet (`cev3 ratify`) — placing the Scope | Running the Build inside the ratified envelope |
+| **Ratifying** the bet (`ce ratify`) — placing the Scope | Running the Build inside the ratified envelope |
 | Making a change **riskier** (the agent may only make it safer) | Making a change *safer* within its envelope |
 | **Judging the artifacts** at Review (diff, evidence, PR) | Producing the artifacts and the Completion Report |
-| The **gated merge** (`cev3 merge --apply`) | Opening the PR and reading the merge gate |
+| The **gated merge** (`ce merge --apply`) | Opening the PR and reading the merge gate |
 | Authorizing **privileged surfaces** when the gate holds one | Refusing privileged actions and surfacing the reason |
 
 Everything else — specifying, clarifying, planning, splitting into tasks,
