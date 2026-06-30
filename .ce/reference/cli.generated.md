@@ -848,21 +848,6 @@ Options:
 | `--backoff-seconds` | no |  | re-read backoff for the fail-closed acquire race (default: 1.0) |
 | `--json` | no |  | emit machine-readable JSON |
 
-### `pickup triage`
-
-Options:
-
-| Option | Required | Choices | Description |
-| --- | --- | --- | --- |
-| `--arc-ticket` | yes |  | parent/arc ticket (owner/name#N, URL, or N with --repo) |
-| `--issues-json` | no |  | path to GitHub Search/list issues JSON, or '-' for stdin |
-| `--repo` | no |  | owner/name default repo for bare arc tickets or issue payloads |
-| `--label` | no |  | pickup label to add and expose as a ce pickup poll hint |
-| `--seat` | no |  | repeatable seat/assignee login; comma-separated allowed |
-| `--apply` | no |  | apply planned labels/assignees through gh api after claim collision checks |
-| `--check-claims` | no |  | dry-run with live work-claim collision checks through gh api |
-| `--json` | no |  | emit machine-readable JSON |
-
 ### `playbook`
 
 discover, inspect, and run governed CE playbooks

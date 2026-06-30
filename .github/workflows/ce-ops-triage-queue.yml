@@ -1,0 +1,77 @@
+name: CE Ops Triage Queue
+
+# Advisory inbound issue triage for creator-engine/ce-ops.
+#
+# This workflow never ratifies, approves, reviews, dispatches, merges, or blocks
+# CI. The scheduled run is dry-run only. A manual workflow_dispatch with
+# apply=true patches an existing ce-ops#67 sentinel comment; it never creates
+# the sentinel comment.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Patch the existing ce-ops#67 triage queue comment"
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  triage-queue:
+    name: Advisory ce-ops triage queue
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator
+        continue-on-error: true
+        run: python -m pip install -e validators
+
+      - name: Scan ce-ops issues
+        continue-on-error: true
+        env:
+          CE_CROSS_REPO_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
+          APPLY: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == true && 'true' || 'false' }}
+        run: |
+          set +e
+          audit_root="${RUNNER_TEMP}/ce-ops-triage-queue-audit"
+          mkdir -p "${audit_root}"
+
+          args=(
+            triage queue scan
+            --repo creator-engine/ce-ops
+            --queue-issue 67
+            --audit-root "${audit_root}"
+            --json
+          )
+          if [[ "${APPLY}" == "true" ]]; then
+            args+=(--apply)
+          fi
+
+          ce "${args[@]}" | tee "${audit_root}/latest.json"
+          exit 0
+
+      - name: Upload triage queue audit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        continue-on-error: true
+        with:
+          name: ce-ops-triage-queue-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ce-ops-triage-queue-audit
+          if-no-files-found: warn
