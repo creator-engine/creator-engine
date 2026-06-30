@@ -7,7 +7,10 @@ import pytest
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator.forge.automerge_policy import (
+    AutoMergeClassPolicy,
+    AutoMergePolicyState,
     AutoMergePolicyStateError,
+    save_automerge_policy_state,
     load_decision_records,
 )
 
@@ -76,6 +79,29 @@ def test_automerge_status_human_output_maps_gesture_to_manual(tmp_path: Path, ca
     assert "run_mode       : dev" in out
     assert "class_flag     : False" in out
     assert "timestamps     : created_at=2026-06-28T00:00:00Z" in out
+
+
+def test_automerge_status_reports_policy_file_arming_state(tmp_path: Path, capsys) -> None:
+    state_dir = tmp_path / ".ce/state"
+    decisions_dir = _decisions_dir(state_dir)
+    _write_record(decisions_dir / "313-abc123.json", decision="AUTO", run_mode="ceo")
+    save_automerge_policy_state(
+        state_dir / "automerge" / "policy.json",
+        AutoMergePolicyState(
+            run_mode="ceo",
+            kill_switch=False,
+            classes={"docs": AutoMergeClassPolicy(auto_merge=True)},
+            enabling_decision_ref="ce-ops#313-enable",
+        ),
+    )
+
+    result = ce_cli.main(["automerge-status", "--state-dir", str(state_dir)])
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "arming state   : ARMED(run_mode=ceo)" in out
+    assert "enabling_ref   : ce-ops#313-enable" in out
+    assert "kill_switch    : False" in out
 
 
 def test_automerge_status_json_output_preserves_records(tmp_path: Path, capsys) -> None:

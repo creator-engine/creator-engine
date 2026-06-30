@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
+  checks: read
 
 jobs:
   decide:
@@ -132,6 +134,115 @@ jobs:
             echo "approver-login=${approver_login}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Resolve live PR automerge inputs
+        id: live
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          work_dir="${RUNNER_TEMP}/ce-automerge-live"
+          mkdir -p "${work_dir}"
+          pr_json="${work_dir}/pr.json"
+          checks_raw="${work_dir}/checks-raw.json"
+          checks_json="${work_dir}/checks.json"
+          printf '{"checks":{}}\n' > "${checks_json}"
+
+          emit_empty() {
+            {
+              echo "review-decision="
+              echo "approver-login="
+              echo "declared-work-class="
+              echo "checks-json-file=${checks_json}"
+            } >> "${GITHUB_OUTPUT}"
+          }
+
+          if [[ -z "${PR_NUMBER}" ]]; then
+            emit_empty
+            exit 0
+          fi
+
+          if ! gh pr view "${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --json reviewDecision,latestReviews,body \
+            > "${pr_json}"; then
+            emit_empty
+            exit 0
+          fi
+
+          if ! gh pr checks "${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --json name,state,conclusion \
+            > "${checks_raw}"; then
+            emit_empty
+            exit 0
+          fi
+
+          python - "${pr_json}" "${checks_raw}" "${checks_json}" "${GITHUB_OUTPUT}" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          pr_path = Path(sys.argv[1])
+          checks_raw_path = Path(sys.argv[2])
+          checks_json_path = Path(sys.argv[3])
+          output_path = Path(sys.argv[4])
+
+          try:
+              pr = json.loads(pr_path.read_text(encoding="utf-8"))
+              checks_rows = json.loads(checks_raw_path.read_text(encoding="utf-8"))
+          except (OSError, json.JSONDecodeError):
+              pr = {}
+              checks_rows = []
+
+          if not isinstance(pr, dict):
+              pr = {}
+          if not isinstance(checks_rows, list):
+              checks_rows = []
+
+          review_decision = str(pr.get("reviewDecision") or "")
+          approver_login = ""
+          latest_reviews = pr.get("latestReviews")
+          if isinstance(latest_reviews, list):
+              for review in latest_reviews:
+                  if not isinstance(review, dict):
+                      continue
+                  if str(review.get("state") or "").upper() != "APPROVED":
+                      continue
+                  author = review.get("author")
+                  if isinstance(author, dict):
+                      login = str(author.get("login") or "").strip()
+                      if login:
+                          approver_login = login
+                          break
+
+          declared_work_class = ""
+          body = pr.get("body")
+          if isinstance(body, str):
+              match = re.search(
+                  r"^- \*\*Declared work class:\*\*\s*(\S+)",
+                  body,
+                  flags=re.MULTILINE | re.IGNORECASE,
+              )
+              if match:
+                  declared_work_class = match.group(1).strip()
+
+          checks_json_path.write_text(
+              json.dumps({"checks": checks_rows}, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"review-decision={review_decision}\n")
+              handle.write(f"approver-login={approver_login}\n")
+              handle.write(f"declared-work-class={declared_work_class}\n")
+              handle.write(f"checks-json-file={checks_json_path}\n")
+          PY
+
       - name: Run automerge decision
         id: decide
         env:
@@ -140,9 +251,11 @@ jobs:
           HEAD_SHA: ${{ steps.inputs.outputs.head-sha }}
           BRANCH: ${{ steps.inputs.outputs.branch }}
           BASE: ${{ steps.inputs.outputs.base }}
-          REVIEW_DECISION: ${{ steps.inputs.outputs.review-decision }}
+          REVIEW_DECISION: ${{ steps.live.outputs.review-decision || steps.inputs.outputs.review-decision }}
           AUTHOR_LOGIN: ${{ steps.inputs.outputs.author-login }}
-          APPROVER_LOGIN: ${{ steps.inputs.outputs.approver-login }}
+          APPROVER_LOGIN: ${{ steps.live.outputs.approver-login || steps.inputs.outputs.approver-login }}
+          DECLARED_WORK_CLASS: ${{ steps.live.outputs.declared-work-class || 'S' }}
+          CHECKS_JSON_FILE: ${{ steps.live.outputs.checks-json-file || '' }}
           AUTOREVIEW_RUN_MODE: ${{ vars.CE_AUTOREVIEW_RUN_MODE || '' }}
         run: |
           set -euo pipefail
@@ -153,18 +266,23 @@ jobs:
           safe_head="$(printf '%s' "${HEAD_SHA}" | tr -c 'A-Za-z0-9._-' '-')"
           decision_key="${PR_NUMBER:-merge-group}-${safe_head}"
           decision_file="${decisions_dir}/${decision_key}.json"
+          checks_json_arg="${CHECKS_JSON_FILE}"
+          if [[ -z "${checks_json_arg}" ]]; then
+            checks_json_arg='{"checks":{}}'
+          else
+            checks_json_arg="@${checks_json_arg}"
+          fi
 
           args=(
             automerge-decide
             --paths-file "${PATHS_FILE}"
-            --declared-work-class story
+            --declared-work-class "${DECLARED_WORK_CLASS}"
             --repo-root .
             --head-sha "${HEAD_SHA}"
             --repo "${GITHUB_REPOSITORY}"
             --branch "${BRANCH}"
             --base "${BASE}"
-            # Advisory only: do not query live checks or mutate repo/PR state; absent check evidence fails closed.
-            --checks-json '{"checks":{}}'
+            --checks-json "${checks_json_arg}"
             --review-decision "${REVIEW_DECISION}"
             --author-login "${AUTHOR_LOGIN}"
             --approver-login "${APPROVER_LOGIN}"

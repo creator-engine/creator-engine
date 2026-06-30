@@ -33,7 +33,9 @@ AUTOMERGE_RUN_MODE_STRANGE_LOOP: Final[str] = "strangeLoop"
 AUTOMERGE_ARMING_RUN_MODES: Final[frozenset[str]] = frozenset(
     {AUTOMERGE_RUN_MODE_CEO, AUTOMERGE_RUN_MODE_STRANGE_LOOP}
 )
-AUTOMERGE_CANARY_WORK_CLASSES: Final[frozenset[str]] = frozenset({"XS", "S"})
+AUTOMERGE_CANARY_WORK_CLASSES: Final[frozenset[str]] = frozenset(
+    {normalize_work_class("tiny"), normalize_work_class("story")}
+)
 
 
 class AutoMergePolicyStateError(Exception):
@@ -398,6 +400,8 @@ def decide_automerge(
         auto_blockers.append("required_checks_not_green")
     if resolved_review_decision == "CHANGES_REQUESTED":
         auto_blockers.append("reviewDecision_CHANGES_REQUESTED")
+    elif resolved_review_decision != "APPROVED":
+        auto_blockers.append("reviewDecision_not_APPROVED")
     if size_band == "split_required":
         auto_blockers.append("size_band_split_required")
     if declared_work_class not in AUTOMERGE_CANARY_WORK_CLASSES:

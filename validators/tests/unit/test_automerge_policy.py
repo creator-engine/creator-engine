@@ -49,6 +49,12 @@ GREEN_CHECKS = {
     "unit": "success",
     "reviewDecision": "APPROVED",
 }
+LIVE_GREEN_CHECKS = {
+    "checks": [
+        {"name": REQUIRED_CHECK, "state": "SUCCESS", "conclusion": "success"},
+        {"name": "unit", "state": "SUCCESS", "conclusion": "success"},
+    ]
+}
 
 
 def state_with_flags(*enabled: str, run_mode: str = "ceo", kill_switch: bool = False) -> AutoMergePolicyState:
@@ -221,6 +227,93 @@ def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
     assert len(decision.policy_sha) == 64
 
 
+def test_decide_returns_auto_with_live_pr_data_when_policy_is_armed() -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="creator-engine/creator-engine",
+        branch="ce/live-pr-data",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_AUTO
+    assert decision.review_decision == "APPROVED"
+    assert decision.checks_green is True
+    assert decision.enabling_decision_ref == "ce-ops#291-test-enable"
+
+
+@pytest.mark.parametrize("declared_work_class", ["XS", "S", "tiny", "story"])
+def test_canary_work_class_aliases_are_accepted(declared_work_class: str) -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class=declared_work_class,
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_AUTO
+    assert decision.work_class in {"XS", "S"}
+
+
+@pytest.mark.parametrize("declared_work_class", ["M", "L", "feature", "epic"])
+def test_larger_work_classes_are_outside_canary(declared_work_class: str) -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class=declared_work_class,
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert "work_class_outside_canary" in decision.rationale
+
+
+def test_review_required_blocks_auto_even_with_approver_evidence() -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="REVIEW_REQUIRED",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert "reviewDecision_not_APPROVED" in decision.rationale
+
+
+@pytest.mark.parametrize("review_decision", [None, ""])
+def test_missing_review_decision_blocks_auto_even_with_approver_evidence(
+    review_decision: str | None,
+) -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision=review_decision,
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert "reviewDecision_not_APPROVED" in decision.rationale
+
+
 def test_composes_classifier_with_size_ceremony_for_schema_gesture() -> None:
     decision = decide_automerge(
         numstat=numstat_for(["schemas/automerge-policy.schema.yaml"]),
@@ -245,6 +338,27 @@ def test_dev_mode_returns_gesture_even_for_docs_with_flag_on() -> None:
         checks=GREEN_CHECKS,
         **canary_identity(),
     )
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert "run_mode_dev" in decision.rationale
+
+
+def test_default_dev_mode_returns_gesture_without_gh_calls(monkeypatch) -> None:
+    def explode(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("disarmed decision must not call gh or network")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    monkeypatch.setattr(socket, "socket", explode)
+
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=AutoMergePolicyState.default(),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        **canary_identity(),
+    )
+
     assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert "run_mode_dev" in decision.rationale
 
@@ -521,10 +635,15 @@ def _write_decision(tmp_path: Path, payload) -> Path:
     return path
 
 
-def _write_live_automerge_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _write_live_automerge_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    run_mode: str = "ceo",
+) -> Path:
     monkeypatch.chdir(tmp_path)
     path = automerge_policy_state_path(tmp_path / ".ce" / "state")
-    save_automerge_policy_state(path, state_with_flags("docs", run_mode="ceo"))
+    save_automerge_policy_state(path, state_with_flags("docs", run_mode=run_mode))
     return path
 
 
@@ -569,6 +688,23 @@ def test_actuate_caller_mutates_only_after_actuator_predicates_pass(
     assert actuated.reason == "all_predicates_green"
     assert actuated.acted is True
     assert len(green_gh.mutation_calls()) == 1
+
+
+def test_actuator_strangeloop_armed_mode_actuates_like_ceo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_automerge_policy(tmp_path, monkeypatch, run_mode="strangeLoop")
+    gh = FakeActuateGh(check_conclusion="success")
+
+    result = actuate_decision(
+        _write_decision(tmp_path, _strange_loop_decision(run_mode="strangeLoop")),
+        gh_runner=gh,
+    )
+
+    assert result.actuated is True
+    assert result.reason == "all_predicates_green"
+    assert result.acted is True
+    assert len(gh.mutation_calls()) == 1
 
 
 def test_materialized_decision_reaches_actuator_with_change_ref(

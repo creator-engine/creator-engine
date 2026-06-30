@@ -1634,7 +1634,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--checks-json",
         default=None,
         dest="checks_json",
-        help="optional JSON object mapping check-name to status (e.g. '{\"ci\": \"success\"}')",
+        help=(
+            "optional JSON object mapping check-name to status, or @FILE containing one "
+            "(e.g. '{\"ci\": \"success\"}')"
+        ),
     )
     automerge_decide.add_argument(
         "--review-decision",
@@ -3871,10 +3874,15 @@ def _automerge_decide(args) -> int:
     checks_json_str = getattr(args, "checks_json", None)
     if checks_json_str:
         try:
+            if checks_json_str.startswith("@"):
+                checks_path = checks_json_str[1:]
+                if not checks_path:
+                    raise ValueError("checks-json @file path is empty")
+                checks_json_str = Path(checks_path).read_text(encoding="utf-8")
             checks = json.loads(checks_json_str)
             if not isinstance(checks, dict):
                 raise ValueError("checks-json must be a JSON object")
-        except (json.JSONDecodeError, ValueError) as exc:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
             print(f"ERROR: ce automerge-decide: --checks-json invalid: {exc}", file=sys.stderr)
             return 1
 
@@ -3917,23 +3925,57 @@ def _automerge_decide(args) -> int:
 def _automerge_status(args) -> int:
     """ce automerge-status — read dry-run decision logs without side effects."""
 
-    from .forge.automerge_policy import AutoMergePolicyStateError, load_decision_records
+    from .forge.automerge_policy import (
+        AUTOMERGE_ARMING_RUN_MODES,
+        AutoMergePolicyStateError,
+        automerge_policy_state_path,
+        load_automerge_policy_state,
+        load_decision_records,
+    )
 
     repo_root = Path(getattr(args, "repo_root", "."))
     state_dir_arg = getattr(args, "state_dir", None)
     state_dir = Path(state_dir_arg) if state_dir_arg else repo_root / ".ce/state"
+    policy_path = automerge_policy_state_path(state_dir)
 
     try:
         records = load_decision_records(state_dir)
     except AutoMergePolicyStateError as exc:
         print(f"ERROR: ce automerge-status: decision records unreadable: {exc}", file=sys.stderr)
         return 1
+    try:
+        policy_state = load_automerge_policy_state(policy_path)
+    except AutoMergePolicyStateError as exc:
+        print(f"ERROR: ce automerge-status: policy state unreadable: {exc}", file=sys.stderr)
+        return 1
+
+    arming_state = (
+        f"ARMED(run_mode={policy_state.run_mode})"
+        if policy_state.run_mode in AUTOMERGE_ARMING_RUN_MODES and not policy_state.kill_switch
+        else "DISARMED"
+    )
+    policy_payload = {
+        "path": str(policy_path),
+        "arming_state": arming_state,
+        "run_mode": policy_state.run_mode,
+        "enabling_ref": policy_state.enabling_decision_ref,
+        "kill_switch": policy_state.kill_switch,
+    }
 
     if getattr(args, "json_output", False):
-        print(json.dumps({"state_dir": str(state_dir), "records": records}, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                {"state_dir": str(state_dir), "policy": policy_payload, "records": records},
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
 
     print(f"ce automerge-status: {len(records)} decision record(s)")
+    print(f"  arming state   : {arming_state}")
+    print(f"  enabling_ref   : {_automerge_status_value(policy_state.enabling_decision_ref)}")
+    print(f"  kill_switch    : {policy_state.kill_switch}")
     for record in records:
         decision = _automerge_status_decision(record.get("decision"))
         pr_number = record.get("pr_number")
