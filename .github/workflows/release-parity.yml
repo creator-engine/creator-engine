@@ -1,0 +1,210 @@
+name: Release Parity
+
+on:
+  workflow_run:
+    workflows:
+      - Release Finalize
+    types:
+      - completed
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  release-parity:
+    name: Verify live signed release and publish draft
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Wait for Pages propagation
+        run: sleep 300
+
+      - name: Checkout main after finalize
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch release tags
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin 'refs/tags/release/v*:refs/tags/release/v*'
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator (offline, from repo wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            -r validators/requirements.txt
+
+      - name: Install validator build deps (offline, from dev wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            --find-links validators/wheelhouse-dev \
+            -r validators/requirements-dev.txt
+
+      - name: Verify live signed release parity
+        id: parity
+        env:
+          CE_SITE: https://creator-engine.dev
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators python - <<'PYEOF'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from creator_engine_validator.checks import (
+              install_spec_signature_guard,
+              release_artifact_parity_guard,
+          )
+          from creator_engine_validator.update import resolve_latest_signed_release
+
+          root = Path.cwd()
+          site = os.environ["CE_SITE"].rstrip("/")
+
+          def fail(message: str) -> None:
+              raise SystemExit(f"release parity refused: {message}")
+
+          local_errors = [
+              error.format()
+              for error in release_artifact_parity_guard.validate_repo(root)
+          ]
+          local_errors.extend(
+              error.format()
+              for error in install_spec_signature_guard.validate_repo(root)
+          )
+          if local_errors:
+              fail("local release guards failed:\n" + "\n".join(local_errors))
+
+          release = resolve_latest_signed_release(site=site)
+          manifest = release.manifest
+          version = release.identity.semver
+          tag_name = f"release/v{version}"
+
+          if manifest.package_version != version:
+              fail(
+                  "signed manifest package_version does not match app wheel SEMVER: "
+                  f"{manifest.package_version!r} != {version!r}"
+              )
+          expected_base_url = f"{site}/downloads/{version}"
+          if manifest.artifact_base_url.rstrip("/") != expected_base_url:
+              fail(
+                  "signed manifest artifact_base_url does not point at versioned live downloads: "
+                  f"{manifest.artifact_base_url!r}"
+              )
+          if manifest.sha256s_url != f"{expected_base_url}/SHA256SUMS":
+              fail(f"signed manifest sha256s_url does not match release version: {manifest.sha256s_url!r}")
+          if manifest.sha256s_sha256 != release.sha256s_sha256:
+              fail(
+                  "live SHA256SUMS digest does not match signed manifest: "
+                  f"{release.sha256s_sha256} != {manifest.sha256s_sha256}"
+              )
+
+          wheels = manifest.wheel_by_filename()
+          app_wheel = wheels.get(manifest.app_wheel)
+          if app_wheel is None:
+              fail(f"signed manifest app_wheel is missing from required_wheels: {manifest.app_wheel!r}")
+          if app_wheel.filename != release.identity.app_wheel:
+              fail(
+                  "verified app wheel filename does not match signed manifest: "
+                  f"{release.identity.app_wheel!r} != {app_wheel.filename!r}"
+              )
+          if app_wheel.sha256 != release.identity.app_wheel_sha256:
+              fail(
+                  "verified app wheel sha256 does not match signed manifest: "
+                  f"{release.identity.app_wheel_sha256} != {app_wheel.sha256}"
+              )
+
+          try:
+              tag_sha = subprocess.check_output(
+                  ["git", "rev-list", "-n", "1", tag_name],
+                  text=True,
+                  stderr=subprocess.STDOUT,
+              ).strip().lower()
+          except subprocess.CalledProcessError as exc:
+              fail(f"cannot resolve {tag_name}: {exc.output.strip()}")
+          if release.identity.build_git_sha != tag_sha:
+              fail(
+                  "verified app wheel BUILD_GIT_SHA does not match release tag commit: "
+                  f"{release.identity.build_git_sha} != {tag_sha}"
+              )
+
+          local_spec = root / "docs" / "llms-install.md"
+          local_canonical_sha = hashlib.sha256(
+              install_spec_signature_guard.canonical_spec_bytes(local_spec.read_bytes())
+          ).hexdigest()
+          if local_canonical_sha != release.canonical_spec_sha256:
+              fail(
+                  "live signed install spec canonical sha does not match checked-out docs: "
+                  f"{release.canonical_spec_sha256} != {local_canonical_sha}"
+              )
+
+          local_sha256s = root / "docs" / "downloads" / version / "SHA256SUMS"
+          local_sha256s_text = local_sha256s.read_text(encoding="utf-8")
+          local_sha256s_sha = hashlib.sha256(local_sha256s_text.encode("utf-8")).hexdigest()
+          if local_sha256s_sha != release.sha256s_sha256:
+              fail(
+                  "live SHA256SUMS digest does not match checked-out docs: "
+                  f"{release.sha256s_sha256} != {local_sha256s_sha}"
+              )
+          if local_sha256s_text != release.sha256s_text:
+              fail("live SHA256SUMS bytes do not match checked-out docs")
+
+          summary = {
+              "version": version,
+              "tag_name": tag_name,
+              "build_git_sha": release.identity.build_git_sha,
+              "canonical_spec_sha256": release.canonical_spec_sha256,
+              "sha256s_sha256": release.sha256s_sha256,
+              "app_wheel": release.identity.app_wheel,
+              "app_wheel_sha256": release.identity.app_wheel_sha256,
+          }
+          print(json.dumps(summary, sort_keys=True))
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as out:
+              out.write(f"version={version}\n")
+              out.write(f"tag_name={tag_name}\n")
+              out.write(f"build_git_sha={release.identity.build_git_sha}\n")
+              out.write(f"canonical_spec_sha256={release.canonical_spec_sha256}\n")
+          PYEOF
+
+      - name: Publish draft release and close operator issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.parity.outputs.tag_name }}
+          VERSION: ${{ steps.parity.outputs.version }}
+          BUILD_GIT_SHA: ${{ steps.parity.outputs.build_git_sha }}
+          CANONICAL_SPEC_SHA256: ${{ steps.parity.outputs.canonical_spec_sha256 }}
+        run: |
+          set -euo pipefail
+
+          gh release edit "${TAG_NAME}" --draft=false --latest
+
+          issue_json="$(gh issue list \
+            --state all \
+            --search "AWAITING-OPERATOR ${TAG_NAME} signing surface in:title" \
+            --json number,state \
+            --jq '.[0] // empty')"
+          if [[ -z "${issue_json}" ]]; then
+            echo "No AWAITING-OPERATOR issue found for ${TAG_NAME}" >&2
+            exit 1
+          fi
+
+          issue_number="$(jq -r '.number' <<<"${issue_json}")"
+          issue_state="$(jq -r '.state' <<<"${issue_json}")"
+          if [[ "${issue_state}" == "OPEN" ]]; then
+            gh issue close "${issue_number}" \
+              --comment "Release parity passed for ${TAG_NAME} (${VERSION}, ${BUILD_GIT_SHA}). canonical_spec_sha256=${CANONICAL_SPEC_SHA256}; promoted draft release to latest."
+          else
+            echo "AWAITING-OPERATOR issue #${issue_number} is already ${issue_state}"
+          fi
