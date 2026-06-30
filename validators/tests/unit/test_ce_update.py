@@ -207,6 +207,46 @@ def test_verification_doubt_fails_closed_before_any_swap(tmp_path: Path):
     assert swapper.calls == []
 
 
+def test_update_sshsig_runner_reports_actionable_missing_ssh_keygen(monkeypatch):
+    monkeypatch.setattr(update_runtime.shutil, "which", lambda _name: None)
+
+    with pytest.raises(update_runtime.UpdateRefused) as exc:
+        update_runtime._ssh_keygen_verify_runner(
+            message=b"message",
+            signature=b"signature",
+            allowed_signers=v3_installer.PINNED_KEYS["ce-root-v1"],
+            identity="ce-root-v1",
+            namespace=v3_installer.SSH_SIG_NAMESPACE,
+        )
+
+    detail = str(exc.value)
+    assert "missing_dependency_ssh_keygen" in detail
+    assert "sudo apt-get install -y openssh-client" in detail
+    assert "sudo dnf install -y openssh-clients" in detail
+    assert "brew install openssh" in detail
+
+
+def test_update_sshsig_runner_reports_actionable_exec_race(monkeypatch):
+    monkeypatch.setattr(update_runtime.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def missing_binary(*_args, **_kwargs):
+        raise FileNotFoundError("ssh-keygen")
+
+    monkeypatch.setattr(update_runtime.subprocess, "run", missing_binary)
+
+    with pytest.raises(update_runtime.UpdateRefused) as exc:
+        update_runtime._ssh_keygen_verify_runner(
+            message=b"message",
+            signature=b"signature",
+            allowed_signers=v3_installer.PINNED_KEYS["ce-root-v1"],
+            identity="ce-root-v1",
+            namespace=v3_installer.SSH_SIG_NAMESPACE,
+        )
+
+    assert "missing_dependency_ssh_keygen" in str(exc.value)
+    assert "openssh-clients" in str(exc.value)
+
+
 def test_check_mode_is_read_only_with_signed_release():
     mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
 

@@ -15,6 +15,12 @@ from typing import Callable, Mapping
 PYTHON_VERSION = "3.14"
 UV_INSTALLER_URL = "https://astral.sh/uv/install.sh"
 UV_INSTALL_SNIPPET = f"curl --proto '=https' --tlsv1.2 -LsSf {UV_INSTALLER_URL} | sh"
+SSH_KEYGEN_MISSING_CODE = "missing_dependency_ssh_keygen"
+SSH_KEYGEN_PACKAGE_HINT = (
+    "Debian/Ubuntu: sudo apt-get install -y openssh-client; "
+    "Fedora/RHEL: sudo dnf install -y openssh-clients; "
+    "macOS: ssh-keygen is preinstalled, or brew install openssh if unavailable"
+)
 
 
 @dataclass(frozen=True)
@@ -81,6 +87,13 @@ def uv_install_remediation(env: Mapping[str, str] | None = None) -> str:
 def python314_remediation(target_python: Path | str | None = None) -> str:
     target = f"; then rerun ce bootstrap --python {target_python}" if target_python else ""
     return f"Install CPython {PYTHON_VERSION}: uv python install {PYTHON_VERSION}{target}"
+
+
+def ssh_keygen_missing_detail() -> str:
+    return (
+        f"{SSH_KEYGEN_MISSING_CODE}: required command missing: ssh-keygen. "
+        f"Install OpenSSH client package. {SSH_KEYGEN_PACKAGE_HINT}"
+    )
 
 
 def venv_dir_for_target_python(target_python: Path | str) -> Path | None:

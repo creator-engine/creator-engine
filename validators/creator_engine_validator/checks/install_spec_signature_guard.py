@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+from .. import install_prereqs
 from ..v3_installer import PINNED_KEYS, canonical_spec_bytes, content_digest
 from ..reporting import CheckResult, ValidationError, make_error
 from . import register
@@ -36,6 +37,10 @@ SSH_SIG_NAMESPACE = "ce-spec-v1"
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 Verifier = Callable[[str, bytes, Any, Any], bool]
+
+
+class MissingSshKeygenError(RuntimeError):
+    """Raised when the SSHSIG verifier cannot run because ssh-keygen is absent."""
 
 
 def _repo_root_for(path: Path) -> Path | None:
@@ -170,14 +175,17 @@ def validate_file(
     if verify is None:
         verify = ssh_keygen_verifier()
     if verify is None:
-        return [_err(CODE_VERIFY, path, "signature.value", "ssh-keygen is not available to verify SSHSIG")]
+        return [_err(CODE_VERIFY, path, "signature.value", install_prereqs.ssh_keygen_missing_detail())]
 
-    verify_error = _verify_spec(
-        canonical,
-        {"key_id": fields["key_id"], "algo": fields["algo"], "value": fields["value"]},
-        pinned_keys=pinned_keys or PINNED_KEYS,
-        verifier=verify,
-    )
+    try:
+        verify_error = _verify_spec(
+            canonical,
+            {"key_id": fields["key_id"], "algo": fields["algo"], "value": fields["value"]},
+            pinned_keys=pinned_keys or PINNED_KEYS,
+            verifier=verify,
+        )
+    except MissingSshKeygenError:
+        return [_err(CODE_VERIFY, path, "signature.value", install_prereqs.ssh_keygen_missing_detail())]
     if verify_error is not None:
         return [_err(CODE_VERIFY, path, "signature.value", verify_error)]
     return []
@@ -203,30 +211,35 @@ def _ssh_keygen_verify_runner(
     identity: str,
     namespace: str,
 ) -> bool:
+    if not shutil.which("ssh-keygen"):
+        raise MissingSshKeygenError(install_prereqs.ssh_keygen_missing_detail())
     with tempfile.TemporaryDirectory(prefix="ce-install-spec-sig-") as tmp:
         tmpdir = Path(tmp)
         allowed_path = tmpdir / "allowed_signers"
         sig_path = tmpdir / "spec.sig"
         allowed_path.write_text(allowed_signers + "\n", encoding="utf-8")
         sig_path.write_bytes(signature)
-        completed = subprocess.run(
-            [
-                "ssh-keygen",
-                "-Y",
-                "verify",
-                "-f",
-                str(allowed_path),
-                "-I",
-                identity,
-                "-n",
-                namespace,
-                "-s",
-                str(sig_path),
-            ],
-            input=message,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    "ssh-keygen",
+                    "-Y",
+                    "verify",
+                    "-f",
+                    str(allowed_path),
+                    "-I",
+                    identity,
+                    "-n",
+                    namespace,
+                    "-s",
+                    str(sig_path),
+                ],
+                input=message,
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise MissingSshKeygenError(install_prereqs.ssh_keygen_missing_detail()) from exc
     return completed.returncode == 0
 
 
@@ -257,6 +270,8 @@ def ssh_keygen_verifier() -> Verifier | None:
                     namespace=SSH_SIG_NAMESPACE,
                 )
             )
+        except MissingSshKeygenError:
+            raise
         except Exception:
             return False
 

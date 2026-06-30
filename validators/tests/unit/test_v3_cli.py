@@ -33,6 +33,18 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 APPROVER = "a" * 64  # a value-free 64-hex opaque digest
 
 
+@pytest.fixture(autouse=True)
+def _ssh_keygen_present_for_stubbed_cli_verifier(monkeypatch):
+    original_which = v3_cli.shutil.which
+
+    def fake_which(command, *args, **kwargs):
+        if command == "ssh-keygen":
+            return "/usr/bin/ssh-keygen"
+        return original_which(command, *args, **kwargs)
+
+    monkeypatch.setattr(v3_cli.shutil, "which", fake_which)
+
+
 def _file_ready(root: Path, scope_id: str = "rate-limit-login", **over) -> int:
     argv = [
         "scope", scope_id,
@@ -1642,6 +1654,28 @@ def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, m
     assert calls and calls[0]["signature"] == b"sig"
     assert calls[0]["allowed_signers"].startswith("ce-root-v1 ssh-ed25519")
     assert calls[0]["namespace"] == v3_installer.SSH_SIG_NAMESPACE
+
+
+def test_onboard_authentic_reports_actionable_missing_ssh_keygen(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(v3_cli.shutil, "which", lambda _name: None)
+
+    code = v3_cli.main([
+        "onboard",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
+        "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
+        "--inventory",
+        "--json",
+    ])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "refused"
+    assert "missing_dependency_ssh_keygen" in payload["detail"]
+    assert "required command missing: ssh-keygen" in payload["detail"]
+    assert "sudo apt-get install -y openssh-client" in payload["detail"]
+    assert "sudo dnf install -y openssh-clients" in payload["detail"]
+    assert "brew install openssh" in payload["detail"]
 
 
 def test_onboard_refuses_self_attested_when_authentic_required(tmp_path, capsys):

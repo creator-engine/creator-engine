@@ -58,3 +58,14 @@ def test_ssh_keygen_package_plans_are_precise():
         "sudo apk add openssh-client"
     )
     assert prereqs.ssh_keygen_package_plan(which=_which(set())) is None
+
+
+def test_ssh_keygen_missing_detail_names_packages():
+    detail = prereqs.ssh_keygen_missing_detail()
+
+    assert "missing_dependency_ssh_keygen" in detail
+    assert "required command missing: ssh-keygen" in detail
+    assert "sudo apt-get install -y openssh-client" in detail
+    assert "sudo dnf install -y openssh-clients" in detail
+    assert "macOS: ssh-keygen is preinstalled" in detail
+    assert "brew install openssh" in detail
