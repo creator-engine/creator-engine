@@ -76,6 +76,13 @@ def _write_manifest(root: Path, doc: dict[str, object]) -> Path:
     return path
 
 
+def _write_runsc_runner(root: Path, relative_path: str, variable: str, default: str) -> Path:
+    runner = root / relative_path
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text(f'{variable}="${{{variable}:-{default}}}"\n', encoding="utf-8")
+    return runner
+
+
 def _write_consistent_repo(root: Path, doc: dict[str, object] | None = None) -> None:
     _write_manifest(root, doc or _consistent_doc())
     dockerfile = root / "deploy" / "vps-runsc" / "Dockerfile"
@@ -92,10 +99,17 @@ def _write_consistent_repo(root: Path, doc: dict[str, object] | None = None) -> 
         ),
         encoding="utf-8",
     )
-    runner = root / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
-    runner.write_text(
-        'CE_VPS_IMAGE="${CE_VPS_IMAGE:-creator-engine/codex-runsc:0.141.0-x86_64}"\n',
-        encoding="utf-8",
+    _write_runsc_runner(
+        root,
+        "deploy/vps-runsc/run-vps-runsc.sh",
+        "CE_VPS_IMAGE",
+        "creator-engine/codex-runsc:0.141.0-x86_64",
+    )
+    _write_runsc_runner(
+        root,
+        "deploy/dgx-runsc/run-codex-runsc.sh",
+        "CE_DGX_IMAGE",
+        "creator-engine/codex-runsc:0.141.0-aarch64",
     )
     validators = root / "validators"
     validators.mkdir(exist_ok=True)
@@ -162,6 +176,34 @@ def test_consistent_manifest_and_repo_files_pass(tmp_path: Path):
     result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
 
     assert result.ok, [error.format() for error in result.errors]
+
+
+def test_consistent_manifest_matching_dgx_runner_default_passes(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_consistent_manifest_mismatched_dgx_runner_default_fails(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    _write_runsc_runner(
+        tmp_path,
+        "deploy/dgx-runsc/run-codex-runsc.sh",
+        "CE_DGX_IMAGE",
+        "creator-engine/codex-runsc:0.140.0-aarch64",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_RUNSC_IMAGE_MISMATCH in _codes(result)
+    assert any(
+        "deploy/dgx-runsc/run-codex-runsc.sh:CE_DGX_IMAGE" in error.path
+        and "CE_DGX_IMAGE default 'creator-engine/codex-runsc:0.140.0-aarch64'" in error.message
+        and "expected 'creator-engine/codex-runsc:0.141.0-aarch64'" in error.message
+        for error in result.errors
+    )
 
 
 def test_consistent_manifest_missing_dockerfile_digest_fails(tmp_path: Path):
