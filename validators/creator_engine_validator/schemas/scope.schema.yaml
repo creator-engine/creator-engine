@@ -111,6 +111,14 @@ properties:
       RFCs, e.g. `ADR-0007`) this Scope cites as BINDING context — the A↔B
       seam (v3.5-C A-C1). A-C1 adds the FIELD only; the readiness enforcement
       (every cited record must be `status: accepted`) is the B-C2 gate.
+  downstream_refs:
+    type: array
+    items:
+      $ref: "#/$defs/downstream_ref"
+    description: |
+      Optional value-free references to downstream artifacts that depend on this
+      Scope's ratified content. `ce_scope_impact` uses these refs to emit
+      warning-only impact flags when the ratified Scope content drifts.
   crosswalk_parent:
     type: string
     minLength: 1
@@ -163,6 +171,58 @@ $defs:
         enum: [per_run, rolling_5h, rolling_weekly, total]
         description: |
           Optional accounting window. Absent ⇒ `per_run` at the join.
+  downstream_ref:
+    oneOf:
+      - type: object
+        required: [kind, path]
+        unevaluatedProperties: false
+        properties:
+          kind:
+            type: string
+            const: plan
+          path:
+            type: string
+            minLength: 1
+      - type: object
+        required: [kind, id]
+        unevaluatedProperties: false
+        properties:
+          kind:
+            type: string
+            const: decision_record
+          id:
+            type: string
+            minLength: 1
+      - type: object
+        required: [kind, glob]
+        unevaluatedProperties: false
+        properties:
+          kind:
+            type: string
+            const: test_pattern
+          glob:
+            type: string
+            minLength: 1
+      - type: object
+        required: [kind, name]
+        unevaluatedProperties: false
+        properties:
+          kind:
+            type: string
+            const: validator_check
+          name:
+            type: string
+            minLength: 1
+      - type: object
+        required: [kind, scope_id]
+        unevaluatedProperties: false
+        properties:
+          kind:
+            type: string
+            const: scope
+          scope_id:
+            type: string
+            minLength: 1
   scope_ratification:
     type: object
     required: [approver_ref, ratified_scope_sha]

@@ -1977,6 +1977,7 @@ Properties:
 | `ratification` | $ref #/$defs/scope_ratification | no |  | The betting-table attestation (the FRONT-gate bet): value-free opaque digests proving a ratifier placed the bet. Its presence is REQUIRED for a ready-or-later Scope (the front gate gates dispatch); `ce_scope` emits `V... |
 | `skill_refs` | array | no |  | Optional forward hook to the durable Skill axis (deferred). Shape only. |
 | `binding_decisions` | array | no |  | Optional ids of Decision Records (`docs/decisions/` ADRs / `docs/rfcs/` RFCs, e.g. `ADR-0007`) this Scope cites as BINDING context — the A↔B seam (v3.5-C A-C1). A-C1 adds the FIELD only; the readiness enforcement (eve... |
+| `downstream_refs` | array | no |  | Optional value-free references to downstream artifacts that depend on this Scope's ratified content. `ce_scope_impact` uses these refs to emit warning-only impact flags when the ratified Scope content drifts. |
 | `crosswalk_parent` | string | no | minLength `1` | Optional light traceability ref up the collapsible crosswalk tree (PRD/epic/story). The register-side `scope_mappings` axis is deferred. |
 | `state` | string | no | enum `draft`, `ready`, `in_progress`, `verified`, `ratified`, `done` | The CONSERVED mechanical spec-lifecycle state (conserved verbatim from the stage-vocabulary canon). Absent ⇒ treated as `draft`. This is the source of truth; the cognitive phase is derived from it. |
 | `phase` | string | no | enum `Frame`, `Shape`, `Build`, `Review`, `Ship` | OPTIONAL cached cognitive phase (the canon presentation skin). When present it MUST equal the derivation from `state` (`coordination.cognitive_phase`); `ce_scope` emits `VAL-SCOPE-STATE-INCONSISTENT` on drift. The ski... |
@@ -1987,6 +1988,7 @@ Definitions:
 | Property | Shape | Required | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `appetite` | object | no | unevaluatedProperties `false` |  |
+| `downstream_ref` | oneOf | no |  |  |
 | `scope_ratification` | object | no | unevaluatedProperties `false` |  |
 
 ### `schemas/seat-class-policy.schema.yaml`
