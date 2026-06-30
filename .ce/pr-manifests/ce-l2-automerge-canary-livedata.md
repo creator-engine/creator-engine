@@ -6,13 +6,14 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=5a8d1d7034217b1c25204b3108c15261c62412689d41968f668277a54227eb10
+AUTHORIZED_PATHS_SHA256=9faed8d8e4318a94c1200a8903bc26b8d400d30ee40d0d69a3572cd6b392f9f2
 
 ```text
 .ce/changelog/ce-l2-automerge-canary-livedata.md
 .ce/pr-manifests/ce-l2-automerge-canary-livedata.md
+.ce/reference/cli.generated.md
 .github/workflows/automerge-decide.yml
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/forge/automerge_actuator.py
