@@ -13,6 +13,12 @@ see and what each step produces.*
 > walkthrough. When a step touches a concept those guides explain more deeply,
 > we link to them rather than repeat them.
 
+> **Spec-kit is being retired.** This guide describes the legacy spec-kit path.
+> For the current `ce` hands-on path, see
+> [`solo-dev-onboarding.md`](./solo-dev-onboarding.md). For the **Solo + CEO**
+> path (agent drives, you ratify), see
+> [`solo-ceo-onboarding.md`](./solo-ceo-onboarding.md).
+
 ---
 
 ## Phase 0 — Orientation (read this once, then start)
@@ -282,21 +288,21 @@ The agent drives the mechanics; the judgment calls are yours.
 
 This is the heart of CE: taking one ticket from intent to a merged, reviewed,
 evidence-backed change. The loop is **Frame → Shape → Build → Review → Ship**,
-and you drive it with the `cev3` command. Pick one issue from the backlog you
+and you drive it with the `ce` command. Pick one issue from the backlog you
 just created, and follow these steps in order.
 
-> **A note on the commands.** Many `cev3` commands are **plan-by-default**: they
+> **A note on the commands.** Many `ce` commands are **plan-by-default**: they
 > show you what *would* happen and change nothing until you add `--apply`. That's
 > deliberate — you always see the plan before anything privileged occurs.
 
-### Step 4.1 — `cev3 scope` (Frame + Shape your bet)
+### Step 4.1 — `ce scope` (Frame + Shape your bet)
 
 **What it does.** Crystallizes the ticket into a **Scope**: its Goal, its
 **Done-when** acceptance criteria, a Budget you set, and the change type. This is
 the unit CE governs.
 
 ```bash
-cev3 scope my-first-ticket \
+ce scope my-first-ticket \
   --goal "What you're trying to accomplish, in one line" \
   --done-when "First acceptance criterion" \
   --done-when "Second acceptance criterion" \
@@ -317,16 +323,16 @@ the work is finished. Write them the way you'd write good acceptance criteria:
 concrete and checkable. **You set the Budget** — it's a fixed cap on effort you
 commit, not a time estimate; the agent never decides how much you'll spend.
 
-> Not sure your Scope is well-formed? `cev3 shape my-first-ticket` runs a
+> Not sure your Scope is well-formed? `ce shape my-first-ticket` runs a
 > "grill-me" pass that points out gaps and asks what's missing before you commit.
 
-### Step 4.2 — `cev3 ratify` (the human gesture)
+### Step 4.2 — `ce ratify` (the human gesture)
 
 **What it does.** Places the bet. Ratification is the **explicit human "yes"** —
 the front gate. Nothing builds until a Ready Scope is ratified.
 
 ```bash
-cev3 ratify my-first-ticket --approver-ref <64-hex-digest>
+ce ratify my-first-ticket --approver-ref <64-hex-digest>
 ```
 
 **Why you generate a ref.** The `--approver-ref` is a **value-free 64-hex opaque
@@ -349,14 +355,14 @@ moment of human authority — the thing CI can never do for you.
 **Your role here.** This is *the* human decision in the loop. Ratifying means
 "yes, build this." Don't ratify a Scope whose Done-when you wouldn't accept.
 
-### Step 4.3 — `cev3 drive` (Build — tests-first, then code)
+### Step 4.3 — `ce drive` (Build — tests-first, then code)
 
 **What it does.** Dispatches one governed, sandboxed run that does the work. The
 front gate refuses unless the Scope is Ready *and* ratified, and your Budget
 becomes the run's hard spend cap.
 
 ```bash
-cev3 drive my-first-ticket --spawn
+ce drive my-first-ticket --spawn
 ```
 
 (`--spawn` launches a real governed seat to do the build; without it, `drive`
@@ -370,18 +376,18 @@ to pass them** — exactly the order your tasks list encoded in Phase 3.4.
 **What it produced.** An authored branch with the work on it, ready to become a
 pull request — built inside the budget and boundary you set.
 
-### Step 4.4 — `cev3 pr` (open the pull request)
+### Step 4.4 — `ce pr` (open the pull request)
 
 **What it does.** Pushes the run's authored branch and opens its pull request
 through CE's governed forge path.
 
 ```bash
-cev3 pr my-first-ticket --run <run-id> --branch <authored-branch> \
+ce pr my-first-ticket --run <run-id> --branch <authored-branch> \
   --manifest-path <changed-path> --app-config <path-to-github-app-config> --apply
 ```
 
 (Plan-by-default: omit `--apply` first to preview the push and PR without doing
-anything. The `<run-id>` is printed by `cev3 drive`.)
+anything. The `<run-id>` is printed by `ce drive`.)
 
 **What you'll see.** The PR opened on GitHub. Importantly, CE opens it as the
 **App bot identity, not as you** — which is what makes the next step's
@@ -389,13 +395,13 @@ independent review possible on a solo repo.
 
 **What it produced.** A real pull request: the artifact you'll judge.
 
-### Step 4.5 — `cev3 review` (independent review — no self-approval)
+### Step 4.5 — `ce review` (independent review — no self-approval)
 
 **What it does.** Dispatches a **distinct** governed reviewer to evaluate the
 opened PR against the Scope's Done-when.
 
 ```bash
-cev3 review my-first-ticket --run <run-id> --reviewer-actor <reviewer-login> --spawn
+ce review my-first-ticket --run <run-id> --reviewer-actor <reviewer-login> --spawn
 ```
 
 **Why this matters — no self-approval.** Branch protection enforces that the
@@ -408,12 +414,12 @@ against what *you* declared "done," not against a transcript.
 
 **What it produced.** Independent review evidence attached to the PR.
 
-### Step 4.6 — `cev3 merge` (the gated merge)
+### Step 4.6 — `ce merge` (the gated merge)
 
 **What it does.** Performs the governed squash-merge of the PR — the back gate.
 
 ```bash
-cev3 merge my-first-ticket --run <run-id> --apply
+ce merge my-first-ticket --run <run-id> --apply
 ```
 
 (Plan-by-default: run it without `--apply` first to *read the gate* — it tells
@@ -431,13 +437,13 @@ verifies; humans ratify.
 **What it produced.** Your first governed change, merged. The branch is squashed
 into a single clean commit with a full evidence chain behind it.
 
-### Step 4.7 — `cev3 report` (the demo / evidence)
+### Step 4.7 — `ce report` (the demo / evidence)
 
 **What it does.** Renders the per-run **Completion Report** — the evidence
 summary, your "sprint demo" artifact for this ticket.
 
 ```bash
-cev3 report my-first-ticket --run <run-id>
+ce report my-first-ticket --run-id <run-id>
 ```
 
 **What you'll see.** A compact report like:
@@ -447,14 +453,14 @@ cev3 report my-first-ticket --run <run-id>
 │ Outcome   PR opened → #N (merged)
 │ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S
 │ Next      → (done)
-│ Inspect   gh pr view N  |  cev3 show my-first-ticket  |  cev3 artifacts <run-id>
+│ Inspect   gh pr view N  |  ce show my-first-ticket  |  ce artifacts <run-id>
 └──────────────────────────────────────────────────────────
 ```
 
 **What it produced.** The shareable evidence record: what was delivered, how it
 scored against your Done-when, that tests were green, that the diff stayed in
 scope, and how much of the Budget it used. Inspect anything further with
-`cev3 show <scope>` and `cev3 artifacts <run-id>`.
+`ce show <scope>` and `ce artifacts <run-id>`.
 
 **Your role across Phase 4.** You write the Done-when (4.1), you ratify (4.2),
 you review the PR against your own criteria (4.5), and you read the report (4.7).
@@ -467,14 +473,14 @@ The agent builds; you hold the gate and the judgment.
 Once the first ticket is through, every day looks the same shape:
 
 1. **Pick a ticket** from your backlog (the GitHub issues from Phase 3).
-2. **Scope it** — `cev3 scope` with a clear Goal, real Done-when, and a Budget.
-3. **Ratify it** — `cev3 ratify` — your explicit "yes, build this."
-4. **Drive it** — `cev3 drive --spawn` — the agent builds (tests-first where
+2. **Scope it** — `ce scope` with a clear Goal, real Done-when, and a Budget.
+3. **Ratify it** — `ce ratify` — your explicit "yes, build this."
+4. **Drive it** — `ce drive --spawn` — the agent builds (tests-first where
    your constitution requires it).
-5. **Open + review + merge** — `cev3 pr`, then `cev3 review`, then `cev3 merge`
+5. **Open + review + merge** — `ce pr`, then `ce review`, then `ce merge`
    — independent review, gated merge; green is necessary but ratification is what
    authorizes.
-6. **Report** — `cev3 report` — capture the evidence, move on.
+6. **Report** — `ce report` — capture the evidence, move on.
 
 New big initiative? Go back to **Phase 3** and run the spec-driven pipeline again
 to groom it into tickets. Changing your standards? Re-run **`/speckit-constitution`**
