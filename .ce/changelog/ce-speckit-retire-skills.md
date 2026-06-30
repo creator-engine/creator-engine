@@ -1,0 +1,1 @@
+Retire vendored spec-kit skill files (Phase 1 of spec-kit retirement): removes all 14 `.claude/skills/speckit-*` and 9 `.agents/skills/speckit-*` directories. Both vendored copies had `compatibility: Requires .specify/ directory`; since Phase 2 removes `.specify/`, these skills must be removed now to avoid dangling references.
