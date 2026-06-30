@@ -1,0 +1,142 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.dev/schemas/fleet-manifest.schema.yaml"
+title: Fleet manifest
+description: >
+  Per-project Autonomous-Fleet deployment descriptor. This schema captures only
+  the value-free deployment contract; provisioning and cloud VM wiring are
+  intentionally outside P0.
+type: object
+additionalProperties: false
+required:
+  - project
+  - tier
+  - seats
+  - isolation
+  - secrets
+  - identity
+  - egress
+properties:
+  kind:
+    const: fleet-manifest
+    description: Optional discriminator used by validators to identify fleet manifests.
+  version:
+    type: string
+    minLength: 1
+    description: Manifest format version.
+  project:
+    type: object
+    additionalProperties: false
+    required:
+      - name
+      - slug
+      - repo
+    properties:
+      name:
+        type: string
+        minLength: 1
+      slug:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+      repo:
+        type: string
+        pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        description: Target project repository in owner/name form.
+      description:
+        type: string
+  tier:
+    type: string
+    enum:
+      - solo-ceo
+      - fleet
+    description: Deployment tier knob.
+  seats:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - role
+        - isolation_backend
+        - model_account_ref
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,62}$"
+        role:
+          type: string
+          minLength: 1
+        isolation_backend:
+          $ref: "#/$defs/isolationBackend"
+        model_account_ref:
+          $ref: "#/$defs/pointer"
+  isolation:
+    type: object
+    additionalProperties: false
+    required:
+      - backend
+    properties:
+      backend:
+        $ref: "#/$defs/isolationBackend"
+      profile_ref:
+        $ref: "#/$defs/pointer"
+  secrets:
+    type: object
+    description: Named secret references. Values must be pointers, never inline secret material.
+    additionalProperties:
+      $ref: "#/$defs/pointer"
+  identity:
+    type: object
+    description: Identity and credential references. Values must be pointers, never inline material.
+    additionalProperties:
+      $ref: "#/$defs/pointer"
+  egress:
+    type: object
+    additionalProperties: false
+    required:
+      - policy
+    properties:
+      policy:
+        type: string
+        minLength: 1
+      allowed_refs:
+        type: array
+        items:
+          $ref: "#/$defs/pointer"
+$defs:
+  isolationBackend:
+    type: string
+    enum:
+      - os-native
+      - container
+      - gvisor
+  pointer:
+    description: >
+      A value-free reference into an external secret, identity, KMS, or policy
+      system. Plain secret values are rejected by requiring a typed ref prefix.
+    anyOf:
+      - type: string
+        pattern: "^(openbao|vault|kms|aws-kms|gcp-kms|azure-keyvault|secretref|identityref|modelref|egressref|policyref)://[^\\s]+$"
+      - type: object
+        additionalProperties: false
+        required:
+          - ref
+        properties:
+          ref:
+            type: string
+            pattern: "^(openbao|vault|kms|aws-kms|gcp-kms|azure-keyvault|secretref|identityref|modelref|egressref|policyref)://[^\\s]+$"
+          provider:
+            type: string
+            enum:
+              - openbao
+              - vault
+              - kms
+              - aws-kms
+              - gcp-kms
+              - azure-keyvault
+              - secretref
+              - identityref
+              - modelref
+              - egressref
+              - policyref

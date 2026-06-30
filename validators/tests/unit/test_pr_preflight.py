@@ -166,6 +166,25 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
     ] in calls
 
 
+def test_preflight_runs_fleet_manifest_guard(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    guarded = []
+
+    def fake_fleet_manifest_guard(repo_root, out):
+        guarded.append(repo_root)
+        return "guarded"
+
+    monkeypatch.setattr(pr_preflight, "_fleet_manifest_guard", fake_fleet_manifest_guard)
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=FakeRunner(tmp_path), out=io.StringIO(), err=io.StringIO())
+
+    assert rc == 0
+    assert guarded == [tmp_path]
+
+
 def test_preflight_blocks_install_spec_signature_guard_failure(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])

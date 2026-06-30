@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 72
+Schema files: 73
 
 ## Index
 
@@ -35,6 +35,7 @@ Schema files: 72
 | `schemas/evidence-fan-in-packet.schema.yaml` | Creator Engine Local Read-Only Evidence Fan-In Packet | `object` |
 | `schemas/extension-hook-contract.schema.yaml` | Creator Engine extension + hook contract substrate | `object` |
 | `schemas/federated-identity-binding.schema.yaml` | Creator Engine federated identity binding record substrate | `object` |
+| `schemas/fleet-manifest.schema.yaml` | Fleet manifest | `object` |
 | `schemas/forge-claim.schema.yaml` | Creator Engine forge-projected claim record | `object` |
 | `schemas/handoff.schema.yaml` | Creator Engine Hermes Handoff Front Matter | `object` |
 | `schemas/harness-seat-contract.schema.yaml` | Creator Engine harness seat-contract substrate | `object` |
@@ -953,6 +954,41 @@ Definitions:
 | `hash` | string | no | pattern `^[0-9a-f]{64}$` |  |
 | `timestamp` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` |  |
 | `record` | object | no | additionalProperties `false` |  |
+
+### `schemas/fleet-manifest.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Fleet manifest |
+| `$id` | `https://creator-engine.dev/schemas/fleet-manifest.schema.yaml` |
+| Root type | `object` |
+
+Per-project Autonomous-Fleet deployment descriptor. This schema captures only the value-free deployment contract; provisioning and cloud VM wiring are intentionally outside P0.
+
+Required fields:
+
+`project`, `tier`, `seats`, `isolation`, `secrets`, `identity`, `egress`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | const | no | const `fleet-manifest` | Optional discriminator used by validators to identify fleet manifests. |
+| `version` | string | no | minLength `1` | Manifest format version. |
+| `project` | object | yes | additionalProperties `false` |  |
+| `tier` | string | yes | enum `solo-ceo`, `fleet` | Deployment tier knob. |
+| `seats` | array | yes | minItems `1` |  |
+| `isolation` | object | yes | additionalProperties `false` |  |
+| `secrets` | object | yes |  | Named secret references. Values must be pointers, never inline secret material. |
+| `identity` | object | yes |  | Identity and credential references. Values must be pointers, never inline material. |
+| `egress` | object | yes | additionalProperties `false` |  |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `isolationBackend` | string | no | enum `os-native`, `container`, `gvisor` |  |
+| `pointer` | anyOf | no |  | A value-free reference into an external secret, identity, KMS, or policy system. Plain secret values are rejected by requiring a typed ref prefix. |
 
 ### `schemas/forge-claim.schema.yaml`
 
