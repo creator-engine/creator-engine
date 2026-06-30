@@ -110,6 +110,7 @@ class OsNativeCapability:
 
 
 CapabilityProbe = Callable[[], OsNativeCapability]
+OpenShellBackendFactory = Callable[[], RunnerBackend]
 
 
 class OsNativePlanRejected(ValueError):
@@ -176,6 +177,13 @@ class OsNativePlan:
         return tuple(args)
 
 
+@dataclass
+class _OpenShellDelegation:
+    backend: RunnerBackend
+    handle: ProvisionedHandle
+    p3_verified: bool = False
+
+
 class OsNativeCommandRunner(Protocol):
     """The live bwrap execution seam. Tests inject a fake; default uses subprocess."""
 
@@ -222,6 +230,55 @@ class SubprocessOsNativeRunner:
             pass_fds=pass_fds,
             close_fds=True,
         )
+
+
+_P3_BLOCKED_HOST = "203.0.113.1"
+_P3_BLOCKED_PORT = 443
+_P3_BLOCKED_TARGET = f"{_P3_BLOCKED_HOST}:{_P3_BLOCKED_PORT}"
+_P3_BLOCKED_PROBE_COMMAND = (
+    "python3",
+    "-c",
+    (
+        "import socket, sys\n"
+        f"host = {_P3_BLOCKED_HOST!r}\n"
+        f"port = {_P3_BLOCKED_PORT!r}\n"
+        "try:\n"
+        "    sock = socket.create_connection((host, port), timeout=2)\n"
+        "except OSError:\n"
+        "    sys.exit(0)\n"
+        "else:\n"
+        "    sock.close()\n"
+        "    sys.exit(42)\n"
+    ),
+)
+
+
+def _default_openshell_backend() -> RunnerBackend:
+    """Return a live OpenShell backend only when its CLI transport is available."""
+
+    from .openshell_backend import OpenShellBackend, SubprocessSandboxClient
+
+    client = SubprocessSandboxClient()
+    if not client.available():
+        raise BackendUnavailable(
+            "policy declares a non-empty egress allowlist; os-native delegates egress "
+            "enforcement to OpenShell for OQ-1 Option C, but the OpenShell CLI is not "
+            "available. Refusing before any os-native proxy PATH probe or sandbox start."
+        )
+    return OpenShellBackend(client=client)
+
+
+def _has_p3_denial(records: tuple[dict[str, Any], ...]) -> bool:
+    for record in records:
+        if record.get("disposition") != "DENIED":
+            continue
+        target = record.get("target")
+        if target == _P3_BLOCKED_TARGET:
+            return True
+        raw = record.get("raw")
+        if isinstance(raw, dict) and raw.get("target") == _P3_BLOCKED_TARGET:
+            return True
+    return False
 
 
 def _seccomp_available() -> bool:
@@ -408,20 +465,41 @@ class OsNativeBackend(RunnerBackend):
         *,
         capability_probe: CapabilityProbe | None = None,
         runner: OsNativeCommandRunner | None = None,
+        openshell_backend_factory: OpenShellBackendFactory | None = None,
     ) -> None:
         self._capability_probe = capability_probe
         self._runner: OsNativeCommandRunner = (
             runner if runner is not None else SubprocessOsNativeRunner()
         )
+        self._openshell_backend_factory = openshell_backend_factory or _default_openshell_backend
         self._capabilities: dict[str, OsNativeCapability] = {}
         self._plans: dict[str, OsNativePlan] = {}
         self._egress: dict[str, EgressProxyConfig] = {}
+        self._delegations: dict[str, _OpenShellDelegation] = {}
 
     def _provision(self, request: ProvisionRequest) -> ProvisionedHandle:
         # The deny surface (mapping + validate_runtime_policy → PolicyRejected) is
         # enforced by the RunnerBackend.provision template method before we get
         # here. A clean record reaches pure plan translation; all missing or
         # unsupported primitives fail closed before the live runner can start.
+        egress = translate_to_egress_proxy_config(request.runtime_policy)
+        if not egress.no_egress:
+            delegated_backend = self._openshell_backend_factory()
+            delegated_handle = delegated_backend.provision(request)
+            record = request.runtime_policy
+            policy_sha = record.get("policy_sha", "")
+            handle = ProvisionedHandle(
+                backend_key=self.backend_key,
+                run_id=request.run_id,
+                policy_sha=policy_sha if isinstance(policy_sha, str) else "",
+                ref=f"os-native:openshell:{request.run_id}",
+            )
+            self._egress[handle.ref] = egress
+            self._delegations[handle.ref] = _OpenShellDelegation(
+                backend=delegated_backend,
+                handle=delegated_handle,
+            )
+            return handle
         probe = self._capability_probe or probe_os_native_capability
         capability = probe()
         if not capability.available:
@@ -450,6 +528,18 @@ class OsNativeBackend(RunnerBackend):
         return handle
 
     def run(self, handle: ProvisionedHandle, request: RunRequest) -> RunResult:
+        delegation = self._delegations.get(handle.ref)
+        if delegation is not None:
+            self._verify_delegated_p3(delegation)
+            result = delegation.backend.run(delegation.handle, request)
+            return RunResult(
+                exit_code=result.exit_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                started_ref=handle.ref,
+                change_set=result.change_set,
+                runtime_probe=result.runtime_probe,
+            )
         plan = self._plans.get(handle.ref)
         if plan is None:
             raise BackendUnavailable(
@@ -477,7 +567,51 @@ class OsNativeBackend(RunnerBackend):
             started_ref=handle.ref,
         )
 
+    def _verify_delegated_p3(
+        self,
+        delegation: _OpenShellDelegation,
+    ) -> None:
+        if delegation.p3_verified:
+            return
+        probe_result = delegation.backend.run(
+            delegation.handle,
+            RunRequest(command=_P3_BLOCKED_PROBE_COMMAND),
+        )
+        if probe_result.exit_code != 0:
+            raise BackendUnavailable(
+                "OpenShell delegated egress P3 behavioral denial probe failed before "
+                f"os-native run: probe exited {probe_result.exit_code}; refusing user command"
+            )
+        evidence = delegation.backend.collect(delegation.handle)
+        if not _has_p3_denial(evidence.records):
+            raise BackendUnavailable(
+                "OpenShell delegated egress P3 behavioral denial probe produced no "
+                f"DENIED OCSF evidence for {_P3_BLOCKED_TARGET}; refusing user command"
+            )
+        delegation.p3_verified = True
+
     def collect(self, handle: ProvisionedHandle) -> CollectedEvidence:
+        delegation = self._delegations.get(handle.ref)
+        if delegation is not None:
+            evidence = delegation.backend.collect(delegation.handle)
+            records = (
+                {
+                    "backend_key": self.backend_key,
+                    "mechanism": "openshell-delegated-egress",
+                    "delegated_backend": delegation.handle.backend_key,
+                    "delegated_ref": delegation.handle.ref,
+                    "egress": "openshell",
+                    "p3_behavioral_denial_verified": delegation.p3_verified,
+                    "p3_blocked_target": _P3_BLOCKED_TARGET,
+                },
+                *evidence.records,
+            )
+            return CollectedEvidence(
+                handle_ref=handle.ref,
+                records=records,
+                note=f"os-native delegated egress evidence for {handle.ref}",
+                change_set=evidence.change_set,
+            )
         capability = self._capabilities.get(handle.ref)
         plan = self._plans.get(handle.ref)
         egress = self._egress.get(handle.ref)
@@ -506,6 +640,11 @@ class OsNativeBackend(RunnerBackend):
         )
 
     def teardown(self, handle: ProvisionedHandle) -> TeardownResult:
+        delegation = self._delegations.pop(handle.ref, None)
+        if delegation is not None:
+            result = delegation.backend.teardown(delegation.handle)
+            self._egress.pop(handle.ref, None)
+            return TeardownResult(handle_ref=handle.ref, released=result.released)
         self._capabilities.pop(handle.ref, None)
         self._plans.pop(handle.ref, None)
         self._egress.pop(handle.ref, None)

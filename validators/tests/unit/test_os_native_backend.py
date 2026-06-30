@@ -4,7 +4,17 @@ import subprocess
 
 import pytest
 
-from creator_engine_validator.runner import BackendUnavailable, ProvisionRequest, ProvisionedHandle, RunRequest
+from creator_engine_validator import fs_mediation as fm
+from creator_engine_validator.runner import (
+    BackendUnavailable,
+    FakeSandboxClient,
+    OpenShellBackend,
+    ProvisionRequest,
+    ProvisionedHandle,
+    RunRequest,
+)
+from creator_engine_validator.runner import openshell_backend as ob
+from creator_engine_validator.runner import os_native_backend as osn
 from creator_engine_validator.runner.os_native_backend import (
     OsNativeBackend,
     OsNativeCapability,
@@ -54,6 +64,14 @@ def policy(worktree: str, *, egress: bool = False) -> dict:
     }
 
 
+@pytest.fixture(autouse=True)
+def _openshell_test_runtime(monkeypatch, tmp_path):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    shim_parent = tmp_path / "ring1-shim-parent"
+    shim_parent.mkdir(mode=0o700)
+    monkeypatch.setattr(ob, "DEFAULT_RING1_SHIM_DIR", str(shim_parent / "shim"))
+
+
 class FakeNativeRunner:
     def __init__(self, *, available: bool = True):
         self._available = available
@@ -86,10 +104,147 @@ def test_os_native_non_empty_egress_also_refuses_before_runner_probe(tmp_path):
     runner = FakeNativeRunner()
     backend = OsNativeBackend(capability_probe=capability, runner=runner)
 
-    with pytest.raises(BackendUnavailable, match="restrictive seccomp policy"):
+    with pytest.raises(BackendUnavailable, match="OpenShell CLI is not available"):
         backend.provision(ProvisionRequest(policy(str(worktree), egress=True), run_id="run-egress"))
 
     assert runner.calls == []
+
+
+def test_os_native_egress_delegates_to_openshell_and_verifies_p3_before_user_run(tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    p3_records = (
+        {
+            "event_type": "NET:OPEN",
+            "severity": "MED",
+            "disposition": "DENIED",
+            "actor": "/usr/bin/python3(42)",
+            "target": osn._P3_BLOCKED_TARGET,
+            "policy": "-",
+            "engine": "opa",
+            "reason": "endpoint is not allowed by any policy",
+            "raw": {
+                "event_type": "NET:OPEN",
+                "disposition": "DENIED",
+                "target": osn._P3_BLOCKED_TARGET,
+            },
+        },
+    )
+    fake = FakeSandboxClient(sandbox_id="openshell-sandbox-egress", ocsf_records=p3_records)
+    runner = FakeNativeRunner()
+
+    def forbidden_probe() -> OsNativeCapability:
+        raise AssertionError("egress delegation must not run the os-native proxy probe")
+
+    backend = OsNativeBackend(
+        capability_probe=forbidden_probe,
+        runner=runner,
+        openshell_backend_factory=lambda: OpenShellBackend(client=fake),
+    )
+
+    handle = backend.provision(ProvisionRequest(policy(str(worktree), egress=True), run_id="run-egress"))
+    assert handle.backend_key == "os-native"
+    assert handle.ref == "os-native:openshell:run-egress"
+    assert len(fake.created_specs) == 1
+    assert fake.created_specs[0].policy.network_policies[0].endpoints[0].enforcement == "enforce"
+    # Provision installs the OpenShell Ring-1 guard; the P3 probe has not yet run.
+    assert len(fake.exec_calls) == 1
+
+    result = backend.run(handle, RunRequest(command=("echo", "hi")))
+
+    assert result.exit_code == 0
+    assert result.started_ref == handle.ref
+    assert runner.calls == []
+    assert fake.exec_calls[-2][1] == osn._P3_BLOCKED_PROBE_COMMAND
+    assert osn._P3_BLOCKED_HOST in " ".join(fake.exec_calls[-2][1])
+    assert fake.exec_calls[-1] == ("openshell-sandbox-egress", ("echo", "hi"))
+    evidence = backend.collect(handle)
+    assert evidence.records[0]["mechanism"] == "openshell-delegated-egress"
+    assert evidence.records[0]["p3_behavioral_denial_verified"] is True
+    assert backend.teardown(handle).released is True
+    assert fake.deleted == ["openshell-sandbox-egress"]
+
+
+def test_os_native_egress_unavailable_fails_closed_without_proxy_path_probe(monkeypatch, tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    runner = FakeNativeRunner()
+
+    def forbidden_probe() -> OsNativeCapability:
+        raise AssertionError("unavailable OpenShell must not fall through to os-native probe")
+
+    def which(name: str):
+        if name == "proxy":
+            raise AssertionError("proxy PATH probe must not be used for delegated egress")
+        return None
+
+    monkeypatch.setattr(osn.shutil, "which", which)
+    backend = OsNativeBackend(
+        capability_probe=forbidden_probe,
+        runner=runner,
+        openshell_backend_factory=lambda: (_ for _ in ()).throw(
+            BackendUnavailable("openshell unavailable")
+        ),
+    )
+
+    with pytest.raises(BackendUnavailable, match="openshell unavailable"):
+        backend.provision(ProvisionRequest(policy(str(worktree), egress=True), run_id="run-no-open"))
+
+    assert runner.calls == []
+
+
+def test_os_native_no_egress_keeps_existing_fail_closed_path(tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    runner = FakeNativeRunner()
+
+    def forbidden_openshell():
+        raise AssertionError("empty egress allowlist must not delegate to OpenShell")
+
+    backend = OsNativeBackend(
+        capability_probe=capability,
+        runner=runner,
+        openshell_backend_factory=forbidden_openshell,
+    )
+
+    with pytest.raises(BackendUnavailable, match="no concrete deny-by-default host-proxy"):
+        backend.provision(ProvisionRequest(policy(str(worktree)), run_id="run-no-egress"))
+
+    assert runner.calls == []
+
+
+def test_os_native_delegated_egress_fails_closed_without_p3_denial_evidence(tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    fake = FakeSandboxClient(
+        sandbox_id="openshell-sandbox-egress",
+        ocsf_records=(
+            {
+                "event_type": "NET:OPEN",
+                "severity": "INFO",
+                "disposition": "ALLOWED",
+                "target": "api.example:443",
+                "policy": "api_example_443",
+                "engine": "opa",
+                "raw": {"disposition": "ALLOWED", "target": "api.example:443"},
+            },
+        ),
+    )
+    backend = OsNativeBackend(
+        capability_probe=lambda: (_ for _ in ()).throw(
+            AssertionError("egress delegation must not probe os-native")
+        ),
+        openshell_backend_factory=lambda: OpenShellBackend(client=fake),
+    )
+    handle = backend.provision(
+        ProvisionRequest(policy(str(worktree), egress=True), run_id="run-p3-missing")
+    )
+
+    with pytest.raises(BackendUnavailable, match="P3 behavioral denial probe produced no DENIED"):
+        backend.run(handle, RunRequest(command=("echo", "hi")))
+
+    assert fake.exec_calls[-1][1] == osn._P3_BLOCKED_PROBE_COMMAND
+    assert ("openshell-sandbox-egress", ("echo", "hi")) not in fake.exec_calls
 
 
 @pytest.mark.parametrize("missing", [("bwrap",), ("landlock",), ("seccomp",), ("proxy",)])
