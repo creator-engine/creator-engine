@@ -110,6 +110,11 @@ chicken-and-egg of needing `ce` to trust the spec that installs `ce`). Do this
 **before** executing any step; on anything but a `Good` result, **STOP**. (CE's own
 governance applied to its own install: the grader lives outside the agent.)
 
+**Prerequisites for external users:** install OpenSSH client before this
+ceremony if `ssh-keygen` is not already present. On Debian/Ubuntu:
+`sudo apt-get install -y openssh-client`. The `ssh-keygen` command it provides
+is required to verify this signed spec before any CE tooling is trusted.
+
 Assuming you fetched this file as `llms-install.md`:
 
 ```bash
@@ -154,7 +159,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
 
 - **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`.
   Transport integrity for the script body is **TLS** plus the published
-  `install.sh` hash in `https://creator-engine.dev/downloads/0.2.0/SHA256SUMS`.
+  `install.sh` hash in `https://creator-engine.dev/downloads/0.3.1/SHA256SUMS`.
   The script's first authority step is still this signed spec: it fetches
   `llms-install.md`, fetches the trust root, binds that root to an out-of-band
   anchor for the signature key, reconstructs the canonical bytes, verifies the
@@ -162,7 +167,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   refusal. Only after that does it fetch the signed-manifest wheelhouse,
   `SHA256SUMS`, and answers schema, hash-verify every artifact, acquire CPython
   3.14 through the pinned uv artifact if needed, create/reuse a user-local venv,
-  install `creator-engine-validator==0.2.0` offline, and run authenticated
+  install `creator-engine-validator==0.3.1` offline, and run authenticated
   inventory:
 
   ```text
