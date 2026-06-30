@@ -446,6 +446,36 @@ jobs:
             verify-work-sizing-floor --base "${comparison_base}" \
             --declared-work-class "${declared_work_class}" .
 
+      - name: Creator Engine validator — test-coupling PR-diff gate
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -euo pipefail
+          comparison_base="${{ steps.live-base.outputs.comparison_base }}"
+          if [[ -z "${comparison_base}" ]]; then
+            echo "FAIL: live comparison base was not resolved" >&2
+            exit 1
+          fi
+          pr_body_file="${RUNNER_TEMP}/ce-pr-body.md"
+          python - "${pr_body_file}" <<'PYEOF'
+          import json
+          import os
+          import sys
+
+          out_path = sys.argv[1]
+          event_path = os.environ.get("GITHUB_EVENT_PATH")
+          try:
+              with open(event_path, encoding="utf-8") as handle:
+                  body = (json.load(handle).get("pull_request") or {}).get("body") or ""
+          except (OSError, TypeError, ValueError):
+              print("FAIL: could not read pull_request.body from GITHUB_EVENT_PATH", file=sys.stderr)
+              sys.exit(1)
+          with open(out_path, "w", encoding="utf-8") as handle:
+              handle.write(body)
+          PYEOF
+          PYTHONPATH=validators python -m creator_engine_validator \
+            verify-test-coupling --base "${comparison_base}" \
+            --pr-body-file "${pr_body_file}" .
+
       - name: Creator Engine validator — path-manifest PR-diff gate (G-ii)
         if: ${{ github.event_name == 'pull_request' }}
         run: |

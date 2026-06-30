@@ -221,6 +221,21 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_work_sizing_floor.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_test_coupling = sub.add_parser(
+        "verify-test-coupling",
+        help=(
+            "test_coupling PR-diff gate (fails when <base>..HEAD adds or modifies "
+            "non-test source code without adding or modifying tests)"
+        ),
+    )
+    verify_test_coupling.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
+    verify_test_coupling.add_argument(
+        "--pr-body-file",
+        default=None,
+        help="optional file containing PR body text for CE-TEST-COUPLING-EXEMPT override detection",
+    )
+    verify_test_coupling.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     pco_allocate = sub.add_parser(
         "pco-allocate",
         help="PCO-027: allocate a worktree lane (acquire lease, run git worktree add, write claim + event)",
@@ -728,6 +743,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             [Path(p) for p in args.paths],
             args.base,
             declared_work_class=args.declared_work_class,
+        )
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-test-coupling":
+        from .checks.test_coupling import run_with_base as _run_test_coupling
+
+        pr_body = None
+        if args.pr_body_file:
+            try:
+                pr_body = Path(args.pr_body_file).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                print(f"ERROR: verify-test-coupling: could not read --pr-body-file: {exc}", file=sys.stderr)
+                return 2
+        result = _run_test_coupling(
+            [Path(p) for p in args.paths],
+            args.base,
+            pr_body=pr_body,
         )
         return _emit_results([result], args.json_output)
     if subcommand == "hook-check":
