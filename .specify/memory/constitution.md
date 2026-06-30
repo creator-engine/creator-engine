@@ -1,58 +1,63 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 1.1.0
-Bump rationale: Materially expanded Principle II (Repo-Native First) to
-codify the upstream/local boundary: upstream Creator Engine artifacts must
-remain reusable across deployments; instance-local runtime/session state
-must live in ignored local files. New obligations imposed on upstream
-content and on tracked files; no principle removed or redefined. MINOR per
-the versioning policy.
+Version change: 1.1.0 → 2.0.0
+Bump rationale: MAJOR bump. Principle X ("Spec Kit Compatibility") has been
+redefined as Principle X ("CE-Native Spec Substrate"). The prior mandate that
+Creator Engine MUST NOT break Spec-Kit-only workflows is retired and replaced
+by an affirmation that CE's cev3 Scope lifecycle (Frame→Shape→Build→Review→
+Ship) is the first-class native spec substrate. Any governance plan, spec, or
+attestation that cited Principle X as a Spec-Kit compatibility constraint is
+superseded. MAJOR per the versioning policy (backward-incompatible redefinition
+of a ratified principle).
+
+Source (Operator) approval: The Operator ratified the spec-kit full-retirement
+amendment on 2026-06-30. This approval is recorded in the amendment commit and
+in this Sync Impact Report per the constitution's amendment procedure. The
+governing spec/plan/tasks triple is at
+`specs/006-retire-speckit-principle-x/`.
 
 Modified principles:
-  - II. Repo-Native First (v0.1) — added explicit upstream/local boundary
-    clauses (no tracking of instance-local runtime/session state; reusable
-    protocols, schemas, validators, templates, and generic examples belong
-    upstream); rationale extended to cover instance portability.
+  - X. Spec Kit Compatibility → X. CE-Native Spec Substrate — retired the
+    spec-kit CLI/skill compatibility mandate; replaced with an affirmation of
+    the cev3 Scope lifecycle as CE's native spec substrate and a prohibition on
+    re-introducing spec-kit tooling dependencies.
 
 Added sections: None.
 
 Removed sections: None.
 
-Templates and dependent artifacts requiring updates:
-  - ✅ docs/operations/session-continuity-protocol.md — added in this batch;
-    codifies fresh-session continuity for each deployed instance under the
-    new upstream/local boundary.
-  - ✅ templates/hermes/session-state/STATE.template.md — added in this
-    batch; generic instance-local state template. Upstream MUST NOT track
-    filled-in copies.
-  - ✅ .gitignore — annotated in this batch to make the upstream/local
-    boundary intent explicit; `.hermes/` remains ignored.
-  - ✅ .specify/templates/plan-template.md — Constitution Check still
-    enumerates the twelve principles; the Principle II amendment fits the
-    existing gate language without template change.
-  - ✅ .specify/templates/tasks-template.md — task format already requires
-    mutation class, permitted action, and verification evidence; no change
-    needed.
-  - ⚠ .specify/templates/spec-template.md — still does NOT require Creator
-    Engine wrapper metadata; deferred to the wrapper schema feature.
-  - ✅ .specify/templates/checklist-template.md — generic; no changes needed.
-  - ✅ AGENTS.md / CLAUDE.md — point agents to the current plan; no
-    constitution-specific edits needed at this version.
+Templates and dependent artifacts:
+  - ✅ specs/006-retire-speckit-principle-x/spec.md — governance proposal
+    (decision, scenarios, requirements, success criteria, assumptions).
+  - ✅ specs/006-retire-speckit-principle-x/plan.md — before/after diffs,
+    version bump rationale, authorized subsequent phases.
+  - ✅ specs/006-retire-speckit-principle-x/tasks.md — ordered task list.
+  - ✅ .specify/memory/constitution.md — this file; Principle X amended,
+    version bumped, Sync Impact Report updated.
+  - ✅ .ce/changelog/ce-speckit-retire-principle-x.md — per-PR changelog.
+  - ✅ .ce/pr-manifests/ce-speckit-retire-principle-x.md — path-manifest
+    carrier; stem matches branch slug.
+  - No template changes required: the spec.md / plan.md / tasks.md format is
+    unchanged; only the spec-kit tool dependency is retired.
 
 Prior bump history:
   - (template, unratified) → 1.0.0: Initial ratification of the twelve core
     principles, definitions, bootstrap applicability, authority and
     boundaries, workflow and verification discipline, and governance.
+  - 1.0.0 → 1.1.0 (2026-05-11): Materially expanded Principle II (Repo-Native
+    First) to codify the upstream/local boundary: upstream CE artifacts must
+    remain reusable across deployments; instance-local runtime/session state
+    must live in ignored local files. MINOR (new obligations, no principle
+    removed or redefined).
 
 Follow-up TODOs:
-  - When the Creator Engine wrapper schema (identity + mutation-class +
-    attestation + ratifier metadata over Spec Kit artifacts) is itself
-    spec'd, update spec-template.md and tasks-template.md to require the
-    exact machine-checkable wrapper fields.
-  - When the wrapper schema lands, ensure identity and attestation fields
-    reflect the upstream/local boundary so instance-local attestations are
-    not accidentally promoted into upstream artifacts.
+  - Subsequent PRs authorized by specs/006-retire-speckit-principle-x/ may
+    remove .claude/skills/speckit-* skill directories and clean up speckit
+    references in .specify/extensions.yml and related files.
+  - When the CE wrapper schema (identity + mutation-class + attestation +
+    ratifier metadata) is itself spec'd, update spec-template.md and
+    tasks-template.md to require the exact machine-checkable wrapper fields.
 -->
 
 # Creator Engine Constitution
@@ -191,17 +196,26 @@ the substrate.
 against, but Creator Engine's value depends on portability across tenants.
 Conflating substrate and tenant erodes that.
 
-### X. Spec Kit Compatibility
+### X. CE-Native Spec Substrate
 
-Spec Kit is the first supported feature-spec substrate. Creator Engine wraps
-Spec Kit artifacts (spec.md, plan.md, tasks.md, constitution.md) with
-identity, governance, attestation, and ratification metadata. Creator Engine
-MUST NOT break Spec-Kit-only workflows; a spec authored against vanilla Spec
-Kit MUST remain readable and usable.
+CE's own cev3 Scope lifecycle (Frame → Shape → Build → Review → Ship) is the
+first-class, native feature-spec substrate. The artifact format — plain
+Markdown files named spec.md, plan.md, and tasks.md — remains the canonical
+wire format; Creator Engine governs these artifacts natively without the
+vendored spec-kit tool or its skill layer. The vendored spec-kit tooling has
+been retired; CE workflows and CI gates MUST NOT introduce new dependencies on
+the spec-kit CLI, spec-kit Claude-Code skills, or spec-kit scaffolding
+commands.
 
-**Rationale**: Replacing Spec Kit would force tenants to choose. Wrapping it
-lets tenants adopt Creator Engine incrementally, on top of an existing spec
-substrate they already understand.
+Existing spec.md, plan.md, and tasks.md files authored under the spec-kit
+convention remain valid input to CE workflows without rewriting, because CE
+governs the artifact format — not the tool that originally authored it.
+
+**Rationale**: The cev3 Scope lifecycle (Frame→Shape→Build→Review→Ship) gives
+CE a native, governed, full-lifecycle spec substrate. The vendored spec-kit
+dependency was an external tool layer that added drift risk without adding
+governance value. Retiring it eliminates a maintenance obligation and aligns
+the constitution with the system CE has actually become.
 
 ### XI. YAGNI for v0.1
 
@@ -342,4 +356,4 @@ the gating reference. Violations identified during review block ratification
 until either resolved in the artifact under review or addressed via an
 explicit, Source-approved amendment.
 
-**Version**: 1.1.0 | **Ratified**: 2026-05-08 | **Last Amended**: 2026-05-11
+**Version**: 2.0.0 | **Ratified**: 2026-05-08 | **Last Amended**: 2026-06-30
