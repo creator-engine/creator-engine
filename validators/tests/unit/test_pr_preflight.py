@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import io
+import subprocess
 import sys
 from pathlib import Path
 
 from creator_engine_validator import pr_preflight
+from creator_engine_validator.checks import test_coupling as coupling_chk
 
 
 class FakeRunner:
@@ -18,6 +20,9 @@ class FakeRunner:
         install_spec_signature_stdout: str = "ok\n",
         path_manifest_returncode: int = 0,
         path_manifest_stdout: str = "ok\n",
+        test_coupling_requires_marker: bool = False,
+        gh_pr_body: str | None = None,
+        gh_pr_body_returncode: int = 1,
         head_test_result: pr_preflight.CommandResult | None = None,
         baseline_test_result: pr_preflight.CommandResult | None = None,
         changed_paths: str = "",
@@ -29,12 +34,15 @@ class FakeRunner:
         self.install_spec_signature_stdout = install_spec_signature_stdout
         self.path_manifest_returncode = path_manifest_returncode
         self.path_manifest_stdout = path_manifest_stdout
+        self.test_coupling_requires_marker = test_coupling_requires_marker
+        self.gh_pr_body = gh_pr_body
+        self.gh_pr_body_returncode = gh_pr_body_returncode
         self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.changed_paths = changed_paths
         self.calls: list[tuple[list[str], Path, dict[str, str] | None]] = []
 
-    def __call__(self, argv, cwd, env=None):
+    def __call__(self, argv, cwd, env=None, *, timeout=None):
         argv = list(argv)
         self.calls.append((argv, cwd, dict(env) if env is not None else None))
         if argv == ["git", "rev-parse", "--show-toplevel"]:
@@ -49,6 +57,10 @@ class FakeRunner:
             return pr_preflight.CommandResult(0, "abc1234\n", "")
         if argv == ["git", "diff", "--name-only", "abc1234..HEAD"]:
             return pr_preflight.CommandResult(0, self.changed_paths, "")
+        if argv[:3] == ["gh", "pr", "view"]:
+            if self.gh_pr_body_returncode != 0:
+                return pr_preflight.CommandResult(self.gh_pr_body_returncode, "", "no pull requests found\n")
+            return pr_preflight.CommandResult(0, self.gh_pr_body or "", "")
         if argv[:4] == ["git", "worktree", "add", "--detach"]:
             return pr_preflight.CommandResult(0, "", "")
         if argv[:4] == ["git", "worktree", "remove", "--force"]:
@@ -61,6 +73,20 @@ class FakeRunner:
             return pr_preflight.CommandResult(self.malformed_returncode, "malformed rejected\n", "")
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "scan-install-spec-signature" in argv:
             return pr_preflight.CommandResult(self.install_spec_signature_returncode, self.install_spec_signature_stdout, "")
+        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "verify-test-coupling" in argv:
+            if not self.test_coupling_requires_marker:
+                return pr_preflight.CommandResult(0, "ok\n", "")
+            pr_body = ""
+            if "--pr-body-file" in argv:
+                pr_body_file = Path(argv[argv.index("--pr-body-file") + 1])
+                pr_body = pr_body_file.read_text(encoding="utf-8")
+            if coupling_chk.has_opt_out_marker(pr_body):
+                return pr_preflight.CommandResult(0, "ok\n", "")
+            return pr_preflight.CommandResult(
+                1,
+                f"FAIL {coupling_chk.CHECK_NAME} {coupling_chk.CODE_MISSING_TEST}\n",
+                "",
+            )
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "verify-path-manifest" in argv:
             return pr_preflight.CommandResult(self.path_manifest_returncode, self.path_manifest_stdout, "")
         return pr_preflight.CommandResult(0, "ok\n", "")
@@ -79,6 +105,13 @@ def _config(tmp_path: Path, **overrides) -> pr_preflight.PreflightConfig:
     }
     values.update(overrides)
     return pr_preflight.PreflightConfig(**values)
+
+
+def _stub_expensive_preflight_checks(monkeypatch) -> None:
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
 
 
 def test_preflight_refuses_dirty_tree_before_gates(tmp_path: Path):
@@ -342,3 +375,99 @@ def test_pytest_env_scrubs_host_tokens_and_sets_tmpdir(tmp_path: Path, monkeypat
     assert env["TMPDIR"] == "/var/tmp"
     for key in pr_preflight.TOKEN_ENV_VARS:
         assert key not in env
+
+
+def test_preflight_passes_resolved_pr_body_to_test_coupling_gate(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        test_coupling_requires_marker=True,
+        gh_pr_body=f"Documented exemption: {coupling_chk.OPT_OUT_MARKER}\n",
+        gh_pr_body_returncode=0,
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
+    assert "--pr-body-file" in coupling_call
+    assert "PASS: PR preflight" in out.getvalue()
+
+
+def test_preflight_pr_body_file_marker_exempts_test_coupling_gate(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    pr_body_file = tmp_path / "body.md"
+    pr_body_file.write_text(f"Documented exemption: {coupling_chk.OPT_OUT_MARKER}\n", encoding="utf-8")
+    runner = FakeRunner(
+        tmp_path,
+        test_coupling_requires_marker=True,
+        gh_pr_body_returncode=1,
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, pr_body_file=pr_body_file),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
+    assert "--pr-body-file" in coupling_call
+    assert "PASS: PR preflight" in out.getvalue()
+
+
+def test_preflight_without_exemption_marker_still_flags_test_coupling(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        test_coupling_requires_marker=True,
+        gh_pr_body="No exemption here.\n",
+        gh_pr_body_returncode=0,
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    assert coupling_chk.CODE_MISSING_TEST in out.getvalue()
+
+
+def test_preflight_keeps_strict_behavior_when_pr_body_unresolvable(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        test_coupling_requires_marker=True,
+        gh_pr_body_returncode=1,
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
+    assert "--pr-body-file" not in coupling_call
+    assert "could not read PR body via gh" in out.getvalue()
+    assert coupling_chk.CODE_MISSING_TEST in out.getvalue()
+
+
+def test_preflight_keeps_strict_behavior_when_pr_body_lookup_times_out(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(tmp_path, test_coupling_requires_marker=True)
+
+    def timeout_runner(argv, cwd, env=None, *, timeout=None):
+        if list(argv)[:3] == ["gh", "pr", "view"]:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return runner(argv, cwd, env, timeout=timeout)
+
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=timeout_runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
+    assert "--pr-body-file" not in coupling_call
+    assert "timed out reading PR body via gh" in out.getvalue()
+    assert coupling_chk.CODE_MISSING_TEST in out.getvalue()

@@ -1045,6 +1045,8 @@ Options:
 | `--base` | no |  | base branch/ref to fetch and merge-base against (default: origin/main) |
 | `--declared-work-class` | no | `epic, feature, story, tiny` | declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body |
 | `--head-ref` | no |  | PR head branch name for carrier slug (default: current branch) |
+| `--pr-body-file` | no |  | optional PR body file for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate |
+| `--pr-body` | no |  | optional literal PR body for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate |
 | `--allow-dirty` | no |  | continue despite working-tree changes; committed base..HEAD state is still what gets validated |
 | `--test-command` | no |  | test command to compare at base and HEAD (default: <python> -m pytest -p no:cacheprovider validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup) |
 
