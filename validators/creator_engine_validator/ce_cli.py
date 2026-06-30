@@ -99,6 +99,7 @@ from . import (
     brain_recall,
     brain_recall_surface,
     bootstrap_runtime,
+    ce_ops_triage_queue,
     ce_event_runtime,
     ce_onboard,
     ce_provenance,
@@ -193,7 +194,7 @@ def _herdr_session_module():
 # are never silent). `herdr` (authenticated remote reach-plane) is internal pending
 # internal testing and GRADUATES to a public product command in a later release
 # (ce-ops#237).
-INTERNAL_COMMAND_GROUPS = frozenset({"herdr", "ask", "support"})
+INTERNAL_COMMAND_GROUPS = frozenset({"herdr", "ask", "support", "triage"})
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1474,6 +1475,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     _add_support_ask_parser("ask")
     _add_support_ask_parser("support")
+
+    # INTERNAL command (see INTERNAL_COMMAND_GROUPS): advisory ce-ops inbound
+    # triage queue maintenance. It never ratifies, approves, dispatches, merges,
+    # or blocks CI; --apply only patches an existing sentinel comment.
+    triage = groups.add_parser("triage", help=argparse.SUPPRESS)
+    triage_sub = triage.add_subparsers(dest="triage_cmd")
+    triage_queue = triage_sub.add_parser("queue", help=argparse.SUPPRESS)
+    triage_queue_sub = triage_queue.add_subparsers(dest="triage_queue_cmd")
+
+    def _add_triage_queue_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--repo", default=ce_ops_triage_queue.DEFAULT_REPO)
+        p.add_argument("--queue-issue", type=int, default=ce_ops_triage_queue.DEFAULT_QUEUE_ISSUE)
+        p.add_argument("--audit-root", default=None)
+        p.add_argument("--apply", action="store_true")
+        p.add_argument("--json", action="store_true", dest="json_output")
+
+    tq_scan = triage_queue_sub.add_parser("scan", help=argparse.SUPPRESS)
+    _add_triage_queue_args(tq_scan)
+    tq_inspect = triage_queue_sub.add_parser("inspect", help=argparse.SUPPRESS)
+    _add_triage_queue_args(tq_inspect)
 
     publish_branch_cmd = groups.add_parser(
         "publish-branch",
@@ -3412,6 +3433,68 @@ def _reviewer_triage_plan(args) -> int:
     return 0
 
 
+def _emit_triage_queue(args, payload: dict) -> int:
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        kind = payload.get("kind", "ce-triage-queue")
+        count = payload.get("queue_entry_count", 0)
+        applied = "applied" if payload.get("applied") else "planned"
+        print(f"{kind}: {applied} {count} entr{'y' if count == 1 else 'ies'}")
+        for warning in payload.get("warnings", ()):
+            print(f"  warning: {warning}", file=sys.stderr)
+    return 0
+
+
+def _triage_queue_scan(args) -> int:
+    try:
+        payload = ce_ops_triage_queue.scan_and_triage(
+            repo=args.repo,
+            queue_issue=args.queue_issue,
+            audit_root=args.audit_root,
+            apply=getattr(args, "apply", False),
+            gh_runner=_make_gh_runner(),
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory workflow must fail open.
+        payload = {
+            "kind": "ce-triage-queue-scan",
+            "schema_version": ce_ops_triage_queue.SCHEMA_VERSION,
+            "advisory": ce_ops_triage_queue.NON_AUTHORITY_STATEMENT,
+            "repo": args.repo,
+            "queue_issue": args.queue_issue,
+            "applied": False,
+            "queue_entry_count": 0,
+            "entries": [],
+            "warnings": [f"scan_failed:{exc}"],
+        }
+    return _emit_triage_queue(args, payload)
+
+
+def _triage_queue_inspect(args) -> int:
+    try:
+        payload = ce_ops_triage_queue.inspect_queue(
+            repo=args.repo,
+            queue_issue=args.queue_issue,
+            audit_root=args.audit_root,
+            gh_runner=_make_gh_runner(),
+        )
+        if getattr(args, "apply", False):
+            payload.setdefault("warnings", []).append("inspect_ignores_apply")
+    except Exception as exc:  # noqa: BLE001 - advisory workflow must fail open.
+        payload = {
+            "kind": "ce-triage-queue-inspect",
+            "schema_version": ce_ops_triage_queue.SCHEMA_VERSION,
+            "advisory": ce_ops_triage_queue.NON_AUTHORITY_STATEMENT,
+            "repo": args.repo,
+            "queue_issue": args.queue_issue,
+            "comment_id": None,
+            "queue_entry_count": 0,
+            "entries": [],
+            "warnings": [f"inspect_failed:{exc}"],
+        }
+    return _emit_triage_queue(args, payload)
+
+
 def _pickup_triage(args) -> int:
     try:
         if args.issues_json == "-":
@@ -4491,6 +4574,11 @@ _PICKUP_DISPATCH = {
 
 _DISPATCH_DISPATCH = {"plan": _dispatch_plan}
 
+_TRIAGE_QUEUE_DISPATCH = {
+    "scan": _triage_queue_scan,
+    "inspect": _triage_queue_inspect,
+}
+
 _HERDR_DISPATCH = {
     "remote-attach": _herdr_remote_attach,
 }
@@ -4619,6 +4707,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _DISPATCH_DISPATCH.get(dispatch_cmd)
         if handler is None:
             parser.print_usage(sys.stderr)
+            return 2
+        return handler(args)
+    if args.group == "triage":
+        if getattr(args, "triage_cmd", None) != "queue":
+            parser.parse_args(["triage", "--help"])  # prints triage help, exits
+            return 2
+        triage_queue_cmd = getattr(args, "triage_queue_cmd", None)
+        handler = _TRIAGE_QUEUE_DISPATCH.get(triage_queue_cmd)
+        if handler is None:
+            parser.parse_args(["triage", "queue", "--help"])  # prints queue help, exits
             return 2
         return handler(args)
     if args.group == "claim":
