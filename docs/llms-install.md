@@ -13,8 +13,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQ3h5anBXVGRseFhYenVac2FFd0h2MzM4Tm9TZFdxdy9oaTI1RFl0NjJZQUdoZUxzaUE0VFdrM2oKckJiSXBMWU1TMWpLOUQrWVNmZHN5OE9ITllEVzBPCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: 248a699d5f9791417a55c5a1b61efebae235e7db120d5eb48857a97c35ef5460
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQlFOL3YvbUF4VjVSRmtEN0xEMTJMTnlNdGNRVTN4Sk51OFJBa2o2NTFVelRoYnh4ejdxVzdaVVgKcU91QmZmT1Uyck92Z2sxN3R6akhXd1hxRkk4TVVDCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: 865ba4f46acaeb999064ecf9d719e22c216ffa5f75f96b93c0ee50c76122820e
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -110,6 +110,11 @@ chicken-and-egg of needing `ce` to trust the spec that installs `ce`). Do this
 **before** executing any step; on anything but a `Good` result, **STOP**. (CE's own
 governance applied to its own install: the grader lives outside the agent.)
 
+**Prerequisites for external users:** install OpenSSH client before this
+ceremony if `ssh-keygen` is not already present. On Debian/Ubuntu:
+`sudo apt-get install -y openssh-client`. The `ssh-keygen` command it provides
+is required to verify this signed spec before any CE tooling is trusted.
+
 Assuming you fetched this file as `llms-install.md`:
 
 ```bash
@@ -154,7 +159,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
 
 - **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`.
   Transport integrity for the script body is **TLS** plus the published
-  `install.sh` hash in `https://creator-engine.dev/downloads/0.2.0/SHA256SUMS`.
+  `install.sh` hash in `https://creator-engine.dev/downloads/0.3.1/SHA256SUMS`.
   The script's first authority step is still this signed spec: it fetches
   `llms-install.md`, fetches the trust root, binds that root to an out-of-band
   anchor for the signature key, reconstructs the canonical bytes, verifies the
@@ -162,7 +167,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   refusal. Only after that does it fetch the signed-manifest wheelhouse,
   `SHA256SUMS`, and answers schema, hash-verify every artifact, acquire CPython
   3.14 through the pinned uv artifact if needed, create/reuse a user-local venv,
-  install `creator-engine-validator==0.2.0` offline, and run authenticated
+  install `creator-engine-validator==0.3.1` offline, and run authenticated
   inventory:
 
   ```text
