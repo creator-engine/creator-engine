@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="assets/ce-favicon-v2.svg"/>
+<title>What is Creator Engine?</title>
+<style>
+  :root{
+    --ink:#0C0B0A;
+    --ink-2:#11100D;
+    --panel:#16140F;
+    --panel-2:#1D1A14;
+    --paper:#FAF8F1;
+    --muted:#A7A296;
+    --line:rgba(255,255,255,.12);
+    --violet:#A06BFF;
+    --violet-soft:rgba(160,107,255,.17);
+    --moss:#7FB069;
+    --moss-soft:rgba(127,176,105,.16);
+    --amber:#E08B4C;
+    --amber-soft:rgba(224,139,76,.16);
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--ink);color:var(--paper);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{width:min(1120px,calc(100% - 40px));margin:0 auto}
+  .nav{display:flex;justify-content:space-between;align-items:center;gap:22px;padding:22px 0}
+  .brand{display:inline-flex;align-items:center;gap:11px;text-decoration:none;font-family:var(--mono);font-size:13px;letter-spacing:.16em;text-transform:uppercase}
+  .brand img{width:30px;height:30px}
+  .nav-links{display:flex;align-items:center;gap:18px;flex-wrap:wrap;justify-content:flex-end}
+  .nav-links a{font-size:13px;color:var(--muted);text-decoration:none}
+  .nav-links a:hover{color:var(--paper)}
+  .hero{position:relative;overflow:hidden;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:
+    radial-gradient(780px 380px at 18% 0%,var(--violet-soft),transparent 72%),
+    radial-gradient(640px 360px at 92% 18%,var(--moss-soft),transparent 70%),
+    linear-gradient(180deg,var(--ink-2),var(--ink))}
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr);gap:40px;align-items:center;min-height:560px;padding:68px 0}
+  .eyebrow{display:inline-flex;font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--moss);margin-bottom:18px}
+  h1,h2,h3,p{margin-top:0}
+  h1{font-size:clamp(40px,7vw,76px);line-height:1.02;letter-spacing:0;margin-bottom:22px}
+  .hero-copy{max-width:690px;color:#D8D2C5;font-size:clamp(17px,2vw,21px)}
+  .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 18px;border-radius:999px;border:1px solid transparent;text-decoration:none;font-weight:700;font-size:14px}
+  .btn.primary{background:var(--moss);color:#081406}
+  .btn.secondary{border-color:var(--line);background:rgba(255,255,255,.04);color:var(--paper)}
+  .btn:hover{transform:translateY(-1px)}
+  .signal{border:1px solid var(--line);border-radius:8px;background:rgba(22,20,15,.74);box-shadow:0 22px 70px rgba(0,0,0,.34);overflow:hidden}
+  .signal-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 16px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .signal-body{padding:18px}
+  .scope-mini{display:grid;gap:12px}
+  .scope-row{display:grid;grid-template-columns:112px 1fr;gap:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.025)}
+  .scope-row b{font-family:var(--mono);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--violet)}
+  .scope-row span{color:#D6D0C4;font-size:14px}
+  .verdict{margin-top:14px;padding:14px;border:1px solid rgba(127,176,105,.35);border-radius:8px;background:var(--moss-soft);color:#DDEFD5;font-size:14px}
+  .section{padding:74px 0}
+  .section.alt{background:#100E0B;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .section-head{max-width:760px;margin-bottom:30px}
+  .section-head h2{font-size:clamp(28px,4vw,44px);line-height:1.1;letter-spacing:0;margin-bottom:12px}
+  .section-head p{color:var(--muted);font-size:17px}
+  .principles{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .principle{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:22px}
+  .principle .num{display:inline-flex;margin-bottom:14px;font-family:var(--mono);font-size:11px;color:var(--amber)}
+  .principle h3{font-size:18px;margin-bottom:8px}
+  .principle p{color:var(--muted);font-size:14px;margin-bottom:0}
+  .diagram-panel{border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,var(--panel),#0E0D0A);padding:18px;overflow:hidden}
+  .diagram{display:block;width:100%;height:auto;min-height:360px}
+  .diagram text{font-family:var(--sans)}
+  .diagram .label{font-size:18px;font-weight:700;fill:var(--paper)}
+  .diagram .sub{font-size:12px;fill:var(--muted)}
+  .diagram .mono{font-family:var(--mono);font-size:11px;letter-spacing:.08em;fill:var(--muted)}
+  .diagram .box{fill:#1B1812;stroke:rgba(255,255,255,.14);stroke-width:2}
+  .diagram .box.controller{stroke:rgba(160,107,255,.7)}
+  .diagram .box.seat{stroke:rgba(127,176,105,.62)}
+  .diagram .box.forge{stroke:rgba(224,139,76,.65)}
+  .diagram .box.contain{stroke:rgba(255,255,255,.28)}
+  .diagram .flow{stroke:var(--muted);stroke-width:2;fill:none;marker-end:url(#arrow)}
+  .diagram .guard{fill:rgba(127,176,105,.09);stroke:rgba(127,176,105,.42);stroke-width:2;stroke-dasharray:8 8}
+  .caption{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:18px}
+  .caption div{border:1px solid var(--line);border-radius:8px;padding:14px;background:rgba(255,255,255,.025)}
+  .caption b{display:block;font-size:13px;margin-bottom:4px}
+  .caption span{display:block;color:var(--muted);font-size:13px}
+  .flow-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  .flow-step{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:18px;min-height:150px}
+  .flow-step .step{font-family:var(--mono);font-size:11px;color:var(--violet)}
+  .flow-step h3{font-size:17px;margin:9px 0 6px}
+  .flow-step p{font-size:13.5px;color:var(--muted);margin-bottom:0}
+  .callout{display:flex;justify-content:space-between;align-items:center;gap:24px;border:1px solid rgba(160,107,255,.36);border-radius:8px;background:linear-gradient(135deg,rgba(160,107,255,.13),rgba(127,176,105,.10));padding:26px}
+  .callout h2{font-size:clamp(24px,3vw,34px);margin-bottom:7px}
+  .callout p{color:var(--muted);margin-bottom:0;max-width:690px}
+  footer{border-top:1px solid var(--line);padding:30px 0;color:var(--muted);font-size:13px;text-align:center}
+  @media (max-width:900px){
+    .hero-grid{grid-template-columns:1fr;min-height:auto;padding:54px 0}
+    .principles{grid-template-columns:1fr}
+    .caption{grid-template-columns:1fr 1fr}
+    .flow-grid{grid-template-columns:1fr 1fr}
+    .callout{align-items:flex-start;flex-direction:column}
+  }
+  @media (max-width:560px){
+    .wrap{width:min(100% - 28px,1120px)}
+    .nav{align-items:flex-start;flex-direction:column}
+    .nav-links{justify-content:flex-start}
+    .scope-row{grid-template-columns:1fr}
+    .caption,.flow-grid{grid-template-columns:1fr}
+    .diagram{min-height:420px}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav wrap" aria-label="Primary">
+    <a class="brand" href="index.html">
+      <img src="assets/ce-logo-v2-weldarm-transparent.svg" alt="Creator Engine logo" width="30" height="30"/>
+      Creator&nbsp;Engine
+    </a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="index.html#docs">Docs</a>
+      <a href="https://github.com/creator-engine/creator-engine" rel="noopener">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">Product overview</span>
+        <h1>What is Creator Engine?</h1>
+        <p class="hero-copy">Creator Engine is a governed, agent-native software delivery system. It lets a person frame intent, assign bounded work to coding agents, and judge the result with evidence from outside the agent.</p>
+        <p class="hero-copy">The product promise is simple: agents can move fast, but authority, budget, scope, and acceptance stay explicit.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#architecture">View architecture</a>
+          <a class="btn secondary" href="index.html#install">Install</a>
+        </div>
+      </div>
+      <aside class="signal" aria-label="Example governed work summary">
+        <div class="signal-head"><span>Governed work</span><span>outside-grade ready</span></div>
+        <div class="signal-body">
+          <div class="scope-mini">
+            <div class="scope-row"><b>Intent</b><span>Turn a user request into a bounded software change.</span></div>
+            <div class="scope-row"><b>Envelope</b><span>Define done, budget, permitted change type, and review path.</span></div>
+            <div class="scope-row"><b>Evidence</b><span>Record what ran, what changed, and which checks passed.</span></div>
+          </div>
+          <div class="verdict">Acceptance is based on replayable evidence, not on the agent's confidence.</div>
+        </div>
+      </aside>
+    </div>
+  </header>
+
+  <main>
+    <section class="section">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>CE wraps the software lifecycle around agents.</h2>
+          <p>A coding agent is powerful execution. Creator Engine supplies the operating model around it: scope, delegated seats, containment, validation, and a human-readable trail.</p>
+        </div>
+        <div class="principles">
+          <article class="principle">
+            <span class="num">01</span>
+            <h3>Governed by scope</h3>
+            <p>Every run starts with a bounded agreement about the goal, done criteria, budget, and permitted change type.</p>
+          </article>
+          <article class="principle">
+            <span class="num">02</span>
+            <h3>Built by seats</h3>
+            <p>Specialized agent seats can explore, implement, verify, or review while staying inside their assigned authority.</p>
+          </article>
+          <article class="principle">
+            <span class="num">03</span>
+            <h3>Graded from outside</h3>
+            <p>The acceptance path checks evidence, test output, diffs, and constraints from outside the agent that produced the work.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="architecture">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">Architecture at a glance</span>
+          <h2>Controller, seats, forge, and containment form one governed loop.</h2>
+          <p>The controller plans and dispatches. Seats execute bounded roles. The forge keeps work visible and reviewable. Containment limits what each run can touch.</p>
+        </div>
+        <div class="diagram-panel">
+          <svg class="diagram" viewBox="0 0 1120 520" role="img" aria-labelledby="archTitle archDesc">
+            <title id="archTitle">Creator Engine architecture at a glance</title>
+            <desc id="archDesc">A controller dispatches work to bounded seats, seats publish evidence to the forge, and containment surrounds execution and authority.</desc>
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#A7A296"/>
+              </marker>
+            </defs>
+            <rect class="guard" x="24" y="38" width="1072" height="444" rx="28"/>
+            <text class="mono" x="58" y="76">CONTAINMENT AND AUTHORITY BOUNDARY</text>
+
+            <rect class="box controller" x="70" y="180" width="210" height="126" rx="16"/>
+            <text class="label" x="175" y="226" text-anchor="middle">Controller</text>
+            <text class="sub" x="175" y="252" text-anchor="middle">plans, dispatches,</text>
+            <text class="sub" x="175" y="272" text-anchor="middle">monitors, gates</text>
+
+            <rect class="box seat" x="394" y="102" width="160" height="96" rx="14"/>
+            <text class="label" x="474" y="142" text-anchor="middle">Explore</text>
+            <text class="sub" x="474" y="166" text-anchor="middle">read and map</text>
+
+            <rect class="box seat" x="394" y="214" width="160" height="96" rx="14"/>
+            <text class="label" x="474" y="254" text-anchor="middle">Build</text>
+            <text class="sub" x="474" y="278" text-anchor="middle">scoped changes</text>
+
+            <rect class="box seat" x="394" y="326" width="160" height="96" rx="14"/>
+            <text class="label" x="474" y="366" text-anchor="middle">Verify</text>
+            <text class="sub" x="474" y="390" text-anchor="middle">checks and evidence</text>
+
+            <rect class="box forge" x="694" y="178" width="190" height="132" rx="16"/>
+            <text class="label" x="789" y="225" text-anchor="middle">Forge</text>
+            <text class="sub" x="789" y="251" text-anchor="middle">claims, diffs, PRs,</text>
+            <text class="sub" x="789" y="271" text-anchor="middle">review trail</text>
+
+            <rect class="box contain" x="944" y="142" width="112" height="202" rx="16"/>
+            <text class="label" x="1000" y="220" text-anchor="middle">Gate</text>
+            <text class="sub" x="1000" y="247" text-anchor="middle">human</text>
+            <text class="sub" x="1000" y="267" text-anchor="middle">ratifies</text>
+
+            <path class="flow" d="M280 244 C326 152 348 150 394 150"/>
+            <path class="flow" d="M280 244 C326 244 348 262 394 262"/>
+            <path class="flow" d="M280 244 C326 344 348 374 394 374"/>
+            <path class="flow" d="M554 150 C626 150 622 224 694 224"/>
+            <path class="flow" d="M554 262 C616 262 632 244 694 244"/>
+            <path class="flow" d="M554 374 C630 374 622 266 694 266"/>
+            <path class="flow" d="M884 244 L944 244"/>
+            <path class="flow" d="M944 300 C770 462 258 442 175 306"/>
+          </svg>
+          <div class="caption">
+            <div><b>Controller</b><span>Coordinates work and keeps approval at the right level.</span></div>
+            <div><b>Seats</b><span>Execute role-specific work with scoped authority.</span></div>
+            <div><b>Forge</b><span>Turns activity into visible claims, diffs, reviews, and records.</span></div>
+            <div><b>Containment</b><span>Bounds files, credentials, network, and privileged actions.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>The operating loop stays small and inspectable.</h2>
+          <p>CE is not a black-box app generator. It is a repeatable delivery loop for turning intent into a reviewed software change.</p>
+        </div>
+        <div class="flow-grid">
+          <article class="flow-step"><span class="step">01</span><h3>Frame</h3><p>Capture intent and decide what good looks like.</p></article>
+          <article class="flow-step"><span class="step">02</span><h3>Shape</h3><p>Bind the goal, done criteria, budget, and change type.</p></article>
+          <article class="flow-step"><span class="step">03</span><h3>Build</h3><p>Dispatch bounded seats to produce changes and evidence.</p></article>
+          <article class="flow-step"><span class="step">04</span><h3>Review</h3><p>Check the result from outside the producing agent.</p></article>
+          <article class="flow-step"><span class="step">05</span><h3>Ship</h3><p>Land only the work that passes the ratified gate.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="wrap">
+        <div class="callout">
+          <div>
+            <h2>Start with the public docs.</h2>
+            <p>Install Creator Engine, read the user guide, or inspect the security model from the main docs section.</p>
+          </div>
+          <a class="btn primary" href="index.html#docs">Back to docs</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="wrap">Creator Engine - governed delivery for coding agents, with the grader outside the agent.</div></footer>
+</body>
+</html>
