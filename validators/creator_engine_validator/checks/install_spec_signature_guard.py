@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import re
 import shutil
 import subprocess
@@ -19,6 +18,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+from ..v3_installer import PINNED_KEYS, canonical_spec_bytes, content_digest
 from ..reporting import CheckResult, ValidationError, make_error
 from . import register
 
@@ -33,18 +33,7 @@ CONTRACT = "docs/llms-install.md"
 INSTALL_SPEC = "llms-install.md"
 SSH_ED25519_ALGO = "ssh-ed25519"
 SSH_SIG_NAMESPACE = "ce-spec-v1"
-SIGNATURE_PLACEHOLDER = "<published-with-this-spec>"
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
-PINNED_KEYS: dict[str, str] = {
-    "ce-root-v1": (
-        "ce-root-v1 ssh-ed25519 "
-        "AAAAC3NzaC1lZDI1NTE5AAAAIG/El7UgQWNbfCv0so+P8eERg8oGkQqr6HjumrcnMLpJ"
-    ),
-    "ce-dev1-root-v1": (
-        "ce-dev1-root-v1 ssh-ed25519 "
-        "AAAAC3NzaC1lZDI1NTE5AAAAIMjl3sHqj5cutQvwHrFL6qfyQyOgz+2fssoJH29nSvTf"
-    ),
-}
 
 Verifier = Callable[[str, bytes, Any, Any], bool]
 
@@ -78,23 +67,6 @@ def _err(code: str, path: Path, field: str, message: str) -> ValidationError:
 def _signature_value_is_placeholder(value: str) -> bool:
     stripped = value.strip()
     return len(stripped) >= 2 and stripped.startswith("<") and stripped.endswith(">")
-
-
-def content_digest(spec_bytes: bytes | str) -> str:
-    raw = spec_bytes.encode("utf-8") if isinstance(spec_bytes, str) else spec_bytes
-    return hashlib.sha256(raw).hexdigest()
-
-
-def canonical_spec_bytes(spec_bytes: bytes | str) -> bytes:
-    raw = spec_bytes.encode("utf-8") if isinstance(spec_bytes, str) else spec_bytes
-    text = raw.decode("utf-8")
-    for field_name in ("value", "content_sha256"):
-        text = re.sub(
-            rf"(?m)^(  {field_name}: ).*$",
-            rf"\g<1>{SIGNATURE_PLACEHOLDER}",
-            text,
-        )
-    return text.encode("utf-8")
 
 
 def parse_embedded_signature_block(spec_bytes: bytes | str) -> dict[str, str]:
