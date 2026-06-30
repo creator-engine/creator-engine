@@ -286,14 +286,19 @@ class BrainRecallSurface:
                 context, top_k=leg_k, allow_confidential_egress=allow_confidential_egress
             )
             keyword = self._keyword_hits(context, top_k=leg_k)
-            fused = _reciprocal_rank_fusion(semantic, keyword)
+            primary = _reciprocal_rank_fusion(semantic, keyword)
+            graph = self._graph_hits(
+                tuple(RecallHit(record=record, score=score) for record, score in primary),
+                top_k=leg_k,
+            )
+            fused = _reciprocal_rank_fusion(semantic, keyword, graph)
             items = self._filtered_recall_items(
                 fused, top_k=top_k, scope=scope, as_of=as_of
             )
             # Enough matches after filtering, or both legs are exhausted (each
             # returned fewer than we asked for => the store has no deeper
             # candidates to page into). Either way, stop.
-            legs_exhausted = len(semantic) < leg_k and len(keyword) < leg_k
+            legs_exhausted = len(semantic) < leg_k and len(keyword) < leg_k and len(graph) < leg_k
             if len(items) >= top_k or legs_exhausted:
                 return items
             leg_k *= 2
@@ -348,6 +353,12 @@ class BrainRecallSurface:
         if not callable(keyword_fn):
             return ()
         return tuple(keyword_fn(context, top_k=top_k))
+
+    def _graph_hits(self, hits: Sequence[RecallHit], *, top_k: int) -> tuple[RecallHit, ...]:
+        graph_fn = getattr(self.store, "graph_expand", None)
+        if not callable(graph_fn):
+            return ()
+        return tuple(graph_fn(hits, top_k=top_k))
 
     def _guard_query_egress(self, allow_confidential_egress: bool) -> None:
         if not bool(getattr(self.embedder, "requires_egress", False)):
@@ -499,19 +510,19 @@ def _store_records(store: Any) -> tuple[RecallRecord, ...]:
 
 
 def _reciprocal_rank_fusion(
-    semantic: Sequence[RecallHit], keyword: Sequence[RecallHit]
+    *legs: Sequence[RecallHit],
 ) -> tuple[tuple[RecallRecord, float], ...]:
-    """Fuse two ranked legs by reciprocal rank, deterministically tie-broken.
+    """Fuse ranked recall legs by reciprocal rank, deterministically tie-broken.
 
     RRF score = sum over legs of 1 / (k + rank). It needs no score calibration
-    between cosine and bm25 (different scales), only their *ranks*, which is why
-    it is the standard hybrid-recall fusion. Ties break on the stable record key
+    between cosine, bm25, or graph scores (different scales), only their *ranks*,
+    which is why it is the standard hybrid-recall fusion. Ties break on the stable record key
     so output order never depends on dict/storage order.
     """
 
     scores: dict[brain_recall.RecallKey, float] = {}
     records: dict[brain_recall.RecallKey, RecallRecord] = {}
-    for leg in (semantic, keyword):
+    for leg in legs:
         for rank, hit in enumerate(leg):
             key = hit.record.key
             scores[key] = scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)

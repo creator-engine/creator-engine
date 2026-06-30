@@ -582,3 +582,42 @@ def test_keyword_leg_queries_fts5(tmp_path: Path):
     # Pure-keyword miss returns empty, not an error.
     assert store.keyword_search("zzzznomatch", top_k=5) == ()
     assert store.keyword_search("!!!", top_k=5) == ()
+
+
+def test_graph_leg_expands_hybrid_hits_along_wikilinks(tmp_path: Path):
+    """A resolved wikilink can add a pointer that keyword/semantic miss."""
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir(exist_ok=True)
+    _write(
+        corpus,
+        "bridge.md",
+        "# Recall bridge\n\n"
+        "Markdown source truth rebuildable recall projection. Related: [[Launch Hydration]].\n",
+    )
+    _write(
+        corpus,
+        "launch.md",
+        "# Launch Hydration\n\n"
+        "Controller launch context injects top-tier pointers with SSOT precedence.\n",
+    )
+    state_root = tmp_path / ".ce" / "state"
+    db_path = state_root / "brain" / "recall.sqlite"
+    ingest.ingest_markdown(
+        sources=[str(corpus)],
+        state_root=str(state_root),
+        db_path=str(db_path),
+        scope="public",
+        as_of=AS_OF,
+    )
+    surf = surface.open_surface(db_path=str(db_path), state_root=str(state_root))
+
+    result = surf.recall("markdown source truth rebuildable recall projection graph", top_k=5)
+    paths = [item.source_path for item in result.recall_items]
+
+    assert "bridge.md" in paths
+    assert "launch.md" in paths
+    launch = next(item for item in result.recall_items if item.source_path == "launch.md")
+    assert launch.chunk_ref == "heading:launch-hydration"
+    assert launch.to_dict()["verify_against"] == "launch.md"
+    assert "Controller launch context" not in str(launch.to_dict())

@@ -160,6 +160,79 @@ def test_rebuild_from_source_replaces_store_and_indexes_text(tmp_path: Path) -> 
     assert embedder.inputs == [("alpha content", "zeta content"), ("alpha content",)]
 
 
+def test_rebuild_from_source_derives_wikilink_graph_edges_byte_identically(tmp_path: Path) -> None:
+    first = _store(tmp_path / "first")
+    second = _store(tmp_path / "second")
+    chunks = [
+        _chunk(
+            source_path="docs/source.md",
+            chunk_ref="heading:source",
+            content="# Source\n\nFollow [[Target Page]] and [local](target.md#target-page).\n",
+        ),
+        _chunk(
+            source_path="docs/target.md",
+            chunk_ref="heading:target-page",
+            content="# Target Page\n\nPointer-only graph recall destination.\n",
+        ),
+    ]
+    try:
+        first.rebuild_from_source(chunks, DeterministicFakeEmbedder())
+        second.rebuild_from_source(reversed(chunks), DeterministicFakeEmbedder())
+        with sqlite3.connect(first.db_path) as conn:
+            first_edges = conn.execute(
+                """
+                SELECT from_source_path, from_chunk_ref, edge_type, target_ref,
+                       to_source_path, to_chunk_ref
+                  FROM recall_edges
+              ORDER BY from_source_path, from_chunk_ref, edge_type, target_ref,
+                       to_source_path, to_chunk_ref
+                """
+            ).fetchall()
+        with sqlite3.connect(second.db_path) as conn:
+            second_edges = conn.execute(
+                """
+                SELECT from_source_path, from_chunk_ref, edge_type, target_ref,
+                       to_source_path, to_chunk_ref
+                  FROM recall_edges
+              ORDER BY from_source_path, from_chunk_ref, edge_type, target_ref,
+                       to_source_path, to_chunk_ref
+                """
+            ).fetchall()
+        source_record = _record(
+            source_path="docs/source.md",
+            chunk_ref="heading:source",
+            content="# Source\n\nFollow [[Target Page]] and [local](target.md#target-page).\n",
+        )
+        expanded = first.graph_expand(
+            (brain_recall.RecallHit(record=source_record, score=1.0),),
+            top_k=5,
+        )
+    finally:
+        first.close()
+        second.close()
+
+    assert first_edges == second_edges
+    assert first_edges == [
+        (
+            "docs/source.md",
+            "heading:source",
+            "markdown-link",
+            "target.md#target-page",
+            "docs/target.md",
+            "heading:target-page",
+        ),
+        (
+            "docs/source.md",
+            "heading:source",
+            "wikilink",
+            "Target Page",
+            "docs/target.md",
+            "heading:target-page",
+        ),
+    ]
+    assert [hit.record.source_path for hit in expanded] == ["docs/target.md"]
+
+
 def test_privacy_refuses_confidential_scope_with_egress_embedder_without_consent(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:

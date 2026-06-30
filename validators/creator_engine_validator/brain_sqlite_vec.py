@@ -9,12 +9,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import posixpath
 import re
 import sqlite3
+from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from ._versions import V3_LOCAL_STATE_ROOT
 from .brain_recall import (
@@ -43,6 +46,9 @@ METADATA_VECTOR_BACKEND = "vector_backend"
 METADATA_VECTOR_DIM = "vector_dim"
 METADATA_VECTOR_MODEL_ID = "vector_model_id"
 METADATA_SQLITE_VEC_AVAILABLE = "sqlite_vec_available"
+GRAPH_EDGE_WIKILINK = "wikilink"
+GRAPH_EDGE_MARKDOWN_LINK = "markdown-link"
+_GRAPH_RRF_K = 60
 
 
 def default_recall_db_path(state_root: Path | str = V3_LOCAL_STATE_ROOT) -> Path:
@@ -56,6 +62,18 @@ class _PreparedEntry:
     record: RecallRecord
     vector: tuple[float, ...]
     text: str | None
+
+
+@dataclass(frozen=True, order=True)
+class GraphEdge:
+    """One resolved markdown graph edge, derived from source chunk text."""
+
+    from_source_path: str
+    from_chunk_ref: str
+    edge_type: str
+    target_ref: str
+    to_source_path: str
+    to_chunk_ref: str
 
 
 class SqliteVecStore(VectorStoreAdapter):
@@ -102,6 +120,9 @@ class SqliteVecStore(VectorStoreAdapter):
                 self._require_model_id(str(model_id))
             for entry in prepared:
                 self._upsert_one(entry)
+            self._refresh_graph_edges_for_sources(
+                {entry.record.source_path for entry in prepared}
+            )
             self._set_metadata("entry_count", str(self._count_entries()))
         return len(prepared)
 
@@ -188,6 +209,51 @@ class SqliteVecStore(VectorStoreAdapter):
             )[:top_k]
         )
 
+    def graph_expand(self, hits: Sequence[RecallHit], top_k: int = 5) -> tuple[RecallHit, ...]:
+        """Expand ranked recall hits through resolved markdown graph edges.
+
+        The graph is a derived projection over current recall entries. Expansion
+        returns only destination recall records; callers fuse it as an additional
+        leg, so graph edges can add context but never inline source content.
+        """
+
+        if top_k <= 0 or not hits:
+            return ()
+        scores: dict[RecallKey, float] = {}
+        records: dict[RecallKey, RecallRecord] = {}
+        for rank, hit in enumerate(hits):
+            source_key = hit.record.key
+            edge_rows = self._conn.execute(
+                """
+                SELECT e.source_path, e.chunk_ref, e.content_hash, e.as_of,
+                       e.scope_json, e.requires_egress
+                  FROM recall_edges AS g
+                  JOIN recall_entries AS e
+                    ON e.source_path = g.to_source_path
+                   AND e.chunk_ref = g.to_chunk_ref
+                 WHERE g.from_source_path = ?
+                   AND g.from_chunk_ref = ?
+              ORDER BY g.edge_type, g.target_ref, g.to_source_path, g.to_chunk_ref
+                """,
+                (source_key.source_path, source_key.chunk_ref),
+            ).fetchall()
+            for edge_index, row in enumerate(edge_rows):
+                record = self._record_from_row(row)
+                if record.key == source_key:
+                    continue
+                edge_score = 1.0 / (_GRAPH_RRF_K + rank + 1 + (edge_index * 0.001))
+                scores[record.key] = scores.get(record.key, 0.0) + edge_score
+                records.setdefault(record.key, record)
+        ordered = sorted(
+            scores.items(),
+            key=lambda item: (
+                -item[1],
+                item[0].source_path,
+                item[0].chunk_ref,
+            ),
+        )
+        return tuple(RecallHit(record=records[key], score=round(score, 12)) for key, score in ordered[:top_k])
+
     def rebuild_from_source(
         self,
         chunks: Iterable[RecallChunk],
@@ -220,12 +286,14 @@ class SqliteVecStore(VectorStoreAdapter):
             for chunk, vector in zip(source_chunks, vectors, strict=True)
         )
         with self._conn:
+            self._conn.execute("DELETE FROM recall_edges")
             self._conn.execute("DELETE FROM recall_fts")
             self._conn.execute("DELETE FROM recall_entries")
             self._set_metadata(METADATA_VECTOR_DIM, str(embedder.dim))
             self._set_metadata(METADATA_VECTOR_MODEL_ID, str(embedder.model_id))
             for entry in prepared:
                 self._upsert_one(entry)
+            self._rebuild_graph_edges_from_prepared(prepared)
             self._set_metadata("entry_count", str(len(prepared)))
         return RebuildResult(count=len(source_chunks), model_id=embedder.model_id, dim=embedder.dim)
 
@@ -240,12 +308,14 @@ class SqliteVecStore(VectorStoreAdapter):
                 )
                 if cursor.rowcount:
                     self._delete_fts(key)
+                    self._delete_graph_edges(key)
                     count += cursor.rowcount
             remaining = self._count_entries()
             self._set_metadata("entry_count", str(remaining))
             if remaining == 0:
                 self._delete_metadata(METADATA_VECTOR_DIM)
                 self._delete_metadata(METADATA_VECTOR_MODEL_ID)
+                self._conn.execute("DELETE FROM recall_edges")
         return count
 
     @property
@@ -307,6 +377,28 @@ class SqliteVecStore(VectorStoreAdapter):
                     """
                     CREATE VIRTUAL TABLE IF NOT EXISTS recall_fts
                     USING fts5(source_path UNINDEXED, chunk_ref UNINDEXED, text)
+                    """
+                )
+                self._conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS recall_edges (
+                        from_source_path TEXT NOT NULL,
+                        from_chunk_ref TEXT NOT NULL,
+                        edge_type TEXT NOT NULL,
+                        target_ref TEXT NOT NULL,
+                        to_source_path TEXT NOT NULL,
+                        to_chunk_ref TEXT NOT NULL,
+                        PRIMARY KEY (
+                            from_source_path, from_chunk_ref, edge_type,
+                            target_ref, to_source_path, to_chunk_ref
+                        ),
+                        FOREIGN KEY (from_source_path, from_chunk_ref)
+                            REFERENCES recall_entries(source_path, chunk_ref)
+                            ON DELETE CASCADE,
+                        FOREIGN KEY (to_source_path, to_chunk_ref)
+                            REFERENCES recall_entries(source_path, chunk_ref)
+                            ON DELETE CASCADE
+                    ) WITHOUT ROWID
                     """
                 )
                 self._set_metadata(METADATA_SCHEMA_VERSION, SCHEMA_VERSION)
@@ -436,6 +528,70 @@ class SqliteVecStore(VectorStoreAdapter):
             (key.source_path, key.chunk_ref),
         )
 
+    def _refresh_graph_edges_for_sources(self, source_paths: set[str]) -> None:
+        if not source_paths:
+            return
+        self._conn.execute("DELETE FROM recall_edges")
+        entries = self._entries_with_text()
+        self._insert_graph_edges(_derive_graph_edges(entries))
+
+    def _rebuild_graph_edges_from_prepared(self, prepared: Sequence[_PreparedEntry]) -> None:
+        entries = tuple(
+            (entry.record, entry.text)
+            for entry in sorted(prepared, key=lambda item: item.record.key)
+            if entry.text is not None
+        )
+        self._insert_graph_edges(_derive_graph_edges(entries))
+
+    def _insert_graph_edges(self, edges: Iterable[GraphEdge]) -> None:
+        for edge in sorted(set(edges)):
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO recall_edges (
+                    from_source_path, from_chunk_ref, edge_type, target_ref,
+                    to_source_path, to_chunk_ref
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    edge.from_source_path,
+                    edge.from_chunk_ref,
+                    edge.edge_type,
+                    edge.target_ref,
+                    edge.to_source_path,
+                    edge.to_chunk_ref,
+                ),
+            )
+
+    def _delete_graph_edges(self, key: RecallKey) -> None:
+        self._conn.execute(
+            """
+            DELETE FROM recall_edges
+             WHERE from_source_path = ?
+               AND from_chunk_ref = ?
+            """,
+            (key.source_path, key.chunk_ref),
+        )
+        self._conn.execute(
+            """
+            DELETE FROM recall_edges
+             WHERE to_source_path = ?
+               AND to_chunk_ref = ?
+            """,
+            (key.source_path, key.chunk_ref),
+        )
+
+    def _entries_with_text(self) -> tuple[tuple[RecallRecord, str], ...]:
+        rows = self._conn.execute(
+            """
+            SELECT source_path, chunk_ref, content_hash, as_of, scope_json,
+                   requires_egress, text
+              FROM recall_entries
+          ORDER BY source_path, chunk_ref
+            """
+        ).fetchall()
+        return tuple((self._record_from_row(row), str(row["text"])) for row in rows)
+
     def _record_from_row(self, row: sqlite3.Row) -> RecallRecord:
         return RecallRecord(
             source_path=row["source_path"],
@@ -479,6 +635,230 @@ SqliteVectorStore = SqliteVecStore
 
 
 _FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_GRAPH_SLUG_RE = re.compile(r"[^a-z0-9]+")
+_WIKILINK_RE = re.compile(r"\[\[([^\]\n]+)\]\]")
+_MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]\n]*\]\(([^)\n]+)\)")
+
+
+@dataclass(frozen=True)
+class _GraphIndex:
+    sources: frozenset[str]
+    source_aliases: Mapping[str, str | None]
+    preferred_chunk_by_source: Mapping[str, RecallKey]
+    chunk_by_source_heading: Mapping[tuple[str, str], RecallKey]
+    chunk_by_unique_heading: Mapping[str, RecallKey | None]
+
+
+def _derive_graph_edges(
+    entries: Sequence[tuple[RecallRecord, str | None]],
+    *,
+    from_sources: set[str] | None = None,
+) -> tuple[GraphEdge, ...]:
+    index = _build_graph_index(entries)
+    selected_sources = set(from_sources) if from_sources is not None else None
+    edges: list[GraphEdge] = []
+    for record, text in sorted(entries, key=lambda item: item[0].key):
+        if selected_sources is not None and record.source_path not in selected_sources:
+            continue
+        if not text:
+            continue
+        for edge_type, target_ref in _markdown_graph_targets(text):
+            destination = _resolve_graph_target(record.source_path, target_ref, index)
+            if destination is None:
+                continue
+            edges.append(
+                GraphEdge(
+                    from_source_path=record.source_path,
+                    from_chunk_ref=record.chunk_ref,
+                    edge_type=edge_type,
+                    target_ref=target_ref,
+                    to_source_path=destination.source_path,
+                    to_chunk_ref=destination.chunk_ref,
+                )
+            )
+    return tuple(sorted(set(edges)))
+
+
+def _build_graph_index(entries: Sequence[tuple[RecallRecord, str | None]]) -> _GraphIndex:
+    records = tuple(sorted((entry[0] for entry in entries), key=lambda record: record.key))
+    sources = frozenset(record.source_path for record in records)
+    chunks_by_source: dict[str, list[RecallKey]] = defaultdict(list)
+    source_alias_candidates: dict[str, list[str]] = defaultdict(list)
+    chunk_by_source_heading: dict[tuple[str, str], RecallKey] = {}
+    heading_candidates: dict[str, list[RecallKey]] = defaultdict(list)
+
+    for record in records:
+        key = record.key
+        chunks_by_source[record.source_path].append(key)
+        for alias in _source_aliases(record.source_path):
+            source_alias_candidates[alias].append(record.source_path)
+        heading = _heading_from_chunk_ref(record.chunk_ref)
+        if heading is not None:
+            chunk_by_source_heading[(record.source_path, heading)] = key
+            heading_candidates[heading].append(key)
+
+    source_aliases = {
+        alias: candidates[0] if len(set(candidates)) == 1 else None
+        for alias, candidates in source_alias_candidates.items()
+    }
+    preferred_chunk_by_source = {
+        source: _preferred_chunk(keys)
+        for source, keys in chunks_by_source.items()
+    }
+    unique_heading = {
+        heading: keys[0] if len(set(keys)) == 1 else None
+        for heading, keys in heading_candidates.items()
+    }
+    return _GraphIndex(
+        sources=sources,
+        source_aliases=source_aliases,
+        preferred_chunk_by_source=preferred_chunk_by_source,
+        chunk_by_source_heading=chunk_by_source_heading,
+        chunk_by_unique_heading=unique_heading,
+    )
+
+
+def _markdown_graph_targets(text: str) -> tuple[tuple[str, str], ...]:
+    targets: list[tuple[str, str]] = []
+    for match in _WIKILINK_RE.finditer(text):
+        target = _clean_wikilink_target(match.group(1))
+        if target is not None:
+            targets.append((GRAPH_EDGE_WIKILINK, target))
+    for match in _MARKDOWN_LINK_RE.finditer(text):
+        target = _clean_markdown_link_target(match.group(1))
+        if target is not None:
+            targets.append((GRAPH_EDGE_MARKDOWN_LINK, target))
+    return tuple(targets)
+
+
+def _resolve_graph_target(from_source_path: str, target_ref: str, index: _GraphIndex) -> RecallKey | None:
+    path_part, fragment = _split_graph_target(target_ref)
+    if path_part is None and fragment is None:
+        return None
+
+    source_path: str | None = None
+    if path_part is None:
+        source_path = from_source_path
+    elif path_part:
+        source_path = _resolve_source_path(from_source_path, path_part, index)
+
+    if source_path is not None and fragment is not None:
+        return index.chunk_by_source_heading.get((source_path, _graph_slug(fragment)))
+    if source_path is not None:
+        return index.preferred_chunk_by_source.get(source_path)
+    if fragment is not None:
+        return index.chunk_by_unique_heading.get(_graph_slug(fragment))
+
+    assert path_part is not None
+    alias = _graph_ref_key(path_part)
+    resolved_source = index.source_aliases.get(alias)
+    if resolved_source is not None:
+        return index.preferred_chunk_by_source.get(resolved_source)
+    return index.chunk_by_unique_heading.get(alias)
+
+
+def _resolve_source_path(from_source_path: str, path_part: str, index: _GraphIndex) -> str | None:
+    decoded = unquote(path_part).strip()
+    if not decoded:
+        return None
+    candidates: list[str] = []
+    if decoded.startswith("/"):
+        candidates.append(decoded.lstrip("/"))
+    else:
+        base = posixpath.dirname(from_source_path)
+        candidates.append(posixpath.normpath(posixpath.join(base, decoded)))
+        candidates.append(decoded)
+    for candidate in tuple(candidates):
+        if not candidate.endswith(".md"):
+            candidates.append(f"{candidate}.md")
+    for candidate in candidates:
+        normalized = candidate.lstrip("./")
+        if normalized in index.sources:
+            return normalized
+    return index.source_aliases.get(_graph_ref_key(decoded))
+
+
+def _split_graph_target(target_ref: str) -> tuple[str | None, str | None]:
+    target = target_ref.strip()
+    if not target:
+        return None, None
+    if target.startswith("#"):
+        return None, target[1:]
+    path_part, sep, fragment = target.partition("#")
+    path_part = path_part.strip()
+    fragment = fragment.strip() if sep else None
+    if not path_part:
+        return None, fragment or None
+    if sep:
+        return path_part, fragment or None
+    if "/" in path_part or path_part.endswith(".md"):
+        return path_part, None
+    # Bare wikilinks can name either a file or a heading; resolve both later.
+    return path_part, None
+
+
+def _clean_wikilink_target(raw_target: str) -> str | None:
+    target = raw_target.split("|", 1)[0].strip()
+    return target or None
+
+
+def _clean_markdown_link_target(raw_target: str) -> str | None:
+    target = raw_target.strip()
+    if target.startswith("<") and ">" in target:
+        target = target[1 : target.index(">")]
+    else:
+        target = target.split()[0] if target.split() else ""
+    if not target:
+        return None
+    parsed = urlsplit(target)
+    if parsed.scheme or parsed.netloc:
+        return None
+    path = unquote(parsed.path)
+    if path and not path.endswith(".md") and not path.startswith("#"):
+        return None
+    if parsed.fragment:
+        return f"{path}#{unquote(parsed.fragment)}" if path else f"#{unquote(parsed.fragment)}"
+    return path or None
+
+
+def _source_aliases(source_path: str) -> set[str]:
+    without_ext = source_path[:-3] if source_path.endswith(".md") else source_path
+    name = Path(without_ext).name
+    return {
+        _graph_ref_key(source_path),
+        _graph_ref_key(without_ext),
+        _graph_ref_key(name),
+    }
+
+
+def _preferred_chunk(keys: Sequence[RecallKey]) -> RecallKey:
+    ordered = sorted(
+        keys,
+        key=lambda key: (
+            0 if key.chunk_ref == "file" else 1 if key.chunk_ref == "preamble" else 2,
+            key.chunk_ref,
+            key.source_path,
+        ),
+    )
+    return ordered[0]
+
+
+def _heading_from_chunk_ref(chunk_ref: str) -> str | None:
+    if not chunk_ref.startswith("heading:"):
+        return None
+    return chunk_ref.split(":", 1)[1]
+
+
+def _graph_ref_key(value: str) -> str:
+    stripped = value.strip().replace("\\", "/")
+    if stripped.endswith(".md"):
+        stripped = stripped[:-3]
+    return _graph_slug(stripped)
+
+
+def _graph_slug(value: str) -> str:
+    slug = _GRAPH_SLUG_RE.sub("-", value.strip().lower()).strip("-")
+    return slug or "section"
 
 
 def _fts_match_expression(query_text: str) -> str | None:
@@ -517,6 +897,9 @@ def _bm25_relevance(rank: Any) -> float:
 
 
 __all__ = [
+    "GRAPH_EDGE_MARKDOWN_LINK",
+    "GRAPH_EDGE_WIKILINK",
+    "GraphEdge",
     "SCHEMA_VERSION",
     "SqliteVecStore",
     "SqliteVectorStore",

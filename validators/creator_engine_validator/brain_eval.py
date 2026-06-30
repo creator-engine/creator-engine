@@ -10,12 +10,14 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import tempfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from . import brain_recall
+from . import brain_recall, brain_sqlite_vec
 
 DEFAULT_K_VALUES = (3, 5)
 AS_OF = "2026-06-28T00:00:00Z"
@@ -88,6 +90,8 @@ class EvalReport:
     metrics: Mapping[str, Mapping[str, float]]
     cases: tuple[CaseResult, ...]
     fixture_count: int
+    graph_lift_count: int
+    graph_regression_count: int
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +105,8 @@ class EvalReport:
                 for leg, values in sorted(self.metrics.items())
             },
             "fixture_count": self.fixture_count,
+            "graph_lift_count": self.graph_lift_count,
+            "graph_regression_count": self.graph_regression_count,
             "cases": [case.to_dict() for case in self.cases],
         }
 
@@ -153,7 +159,17 @@ FIXTURES: tuple[FixtureSnippet, ...] = (
             "# Derived recall store\n\n"
             "Markdown remains the source of truth. ce brain ingest builds a "
             "rebuildable recall projection with semantic vectors and keyword "
-            "index entries that can be regenerated from source snippets."
+            "index entries that can be regenerated from source snippets.\n\n"
+            "Related controller launch memory path: [[Launch hydration slice]]."
+        ),
+    ),
+    FixtureSnippet(
+        ref="brain/zz-launch-hydration",
+        title="Launch hydration slice",
+        markdown=(
+            "# Launch hydration slice\n\n"
+            "Controller startup adds advisory launch pointers while preserving "
+            "SSOT precedence and pointer-only verification."
         ),
     ),
     FixtureSnippet(
@@ -232,6 +248,11 @@ GOLDEN_CASES: tuple[GoldenCase, ...] = (
     GoldenCase("case-preflight", "clean egg-info build before validate-pr TMPDIR PYTHONPATH", ("brain/preflight",)),
     GoldenCase("case-ledger", "brain init assertion ledger verify corrections", ("brain/assertions",)),
     GoldenCase("case-recall", "markdown source truth rebuildable recall projection vectors keyword", ("brain/recall-derived",)),
+    GoldenCase(
+        "case-graph-launch-hydration",
+        "markdown source truth rebuildable recall projection graph",
+        ("brain/recall-derived", "brain/zz-launch-hydration"),
+    ),
     GoldenCase("case-foreman", "foreman dispatch worker implementation review sub-agent", ("brain/foreman-worker",)),
     GoldenCase("case-review", "author cannot review own PR distinct non-author seat", ("brain/review-boundary",)),
     GoldenCase("case-egress", "offline no network endpoint credential broker secrets tokens", ("brain/egress",)),
@@ -279,18 +300,41 @@ def run_eval(k_values: Sequence[int] = DEFAULT_K_VALUES) -> EvalReport:
     max_k = max(normalized_k)
     keyword_index = _build_keyword_index(fixtures)
     semantic_store = _build_semantic_store(fixtures)
+    graph_store = _build_sqlite_graph_store(fixtures)
     embedder = MockSemanticEmbedding()
 
     case_results: list[CaseResult] = []
     for case in cases:
         keyword_hits = tuple(ref for ref, _score in _keyword_search(case.query, keyword_index, max_k))
         semantic_vector = embedder.embed((case.query,))[0]
-        semantic_hits = tuple(hit.record.source_path for hit in semantic_store.query(semantic_vector, top_k=max_k))
+        semantic = semantic_store.query(semantic_vector, top_k=max_k)
+        semantic_hits = tuple(hit.record.source_path for hit in semantic)
+        sqlite_semantic = graph_store.query(semantic_vector, top_k=max_k)
+        sqlite_keyword = graph_store.keyword_search(case.query, top_k=max_k)
+        hybrid = _reciprocal_rank_fusion(sqlite_semantic, sqlite_keyword)
+        graph = graph_store.graph_expand(
+            tuple(brain_recall.RecallHit(record=record, score=score) for record, score in hybrid),
+            top_k=max_k,
+        )
+        hybrid_graph = _reciprocal_rank_fusion(sqlite_semantic, sqlite_keyword, graph)
         legs = {
             "keyword": _case_leg(case.expected_refs, keyword_hits, normalized_k),
             "semantic": _case_leg(case.expected_refs, semantic_hits, normalized_k),
+            "hybrid": _case_leg(
+                case.expected_refs,
+                tuple(record.source_path for record, _score in hybrid),
+                normalized_k,
+            ),
+            "hybrid_graph": _case_leg(
+                case.expected_refs,
+                tuple(record.source_path for record, _score in hybrid_graph),
+                normalized_k,
+            ),
         }
-        passed = all(leg.recall_by_k[max_k] >= 1.0 for leg in legs.values())
+        passed = legs["hybrid_graph"].recall_by_k[max_k] >= 1.0 and all(
+            legs["hybrid_graph"].recall_by_k[k] >= legs["hybrid"].recall_by_k[k]
+            for k in normalized_k
+        )
         case_results.append(
             CaseResult(
                 case_id=case.case_id,
@@ -303,8 +347,24 @@ def run_eval(k_values: Sequence[int] = DEFAULT_K_VALUES) -> EvalReport:
 
     passed_count = sum(1 for case in case_results if case.passed)
     metrics = _aggregate_metrics(case_results, normalized_k)
+    graph_lift_count = sum(
+        1
+        for case in case_results
+        if any(
+            case.legs["hybrid_graph"].recall_by_k[k] > case.legs["hybrid"].recall_by_k[k]
+            for k in normalized_k
+        )
+    )
+    graph_regression_count = sum(
+        1
+        for case in case_results
+        if any(
+            case.legs["hybrid_graph"].recall_by_k[k] < case.legs["hybrid"].recall_by_k[k]
+            for k in normalized_k
+        )
+    )
     return EvalReport(
-        ok=passed_count == len(case_results),
+        ok=passed_count == len(case_results) and graph_regression_count == 0 and graph_lift_count > 0,
         case_count=len(case_results),
         passed_count=passed_count,
         failed_count=len(case_results) - passed_count,
@@ -312,6 +372,8 @@ def run_eval(k_values: Sequence[int] = DEFAULT_K_VALUES) -> EvalReport:
         metrics=metrics,
         cases=tuple(case_results),
         fixture_count=len(fixtures),
+        graph_lift_count=graph_lift_count,
+        graph_regression_count=graph_regression_count,
     )
 
 
@@ -323,20 +385,32 @@ def _normalize_k_values(k_values: Sequence[int]) -> tuple[int, ...]:
 
 
 def _build_semantic_store(fixtures: Sequence[FixtureSnippet]) -> brain_recall.InMemoryVectorStore:
+    store = brain_recall.InMemoryVectorStore()
+    store.rebuild_from_source(_fixture_chunks(fixtures), MockSemanticEmbedding())
+    return store
+
+
+def _build_sqlite_graph_store(fixtures: Sequence[FixtureSnippet]) -> brain_sqlite_vec.SqliteVecStore:
+    tempdir = tempfile.TemporaryDirectory()
+    store = brain_sqlite_vec.SqliteVecStore(Path(tempdir.name) / "recall.sqlite")
+    store._brain_eval_tempdir = tempdir  # keep the tempdir alive for the store lifetime
+    store.rebuild_from_source(_fixture_chunks(fixtures), MockSemanticEmbedding())
+    return store
+
+
+def _fixture_chunks(fixtures: Sequence[FixtureSnippet]) -> tuple[brain_recall.RecallChunk, ...]:
     chunks = []
     for fixture in fixtures:
         record = brain_recall.RecallRecord(
             source_path=fixture.ref,
-            chunk_ref="fixture",
+            chunk_ref=f"heading:{_heading_slug(fixture.title)}",
             content_hash=hashlib.sha256(fixture.markdown.encode("utf-8")).hexdigest(),
             as_of=AS_OF,
             scope=SCOPE,
             requires_egress=False,
         )
         chunks.append(brain_recall.RecallChunk(record=record, text=fixture.markdown))
-    store = brain_recall.InMemoryVectorStore()
-    store.rebuild_from_source(chunks, MockSemanticEmbedding())
-    return store
+    return tuple(chunks)
 
 
 def _build_keyword_index(fixtures: Sequence[FixtureSnippet]) -> tuple[tuple[FixtureSnippet, Counter[str]], ...]:
@@ -378,13 +452,28 @@ def _aggregate_metrics(
     k_values: Sequence[int],
 ) -> dict[str, dict[str, float]]:
     metrics: dict[str, dict[str, float]] = {}
-    for leg in ("keyword", "semantic"):
+    leg_names = sorted(case_results[0].legs) if case_results else ()
+    for leg in leg_names:
         values: dict[str, float] = {}
         for k in k_values:
             mean = sum(case.legs[leg].recall_by_k[k] for case in case_results) / len(case_results)
             values[f"recall@{k}"] = round(mean, 6)
         metrics[leg] = values
     return metrics
+
+
+def _reciprocal_rank_fusion(
+    *legs: Sequence[brain_recall.RecallHit],
+) -> tuple[tuple[brain_recall.RecallRecord, float], ...]:
+    scores: dict[brain_recall.RecallKey, float] = {}
+    records: dict[brain_recall.RecallKey, brain_recall.RecallRecord] = {}
+    for leg in legs:
+        for rank, hit in enumerate(leg):
+            key = hit.record.key
+            scores[key] = scores.get(key, 0.0) + 1.0 / (60 + rank + 1)
+            records.setdefault(key, hit.record)
+    ordered = sorted(scores.items(), key=lambda item: (-item[1], item[0].source_path, item[0].chunk_ref))
+    return tuple((records[key], round(score, 12)) for key, score in ordered)
 
 
 def _semantic_vector(text: str) -> brain_recall.Vector:
@@ -400,6 +489,11 @@ def _semantic_vector(text: str) -> brain_recall.Vector:
 
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(_TOKEN_RE.findall(text.lower()))
+
+
+def _heading_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "section"
 
 
 __all__ = [
