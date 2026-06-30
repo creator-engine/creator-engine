@@ -1,4 +1,4 @@
-# PR path manifest — L4-brain · Add wikilink graph recall and launch hydration support
+# PR path manifest — ce-ops#360 · Add wikilink graph recall and launch hydration support
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-brain-l4-recall` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
