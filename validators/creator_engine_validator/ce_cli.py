@@ -18,6 +18,7 @@ ce worker run        # resolve a role definition, launch a governed worker, retu
 ce bootstrap         # provision a source-clone controller/seat venv offline
 ce verify-install    # verify a post-install CE release venv provenance
 ce update            # signed in-place CE update; --check is read-only
+ce clean-main-install # build/install verified origin/main from source, no release signature
 ce onboard           # first-run one-shot: verify/install + brain-init + first governed launch
 ce publish-branch   # host-side publish gate for contained seats' committed branches
 ce herdr remote-attach # attach through authenticated herdr remote reach, not docker exec
@@ -110,6 +111,7 @@ from . import (
     integration_queue_dry_run,
     lane_runtime,
     launch_runtime,
+    main_head_install,
     orchestrator_status,
     pcl_runtime,
     playbook_runtime,
@@ -235,12 +237,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     update = groups.add_parser(
         "update",
-        help="signed in-place CE update; --check is read-only",
+        help="signed release update, or verified main-HEAD source build with --track main",
+    )
+    update.add_argument(
+        "--track",
+        default="release",
+        choices=("release", "main"),
+        help="update track: signed release mirror, or verified origin/main source build",
     )
     update.add_argument(
         "--check",
         action="store_true",
-        help="resolve the latest signed release and compare without mutating",
+        help="resolve and verify without mutating",
     )
     update.add_argument(
         "--install-root",
@@ -257,7 +265,49 @@ def _build_parser() -> argparse.ArgumentParser:
         default=update_runtime.DEFAULT_TRUST_ANCHOR_URL,
         help="out-of-band ce-root-v1 DNS TXT resolver URL",
     )
+    update.add_argument(
+        "--repo-root",
+        default=".",
+        help="source checkout root for --track main (default: cwd)",
+    )
+    update.add_argument(
+        "--remote",
+        default=main_head_install.REMOTE,
+        help="git remote for --track main (must be origin)",
+    )
+    update.add_argument(
+        "--branch",
+        default=main_head_install.BRANCH,
+        help="git branch for --track main (must be main)",
+    )
     update.add_argument("--json", action="store_true", dest="json_output")
+
+    clean_main = groups.add_parser(
+        "clean-main-install",
+        help="build and install verified origin/main from source, refusing on any hash mismatch",
+    )
+    clean_main.add_argument("--repo-root", default=".", help="source checkout root (default: cwd)")
+    clean_main.add_argument(
+        "--install-root",
+        default=None,
+        help="CE bootstrap install root (default: CE_INSTALL_ROOT or installer default)",
+    )
+    clean_main.add_argument(
+        "--remote",
+        default=main_head_install.REMOTE,
+        help="git remote to resolve (must be origin)",
+    )
+    clean_main.add_argument(
+        "--branch",
+        default=main_head_install.BRANCH,
+        help="git branch to resolve (must be main)",
+    )
+    clean_main.add_argument(
+        "--check",
+        action="store_true",
+        help="resolve, build, and verify without installing",
+    )
+    clean_main.add_argument("--json", action="store_true", dest="json_output")
 
     surfaces = groups.add_parser(
         "surfaces",
@@ -4559,7 +4609,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.group == "verify-install":
         return _verify_install(args)
     if args.group == "update":
+        if getattr(args, "track", "release") == "main":
+            return main_head_install.run_cli(args)
         return update_runtime.run_cli(args)
+    if args.group == "clean-main-install":
+        return main_head_install.run_cli(args)
     if args.group == "surfaces":
         surfaces_cmd = getattr(args, "surfaces_cmd", None)
         if surfaces_cmd == "check-updates":

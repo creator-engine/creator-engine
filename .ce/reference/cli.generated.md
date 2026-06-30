@@ -273,6 +273,19 @@ Options:
 | `--json` | no |  | emit machine-readable JSON |
 | `--write-cache` | no |  | write the view-only Cockpit cache under <ROOT>/claims/claims.json |
 
+### `clean-main-install`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--repo-root` | no |  | source checkout root (default: cwd) |
+| `--install-root` | no |  | CE bootstrap install root (default: CE_INSTALL_ROOT or installer default) |
+| `--remote` | no |  | git remote to resolve (must be origin) |
+| `--branch` | no |  | git branch to resolve (must be main) |
+| `--check` | no |  | resolve, build, and verify without installing |
+| `--json` | no |  |  |
+
 ### `connector`
 
 GitHub connector runtime: read-only verify/plan/fetch (G2.005.1) + strict-mode write-plan/submit (G2.005.2)
@@ -1012,10 +1025,14 @@ Options:
 
 | Option | Required | Choices | Description |
 | --- | --- | --- | --- |
-| `--check` | no |  | resolve the latest signed release and compare without mutating |
+| `--track` | no | `main, release` | update track: signed release mirror, or verified origin/main source build |
+| `--check` | no |  | resolve and verify without mutating |
 | `--install-root` | no |  | CE bootstrap install root (default: CE_INSTALL_ROOT or installer default) |
 | `--site` | no |  | CE mirror site (default: https://creator-engine.dev) |
 | `--trust-anchor-url` | no |  | out-of-band ce-root-v1 DNS TXT resolver URL |
+| `--repo-root` | no |  | source checkout root for --track main (default: cwd) |
+| `--remote` | no |  | git remote for --track main (must be origin) |
+| `--branch` | no |  | git branch for --track main (must be main) |
 | `--json` | no |  |  |
 
 ### `validate-pr`

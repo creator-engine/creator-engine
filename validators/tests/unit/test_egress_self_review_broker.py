@@ -3,6 +3,8 @@ import logging
 import os
 import socket
 import subprocess
+import shutil
+import tempfile
 import threading
 from pathlib import Path
 
@@ -678,56 +680,61 @@ def test_bounded_json_request_refuses_oversize_and_non_object():
         broker.bounded_json_load(b'["not", "object"]', max_bytes=100)
 
 
-def test_self_review_server_activation_keeps_existing_inode(tmp_path):
-    socket_path = tmp_path / "activated-self-review.sock"
+def test_self_review_server_activation_keeps_existing_inode():
+    socket_dir = Path(tempfile.mkdtemp(prefix="ce-sr-", dir="/var/tmp"))
+    socket_path = socket_dir / "sr.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    listener.bind(str(socket_path))
-    listener.listen(16)
-    before = socket_path.stat()
-    requests = []
-    server_exceptions = []
+    try:
+        listener.bind(str(socket_path))
+        listener.listen(16)
+        before = socket_path.stat()
+        requests = []
+        server_exceptions = []
 
-    def submitter(request):
-        requests.append(request)
-        return broker.SelfReviewResult(
-            ok=True,
-            repo=_REPO,
-            pr_number=request.pr_number,
-            head_sha=request.head_sha,
-            event=request.event,
-            review_id=1234,
-            applied=True,
-        )
+        def submitter(request):
+            requests.append(request)
+            return broker.SelfReviewResult(
+                ok=True,
+                repo=_REPO,
+                pr_number=request.pr_number,
+                head_sha=request.head_sha,
+                event=request.event,
+                review_id=1234,
+                applied=True,
+            )
 
-    def run_server():
-        try:
-            with broker.SelfReviewServer(
-                str(socket_path),
-                submitter=submitter,
-                max_request_bytes=broker.DEFAULT_MAX_REQUEST_BYTES,
-                activated_socket=listener,
-            ) as server:
-                server.handle_request()
-        except Exception as exc:  # pragma: no cover - asserted through server_exceptions
-            server_exceptions.append(exc)
+        def run_server():
+            try:
+                with broker.SelfReviewServer(
+                    str(socket_path),
+                    submitter=submitter,
+                    max_request_bytes=broker.DEFAULT_MAX_REQUEST_BYTES,
+                    activated_socket=listener,
+                ) as server:
+                    server.handle_request()
+            except Exception as exc:  # pragma: no cover - asserted through server_exceptions
+                server_exceptions.append(exc)
 
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
 
-    response = broker.send_request(str(socket_path), _request())
-    server_thread.join(timeout=2)
-    after = socket_path.stat()
+        response = broker.send_request(str(socket_path), _request())
+        server_thread.join(timeout=2)
+        after = socket_path.stat()
 
-    assert response == {
-        "applied": True,
-        "event": "COMMENT",
-        "head_sha": _HEAD,
-        "ok": True,
-        "pr_number": 7,
-        "repo": _REPO,
-        "review_id": 1234,
-    }
-    assert [request.pr_number for request in requests] == [7]
-    assert server_exceptions == []
-    assert not server_thread.is_alive()
-    assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
+        assert response == {
+            "applied": True,
+            "event": "COMMENT",
+            "head_sha": _HEAD,
+            "ok": True,
+            "pr_number": 7,
+            "repo": _REPO,
+            "review_id": 1234,
+        }
+        assert [request.pr_number for request in requests] == [7]
+        assert server_exceptions == []
+        assert not server_thread.is_alive()
+        assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
+    finally:
+        listener.close()
+        shutil.rmtree(socket_dir, ignore_errors=True)
