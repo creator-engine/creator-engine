@@ -34,6 +34,10 @@ _EXPECTED_DOC_LINKS = {
     "security/SECURITY_MODEL.md",
 }
 
+_EXPECTED_RENDERED_DOC_LINKS = {
+    "what-is-creator-engine.html",
+}
+
 
 class _SiteIndexParser(HTMLParser):
     def __init__(self) -> None:
@@ -102,11 +106,13 @@ def test_docs_anchor_exists_and_links_to_current_docs():
 
     assert "docs" in site.ids
     assert _EXPECTED_DOC_LINKS <= set(site.docs_links)
+    assert _EXPECTED_RENDERED_DOC_LINKS <= set(site.docs_links)
 
     for href in site.docs_links:
         parsed = urlparse(href)
         assert not parsed.scheme and not parsed.netloc, f"docs link must be relative: {href}"
-        assert parsed.path.endswith(".md"), f"docs link must target Markdown docs: {href}"
+        if not parsed.path.endswith(".md"):
+            assert parsed.path in _EXPECTED_RENDERED_DOC_LINKS, f"unexpected rendered docs link: {href}"
 
         target = (_DOCS_ROOT / parsed.path).resolve()
         assert target.is_relative_to(_DOCS_ROOT.resolve())
