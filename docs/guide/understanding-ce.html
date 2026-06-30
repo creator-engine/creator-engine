@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../assets/ce-favicon-v2.svg"/>
+<title>Understanding Creator Engine &#x2014; Creator Engine</title>
+<style>
+  :root{
+    --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
+    --violet-soft:rgba(160,107,255,.16);
+    --ink:#0C0B0A;--panel:#16140F;--panel-2:#191712;--line:rgba(255,255,255,.10);
+    --paper:#FAF8F1;--muted:#9A968C;--moss:#7FB069;--oxide:#E08B4C;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--ink);color:var(--paper);font-family:var(--sans);
+       line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  .wrap-full{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* Nav */
+  .nav{display:flex;justify-content:space-between;align-items:center;
+       padding:22px 28px;max-width:1180px;margin:0 auto}
+  .logo{display:flex;align-items:center;gap:11px;font-family:var(--mono);
+        font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+        text-decoration:none;color:var(--paper)}
+  .logo-mark{width:30px;height:30px;display:block}
+  .nav a{display:inline-flex;align-items:center;color:var(--muted);
+         text-decoration:none;font-size:13px;margin-left:26px;transition:color .15s}
+  .nav a:hover{color:var(--paper)}
+  .nav-ico{width:14px;height:14px;margin-right:6px;flex:none}
+
+  /* Page header */
+  .page-header{padding:40px 0 32px;border-bottom:1px solid var(--line)}
+  .page-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+                text-transform:uppercase;color:var(--violet);display:block;margin-bottom:12px}
+  .page-header h1{font-size:clamp(26px,5vw,44px);font-weight:700;letter-spacing:-.02em;
+                  line-height:1.08;color:var(--paper)}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+             font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+             color:var(--muted);text-decoration:none;margin-bottom:20px;
+             transition:color .15s}
+  .back-link:hover{color:var(--violet)}
+  .back-link svg{width:12px;height:12px}
+
+  /* Article body */
+  .article{padding:44px 0 80px}
+  .article h1{font-size:clamp(22px,4vw,36px);font-weight:700;letter-spacing:-.02em;
+              line-height:1.1;margin:36px 0 14px;color:var(--paper)}
+  .article h2{font-size:clamp(18px,3vw,26px);font-weight:700;letter-spacing:-.01em;
+              line-height:1.12;margin:36px 0 12px;color:var(--paper);
+              padding-top:8px;border-top:1px solid var(--line)}
+  .article h3{font-size:clamp(15px,2.4vw,20px);font-weight:700;margin:28px 0 10px;
+              color:var(--paper)}
+  .article h4{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--violet-bright)}
+  .article h5,.article h6{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--muted)}
+  .article p{margin:0 0 18px;font-size:15.5px;color:#d8d4cc;line-height:1.65}
+  .article a{color:var(--violet);text-decoration:none;
+             border-bottom:1px solid rgba(160,107,255,.3);
+             transition:color .15s,border-color .15s}
+  .article a:hover{color:var(--violet-bright);border-bottom-color:var(--violet)}
+  .article strong{color:var(--paper);font-weight:700}
+  .article em{color:#c8c2b4;font-style:italic}
+  .article code{font-family:var(--mono);font-size:13px;background:var(--panel);
+                border:1px solid var(--line);border-radius:4px;padding:2px 6px;
+                color:var(--violet-bright)}
+  .article pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+               padding:18px 20px;overflow-x:auto;margin:0 0 24px}
+  .article pre code{background:transparent;border:none;padding:0;
+                    font-size:13px;color:#d0c9be;line-height:1.6}
+  .article hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .article ul,.article ol{margin:0 0 18px;padding-left:22px}
+  .article li{margin-bottom:8px;font-size:15.5px;color:#d8d4cc;line-height:1.6}
+  .article li code{font-size:12.5px}
+  .article blockquote{border-left:3px solid var(--violet);margin:0 0 18px;
+                      padding:12px 18px;background:rgba(160,107,255,.06);
+                      border-radius:0 8px 8px 0}
+  .article blockquote p{margin:0;color:var(--muted)}
+  .article table{width:100%;border-collapse:collapse;margin:0 0 24px;
+                 font-size:14px;overflow-x:auto;display:block}
+  .article th{background:var(--panel);color:var(--paper);font-weight:700;
+              text-align:left;padding:10px 14px;border:1px solid var(--line);
+              font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+              text-transform:uppercase}
+  .article td{padding:10px 14px;border:1px solid var(--line);
+              color:#d8d4cc;vertical-align:top}
+  .article tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+  footer{border-top:1px solid var(--line);padding:30px 0;
+         text-align:center;color:var(--muted);font-size:13px}
+  @media (max-width:640px){
+    .nav{padding:16px 18px}
+    .nav a{margin-left:16px}
+    .article{padding:28px 0 60px}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div>
+      <a class="logo" href="../index.html">
+        <img class="logo-mark" src="../assets/ce-logo-v2-weldarm-transparent.svg" alt="Creator Engine logo" width="30" height="30"/>
+        Creator&nbsp;Engine
+      </a>
+    </div>
+    <div>
+      <a href="../index.html#install">Install</a>
+      <a href="../index.html#scope">How it works</a>
+      <a href="../index.html#docs"><svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 1.7h5L13 5v9.3H4z" stroke-linejoin="round"/><path d="M9 1.7V5h4M6 8.2h5M6 11h5" stroke-linecap="round"/></svg>Docs</a>
+      <a href="https://github.com/creator-engine/creator-engine"><svg class="nav-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.9c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <div class="page-header">
+      <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
+      <span class="page-eyebrow">User guide</span>
+      <h1>Understanding Creator Engine</h1>
+    </div>
+    <article class="article">
+<h1 id="understanding-creator-engine">Understanding Creator Engine</h1>
+<p><em>A plain-language guide to what CE is and the words it uses. Brand new? Start at the <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>Welcome / Start Here</code></a> onboarding front door, then come back here for the workflow tour. If you want the full, precise mapping to the machine underneath, the canonical reference is <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>../architecture/stage-vocabulary.md</code></a>.</em></p>
+<h2 id="what-ce-is">What CE is</h2>
+<p>Creator Engine runs <strong>your own coding agent — under governance.</strong> You keep chatting with the agent you already use; CE wraps a structured, stateful, artifact-aware workflow around it so that real work is <strong>planned, tracked, checked, and merged on purpose</strong> — not in one undifferentiated blur of edits. The core idea: <strong>the thing that decides whether work is good lives <em>outside</em> the agent.</strong> You judge artifacts — a plan, a diff, the evidence, the PR — not a transcript.</p>
+<h2 id="the-five-stages-frame-shape-build-review-ship">The five stages: Frame → Shape → Build → Review → Ship</h2>
+<p>CE names where you are with five plain words. They describe <strong>what you&#x27;re doing right now</strong>, and they work at any size — a one-line fix or a whole project.</p>
+<ol>
+<li><strong>Frame</strong> — <em>understand the problem.</em> What&#x27;s being asked, why, and what &quot;done&quot; looks like. This is just thinking; nothing is tracked yet.</li>
+<li><strong>Shape</strong> — <em>turn it into a bet.</em> You and the agent draft a small, ratifiable unit of work called a <strong>Scope</strong>: what done means, how much you&#x27;re willing to spend, what kind of change it is. When it&#x27;s complete, you place the bet.</li>
+<li><strong>Build</strong> — <em>do the work.</em> The agent executes the bet in one governed, sandboxed run.</li>
+<li><strong>Review</strong> — <em>check it.</em> The result is graded against what you said &quot;done&quot; was — with evidence, not vibes.</li>
+<li><strong>Ship</strong> — <em>land it.</em> The governed finish: a merged pull request, delivered research, or a reasoned &quot;no change needed.&quot;</li>
+</ol>
+<p>You&#x27;ll see the current stage in the status line as you work, so you&#x27;re never lost.</p>
+<h2 id="the-scope-card-your-unit-of-work">The Scope card: your unit of work</h2>
+<p>When a chat request turns into real work, CE drafts a <strong>Scope</strong> — a small card with five fields. The agent fills in what it can and asks you only what it must:</p>
+<table>
+<thead><tr><th>Field</th><th>What it means</th></tr></thead>
+<tbody>
+<tr><td><strong>Goal</strong></td><td>what you&#x27;re trying to do</td></tr>
+<tr><td><strong>Done when</strong></td><td>the checks that say it&#x27;s finished (these are what get graded)</td></tr>
+<tr><td><strong>Budget</strong></td><td>how much effort you&#x27;re willing to spend — a fixed cap you commit, <em>not</em> a time estimate</td></tr>
+<tr><td><strong>Change type</strong></td><td>what kind of change this is, and how risky (a docs tweak vs. a deploy)</td></tr>
+<tr><td><strong>Ready</strong></td><td>a ✓ that appears once the other four are filled in and valid</td></tr>
+</tbody></table>
+<p>Once the card is <strong>Ready</strong>, you place the bet and the agent starts building. A card in progress looks like this:</p>
+<pre><code>◆ CE · Shape → &quot;rate-limit /api/login&quot;   (Goal ✓ · Done-when 3 · Budget S · Change-type code · Ready ✓)
+◆ CE · ratify &amp; dispatch the bet? › yes</code></pre>
+<p>A few things worth knowing:</p>
+<ul>
+<li><strong>You set the Budget.</strong> The agent never decides how much you&#x27;re willing to spend — that&#x27;s your call.</li>
+<li><strong>The agent can make a change <em>safer</em> on its own, but only you can make it <em>riskier</em>.</strong> If a change turns out to be higher-stakes than first drafted, that needs your explicit OK.</li>
+<li><strong>Nothing is tracked until you say yes.</strong> Plain chat stays plain chat; a Scope only appears when you confirm the bet.</li>
+</ul>
+<h2 id="seeing-the-machine-under-the-skin">Seeing the machine under the skin</h2>
+<p>These friendly words are a <strong>clear skin over a precise state machine.</strong> Under &quot;Ready&quot; is a real Definition-of-Ready check; under &quot;Ship&quot; is a governed, branch-protected merge; under the five stages is a conserved lifecycle that the evidence and governance run on. The skin makes CE approachable; the machine makes it trustworthy — and you can always look underneath.</p>
+<p>If you want the full mapping — every user-facing word to its mechanical state, the gates, and how the same five stages scale from a single ticket up to a whole project — read the canon: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>../architecture/stage-vocabulary.md</code></a>.</p>
+<hr>
+<p><em>This is the seed of CE&#x27;s in-product help; the full interactive guide ships with the product surface.</em></p>
+    </article>
+  </div>
+  <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
+</body>
+</html>

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../assets/ce-favicon-v2.svg"/>
+<title>Contributing to Creator Engine &#x2014; Creator Engine</title>
+<style>
+  :root{
+    --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
+    --violet-soft:rgba(160,107,255,.16);
+    --ink:#0C0B0A;--panel:#16140F;--panel-2:#191712;--line:rgba(255,255,255,.10);
+    --paper:#FAF8F1;--muted:#9A968C;--moss:#7FB069;--oxide:#E08B4C;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--ink);color:var(--paper);font-family:var(--sans);
+       line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  .wrap-full{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* Nav */
+  .nav{display:flex;justify-content:space-between;align-items:center;
+       padding:22px 28px;max-width:1180px;margin:0 auto}
+  .logo{display:flex;align-items:center;gap:11px;font-family:var(--mono);
+        font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+        text-decoration:none;color:var(--paper)}
+  .logo-mark{width:30px;height:30px;display:block}
+  .nav a{display:inline-flex;align-items:center;color:var(--muted);
+         text-decoration:none;font-size:13px;margin-left:26px;transition:color .15s}
+  .nav a:hover{color:var(--paper)}
+  .nav-ico{width:14px;height:14px;margin-right:6px;flex:none}
+
+  /* Page header */
+  .page-header{padding:40px 0 32px;border-bottom:1px solid var(--line)}
+  .page-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+                text-transform:uppercase;color:var(--violet);display:block;margin-bottom:12px}
+  .page-header h1{font-size:clamp(26px,5vw,44px);font-weight:700;letter-spacing:-.02em;
+                  line-height:1.08;color:var(--paper)}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+             font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+             color:var(--muted);text-decoration:none;margin-bottom:20px;
+             transition:color .15s}
+  .back-link:hover{color:var(--violet)}
+  .back-link svg{width:12px;height:12px}
+
+  /* Article body */
+  .article{padding:44px 0 80px}
+  .article h1{font-size:clamp(22px,4vw,36px);font-weight:700;letter-spacing:-.02em;
+              line-height:1.1;margin:36px 0 14px;color:var(--paper)}
+  .article h2{font-size:clamp(18px,3vw,26px);font-weight:700;letter-spacing:-.01em;
+              line-height:1.12;margin:36px 0 12px;color:var(--paper);
+              padding-top:8px;border-top:1px solid var(--line)}
+  .article h3{font-size:clamp(15px,2.4vw,20px);font-weight:700;margin:28px 0 10px;
+              color:var(--paper)}
+  .article h4{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--violet-bright)}
+  .article h5,.article h6{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--muted)}
+  .article p{margin:0 0 18px;font-size:15.5px;color:#d8d4cc;line-height:1.65}
+  .article a{color:var(--violet);text-decoration:none;
+             border-bottom:1px solid rgba(160,107,255,.3);
+             transition:color .15s,border-color .15s}
+  .article a:hover{color:var(--violet-bright);border-bottom-color:var(--violet)}
+  .article strong{color:var(--paper);font-weight:700}
+  .article em{color:#c8c2b4;font-style:italic}
+  .article code{font-family:var(--mono);font-size:13px;background:var(--panel);
+                border:1px solid var(--line);border-radius:4px;padding:2px 6px;
+                color:var(--violet-bright)}
+  .article pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+               padding:18px 20px;overflow-x:auto;margin:0 0 24px}
+  .article pre code{background:transparent;border:none;padding:0;
+                    font-size:13px;color:#d0c9be;line-height:1.6}
+  .article hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .article ul,.article ol{margin:0 0 18px;padding-left:22px}
+  .article li{margin-bottom:8px;font-size:15.5px;color:#d8d4cc;line-height:1.6}
+  .article li code{font-size:12.5px}
+  .article blockquote{border-left:3px solid var(--violet);margin:0 0 18px;
+                      padding:12px 18px;background:rgba(160,107,255,.06);
+                      border-radius:0 8px 8px 0}
+  .article blockquote p{margin:0;color:var(--muted)}
+  .article table{width:100%;border-collapse:collapse;margin:0 0 24px;
+                 font-size:14px;overflow-x:auto;display:block}
+  .article th{background:var(--panel);color:var(--paper);font-weight:700;
+              text-align:left;padding:10px 14px;border:1px solid var(--line);
+              font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+              text-transform:uppercase}
+  .article td{padding:10px 14px;border:1px solid var(--line);
+              color:#d8d4cc;vertical-align:top}
+  .article tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+  footer{border-top:1px solid var(--line);padding:30px 0;
+         text-align:center;color:var(--muted);font-size:13px}
+  @media (max-width:640px){
+    .nav{padding:16px 18px}
+    .nav a{margin-left:16px}
+    .article{padding:28px 0 60px}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div>
+      <a class="logo" href="../index.html">
+        <img class="logo-mark" src="../assets/ce-logo-v2-weldarm-transparent.svg" alt="Creator Engine logo" width="30" height="30"/>
+        Creator&nbsp;Engine
+      </a>
+    </div>
+    <div>
+      <a href="../index.html#install">Install</a>
+      <a href="../index.html#scope">How it works</a>
+      <a href="../index.html#docs"><svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 1.7h5L13 5v9.3H4z" stroke-linejoin="round"/><path d="M9 1.7V5h4M6 8.2h5M6 11h5" stroke-linecap="round"/></svg>Docs</a>
+      <a href="https://github.com/creator-engine/creator-engine"><svg class="nav-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.9c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <div class="page-header">
+      <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
+      <span class="page-eyebrow">Contribute</span>
+      <h1>Contributing to Creator Engine</h1>
+    </div>
+    <article class="article">
+<h1 id="contributing-to-creator-engine">Contributing to Creator Engine</h1>
+<h2 id="1-who-this-is-for">1. Who This Is For</h2>
+<p>This guide is for human contributors who want to move from a fresh clone to a well-scoped pull request in the Creator Engine repository. It is written for people who can work inside a ratification-governed project without assuming that a green CI run, a comment, or an opened PR gives them authority. External PRs carry proposed change only; issues carry information; envelopes carry authority; CI verifies but never ratifies (<code>docs/governance/EXTERNAL_CONTRIBUTOR_INTAKE_BOUNDARY.md:38-56</code>).</p>
+<p>Creator Engine is pre-1.0 and ratification-governed. The public contributing on-ramp already says contributors should follow the spec/plan/tasks model and respect ratification boundaries (<code>CONTRIBUTING.md:3-8</code>).</p>
+<h3 id="trust-tier-table">Trust-Tier Table</h3>
+<p>The baseline authority matrix has exactly seven <code>role_category</code> values (<code>schemas/authority-matrix.schema.yaml:7-12</code>, <code>schemas/authority-matrix.schema.yaml:37-40</code>). The prose contract describes the same seven categories (<code>docs/contracts/authority-matrix.md:24-37</code>).</p>
+<table>
+<thead><tr><th>Trust tier / <code>role_category</code></th><th>Can do</th><th>Cannot do without ratification or delegation</th></tr></thead>
+<tbody>
+<tr><td><code>source</code> / Operator</td><td>Approve governance direction and ratify privileged mutations (<code>docs/contracts/authority-matrix.md:29-32</code>).</td><td>Cannot bypass author/approver separation; single-actor approval of a privileged mutation is invalid (<code>GOVERNANCE.md:116-118</code>, <code>docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md:121-123</code>).</td></tr>
+<tr><td><code>ratifier</code></td><td>Accept a mutation after reviewing evidence when Source has authorized that role (<code>docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md:99-109</code>).</td><td>Cannot become the author of the same mutation they ratify; cannot grant themselves privileged authority.</td></tr>
+<tr><td><code>architect</code></td><td>Author spec/plan/contract and docs/code/schema design artifacts (<code>docs/contracts/authority-matrix.yml:62-77</code>).</td><td>Cannot ratify; cannot deploy, mutate identity, or change governance without a human ratifier.</td></tr>
+<tr><td><code>implementer</code></td><td>Author docs/code/schema work from spec/plan/tasks (<code>docs/contracts/authority-matrix.yml:78-92</code>).</td><td>Cannot review or ratify their own PR; cannot expand mutation class or path scope.</td></tr>
+<tr><td><code>reviewer</code></td><td>Provide review evidence on PRs and artifacts (<code>docs/contracts/authority-matrix.yml:94-106</code>).</td><td>Review text is not privileged ratification (<code>docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md:111-119</code>).</td></tr>
+<tr><td><code>verifier</code></td><td>Author tests, validators, and verification artifacts (<code>docs/contracts/authority-matrix.yml:108-121</code>, <code>docs/contracts/authority-matrix.md:36</code>).</td><td>Cannot treat passing tests as authority; CI/verifier evidence does not ratify.</td></tr>
+<tr><td><code>observer</code></td><td>Write notes, issues, observations, and handoff material (<code>docs/contracts/authority-matrix.yml:123-133</code>).</td><td>Cannot author tracked implementation, approve, merge, or ratify.</td></tr>
+</tbody></table>
+<h3 id="governed-contributor-hard-denials">Governed Contributor Hard Denials</h3>
+<p>A governed contributor environment does not get ambient platform authority.</p>
+<ul>
+<li><code>git push</code> is classified as the restricted <code>deploy</code> mechanic (<code>validators/creator_engine_validator/hook_check.py:198-204</code>). Under governed posture, restricted mechanics that are not covered are hard-denied (<code>validators/creator_engine_validator/hook_check.py:318-327</code>, <code>validators/creator_engine_validator/hook_check.py:551-563</code>).</li>
+<li><code>gh pr review</code> is classified as the restricted <code>pr_review</code> mechanic (<code>validators/creator_engine_validator/hook_check.py:210-214</code>). A reviewer-authority envelope can authorize exactly one review action on exactly one PR, and everything else fails closed.</li>
+<li>Secret-looking reads are denied. The hook recognizes <code>.env</code>, key files, PEM/key suffixes, <code>.ssh</code>, <code>.gnupg</code>, <code>.aws</code>, and credential-like names (<code>validators/creator_engine_validator/hook_check.py:160-190</code>), and returns a credential-path denial without reading secret bytes (<code>validators/creator_engine_validator/hook_check.py:330-334</code>).</li>
+<li>Branch-protection settings, repository settings, and constitution changes remain privileged. Live branch-protection mutation requires a separate Source ratification envelope and is not performed by CI, PR, merge, or agent action (<code>.github/BRANCH_PROTECTION_POLICY.md:56-67</code>). <code>CONTRIBUTING.md</code> tells contributors not to change branch protection, history, the constitution, or canonical governance docs without explicit authorization (<code>CONTRIBUTING.md:70-83</code>).</li>
+</ul>
+<h2 id="2-governance-in-five-minutes">2. Governance In Five Minutes</h2>
+<p>Creator Engine separates verification from authority. The CI workflow itself states that it verifies only and does not deploy, publish, merge, approve, or ratify (<code>.github/workflows/validate.yml:1-5</code>). <code>GOVERNANCE.md</code> repeats the invariant: automated checks prove artifacts are well formed and policies are followed; they do not authorize privileged action (<code>GOVERNANCE.md:120-125</code>).</p>
+<p>The six privileged mutation classes are <code>deploy</code>, <code>governance</code>, <code>identity</code>, <code>security</code>, <code>attestation</code>, and <code>redaction</code> (<code>GOVERNANCE.md:101-108</code>). The mutation-class model describes the nine baseline classes and marks those six as privileged (<code>docs/governance/MUTATION_CLASS_MODEL.md:18-37</code>). Privileged classes require human ratification and cannot be ratified by agent-authored review text or CI (<code>docs/governance/MUTATION_CLASS_MODEL.md:92-127</code>).</p>
+<p>In practical terms:</p>
+<ul>
+<li>CI verifies.</li>
+<li>Humans ratify.</li>
+<li>PRs carry change.</li>
+<li>Envelopes carry authority.</li>
+<li>Reviewers produce evidence unless they are explicitly acting as ratifiers under the authority model.</li>
+</ul>
+<h2 id="3-environment-setup">3. Environment Setup</h2>
+<p>Clone the repository and work from the repository root:</p>
+<pre><code class="language-bash">git clone &lt;repo-url&gt;
+cd creator-engine
+git rev-parse --short=7 HEAD</code></pre>
+<p>Install the validator using the uv-first offline source path (<code>validators/README.md:7-17</code>):</p>
+<pre><code class="language-bash">uv venv --python 3.14 .venv
+CE_VALIDATOR_PYTHON=&quot;${CE_VALIDATOR_PYTHON:-.venv/bin/python}&quot;
+UV_PYTHON_DOWNLOADS=never uv pip install --python &quot;$CE_VALIDATOR_PYTHON&quot; --no-index --find-links validators/wheelhouse -r validators/requirements.txt</code></pre>
+<p>If you need the full pytest gate, add dev/test dependencies to the same interpreter (<code>validators/README.md:41-55</code>):</p>
+<pre><code class="language-bash">UV_PYTHON_DOWNLOADS=never uv pip install --python &quot;$CE_VALIDATOR_PYTHON&quot; --no-index \
+  --find-links validators/wheelhouse \
+  --find-links validators/wheelhouse-dev \
+  -r validators/requirements.txt \
+  -r validators/requirements-dev.txt</code></pre>
+<p>Run these three named CI checks locally before asking for review:</p>
+<pre><code class="language-bash"># Creator Engine validator - pytest suite (offline)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
+  &quot;$CE_VALIDATOR_PYTHON&quot; -m pytest -p no:cacheprovider validators/tests/ -q -n auto --dist loadgroup
+
+# Creator Engine validator - well-formed examples
+PYTHONPATH=validators &quot;$CE_VALIDATOR_PYTHON&quot; -m creator_engine_validator check examples/well-formed/
+
+# Creator Engine validator - malformed examples (expect failures)
+if PYTHONPATH=validators &quot;$CE_VALIDATOR_PYTHON&quot; -m creator_engine_validator check examples/malformed/; then
+  echo &quot;FAIL: malformed examples unexpectedly passed&quot;
+  exit 1
+else
+  echo &quot;OK: malformed examples correctly rejected&quot;
+fi</code></pre>
+<p>Those names and commands mirror the workflow steps in <code>.github/workflows/validate.yml:43-46</code>, <code>.github/workflows/validate.yml:83-94</code>. For smaller documentation PRs, the existing <code>CONTRIBUTING.md</code> also asks contributors to run <code>git diff --check</code>, <code>check-examples</code>, and <code>scan-no-limitless</code> locally (<code>CONTRIBUTING.md:108-125</code>).</p>
+<blockquote>
+<p><strong>Running from an isolated worktree?</strong> Set</p>
+<p><code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/validators/README.md"><code>../../validators/README.md</code></a>.</p>
+</blockquote>
+<h2 id="4-the-governed-cycle">4. The Governed Cycle</h2>
+<p>The user-facing cycle is:</p>
+<pre><code class="language-text">Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship</code></pre>
+<p><code>docs/architecture/stage-vocabulary.md</code> is the canon for these words (<code>docs/architecture/stage-vocabulary.md:1-11</code>). The short version:</p>
+<ul>
+<li>Frame: understand and bound the problem.</li>
+<li>Shape: turn it into a ratifiable bet: acceptance criteria, budget, mutation class, and plan.</li>
+<li>Build: execute the ratified bet in a governed run.</li>
+<li>Review: grade the result against acceptance criteria.</li>
+<li>Ship: land the governed terminal result (<code>docs/architecture/stage-vocabulary.md:13-17</code>).</li>
+</ul>
+<p>Under the words is a conserved state machine. Shape-to-Build is the front gate, and Ship is the back gate with mutation-class-tiered ratification plus branch-protected merge (<code>docs/architecture/stage-vocabulary.md:27-38</code>). The mechanical spec lifecycle remains <code>draft -&gt; ready -&gt; in_progress -&gt; verified -&gt; ratified -&gt; done</code> (<code>docs/architecture/stage-vocabulary.md:40-48</code>).</p>
+<p>For a contributor, the practical loop is:</p>
+<ol>
+<li>Compose: frame the request, scope it, and name the mutation class.</li>
+<li>Verify: run the local validator/pytest checks and collect evidence.</li>
+<li>Ratify: obtain the required human ratification for governed or privileged scope.</li>
+<li>Implement: produce the bounded diff and PR.</li>
+<li>Review/Ship: obtain independent review, then a maintainer/Operator lands what is authorized.</li>
+</ol>
+<h2 id="5-your-first-pr">5. Your First PR</h2>
+<p>Keep the PR boring and bounded.</p>
+<p>Use the PR template&#x27;s scope section to state what changed, what did not change, and the mutation class (<code>.github/pull_request_template.md:3-12</code>). The privileged mutation section asks for the Source ratification envelope reference, authorized scope, dominant mutation class, and confirmation that no deploy, live branch-protection mutation, merge, or secrets action occurred (<code>.github/pull_request_template.md:29-49</code>).</p>
+<p>Path scope is not informal. The live CI path-manifest gate uses per-PR carriers under <code>.ce/pr-manifests/&lt;branch-slug&gt;.md</code>, discovered from the PR diff, and enforces that the PR diff equals the carrier path set (<code>.github/workflows/validate.yml:100-118</code>). Do not invent a different carrier name for live PRs unless a ratified change updates the validator and workflow.</p>
+<p>Checklist for the first PR:</p>
+<ul>
+<li>Reference the issue/spec/Scope that authorizes the change.</li>
+<li>Declare mutation class: <code>docs</code>, <code>code</code>, <code>schema</code>, or another baseline class from the mutation taxonomy.</li>
+<li>Keep the changed-file boundary tight.</li>
+<li>Add the path-manifest carrier when the PR is governed by a manifest.</li>
+<li>Paste validation evidence, including the three local checks above when they apply.</li>
+<li>Do not include secrets, local session state, generated logs, or machine-local paths. <code>CONTRIBUTING.md</code> explicitly excludes instance-local state and credentials (<code>CONTRIBUTING.md:91-106</code>).</li>
+</ul>
+<h2 id="6-review-and-independence">6. Review And Independence</h2>
+<p>You cannot self-approve.</p>
+<p>The CODEOWNERS file requires a non-author reviewer, and GitHub&#x27;s author-cannot-approve-own-PR rule is part of the enforcement model (<code>.github/CODEOWNERS:1-9</code>). Branch-protection policy requires at least one reviewer approval and author/approver separation for every PR targeting <code>main</code> (<code>.github/BRANCH_PROTECTION_POLICY.md:18-36</code>).</p>
+<p>Peer authority also enforces this at the governance-data level. The <code>peer_authority</code> check says the author&#x27;s or active contributor&#x27;s human never counts as a ratifier (<code>validators/creator_engine_validator/checks/peer_authority.py:173-181</code>), and the implementation skips any approver resolving to the author human (<code>validators/creator_engine_validator/checks/peer_authority.py:204-219</code>).</p>
+<p>Reviewer authority is distinct from author authority. A reviewer authority reference is valid only for a distinct reviewer role and review-scoped session (<code>validators/creator_engine_validator/lane_runtime.py:361-372</code>, <code>validators/creator_engine_validator/lane_runtime.py:620-630</code>). That reviewer session gets only the envelope-authorized <code>pr_review</code> mechanic for one PR; it cannot push or merge (<code>validators/creator_engine_validator/v3_seat_bridge.py:952-984</code>).</p>
+<h2 id="7-boundaries">7. Boundaries</h2>
+<p>Ask before you cross a boundary. Stop before you mutate a privileged surface.</p>
+<p>These require explicit Operator/maintainer authorization before implementation:</p>
+<ul>
+<li>Large architecture changes.</li>
+<li>New mutation classes.</li>
+<li>Changes to the constitution.</li>
+<li>Changes to the foundational governance substrate or operating model.</li>
+<li>Anything crossing a privileged-class boundary (<code>CONTRIBUTING.md:46-52</code>).</li>
+</ul>
+<p>Never-touch list for ordinary contributor PRs:</p>
+<ul>
+<li>Branch-protection rules and repository settings.</li>
+<li>Git history rewrites on shared branches.</li>
+<li><code>.specify/memory/constitution.md</code>.</li>
+<li>Canonical governance docs under <code>docs/governance/</code>.</li>
+<li>Identity records, credentials, signing keys, App PEMs, tokens, and secret-shaped files.</li>
+<li>Redaction/security/attestation gate weakening.</li>
+<li>Deploy, publish, merge, or live external-tracker mutation on behalf of the project.</li>
+</ul>
+<p>The governance on-ramp lists these privileged repo/platform operations and says PRs attempting them without authorization are closed pending the appropriate spec/plan/tasks triple and Operator ratification (<code>GOVERNANCE.md:135-155</code>).</p>
+<h2 id="8-legal-apache-20-and-dco">8. Legal: Apache-2.0 And DCO</h2>
+<p>Current <code>CONTRIBUTING.md</code> says contributions are licensed under Apache License, Version 2.0 (<code>CONTRIBUTING.md:150-158</code>). This guide documents the Developer Certificate of Origin mechanics that contributors should follow for auditable commit provenance.</p>
+<p>Contributor rule:</p>
+<pre><code class="language-text">Every commit must carry a Developer Certificate of Origin sign-off.
+Use `git commit -s`, or include this line in the commit message:
+
+Signed-off-by: Name &lt;email&gt;</code></pre>
+<p>Exact CONTRIBUTING.md DCO requirement line for ratification:</p>
+<pre><code class="language-markdown">- By contributing, you certify the Developer Certificate of Origin for each commit by adding a `Signed-off-by: Name &lt;email&gt;` trailer, usually with `git commit -s`.</code></pre>
+<p>Example:</p>
+<pre><code class="language-bash">git commit -s -m &quot;docs: clarify contributor setup&quot;</code></pre>
+<p>The email in the sign-off must identify the human contributor. Do not sign off for another person.</p>
+<h2 id="9-growth-path">9. Growth Path</h2>
+<p>The default contributor path is:</p>
+<pre><code class="language-text">contributor -&gt; trusted implementer/reviewer -&gt; area owner -&gt; peer ratifier</code></pre>
+<p>The authority matrix already has least-privilege role categories for implementer, reviewer, verifier, ratifier, and source (<code>docs/contracts/authority-matrix.md:24-37</code>). Peer authority extends this with per-area ownership and risk-tiered quorum rather than a new authority engine (<code>docs/contracts/peer-authority.md:10-24</code>).</p>
+<p>To become an area owner or peer ratifier, a contributor needs a ratified identity/authority update, not just more merged PRs. The repo coordination policy is self-classified as <code>governance</code>, and changing its authority map requires the privileged ratification bar (<code>.ce/coordination.yml:1-12</code>, <code>schemas/coordination-policy.schema.yaml:17-20</code>). For privileged decisions in team mode, peer authority requires at least two distinct humans (<code>docs/contracts/peer-authority.md:15-20</code>, <code>schemas/coordination-policy.schema.yaml:85-97</code>).</p>
+<p>Until that update is ratified, keep working as a contributor: propose small, scoped changes; provide evidence; and let independent reviewers and ratifiers carry authority.</p>
+<h3 id="trust-tier-graduation-criteria">Trust-Tier Graduation Criteria</h3>
+<p>Graduation is evidence-based and auditable. Merged PRs, review records, DCO trailers, identity-map entries, and ratification records are the evidence; informal reputation, agent output, or CI success alone is not authority. The <code>trust_tier</code> identity field is a follow-on recording surface for the result, not an automated gate in this guide.</p>
+<p>Observer to contributor, for implementer or verifier work:</p>
+<ul>
+<li>At least one merged PR of any scope.</li>
+<li>Every commit in that contribution carries a Developer Certificate of Origin <code>Signed-off-by:</code> trailer.</li>
+<li>No unresolved conduct or policy violation is open against the contributor.</li>
+</ul>
+<p>Contributor to trusted implementer or trusted reviewer:</p>
+<ul>
+<li>At least five merged PRs spanning at least two mutation classes, such as <code>docs</code> plus <code>code</code>, or <code>code</code> plus <code>test</code>.</li>
+<li>At least two of those PRs were reviewed by an existing trusted human reviewer who was independent of the author. Peer authority&#x27;s no-self-approval rule means the author&#x27;s human never counts as the reviewer or ratifier for the same decision (<code>docs/contracts/peer-authority.md:57-58</code>).</li>
+<li>Every commit in those PRs carries a DCO <code>Signed-off-by:</code> trailer.</li>
+<li>No conduct or policy violation remains open, and no unresolved privileged-class boundary crossing remains on the record.</li>
+</ul>
+<p>Trusted implementer or trusted reviewer to area owner or peer ratifier:</p>
+<ul>
+<li>At least fifteen merged PRs total, including at least five merged PRs in the target area.</li>
+<li>At least three consecutive calendar months of active contribution, where active means at least one merged PR in each month.</li>
+<li>Demonstrated independent-review evidence: at least five review comments or PR reviews that a maintainer, area owner, or ratifier cited as useful evidence.</li>
+<li>An identity entry for the contributor is present and resolved in <code>.ce/coordination.yml</code> <code>identity_map</code> before the first privileged ratification record counts.</li>
+<li>The area-owner or peer-ratifier update is recorded as a privileged governance decision in <code>.ce/coordination.yml</code>. Once the identity map resolves two or more humans, that decision needs two distinct humans under peer authority (<code>docs/contracts/peer-authority.md:15-20</code>). If the map still resolves exactly one human, the documented solo fallback must record <code>quorum: n1_solo</code>; it is not quorum two and it expires automatically when the map resolves two or more humans (<code>docs/contracts/peer-authority.md:55-76</code>).</li>
+<li>The contributor has a DCO-clean record across all counted contributions.</li>
+</ul>
+<p>These criteria define the observable bar for graduation. They do not add schema enforcement, alter CODEOWNERS, bypass branch protection, or replace the peer-authority contract.</p>
+    </article>
+  </div>
+  <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
+</body>
+</html>

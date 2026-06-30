@@ -28,14 +28,16 @@ _VOID_TAGS = {
 
 _EXPECTED_DOC_LINKS = {
     "llms-install.md",
-    "guide/understanding-ce.md",
-    "guide/pilot-runbook.md",
-    "guide/contributing-to-ce.md",
-    "security/SECURITY_MODEL.md",
 }
 
 _EXPECTED_RENDERED_DOC_LINKS = {
     "what-is-creator-engine.html",
+    "guide/understanding-ce.html",
+    "guide/pilot-runbook.html",
+    "guide/contributing-to-ce.html",
+    "guide/solo-dev-onboarding.html",
+    "guide/solo-ceo-onboarding.html",
+    "security/SECURITY_MODEL.html",
 }
 
 
