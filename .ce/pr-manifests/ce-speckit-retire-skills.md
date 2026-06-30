@@ -6,11 +6,20 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=16
+AUTHORIZED_PATHS_COUNT=25
 
-AUTHORIZED_PATHS_SHA256=720f08e0f67e07be02e49945a6fc531260f2f69dc35e1152c880f837c56cf711
+AUTHORIZED_PATHS_SHA256=432bcaf1916f142130e6a6af49ba024d841189f37f9b820770daa72899e722ca
 
 ```text
+.agents/skills/speckit-analyze/SKILL.md
+.agents/skills/speckit-checklist/SKILL.md
+.agents/skills/speckit-clarify/SKILL.md
+.agents/skills/speckit-constitution/SKILL.md
+.agents/skills/speckit-implement/SKILL.md
+.agents/skills/speckit-plan/SKILL.md
+.agents/skills/speckit-specify/SKILL.md
+.agents/skills/speckit-tasks/SKILL.md
+.agents/skills/speckit-taskstoissues/SKILL.md
 .ce/changelog/ce-speckit-retire-skills.md
 .ce/pr-manifests/ce-speckit-retire-skills.md
 .claude/skills/speckit-analyze/SKILL.md
