@@ -169,7 +169,7 @@ is what authorizes the merge; CI just verifies the change is well-formed.
 After the merge:
 
 ```bash
-cev3 report <scope-id> --run <run-id>
+cev3 report <scope-id> --run-id <run-id>
 ```
 
 This renders the **CE Completion Report** — a compact record of what was
