@@ -69,7 +69,11 @@ SEMVER_RE = re.compile(r"(?<!\d)\d+\.\d+\.\d+(?!\d)")
 FROM_RE = re.compile(r"^\s*FROM\s+(?P<body>.+?)(?:\s+#.*)?\s*$", re.IGNORECASE)
 ARG_RE = re.compile(r"^\s*ARG\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:=(?P<value>\S+))?", re.IGNORECASE)
 REQ_PIN_RE = re.compile(r"^\s*(?P<name>[A-Za-z0-9_.-]+)==(?P<version>[^\s;#]+)")
-SHELL_DEFAULT_RE = re.compile(r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)[:-](?P<value>[^}]+)\}")
+SHELL_DEFAULT_RE = re.compile(r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-|-)(?P<value>[^}]+)\}")
+RUNSC_IMAGE_DEFAULTS = (
+    ("deploy/vps-runsc/run-vps-runsc.sh", "CE_VPS_IMAGE", "x86_64", False),
+    ("deploy/dgx-runsc/run-codex-runsc.sh", "CE_DGX_IMAGE", "aarch64", True),
+)
 
 
 def _surface_key(name: object) -> str:
@@ -392,27 +396,48 @@ def _default_encodes_version(default: str) -> bool:
     return SEMVER_RE.search(tag.rsplit(":", 1)[1]) is not None
 
 
+def _runsc_image_error(
+    repo_root: Path,
+    codex_version: str,
+    script_path: str,
+    variable: str,
+    arch: str,
+    exact: bool,
+) -> ValidationError | None:
+    path = repo_root / script_path
+    default = _script_default(path, variable)
+    if default is None or "codex" not in default.lower():
+        return None
+
+    expected = f"creator-engine/codex-runsc:{codex_version}-{arch}"
+    if exact:
+        matches = default == expected
+    else:
+        if not _default_encodes_version(default):
+            return None
+        matches = codex_version in default
+
+    if matches:
+        return None
+    return make_error(
+        CODE_RUNSC_IMAGE_MISMATCH,
+        path,
+        variable,
+        f"{variable} default {default!r} must match expected {expected!r}",
+        CONSISTENT_CONTRACT,
+    )
+
+
 def _runsc_image_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     codex_version = _surface_version(by_name.get("codex"))
     if codex_version is None:
         return []
-    path = repo_root / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
-    default = _script_default(path, "CE_VPS_IMAGE")
-    if default is None or "codex" not in default.lower():
-        return []
-    if not _default_encodes_version(default):
-        return []
-    if codex_version in default:
-        return []
-    return [
-        make_error(
-            CODE_RUNSC_IMAGE_MISMATCH,
-            path,
-            "CE_VPS_IMAGE",
-            f"CE_VPS_IMAGE default {default!r} must include manifest codex version {codex_version!r}",
-            CONSISTENT_CONTRACT,
-        )
-    ]
+    errors: list[ValidationError] = []
+    for script_path, variable, arch, exact in RUNSC_IMAGE_DEFAULTS:
+        error = _runsc_image_error(repo_root, codex_version, script_path, variable, arch, exact)
+        if error is not None:
+            errors.append(error)
+    return errors
 
 
 def _requirement_pins(path: Path) -> dict[str, tuple[str, int]]:
