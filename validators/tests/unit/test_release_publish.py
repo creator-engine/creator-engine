@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import re
 import subprocess
 from pathlib import Path
@@ -11,6 +12,7 @@ from creator_engine_validator.release_publish import (
     PLACEHOLDER_SIGNATURE,
     ReleasePublishError,
     ReleaseStageResult,
+    finalize_signed_release,
     stage_signed_release,
 )
 from creator_engine_validator import cli, release_publish
@@ -497,6 +499,105 @@ def test_stage_signed_release_rejects_unknown_signing_key_id(tmp_path: Path):
 
     assert builder_called is False
     assert not out.exists()
+
+
+def test_finalize_signed_release_verifies_signature_and_promotes_publishable_artifacts(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    stage = tmp_path / "stage"
+    stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=build_sha,
+        out=stage,
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+    signature = base64.b64encode(b"mock-sshsig").decode("ascii")
+    seen: dict[str, object] = {}
+
+    def _verifier(algo, raw, value, key_material):
+        seen["algo"] = algo
+        seen["raw_sha"] = hashlib.sha256(raw).hexdigest()
+        seen["value"] = value
+        seen["key_material"] = key_material
+        return True
+
+    out = tmp_path / "signed"
+    result = finalize_signed_release(
+        stage=stage,
+        signature_base64=signature,
+        out=out,
+        verifier=_verifier,
+    )
+
+    signed_spec = (out / "llms-install.md").read_text(encoding="utf-8")
+    finalize_manifest = (out / "release-finalize-manifest.yml").read_text(encoding="utf-8")
+    canonical_sha = hashlib.sha256((stage / "llms-install.canonical").read_bytes()).hexdigest()
+
+    assert result.version == "0.2.0"
+    assert result.signing_key_id == "ce-root-v1"
+    assert result.canonical_spec_sha256 == canonical_sha
+    assert PLACEHOLDER_SIGNATURE not in signed_spec
+    assert f"  value: {signature}\n" in signed_spec
+    assert "kind: ce-release-finalize-manifest" in finalize_manifest
+    assert f"canonical_spec_sha256: {canonical_sha}\n" in finalize_manifest
+    assert seen["raw_sha"] == canonical_sha
+    assert seen["value"] == signature
+
+
+def test_finalize_signed_release_fails_closed_on_non_verifying_signature(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    stage = tmp_path / "stage"
+    stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=build_sha,
+        out=stage,
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+
+    with pytest.raises(ReleasePublishError, match="signed install spec verification failed"):
+        finalize_signed_release(
+            stage=stage,
+            signature_base64=base64.b64encode(b"bad-sshsig").decode("ascii"),
+            out=tmp_path / "signed",
+            verifier=lambda *_args: False,
+        )
+
+    assert not (tmp_path / "signed").exists()
+
+
+def test_finalize_signed_release_requires_exactly_one_placeholder(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    stage = tmp_path / "stage"
+    stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=build_sha,
+        out=stage,
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+    spec = stage / "llms-install.md"
+    spec.write_text(
+        spec.read_text(encoding="utf-8").replace(PLACEHOLDER_SIGNATURE, "not-base64"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleasePublishError, match="expected exactly one placeholder"):
+        finalize_signed_release(
+            stage=stage,
+            signature_base64=base64.b64encode(b"mock").decode("ascii"),
+            out=tmp_path / "signed",
+            verifier=lambda *_args: True,
+        )
 
 
 def test_anchor_recipe_guard_raises_on_divergence():
