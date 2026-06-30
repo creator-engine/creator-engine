@@ -256,6 +256,43 @@ def test_startup_notice_check_is_spec_only_and_downloads_no_wheels(tmp_path: Pat
     assert not any(call.endswith(".whl") for call in calls)
 
 
+def test_startup_notice_check_notice_shown_cache_suppresses_second_notice(tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.1", build_sha="b" * 40)
+    cache_path = tmp_path / "update-check.json"
+
+    first = update_runtime.check_startup_update_notice(
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.3.0", "a" * 40),
+        cache_path=cache_path,
+        now=100.0,
+    )
+
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["notice_shown"] = True
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def forbidden_fetch(_url: str) -> bytes:
+        raise AssertionError("fresh cache must skip fetch")
+
+    second = update_runtime.check_startup_update_notice(
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=forbidden_fetch,
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.3.0", "a" * 40),
+        cache_path=cache_path,
+        now=101.0,
+    )
+
+    assert first.notice_due is True
+    assert second.from_cache is True
+    assert second.update_available is True
+    assert second.notice_due is False
+
+
 def test_startup_notice_check_fails_open_on_error_and_timeout(tmp_path: Path):
     def error_fetch(_url: str) -> bytes:
         raise RuntimeError("network down")
@@ -301,12 +338,12 @@ def test_startup_notice_check_opt_out_skips_fetch(tmp_path: Path):
     assert result.reason == "disabled"
 
 
-def test_startup_notice_prints_once_for_interactive_solo_stable(monkeypatch, capsys):
+def test_startup_notice_prints_once_for_interactive_solo_stable(monkeypatch, capsys, tmp_path: Path):
     class Tty(io.StringIO):
         def isatty(self):
             return True
 
-    cache_path = Path("/tmp/ce-startup-test-cache.json")
+    cache_path = tmp_path / "ce-startup-test-cache.json"
     calls: list[str] = []
 
     def fake_check():
