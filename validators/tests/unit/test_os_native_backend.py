@@ -272,11 +272,14 @@ def test_os_native_missing_primitive_refuses_before_side_effects(tmp_path, missi
 
 
 def test_os_native_unknown_handle_has_no_unsandboxed_fallback():
+    # Option C delegates; there is no native execution path. An unrecognised
+    # handle (not in self._delegations) must fail closed, not fall through to
+    # an unsandboxed or native bwrap execution.
     runner = FakeNativeRunner()
     backend = OsNativeBackend(capability_probe=capability, runner=runner)
     handle = ProvisionedHandle("os-native", "run-unknown", _POLICY_SHA, "os-native:unknown")
 
-    with pytest.raises(BackendUnavailable, match="no provisioned os-native sandbox plan"):
+    with pytest.raises(BackendUnavailable, match="no provisioned os-native delegation"):
         backend.run(handle, RunRequest(command=("echo", "hi")))
 
     assert runner.calls == []
