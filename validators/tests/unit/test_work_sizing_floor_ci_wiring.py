@@ -172,14 +172,13 @@ def test_validate_workflow_runs_path_manifest_gate_from_live_base_and_head_ref()
     assert "PR_BASE_SHA" not in run
 
 
-def test_validate_workflow_runs_install_spec_signature_guard_advisory_only():
-    step = _validate_step("Creator Engine validator — install-spec signature guard (advisory)")
+def test_validate_workflow_runs_install_spec_signature_guard_as_blocking_gate():
+    step = _validate_step("Creator Engine validator — install-spec signature guard")
 
     run = step["run"]
     assert "scan-install-spec-signature" in run
-    assert "set -euo pipefail" in run
-    assert "::warning::install-spec signature guard is advisory/non-blocking" in run
-    assert "this flips to a required blocking gate after re-sign" in run
+    assert "::warning::install-spec signature guard is advisory/non-blocking" not in run
+    assert "if PYTHONPATH=validators" not in run
     assert "exit 1" not in run
 
 

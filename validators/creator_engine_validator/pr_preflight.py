@@ -385,7 +385,7 @@ def _workflow_permissions_audit(repo_root: Path) -> None:
     print("OK: no write permissions found in YAML structure")
 
 
-def _install_spec_signature_advisory(
+def _install_spec_signature_required(
     config: PreflightConfig,
     py: str,
     py_env: Mapping[str, str],
@@ -394,21 +394,16 @@ def _install_spec_signature_advisory(
     out: TextIO,
     err: TextIO,
 ) -> str:
-    print("==> Install-spec signature guard - advisory/non-blocking", file=out)
-    result = runner(
+    _run_checked(
+        "Install-spec signature guard",
         [py, "-m", "creator_engine_validator", "scan-install-spec-signature", "."],
         config.repo_root,
-        py_env,
+        runner=runner,
+        env=py_env,
+        out=out,
+        err=err,
     )
-    _print_streams(result, out, err)
-    if result.returncode == 0:
-        return "install-spec signature scan passed"
-    print(
-        "WARNING: install-spec signature scan is advisory/non-blocking until the "
-        "controller re-signs docs/llms-install.md and flips this to a required gate.",
-        file=err,
-    )
-    return f"advisory findings present (exit {result.returncode}); not blocking this PR"
+    return "install-spec signature scan passed"
 
 
 def _run_check(name: str, func: Callable[[], str | None], out: TextIO, err: TextIO) -> CheckDetail:
@@ -534,8 +529,8 @@ def run_preflight(
     )
     checks.append(
         _run_check(
-            "Install-spec signature guard (advisory/non-blocking)",
-            lambda: _install_spec_signature_advisory(
+            "Install-spec signature guard",
+            lambda: _install_spec_signature_required(
                 config,
                 py,
                 py_env,
