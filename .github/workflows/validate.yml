@@ -395,9 +395,11 @@ jobs:
 
       - name: Creator Engine validator — work-sizing floor PR-diff gate (G5)
         if: ${{ github.event_name == 'pull_request' }}
+        env:
+          COMPARISON_BASE: ${{ steps.live-base.outputs.comparison_base }}
         run: |
           set -euo pipefail
-          comparison_base="${{ steps.live-base.outputs.comparison_base }}"
+          comparison_base="${COMPARISON_BASE}"
           if [[ -z "${comparison_base}" ]]; then
             echo "FAIL: live comparison base was not resolved" >&2
             exit 1
@@ -464,9 +466,11 @@ jobs:
 
       - name: Creator Engine validator — test-coupling PR-diff gate
         if: ${{ github.event_name == 'pull_request' }}
+        env:
+          COMPARISON_BASE: ${{ steps.live-base.outputs.comparison_base }}
         run: |
           set -euo pipefail
-          comparison_base="${{ steps.live-base.outputs.comparison_base }}"
+          comparison_base="${COMPARISON_BASE}"
           if [[ -z "${comparison_base}" ]]; then
             echo "FAIL: live comparison base was not resolved" >&2
             exit 1
@@ -494,10 +498,13 @@ jobs:
 
       - name: Creator Engine validator — path-manifest PR-diff gate (G-ii)
         if: ${{ github.event_name == 'pull_request' }}
+        env:
+          COMPARISON_BASE: ${{ steps.live-base.outputs.comparison_base }}
+          HEAD_REF: ${{ steps.live-base.outputs.head_ref }}
         run: |
           set -euo pipefail
-          comparison_base="${{ steps.live-base.outputs.comparison_base }}"
-          head_ref="${{ steps.live-base.outputs.head_ref }}"
+          comparison_base="${COMPARISON_BASE}"
+          head_ref="${HEAD_REF}"
           if [[ -z "${comparison_base}" ]]; then
             echo "FAIL: live comparison base was not resolved" >&2
             exit 1
