@@ -120,7 +120,7 @@ properties:
         enum: [missing, pending, satisfied, changes_requested]
       declared_work_class:
         type: string
-        enum: [tiny, story, feature, epic, unknown]
+        enum: [XS, S, M, L, unknown]
       ratification:
         type: string
         enum: [missing, satisfied, not_required]

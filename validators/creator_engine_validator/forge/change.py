@@ -50,6 +50,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ..work_sizing import WORK_CLASSES, normalize_work_class
 from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 
@@ -58,8 +59,7 @@ from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 # frozen sibling modules stay byte-unchanged and ``change.py`` couples to none of them.
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _POLICY_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
-_WORK_CLASSES = ("tiny", "story", "feature", "epic")
-_DEFAULT_DECLARED_WORK_CLASS = "epic"
+_DEFAULT_DECLARED_WORK_CLASS = "L"
 
 
 class OpenChangeRefused(ForgeConfigRefused):
@@ -184,6 +184,7 @@ def _render_pr_body(
     intend to declare. The default is only a conservative scaffold fallback so
     the generated body never omits the required governance line.
     """
+    declared_work_class = normalize_work_class(declared_work_class)
     paths = tuple(sorted(set(manifest_paths)))
     paths_block = "\n".join(paths)
     path_manifest = _carrier_line(
@@ -213,8 +214,8 @@ def _render_pr_body(
         f"Before marking the PR ready, ensure the committed carrier files use the "
         f"current branch slug and replace the scaffold fallback with the "
         f"`verify-work-sizing-floor` / computed G5 floor result when known. The "
-        f"declared work class must be at least that floor (`tiny`, `story`, "
-        f"`feature`, or `epic`).\n\n"
+        f"declared work class must be at least that floor (`XS`, `S`, "
+        f"`M`, or `L`).\n\n"
         f"Authorized path manifest (audit mirror — the CI gate parses this PR's "
         f"`.ce/pr-manifests/<branch-slug>.md` carrier in the diff, NOT this body):\n\n"
         f"```text\n{paths_block}\n```\n"
@@ -248,11 +249,13 @@ def _validate(
         raise OpenChangeRefused("plan_ref (the ratified plan/policy reference) is required")
     if not _POLICY_SHA_RE.match(plan_ref):
         raise OpenChangeRefused(f"plan_ref {plan_ref!r} is not a 64-hex policy/plan digest")
-    if declared_work_class not in _WORK_CLASSES:
-        allowed = ", ".join(_WORK_CLASSES)
+    try:
+        normalize_work_class(declared_work_class)
+    except ValueError:
+        allowed = ", ".join(WORK_CLASSES)
         raise OpenChangeRefused(
-            f"declared_work_class {declared_work_class!r} must be one of: {allowed}"
-        )
+            f"declared_work_class must be one of: {allowed} (legacy aliases: tiny, story, feature, epic)"
+        ) from None
 
 
 def _read_open_pr(
@@ -294,7 +297,7 @@ def open_change(
     ``declared_work_class`` is the PR-body declaration consumed by the G5 CI gate.
     Production callers should pass the class derived from ``verify-work-sizing-floor``
     or the same computed floor. When omitted, ``open_change`` emits the valid
-    conservative scaffold fallback ``epic``; that fallback is intentionally not a
+    conservative scaffold fallback ``L``; that fallback is intentionally not a
     claim that this helper computed the diff floor.
     """
     paths = tuple(manifest_paths or ())

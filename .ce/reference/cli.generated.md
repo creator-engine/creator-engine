@@ -22,7 +22,7 @@ Options:
 | --- | --- | --- | --- |
 | `--paths` | no |  | repeatable: repo-relative path changed in the PR (from git diff --name-only) |
 | `--paths-file` | no |  | path to a newline-separated file of changed paths (alternative to --paths) |
-| `--declared-work-class` | no | `epic, feature, story, tiny` | declared PR work class (default: story) |
+| `--declared-work-class` | no | `L, M, S, XS, epic, feature, l, m, s, story, tiny, xs` | declared PR work class (default: S) |
 | `--run-mode` | no | `ceo, dev, strangeLoop` | advisory run mode override for AutoReview/automerge policy evaluation; defaults to the policy state, whose shipped default is dev |
 | `--policy-state` | no |  | path to the automerge policy state JSON (default: .ce/state/automerge/policy.json relative to --repo-root) |
 | `--repo-root` | no |  | repo root for default policy state path (default: current directory) |
@@ -1043,7 +1043,7 @@ Options:
 | --- | --- | --- | --- |
 | `--repo-root` | no |  | PR worktree root (default: current directory) |
 | `--base` | no |  | base branch/ref to fetch and merge-base against (default: origin/main) |
-| `--declared-work-class` | no | `epic, feature, story, tiny` | declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body |
+| `--declared-work-class` | no | `L, M, S, XS, epic, feature, l, m, s, story, tiny, xs` | declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body |
 | `--head-ref` | no |  | PR head branch name for carrier slug (default: current branch) |
 | `--pr-body-file` | no |  | optional PR body file for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate |
 | `--pr-body` | no |  | optional literal PR body for CE-TEST-COUPLING-EXEMPT detection in the test-coupling gate |

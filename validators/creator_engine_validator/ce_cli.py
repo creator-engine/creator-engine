@@ -1508,7 +1508,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_pr.add_argument(
         "--declared-work-class",
-        choices=pr_preflight.WORK_CLASSES,
+        choices=pr_preflight.WORK_CLASS_INPUTS,
         help="declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body",
     )
     validate_pr.add_argument(
@@ -1565,10 +1565,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     automerge_decide.add_argument(
         "--declared-work-class",
-        default="story",
+        default="S",
         dest="declared_work_class",
-        choices=["tiny", "story", "feature", "epic"],
-        help="declared PR work class (default: story)",
+        choices=pr_preflight.WORK_CLASS_INPUTS,
+        help="declared PR work class (default: S)",
     )
     automerge_decide.add_argument(
         "--run-mode",
@@ -3882,7 +3882,7 @@ def _automerge_decide(args) -> int:
 
     decision = decide_automerge(
         changed_paths=changed_paths,
-        declared_work_class=getattr(args, "declared_work_class", "story"),
+        declared_work_class=getattr(args, "declared_work_class", "S"),
         policy_state=policy_state,
         checks=checks,
         review_decision=review_decision,

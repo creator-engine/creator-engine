@@ -17,19 +17,19 @@ from creator_engine_validator.work_sizing import (
 
 
 SIZE_EXPECTATIONS = {
-    "tiny": {
+    "XS": {
         "artifact_set": ("scope_card",),
         "decomposition_depth": 0,
     },
-    "story": {
+    "S": {
         "artifact_set": ("intent_line", "scope_record", "inline_tasks", "tasks.ce.yml"),
         "decomposition_depth": 1,
     },
-    "feature": {
+    "M": {
         "artifact_set": ("spec.md", "plan.md", "tasks.md", "tasks.ce.yml"),
         "decomposition_depth": 2,
     },
-    "epic": {
+    "L": {
         "artifact_set": ("prd.md", "per_feature_plan.md", "thin_slice_scope", "tasks.ce.yml"),
         "decomposition_depth": 3,
     },
@@ -135,37 +135,44 @@ def test_size_axis_controls_only_depth_and_artifacts():
 
 def test_risk_axis_controls_only_gates_and_adr_requirement():
     for mutation_class, expected in RISK_EXPECTATIONS.items():
-        tiny_record = size_ceremony("tiny", mutation_class)
-        feature_record = size_ceremony("feature", mutation_class)
-        assert tuple(tiny_record["ratification_gates"]) == expected["ratification_gates"]
-        assert tuple(feature_record["ratification_gates"]) == expected["ratification_gates"]
-        assert tiny_record["adr_required"] is expected["adr_required"]
-        assert feature_record["adr_required"] is expected["adr_required"]
+        xs_record = size_ceremony("XS", mutation_class)
+        m_record = size_ceremony("M", mutation_class)
+        assert tuple(xs_record["ratification_gates"]) == expected["ratification_gates"]
+        assert tuple(m_record["ratification_gates"]) == expected["ratification_gates"]
+        assert xs_record["adr_required"] is expected["adr_required"]
+        assert m_record["adr_required"] is expected["adr_required"]
 
 
 def test_size_and_risk_axes_are_independent():
-    tiny_identity = size_ceremony("tiny", "identity")
-    feature_docs = size_ceremony("feature", "docs")
+    xs_identity = size_ceremony("XS", "identity")
+    m_docs = size_ceremony("M", "docs")
 
-    assert tiny_identity["decomposition_depth"] == 0
-    assert tiny_identity["artifact_set"] == ["scope_card"]
-    assert tiny_identity["adr_required"] is True
-    assert "operator_human_ratifier" in tiny_identity["ratification_gates"]
+    assert xs_identity["decomposition_depth"] == 0
+    assert xs_identity["artifact_set"] == ["scope_card"]
+    assert xs_identity["adr_required"] is True
+    assert "operator_human_ratifier" in xs_identity["ratification_gates"]
 
-    assert feature_docs["decomposition_depth"] == 2
-    assert feature_docs["artifact_set"] == ["spec.md", "plan.md", "tasks.md", "tasks.ce.yml"]
-    assert feature_docs["adr_required"] is False
-    assert feature_docs["ratification_gates"] == ["auto_back_gate"]
+    assert m_docs["decomposition_depth"] == 2
+    assert m_docs["artifact_set"] == ["spec.md", "plan.md", "tasks.md", "tasks.ce.yml"]
+    assert m_docs["adr_required"] is False
+    assert m_docs["ratification_gates"] == ["auto_back_gate"]
 
 
 def test_size_ceremony_is_deterministic_as_canonical_json_bytes():
-    first = json.dumps(size_ceremony("story", "code"), sort_keys=True, separators=(",", ":")).encode()
-    second = json.dumps(size_ceremony("story", "code"), sort_keys=True, separators=(",", ":")).encode()
+    first = json.dumps(size_ceremony("S", "code"), sort_keys=True, separators=(",", ":")).encode()
+    second = json.dumps(size_ceremony("S", "code"), sort_keys=True, separators=(",", ":")).encode()
     assert first == second
 
 
+def test_legacy_work_class_aliases_map_to_canonical_records():
+    assert size_ceremony("tiny", "docs")["work_class"] == "XS"
+    assert size_ceremony("story", "docs")["work_class"] == "S"
+    assert size_ceremony("feature", "docs")["work_class"] == "M"
+    assert size_ceremony("epic", "docs")["work_class"] == "L"
+
+
 def test_unknown_work_or_mutation_class_fails_closed_with_value_free_error():
-    for bad_work, bad_mutation in (("bogus", "docs"), ("tiny", "bogus")):
+    for bad_work, bad_mutation in (("bogus", "docs"), ("XS", "bogus")):
         try:
             size_ceremony(bad_work, bad_mutation)
         except ValueError as exc:
@@ -197,4 +204,3 @@ def test_reproduces_design_a4_table_exactly():
         for work_class, mutation_class in product(WORK_CLASSES, MUTATION_CLASSES)
     }
     assert observed == expected
-

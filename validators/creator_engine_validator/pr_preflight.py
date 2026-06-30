@@ -19,8 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class
+
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
-WORK_CLASSES = ("tiny", "story", "feature", "epic")
 DEFAULT_TEST_COMMAND = (
     f"{shlex.quote(sys.executable)} -m pytest -p no:cacheprovider "
     'validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup'
@@ -225,12 +226,13 @@ def _resolve_declared_work_class(
     runner: Runner,
 ) -> str:
     if config.declared_work_class:
-        declared = config.declared_work_class
-        if declared not in WORK_CLASSES:
+        try:
+            return normalize_work_class(config.declared_work_class)
+        except ValueError:
             raise RuntimeError(
-                f"declared work class {declared!r} is invalid; expected one of: {', '.join(WORK_CLASSES)}"
-            )
-        return declared
+                "declared work class is invalid; expected one of: "
+                f"{', '.join(WORK_CLASSES)} (legacy aliases: tiny, story, feature, epic)"
+            ) from None
 
     from .checks.path_manifest_fidelity import MANIFEST_DIR, branch_slug
 
@@ -259,15 +261,17 @@ def _resolve_declared_work_class(
         locations = ", ".join(str(path.relative_to(config.repo_root)) for path, _ in found) or "none"
         raise RuntimeError(
             "PR body/carrier must contain exactly one declared work class line: "
-            "'- **Declared work class:** <tiny|story|feature|epic>' "
+            "'- **Declared work class:** <XS|S|M|L>' "
             f"(found {len(values)}; locations: {locations})"
         )
     declared = values[0]
-    if declared not in WORK_CLASSES:
+    try:
+        return normalize_work_class(declared)
+    except ValueError:
         raise RuntimeError(
-            f"declared work class {declared!r} is invalid; expected one of: {', '.join(WORK_CLASSES)}"
-        )
-    return declared
+            "declared work class is invalid; expected one of: "
+            f"{', '.join(WORK_CLASSES)} (legacy aliases: tiny, story, feature, epic)"
+        ) from None
 
 
 def _resolve_test_coupling_pr_body(

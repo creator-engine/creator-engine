@@ -19,6 +19,7 @@ from typing import Any, Final, Iterable
 from ..loader import LoaderError, load_yaml
 from ..reporting import CheckResult, ValidationError, make_error
 from ..schema import validate_with_schema
+from ..work_sizing import WORK_CLASSES, normalize_work_class
 from . import register
 
 CHECK_NAME = "work_sizing_floor"
@@ -29,7 +30,6 @@ KIND_VALUE = "work-sizing-floor-record"
 CODE_SCHEMA = "VAL-WORK-SIZING-FLOOR-SCHEMA"
 CODE_INVALID = "VAL-WORK-SIZING-FLOOR-INVALID"
 
-WORK_CLASSES: Final[tuple[str, ...]] = ("tiny", "story", "feature", "epic")
 _LOCKFILE_NAMES: Final[frozenset[str]] = frozenset(
     {
         "cargo.lock",
@@ -164,12 +164,12 @@ def _coerce_change_stat(raw: ChangeStat | dict[str, Any]) -> ChangeStat:
 
 def _size_band(included_lines: int) -> tuple[str, str]:
     if included_lines < 400:
-        return "target_advisory", "tiny"
+        return "target_advisory", "XS"
     if included_lines < 800:
-        return "warn", "story"
+        return "warn", "S"
     if included_lines <= 1000:
-        return "explain_or_split", "feature"
-    return "split_required", "epic"
+        return "explain_or_split", "M"
+    return "split_required", "L"
 
 
 def classify_change_size(change_stats: Iterable[ChangeStat | dict[str, Any]]) -> dict[str, Any]:
@@ -208,12 +208,11 @@ def sizing_floor_projection(
     change_stats: Iterable[ChangeStat | dict[str, Any]],
 ) -> dict[str, Any]:
     """Return derived floor fields for the declared work class."""
-    if declared_work_class not in WORK_CLASSES:
-        raise ValueError("unknown work_class")
+    declared_work_class = normalize_work_class(declared_work_class)
     projection = classify_change_size(change_stats)
     projection["floor_met"] = (
         WORK_CLASSES.index(declared_work_class)
-        >= WORK_CLASSES.index(str(projection["minimum_work_class"]))
+        >= WORK_CLASSES.index(normalize_work_class(str(projection["minimum_work_class"])))
     )
     return projection
 

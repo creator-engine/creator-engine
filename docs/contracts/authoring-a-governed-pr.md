@@ -8,7 +8,7 @@ The source of truth is the committed PR diff, not the working tree.
 Every PR body must contain exactly one declared work class line:
 
 ```text
-- **Declared work class:** <tiny|story|feature|epic>
+- **Declared work class:** <XS|S|M|L>
 ```
 
 Use the smallest honest class that satisfies the work-sizing floor. If the
@@ -20,7 +20,7 @@ work.
 Run from the PR worktree:
 
 ```bash
-scripts/ce-preflight.sh --base origin/main --head-ref "$(git branch --show-current)" --declared-work-class feature
+scripts/ce-preflight.sh --base origin/main --head-ref "$(git branch --show-current)" --declared-work-class M
 ```
 
 The command refuses a dirty worktree by default because it validates committed
@@ -82,7 +82,7 @@ its branch slug:
 The branch slug is produced by
 `creator_engine_validator.checks.path_manifest_fidelity.branch_slug(head_ref)`.
 For implementation PRs like this lane, the declared work class is normally
-`feature` unless the committed diff proves a smaller or larger class.
+`M` unless the committed diff proves a smaller or larger class.
 
 ## Manifest-fidelity recipe
 

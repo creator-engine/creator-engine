@@ -78,7 +78,7 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
         return _refuse("kill_switch_not_false", payload)
     if payload.get("class_flag") is not True:
         return _refuse("class_flag_not_true", payload)
-    if payload.get("class") not in {"tiny", "story"}:
+    if payload.get("class") not in {"XS", "S"}:
         return _refuse("work_class_outside_canary", payload)
 
     enabling_ref = payload.get("enabling_decision_ref")
