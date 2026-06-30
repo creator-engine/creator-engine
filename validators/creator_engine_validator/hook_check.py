@@ -28,12 +28,13 @@ event it is handed.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
 
 from .seat_class import (
@@ -1142,6 +1143,19 @@ _TOOLCHAIN_SELF_UPDATE_DENY_REASON = (
     "rolled out canonically — see ce-ops#271 / rented-surface governance"
 )
 
+_CONTAINED_OR_FLEET_ENV_MARKERS = frozenset(
+    {
+        "CE_EGRESS_BROKER_SOCKET",
+        "CE_EGRESS_SELF_REVIEW_SOCKET",
+        "CE_SEAT_ID",
+        "CE_FLEET_ID",
+        "CE_FLEET_SCOPE",
+        "CE_VPS_CONTAINER_NAME",
+        "CE_DGX_CONTAINER_NAME",
+        "CE_DGX_CONTROLLER_CONTAINER_NAME",
+    }
+)
+
 
 def _mechanics_would_deny(command: Any, context: HookContext) -> str | None:
     action = classify_mechanics(command)
@@ -1156,6 +1170,37 @@ def _mechanics_would_deny(command: Any, context: HookContext) -> str | None:
         f"restricted mechanic ({action}) is denied without a matching ratified "
         "reviewer-venue side-effect-authority envelope (G2.007.2)"
     )
+
+
+def startup_toolchain_self_update_denied(
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: str | Path | None = None,
+) -> tuple[bool, str | None]:
+    """Return whether CE startup self-update checks are statically off.
+
+    This is the startup-check counterpart to the Ring-1
+    ``toolchain_self_update`` deny path: governed posture, contained seats, and
+    fleet-marked seats do not perform self-update egress probes.
+    """
+    source = env if env is not None else os.environ
+    for marker in sorted(_CONTAINED_OR_FLEET_ENV_MARKERS):
+        if source.get(marker):
+            return True, _TOOLCHAIN_SELF_UPDATE_DENY_REASON.format(matched=marker)
+
+    root = Path(cwd) if cwd is not None else Path.cwd()
+    ledger_root = source.get("CE_LEDGER_ROOT")
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ce update --check"},
+        "cwd": str(root),
+    }
+    context = build_context(event, posture_root=str(root), ledger_root=ledger_root)
+    if context.posture == "governed":
+        reason = _mechanics_would_deny("ce update --check", context)
+        return True, reason or _TOOLCHAIN_SELF_UPDATE_DENY_REASON.format(matched="ce")
+    return False, None
 
 
 def _secret_would_deny(file_path: Any, context: HookContext) -> str | None:

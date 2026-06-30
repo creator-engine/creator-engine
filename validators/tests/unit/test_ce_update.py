@@ -4,7 +4,10 @@ import base64
 import hashlib
 import io
 import json
+import sys
+import time
 import zipfile
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -223,6 +226,133 @@ def test_check_mode_is_read_only_with_signed_release():
     assert result.update_available is True
     assert result.available is not None
     assert result.available.token.startswith("0.3.0+")
+
+
+def test_startup_notice_check_is_spec_only_and_downloads_no_wheels(tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.1", build_sha="b" * 40)
+    calls: list[str] = []
+
+    def fetch(url: str) -> bytes:
+        calls.append(url)
+        return mapping[url]
+
+    result = update_runtime.check_startup_update_notice(
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=fetch,
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.3.0", "a" * 40),
+        cache_path=tmp_path / "update-check.json",
+        now=100.0,
+    )
+
+    assert result.update_available is True
+    assert result.notice_due is True
+    assert calls == [
+        f"{SITE}/llms-install.md",
+        f"{SITE}/keys/ce-root-v1",
+        ANCHOR_URL,
+    ]
+    assert not any(call.endswith(".whl") for call in calls)
+
+
+def test_startup_notice_check_fails_open_on_error_and_timeout(tmp_path: Path):
+    def error_fetch(_url: str) -> bytes:
+        raise RuntimeError("network down")
+
+    error_result = update_runtime.check_startup_update_notice(
+        fetcher=error_fetch,
+        installed=update_runtime.InstalledIdentity("0.3.0", "a" * 40),
+        cache_path=tmp_path / "error.json",
+    )
+
+    assert error_result.update_available is False
+    assert error_result.notice_due is False
+
+    def slow_fetch(_url: str) -> bytes:
+        time.sleep(0.2)
+        return b""
+
+    start = time.monotonic()
+    slow_result = update_runtime.check_startup_update_notice(
+        fetcher=slow_fetch,
+        installed=update_runtime.InstalledIdentity("0.3.0", "a" * 40),
+        cache_path=tmp_path / "slow.json",
+        fetch_timeout_seconds=0.01,
+    )
+
+    assert time.monotonic() - start < 0.15
+    assert slow_result.update_available is False
+    assert slow_result.notice_due is False
+
+
+def test_startup_notice_check_opt_out_skips_fetch(tmp_path: Path):
+    def forbidden_fetch(_url: str) -> bytes:
+        raise AssertionError("opt-out must skip fetch")
+
+    result = update_runtime.check_startup_update_notice(
+        fetcher=forbidden_fetch,
+        installed=update_runtime.InstalledIdentity("0.3.0", "a" * 40),
+        cache_path=tmp_path / "disabled.json",
+        env={update_runtime.STARTUP_UPDATE_DISABLE_ENV: "off"},
+    )
+
+    assert result.update_available is False
+    assert result.reason == "disabled"
+
+
+def test_startup_notice_prints_once_for_interactive_solo_stable(monkeypatch, capsys):
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    cache_path = Path("/tmp/ce-startup-test-cache.json")
+    calls: list[str] = []
+
+    def fake_check():
+        calls.append("check")
+        return update_runtime.StartupUpdateCheck(
+            update_available=True,
+            available_semver="0.3.1",
+            notice_due=True,
+            cache_path=cache_path,
+        )
+
+    shown: list[Path | None] = []
+
+    monkeypatch.setattr(sys, "stdin", Tty())
+    monkeypatch.setattr(sys, "stdout", Tty())
+    monkeypatch.setattr(ce_cli.hook_check, "startup_toolchain_self_update_denied", lambda **_kwargs: (False, None))
+    monkeypatch.setattr(update_runtime, "check_startup_update_notice", fake_check)
+    monkeypatch.setattr(update_runtime, "mark_startup_update_notice_shown", lambda path=None: shown.append(path))
+
+    ce_cli._maybe_print_startup_update_notice(Namespace(json_output=False))
+
+    assert calls == ["check"]
+    assert shown == [cache_path]
+    assert "ce 0.3.1 available - run 'ce update'" in capsys.readouterr().err
+
+
+def test_startup_notice_checker_off_for_contained_or_json(monkeypatch):
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    calls: list[str] = []
+
+    def forbidden_check():
+        calls.append("check")
+        raise AssertionError("posture/json gate must skip checker")
+
+    monkeypatch.setattr(sys, "stdin", Tty())
+    monkeypatch.setattr(sys, "stdout", Tty())
+    monkeypatch.setenv("CE_SEAT_ID", "dev-1")
+    monkeypatch.setattr(update_runtime, "check_startup_update_notice", forbidden_check)
+
+    ce_cli._maybe_print_startup_update_notice(Namespace(json_output=False))
+    ce_cli._maybe_print_startup_update_notice(Namespace(json_output=True))
+
+    assert calls == []
 
 
 def test_ce_update_check_cli_uses_read_only_runtime(monkeypatch, capsys):

@@ -1177,6 +1177,33 @@ def test_gate_b_regression_1_real_ledger_pinned_seat_governed_via_real_claim(tmp
     assert ctx.posture == "governed"
 
 
+def test_startup_update_gate_reuses_governed_posture_predicate(tmp_path):
+    real_ledger = tmp_path / "root" / ".hermes" / "active-work-ledger"
+    _write_real_ledger(real_ledger, lane="real-lane")
+    wt = _worktree_with_examples_footgun(tmp_path)
+
+    denied, reason = hook_check.startup_toolchain_self_update_denied(
+        env={"CE_LEDGER_ROOT": str(real_ledger)},
+        cwd=wt,
+    )
+
+    assert denied is True
+    assert reason is not None
+    assert "toolchain self-update" in reason
+    assert "ce-ops#271" in reason
+
+
+def test_startup_update_gate_rejects_contained_or_fleet_markers(tmp_path):
+    denied, reason = hook_check.startup_toolchain_self_update_denied(
+        env={"CE_SEAT_ID": "dev-1"},
+        cwd=tmp_path,
+    )
+
+    assert denied is True
+    assert reason is not None
+    assert "toolchain self-update" in reason
+
+
 def test_gate_b_regression_2_unpinned_seat_is_ungoverned(tmp_path):
     # (2) An unallocated / unpinned seat resolves `ungoverned` (advisory). The
     # worktree carries the examples footgun but, with no ledger pin and no real
