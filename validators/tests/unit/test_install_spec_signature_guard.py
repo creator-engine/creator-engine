@@ -119,6 +119,37 @@ def test_validate_file_rejects_non_verifying_ssh_signature(tmp_path: Path):
     assert _codes(errors) == {CODE_VERIFY}
 
 
+def test_validate_file_reports_actionable_missing_ssh_keygen(tmp_path: Path, monkeypatch):
+    signature_value = base64.b64encode(b"mock-sshsig").decode("ascii")
+    spec_path = _write_spec(tmp_path / "llms-install.md", signature_value)
+    monkeypatch.setattr(guard.shutil, "which", lambda _name: None)
+
+    errors = validate_file(spec_path, verifier=None)
+
+    assert _codes(errors) == {CODE_VERIFY}
+    assert "missing_dependency_ssh_keygen" in errors[0].message
+    assert "sudo apt-get install -y openssh-client" in errors[0].message
+    assert "sudo dnf install -y openssh-clients" in errors[0].message
+    assert "brew install openssh" in errors[0].message
+
+
+def test_validate_file_reports_actionable_ssh_keygen_exec_race(tmp_path: Path, monkeypatch):
+    signature_value = base64.b64encode(b"mock-sshsig").decode("ascii")
+    spec_path = _write_spec(tmp_path / "llms-install.md", signature_value)
+    monkeypatch.setattr(guard.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def missing_binary(*_args, **_kwargs):
+        raise FileNotFoundError("ssh-keygen")
+
+    monkeypatch.setattr(guard.subprocess, "run", missing_binary)
+
+    errors = validate_file(spec_path, verifier=None)
+
+    assert _codes(errors) == {CODE_VERIFY}
+    assert "missing_dependency_ssh_keygen" in errors[0].message
+    assert "openssh-client" in errors[0].message
+
+
 def test_validate_repo_checks_versioned_mirrors_when_present(tmp_path: Path):
     good_signature = base64.b64encode(b"mock-sshsig").decode("ascii")
     _repo_with_spec(tmp_path, good_signature)

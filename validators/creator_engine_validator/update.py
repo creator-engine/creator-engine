@@ -29,7 +29,7 @@ from typing import Any, Callable, Mapping
 from urllib.parse import urljoin
 from urllib.request import urlopen as _stdlib_urlopen
 
-from . import _version, ce_provenance
+from . import _version, ce_provenance, install_prereqs
 from .bootstrap_manifest import (
     BootstrapManifest,
     BootstrapManifestError,
@@ -489,32 +489,35 @@ def _ssh_keygen_verify_runner(
     namespace: str,
 ) -> bool:
     if not shutil.which("ssh-keygen"):
-        return False
+        raise UpdateRefused(install_prereqs.ssh_keygen_missing_detail())
     with tempfile.TemporaryDirectory(prefix="ce-update-sshsig-") as tmp:
         root = Path(tmp)
         allowed_path = root / "allowed_signers"
         sig_path = root / "spec.sig"
         allowed_path.write_text(allowed_signers + "\n", encoding="utf-8")
         sig_path.write_bytes(signature)
-        proc = subprocess.run(
-            [
-                "ssh-keygen",
-                "-Y",
-                "verify",
-                "-f",
-                str(allowed_path),
-                "-I",
-                identity,
-                "-n",
-                namespace,
-                "-s",
-                str(sig_path),
-            ],
-            input=message,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                [
+                    "ssh-keygen",
+                    "-Y",
+                    "verify",
+                    "-f",
+                    str(allowed_path),
+                    "-I",
+                    identity,
+                    "-n",
+                    namespace,
+                    "-s",
+                    str(sig_path),
+                ],
+                input=message,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise UpdateRefused(install_prereqs.ssh_keygen_missing_detail()) from exc
         return proc.returncode == 0
 
 

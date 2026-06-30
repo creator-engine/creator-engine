@@ -72,6 +72,7 @@ from . import (
     coordination,
     dispatch_worktree,
     evidence_sink,
+    install_prereqs,
     onboard_apply,
     onboard_apply_live,
     playbook_runtime,
@@ -3060,6 +3061,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 {"error": "refused", "detail": "signature_refused: no fetched trust-root key id is pinned by this wheel"},
             )
         pinned_keys_for_plan = usable_keys
+        if not shutil.which("ssh-keygen"):
+            return _emit_missing_ssh_keygen(args)
         apply_verifier = v3_installer.ssh_ed25519_verifier(_ssh_keygen_verify_runner)
         try:
             signed = v3_installer.parse_signed_install_spec(spec_bytes)
@@ -3096,6 +3099,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             )
         self_attested = False
     elif apply_mode or args.sig_algo == v3_installer.SSH_ED25519_ALGO:
+        if not shutil.which("ssh-keygen"):
+            return _emit_missing_ssh_keygen(args)
         apply_verifier = v3_installer.ssh_ed25519_verifier(_ssh_keygen_verify_runner)
         if args.sig_value is not None:
             apply_signature = {
@@ -3813,6 +3818,16 @@ def _which(tool: str) -> bool:
     return bool(shutil.which(tool))
 
 
+def _emit_missing_ssh_keygen(args: argparse.Namespace) -> int:
+    detail = install_prereqs.ssh_keygen_missing_detail()
+    return _emit(
+        args,
+        1,
+        [f"{_BRAND} · onboard REFUSED: {detail}"],
+        {"error": "refused", "detail": detail},
+    )
+
+
 def _ssh_keygen_verify_runner(
     *,
     message: bytes,
@@ -3823,32 +3838,35 @@ def _ssh_keygen_verify_runner(
 ) -> bool:
     """Verify an OpenSSH SSHSIG with stock ``ssh-keygen``."""
     if not shutil.which("ssh-keygen"):
-        return False
+        raise v3_installer.InstallRefused(install_prereqs.ssh_keygen_missing_detail())
     with tempfile.TemporaryDirectory(prefix="ce-sshsig-") as tmp:
         root = Path(tmp)
         allowed_path = root / "allowed_signers"
         sig_path = root / "spec.sig"
         allowed_path.write_text(allowed_signers + "\n", encoding="utf-8")
         sig_path.write_bytes(signature)
-        proc = subprocess.run(
-            [
-                "ssh-keygen",
-                "-Y",
-                "verify",
-                "-f",
-                str(allowed_path),
-                "-I",
-                identity,
-                "-n",
-                namespace,
-                "-s",
-                str(sig_path),
-            ],
-            input=message,
-            check=False,
-            capture_output=True,
-            timeout=20,
-        )
+        try:
+            proc = subprocess.run(
+                [
+                    "ssh-keygen",
+                    "-Y",
+                    "verify",
+                    "-f",
+                    str(allowed_path),
+                    "-I",
+                    identity,
+                    "-n",
+                    namespace,
+                    "-s",
+                    str(sig_path),
+                ],
+                input=message,
+                check=False,
+                capture_output=True,
+                timeout=20,
+            )
+        except FileNotFoundError as exc:
+            raise v3_installer.InstallRefused(install_prereqs.ssh_keygen_missing_detail()) from exc
     return proc.returncode == 0
 
 
