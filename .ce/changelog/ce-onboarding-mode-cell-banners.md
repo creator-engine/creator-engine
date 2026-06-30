@@ -6,8 +6,8 @@ scope: docs
 issue: ce-ops#673
 ---
 
-**Add Solo+Dev scope banners and Solo+CEO onboarding guide.**
+**Add Solo+Dev and Solo+CEO onboarding guides with scope-mode cell banners.**
 
-- Add mode-cell banners to getting-started-step-by-step.md and agile-to-ce-sdlc.md
-- Author solo-ceo-onboarding.md for the Solo+CEO mode cell
-- Register the new guide in docs/index.html
+Add Solo+Dev onboarding guide, Solo+CEO onboarding guide, update speckit-retirement banners in existing guides, and add nav links in docs/index.html.
+
+- **Declared work class:** story

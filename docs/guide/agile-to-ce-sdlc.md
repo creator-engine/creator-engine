@@ -16,13 +16,11 @@ contributor's companion to both. For the install-to-ship walkthrough, the
 > merged result. Everything below works for **any** project; we occasionally use
 > a sample project for flavor.
 
-> **You are in: Solo + Dev mode.** This guide is written for the **Solo + Dev**
-> cell: you type `/speckit-*` slash commands yourself to drive the pipeline, and
-> you hold the Frame + Shape decisions explicitly at each step. If you are in
-> **Solo + CEO** mode — where the agent runs the pipeline under the hood and
-> your interaction is framing intent, reviewing the Scopes and plans the agent
-> assembles, and ratifying each gate — see
-> [`solo-ceo-onboarding.md`](./solo-ceo-onboarding.md) instead.
+> **Spec-kit is being retired.** This guide describes the legacy spec-kit path.
+> For the current `ce` hands-on path, see
+> [`solo-dev-onboarding.md`](./solo-dev-onboarding.md). For the **Solo + CEO**
+> path (agent drives, you ratify), see
+> [`solo-ceo-onboarding.md`](./solo-ceo-onboarding.md).
 
 ---
 
