@@ -49,7 +49,10 @@ def _happy_surfaces() -> list[dict[str, object]]:
         _surface(
             "rust",
             version="1-bookworm",
-            commit_or_digest="sha256:" + "c" * 64,
+            commit_or_digest={
+                "amd64": "sha256:" + "c" * 64,
+                "arm64": "sha256:" + "d" * 64,
+            },
             source="docker.io/library/rust:1-bookworm",
             custody="docker-base-image",
         ),
@@ -59,7 +62,7 @@ def _happy_surfaces() -> list[dict[str, object]]:
 def test_build_args_render_happy_path(tmp_path: Path):
     manifest = _manifest(tmp_path, _happy_surfaces())
 
-    rendered = render.render_build_args(manifest)
+    rendered = render.render_build_args(manifest, arch="amd64")
 
     assert render._lines(rendered) == [
         "--build-arg HERDR_COMMIT_OR_DIGEST=ff924966",
@@ -78,12 +81,12 @@ def test_build_args_render_happy_path(tmp_path: Path):
 def test_launch_env_render_happy_path(tmp_path: Path):
     manifest = _manifest(tmp_path, _happy_surfaces())
 
-    rendered = render.render_launch_env(manifest)
+    rendered = render.render_launch_env(manifest, arch="arm64")
 
     assert render._lines(rendered) == [
         "export HERDR_COMMIT_OR_DIGEST=ff924966",
         "export HERDR_SOURCE=https://github.com/creator-engine/herdr-ce.git",
-        "export RUST_COMMIT_OR_DIGEST=sha256:" + "c" * 64,
+        "export RUST_COMMIT_OR_DIGEST=sha256:" + "d" * 64,
         "export RUST_SOURCE=docker.io/library/rust:1-bookworm",
         "export RUST_VERSION=1-bookworm",
         "export ZIG_TOOLCHAIN_LINUX_AARCH64_SHA256=" + "a" * 64,
@@ -141,3 +144,12 @@ def test_output_is_deterministic_and_stable(tmp_path: Path):
     second = _manifest(tmp_path / "second", list(reversed(_happy_surfaces())))
 
     assert render._lines(render.render_build_args(first)) == render._lines(render.render_build_args(second))
+
+
+def test_base_image_mapping_without_target_arch_emits_arch_specific_keys(tmp_path: Path):
+    manifest = _manifest(tmp_path, _happy_surfaces())
+
+    rendered = render.render_build_args(manifest)
+
+    assert "--build-arg RUST_AMD64_COMMIT_OR_DIGEST=" + "c" * 64 in render._lines(rendered)
+    assert "--build-arg RUST_ARM64_COMMIT_OR_DIGEST=" + "d" * 64 in render._lines(rendered)

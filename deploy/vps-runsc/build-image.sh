@@ -48,7 +48,7 @@ done
 
 surface_build_args=()
 surface_build_args_file="$(mktemp "${TMPDIR:-/tmp}/ce-vps-surface-build-args.XXXXXX")"
-python3 "${repo_root}/surfaces/render.py" build-args > "${surface_build_args_file}"
+python3 "${repo_root}/surfaces/render.py" --arch amd64 build-args > "${surface_build_args_file}"
 while read -r flag assignment; do
   surface_build_args+=("${flag}" "${assignment}")
 done < "${surface_build_args_file}"

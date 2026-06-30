@@ -26,6 +26,7 @@ CODE_MISSING_FIELD = "surfaces_manifest_missing_field"
 CODE_PINNABLE_MISSING_DIGEST = "surfaces_manifest_pinnable_missing_digest"
 CODE_PYTHON_DIGEST_WARNING = "surfaces_manifest_python_digest_pending"
 CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST = "surfaces_manifest_consistency_pinnable_missing_digest"
+CODE_BASE_IMAGE_ARCH_DIGEST_MISSING = "surfaces_manifest_base_image_arch_digest_missing"
 CODE_DOCKERFILE_FROM_MISSING_DIGEST = "surfaces_manifest_dockerfile_from_missing_digest"
 CODE_DOCKERFILE_FROM_DIGEST_MISMATCH = "surfaces_manifest_dockerfile_from_digest_mismatch"
 CODE_ARG_MISMATCH = "surfaces_manifest_arg_mismatch"
@@ -63,6 +64,15 @@ KNOWN_SURFACES = frozenset(
 PYTHON_DEP_SURFACES = frozenset({"pyyaml", "jsonschema", "textual"})
 PHASE1_PENDING_DIGEST_SURFACES = frozenset({"codex", *PYTHON_DEP_SURFACES})
 ZIG_ARCHES = frozenset({"linux-aarch64", "linux-x86_64"})
+DUAL_ARCH_BASE_IMAGE_ARCHES = frozenset({"amd64", "arm64"})
+ARCH_ALIASES = {
+    "amd64": "amd64",
+    "x86_64": "amd64",
+    "linux/amd64": "amd64",
+    "arm64": "arm64",
+    "aarch64": "arm64",
+    "linux/arm64": "arm64",
+}
 SHA_RE = re.compile(r"^[0-9a-f]{8,40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SEMVER_RE = re.compile(r"(?<!\d)\d+\.\d+\.\d+(?!\d)")
@@ -210,11 +220,23 @@ def _normal_sha256(value: object) -> str | None:
     return None
 
 
+def _normal_arch(value: object) -> str | None:
+    if value is None:
+        return None
+    return ARCH_ALIASES.get(str(value).strip().lower())
+
+
 def _is_host_only(surface: dict[str, Any]) -> bool:
     source = str(surface.get("source", "")).lower()
     custody = str(surface.get("custody", "")).lower()
     update_policy = str(surface.get("update_policy", "")).lower()
     return source.startswith("host:") or "host-only" in custody or "host inventory" in update_policy
+
+
+def _is_base_image_surface(surface: dict[str, Any]) -> bool:
+    source = str(surface.get("source", "")).lower()
+    custody = str(surface.get("custody", "")).lower()
+    return source.startswith("docker.io/") and "docker-base-image" in custody
 
 
 def _pinnable_null_digest_errors(path: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
@@ -253,16 +275,27 @@ def _iter_dockerfiles(repo_root: Path) -> Iterable[Path]:
 
 
 def _from_image_token(line: str) -> str | None:
+    parsed = _from_image_and_platform(line)
+    return parsed[0] if parsed is not None else None
+
+
+def _from_image_and_platform(line: str) -> tuple[str, str | None] | None:
     match = FROM_RE.match(line)
     if not match:
         return None
     tokens = match.group("body").split()
     index = 0
+    platform: str | None = None
     while index < len(tokens) and tokens[index].startswith("--"):
+        if tokens[index].startswith("--platform="):
+            platform = tokens[index].split("=", 1)[1]
+        elif tokens[index] == "--platform" and index + 1 < len(tokens):
+            platform = tokens[index + 1]
+            index += 1
         index += 1
     if index >= len(tokens):
         return None
-    return tokens[index]
+    return tokens[index], platform
 
 
 def _matching_surface_for_image(image: str, by_name: dict[str, dict[str, Any]]) -> tuple[str, dict[str, Any]] | None:
@@ -287,6 +320,96 @@ def _matches_manifest_arg_ref(image: str, surface: dict[str, Any]) -> bool:
     )
 
 
+def _dockerfile_target_arch(path: Path, platform: str | None) -> str | None:
+    explicit = _normal_arch(platform)
+    if explicit is not None:
+        return explicit
+    normalized = path.as_posix()
+    if normalized.endswith("deploy/vps-runsc/Dockerfile") or "/deploy/vps-runsc/" in normalized:
+        return "amd64"
+    if (
+        normalized.endswith("deploy/dgx-runsc/Dockerfile")
+        or normalized.endswith("deploy/dgx-controller-runsc/Dockerfile")
+        or "/deploy/dgx-runsc/" in normalized
+        or "/deploy/dgx-controller-runsc/" in normalized
+    ):
+        return "arm64"
+    return None
+
+
+def _surface_digest_for_arch(surface: dict[str, Any], arch: str | None) -> str | None:
+    digest = _surface_commit_or_digest(surface)
+    if isinstance(digest, str):
+        return _normal_sha256(digest)
+    if not isinstance(digest, dict) or arch is None:
+        return None
+    for raw_arch, payload in digest.items():
+        if _normal_arch(raw_arch) != arch:
+            continue
+        if isinstance(payload, str):
+            return _normal_sha256(payload)
+        if isinstance(payload, dict):
+            return _normal_sha256(payload.get("sha256"))
+    return None
+
+
+def _base_image_arch_digest_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
+    used_arches: dict[str, set[str]] = {}
+    surfaces_by_key: dict[str, dict[str, Any]] = {}
+    for path in _iter_dockerfiles(repo_root):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line in lines:
+            parsed = _from_image_and_platform(line)
+            if parsed is None:
+                continue
+            image, platform = parsed
+            matched = _matching_surface_for_image(image, by_name)
+            if matched is None:
+                continue
+            surface_key, surface = matched
+            if not _is_base_image_surface(surface):
+                continue
+            arch = _dockerfile_target_arch(path, platform)
+            if arch in DUAL_ARCH_BASE_IMAGE_ARCHES:
+                used_arches.setdefault(surface_key, set()).add(arch)
+                surfaces_by_key[surface_key] = surface
+
+    errors: list[ValidationError] = []
+    manifest = repo_root / MANIFEST
+    for surface_key, arches in sorted(used_arches.items()):
+        if not DUAL_ARCH_BASE_IMAGE_ARCHES.issubset(arches):
+            continue
+        surface = surfaces_by_key[surface_key]
+        name = surface.get("name", surface_key)
+        digest = _surface_commit_or_digest(surface)
+        if not isinstance(digest, dict):
+            errors.append(
+                make_error(
+                    CODE_BASE_IMAGE_ARCH_DIGEST_MISSING,
+                    manifest,
+                    f"{name}.commit_or_digest",
+                    f"base image {name!r} is used by amd64 and arm64 Dockerfiles and must declare both arch digests",
+                    CONSISTENT_CONTRACT,
+                )
+            )
+            continue
+        for arch in sorted(DUAL_ARCH_BASE_IMAGE_ARCHES):
+            if _surface_digest_for_arch(surface, arch) is None:
+                errors.append(
+                    make_error(
+                        CODE_BASE_IMAGE_ARCH_DIGEST_MISSING,
+                        manifest,
+                        f"{name}.commit_or_digest.{arch}",
+                        f"base image {name!r} is used by amd64 and arm64 Dockerfiles and must declare a sha256 digest for {arch}",
+                        CONSISTENT_CONTRACT,
+                    )
+                )
+    return errors
+
+
 def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for path in _iter_dockerfiles(repo_root):
@@ -298,17 +421,22 @@ def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> l
             )
             continue
         for line_no, line in enumerate(lines, start=1):
-            image = _from_image_token(line)
-            if image is None or image.lower() == "scratch":
+            parsed = _from_image_and_platform(line)
+            if parsed is None:
+                continue
+            image, platform = parsed
+            if image.lower() == "scratch":
                 continue
             matched = _matching_surface_for_image(image, by_name)
             if matched is None:
                 continue
             surface_key, surface = matched
-            manifest_digest = _normal_sha256(_surface_commit_or_digest(surface))
-            if manifest_digest is None:
-                continue
             if _matches_manifest_arg_ref(image, surface):
+                continue
+            manifest_digest = _surface_digest_for_arch(surface, _dockerfile_target_arch(path, platform))
+            if manifest_digest is None:
+                manifest_digest = _normal_sha256(_surface_commit_or_digest(surface))
+            if manifest_digest is None:
                 continue
             if "@sha256:" not in image:
                 errors.append(
@@ -575,6 +703,7 @@ def validate_repo_consistent(repo_root: Path) -> CheckResult:
         by_name, index_errors = _index_surfaces(manifest, surfaces)
         errors.extend(index_errors)
         errors.extend(_pinnable_null_digest_errors(manifest, by_name))
+        errors.extend(_base_image_arch_digest_errors(repo_root, by_name))
         errors.extend(_dockerfile_errors(repo_root, by_name))
         errors.extend(_arg_errors(repo_root, by_name))
         errors.extend(_runsc_image_errors(repo_root, by_name))

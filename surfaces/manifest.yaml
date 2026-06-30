@@ -37,18 +37,22 @@ surfaces:
 
   - name: rust
     version: "1-bookworm"
-    commit_or_digest: sha256:c993d32d95cc146bd12c84d66f0b924a6a96f3988325f39c144f2f9893dea120
+    commit_or_digest:
+      amd64: sha256:c993d32d95cc146bd12c84d66f0b924a6a96f3988325f39c144f2f9893dea120
+      arm64: sha256:05f85ef6eb0f2600ac62e9d779642b5b362d5be2ed67b80e162fae6e28b66524
     source: docker.io/library/rust:1-bookworm
     custody: docker-base-image
-    update_policy: linux/amd64 digest pin required before Dockerfile use
+    update_policy: per-architecture digest pin required before Dockerfile use
     last_evaluated: "2026-06-26"
 
   - name: debian
     version: "bookworm-slim"
-    commit_or_digest: sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4
+    commit_or_digest:
+      amd64: sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4
+      arm64: sha256:675b032d19e294c9eb2525b24ee63e6dc718854a481c6fd6f5e0aefcaf8208a1
     source: docker.io/library/debian:bookworm-slim
     custody: docker-base-image
-    update_policy: linux/amd64 digest pin required before Dockerfile use
+    update_policy: per-architecture digest pin required before Dockerfile use
     last_evaluated: "2026-06-26"
 
   - name: OCI CPython base image
