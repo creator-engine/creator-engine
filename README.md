@@ -106,7 +106,7 @@ platform evolves:
   provides local repo-native operations such as `check`, `doctor`, `init`,
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `dequeue`, `event`, `pcl`,
   `brain`, `orchestrator`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
-  `pickup`, `dispatch`, `playbook`, `surfaces`, `bootstrap`, `verify-install`, `update`, `onboard`, `publish-branch`,
+  `pickup`, `dispatch`, `playbook`, `surfaces`, `bootstrap`, `verify-install`, `update`, `clean-main-install`, `onboard`, `publish-branch`,
   `harness-matrix`, `containment-status`, `validate-pr`, `automerge-decide`, and `automerge-status`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
@@ -115,8 +115,12 @@ platform evolves:
   `ce dispatch`, `ce playbook`, `ce surfaces`, `ce bootstrap`
   (offline provisioning for a source-clone controller/seat venv),
   `ce verify-install` (post-install provenance verification for a pinned CE
-  release venv), `ce update` (signed in-place CE release updates, with
-  `ce update --check` as the read-only installed-vs-available data source),
+  release venv), `ce update` (signed in-place CE release updates by default,
+  with `ce update --check` as the read-only installed-vs-available data source;
+  `ce update --track main` uses the fail-closed main-HEAD source-build resolver),
+  `ce clean-main-install` (resolve `origin/main`, build a first-party wheel from
+  that exact commit, verify source and artifact hashes, then promote only the
+  verified artifact),
   `ce surfaces check-updates` (read-only upstream availability reporting for
   entries in `surfaces/manifest.yaml`),
   `ce publish-branch` (host-side publish gate for contained
