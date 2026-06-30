@@ -103,10 +103,17 @@ def test_summary_from_evidence_no_outcome_record():
 # ---------------------------------------------------------------------------
 def test_enumerate_artifacts():
     s = {"run_id": "r-1", "scope_id": "cs-1", "pr": 7, "spent": Decimal("1")}
-    arts = {a["kind"] for a in rep.enumerate_artifacts(s)}
+    enumerated = rep.enumerate_artifacts(s)
+    arts = {a["kind"] for a in enumerated}
     assert {"pr", "scope", "evidence", "spend"} <= arts
-    pr = [a for a in rep.enumerate_artifacts(s) if a["kind"] == "pr"][0]
+    pr = [a for a in enumerated if a["kind"] == "pr"][0]
     assert pr["inspect"] == "gh pr view 7"
+    evidence = [a for a in enumerated if a["kind"] == "evidence"][0]
+    spend = [a for a in enumerated if a["kind"] == "spend"][0]
+    assert evidence["inspect"] == "ce artifacts cs-1 --run-id r-1"
+    assert spend["inspect"] == "ce artifacts cs-1 --run-id r-1"
+    assert evidence["inspect"] != "ce artifacts r-1"
+    assert spend["inspect"] != "ce artifacts r-1"
 
 
 def test_inspect_commands_use_user_facing_ce_not_cev3():

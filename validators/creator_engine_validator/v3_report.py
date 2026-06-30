@@ -150,10 +150,11 @@ def enumerate_artifacts(summary: dict[str, Any]) -> list[dict[str, str]]:
     for extra in summary.get("artifacts") or []:
         if isinstance(extra, dict) and extra.get("label"):
             out.append(extra)
-    if run:
-        out.append({"kind": "evidence", "label": "evidence-chain ✓", "inspect": f"{CE_CMD} artifacts {run}"})
+    if run and scope:
+        inspect = f"{CE_CMD} artifacts {scope} --run-id {run}"
+        out.append({"kind": "evidence", "label": "evidence-chain ✓", "inspect": inspect})
         if summary.get("spent") is not None:
-            out.append({"kind": "spend", "label": "spend", "inspect": f"{CE_CMD} artifacts {run}"})
+            out.append({"kind": "spend", "label": "spend", "inspect": inspect})
     return out
 
 
