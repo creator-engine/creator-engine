@@ -107,3 +107,4 @@ from . import surfaces_manifest as surfaces_manifest  # noqa: E402,F401
 from . import schema_reference_autogen_sync as schema_reference_autogen_sync  # noqa: E402,F401
 from . import cli_reference_autogen_sync as cli_reference_autogen_sync  # noqa: E402,F401
 from . import skill_antidrift_guard as skill_antidrift_guard  # noqa: E402,F401
+from . import test_coupling as test_coupling  # noqa: E402,F401
