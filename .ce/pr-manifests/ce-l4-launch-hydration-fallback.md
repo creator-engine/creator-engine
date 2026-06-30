@@ -8,6 +8,8 @@ AUTHORIZED_PATHS_COUNT=5
 
 AUTHORIZED_PATHS_SHA256=1e3c7b108d4415d415aba6b96baf9387b5866e9ac7e8c0933f265cab62cb730f
 
+- **Declared work class:** story
+
 ```text
 .ce/changelog/ce-l4-launch-hydration-fallback.md
 .ce/pr-manifests/ce-l4-launch-hydration-fallback.md
