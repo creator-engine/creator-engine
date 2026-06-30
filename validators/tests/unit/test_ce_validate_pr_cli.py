@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator import ce_cli
 
 
@@ -47,6 +49,28 @@ def test_ce_validate_pr_dispatches_to_preflight(monkeypatch):
         "pr_body_file": None,
         "pr_body": None,
     }
+
+
+def test_ce_validate_pr_accepts_canonical_and_legacy_work_class_inputs(monkeypatch):
+    captured = []
+
+    def fake_run_cli(args):
+        captured.append(args.declared_work_class)
+        return 0
+
+    monkeypatch.setattr(ce_cli.pr_preflight, "run_cli", fake_run_cli)
+
+    for declared in ("XS", "S", "M", "L", "tiny", "story", "feature", "epic"):
+        assert ce_cli.main(["validate-pr", "--declared-work-class", declared]) == 0
+
+    assert captured == ["XS", "S", "M", "L", "tiny", "story", "feature", "epic"]
+
+
+def test_ce_validate_pr_still_rejects_bogus_work_class():
+    with pytest.raises(SystemExit) as exc_info:
+        ce_cli.main(["validate-pr", "--declared-work-class", "Z"])
+
+    assert exc_info.value.code == 2
 
 
 def test_ce_validate_pr_allows_carrier_declared_work_class_discovery(monkeypatch):
