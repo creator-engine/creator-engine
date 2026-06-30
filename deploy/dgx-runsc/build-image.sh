@@ -7,7 +7,7 @@ Usage:
   deploy/dgx-runsc/build-image.sh [--image IMAGE] [--dry-run]
 
 Environment:
-  CE_DGX_BUILD_IMAGE  Docker image tag (default: creator-engine/codex-runsc:0.141.0-aarch64)
+  CE_DGX_BUILD_IMAGE  Docker image tag (default: creator-engine/codex-runsc:0.142.4-aarch64)
   CE_DGX_USER         Runtime user name build arg (default: id -un)
   CE_DGX_UID          Runtime uid build arg (default: id -u)
   CE_DGX_GID          Runtime gid build arg (default: id -g)
@@ -21,7 +21,7 @@ quote_cmd() {
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../.." && pwd)"
-image="${CE_DGX_BUILD_IMAGE:-creator-engine/codex-runsc:0.141.0-aarch64}"
+image="${CE_DGX_BUILD_IMAGE:-creator-engine/codex-runsc:0.142.4-aarch64}"
 dry_run=0
 
 while [ "$#" -gt 0 ]; do
