@@ -6,6 +6,7 @@ from pathlib import Path
 
 from creator_engine_validator import cli
 from creator_engine_validator import v3_installer
+from creator_engine_validator.checks import install_spec_signature_guard as guard
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.install_spec_signature_guard import (
     CHECK_NAME,
@@ -20,7 +21,7 @@ from creator_engine_validator.checks.install_spec_signature_guard import (
 
 SPEC_TEMPLATE = """<!--
 signature:
-  key_id: ce-root-v1
+  key_id: {key_id}
   algo: ssh-ed25519
   namespace: ce-spec-v1
   value: {value}
@@ -34,15 +35,19 @@ artifact_manifest:
 """
 
 
-def _spec(value: str) -> str:
-    draft = SPEC_TEMPLATE.format(value=value, content_sha256=v3_installer.SIGNATURE_PLACEHOLDER)
+def _spec(value: str, *, key_id: str = "ce-root-v1") -> str:
+    draft = SPEC_TEMPLATE.format(
+        key_id=key_id,
+        value=value,
+        content_sha256=v3_installer.SIGNATURE_PLACEHOLDER,
+    )
     canonical_sha = v3_installer.content_digest(v3_installer.canonical_spec_bytes(draft))
-    return SPEC_TEMPLATE.format(value=value, content_sha256=canonical_sha)
+    return SPEC_TEMPLATE.format(key_id=key_id, value=value, content_sha256=canonical_sha)
 
 
-def _write_spec(path: Path, value: str) -> Path:
+def _write_spec(path: Path, value: str, *, key_id: str = "ce-root-v1") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_spec(value), encoding="utf-8")
+    path.write_text(_spec(value, key_id=key_id), encoding="utf-8")
     return path
 
 
@@ -56,6 +61,13 @@ def _codes(errors) -> set[str]:
 
 def test_install_spec_signature_guard_is_registered():
     assert CHECK_NAME in registered_checks()
+
+
+def test_guard_uses_v3_installer_signature_primitives():
+    assert guard.PINNED_KEYS is v3_installer.PINNED_KEYS
+    assert guard.PINNED_KEYS == v3_installer.PINNED_KEYS
+    assert guard.content_digest is v3_installer.content_digest
+    assert guard.canonical_spec_bytes is v3_installer.canonical_spec_bytes
 
 
 def test_validate_file_rejects_placeholder_signature_value(tmp_path: Path):
@@ -84,17 +96,18 @@ def test_validate_file_rejects_invalid_base64_signature_value(tmp_path: Path):
 
 def test_validate_file_accepts_mocked_good_ssh_signature(tmp_path: Path):
     signature_value = base64.b64encode(b"mock-sshsig").decode("ascii")
-    spec_path = _write_spec(tmp_path / "llms-install.md", signature_value)
-    expected_canonical = v3_installer.canonical_spec_bytes(spec_path.read_bytes())
+    for key_id, expected_key_material in v3_installer.PINNED_KEYS.items():
+        spec_path = _write_spec(tmp_path / f"{key_id}.md", signature_value, key_id=key_id)
+        expected_canonical = v3_installer.canonical_spec_bytes(spec_path.read_bytes())
 
-    def verifier(algo, raw, value, key_material):
-        assert algo == v3_installer.SSH_ED25519_ALGO
-        assert raw == expected_canonical
-        assert value == signature_value
-        assert key_material == v3_installer.PINNED_KEYS["ce-root-v1"]
-        return True
+        def verifier(algo, raw, value, key_material):
+            assert algo == v3_installer.SSH_ED25519_ALGO
+            assert raw == expected_canonical
+            assert value == signature_value
+            assert key_material == expected_key_material
+            return True
 
-    assert validate_file(spec_path, verifier=verifier) == []
+        assert validate_file(spec_path, verifier=verifier) == []
 
 
 def test_validate_file_rejects_non_verifying_ssh_signature(tmp_path: Path):

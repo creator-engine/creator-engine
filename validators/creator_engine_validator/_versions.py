@@ -326,6 +326,11 @@ BASELINE_SHARED_TO_VERSION_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
         # The HARD v1<->v3 invariant is untouched: press_merge_bundle imports only
         # fanin_runtime (v1) and two shared modules (loader, schema).
         ("press_merge_bundle", "fanin_runtime"),
+        # ce-ops#364: the install-spec signature guard is advisory shared validator
+        # infrastructure, but must consume the installer's pinned trust roots and
+        # canonicalization helpers as the single source of truth to avoid silent
+        # security drift.
+        ("checks.install_spec_signature_guard", "v3_installer"),
     }
 )
 

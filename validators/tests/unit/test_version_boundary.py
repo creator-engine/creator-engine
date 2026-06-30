@@ -45,9 +45,9 @@ def test_runtime_policy_check_does_not_import_v3_runner(version_boundary_modules
     ] == []
 
 
-# --- the baselined allowlist is exactly the 5 derived edges, and minimal ----
+# --- the baselined allowlist is exactly the 6 derived edges, and minimal ----
 
-def test_allowlist_is_the_four_baselined_edges():
+def test_allowlist_is_the_six_baselined_edges():
     assert ver.BASELINE_SHARED_TO_VERSION_ALLOWLIST == frozenset(
         {
             ("cli", "hook_check"),
@@ -56,6 +56,7 @@ def test_allowlist_is_the_four_baselined_edges():
             ("harness_adapters.claude_code_adapter", "hook_pack_confirm"),
             # W3 press-merge bundle: shared->v1 reuse of fanin_runtime canonicalization.
             ("press_merge_bundle", "fanin_runtime"),
+            ("checks.install_spec_signature_guard", "v3_installer"),
         }
     )
 
@@ -169,8 +170,8 @@ def test_unallowed_fires_when_allowlist_emptied(monkeypatch, version_boundary_mo
     monkeypatch.setattr(ver, "BASELINE_SHARED_TO_VERSION_ALLOWLIST", frozenset())
     errors, _ = evaluate(version_boundary_modules)
     unallowed = [e for e in errors if e.code == CODE_UNALLOWED]
-    # 4 original edges + 1 W3 edge (press_merge_bundle -> fanin_runtime)
-    assert len(unallowed) == 5
+    # 4 original edges + W3 press_merge_bundle + ce-ops#364 install-signature guard.
+    assert len(unallowed) == 6
 
 
 def test_missing_fires_for_ghost_runtime_module(monkeypatch, version_boundary_modules):
