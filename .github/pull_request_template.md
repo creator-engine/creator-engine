@@ -7,7 +7,7 @@
      State the mutation class (standard / governed / privileged). -->
 
 - **Mutation class:**
-- **Declared work class:** <!-- tiny / story / feature / epic -->
+- **Declared work class:** <!-- XS / S / M / L -->
 - **Files changed:**
 - **Files explicitly NOT changed:**
 

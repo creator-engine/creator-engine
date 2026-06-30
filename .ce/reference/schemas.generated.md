@@ -224,9 +224,9 @@ Properties:
 
 | Property | Shape | Required | Constraints | Description |
 | --- | --- | --- | --- | --- |
-| `class` | string | yes | enum `tiny`, `story`, `feature`, `epic` |  |
+| `class` | string | yes | enum `XS`, `S`, `M`, `L` |  |
 | `size_band` | string | yes | enum `target_advisory`, `warn`, `explain_or_split`, `split_required` |  |
-| `minimum_work_class` | string | yes | enum `tiny`, `story`, `feature`, `epic` |  |
+| `minimum_work_class` | string | yes | enum `XS`, `S`, `M`, `L` |  |
 | `mutation_class` | string | yes | enum `none`, `docs`, `code`, `schema`, `deploy`, `governance`, `identity`, `security`, `attestation`, `redaction` |  |
 | `gates` | array | yes |  |  |
 | `decision` | string | yes | enum `AUTO`, `GESTURE` |  |
@@ -2481,7 +2481,7 @@ Properties:
 | `kind` | string | yes | const `work-sizing-floor-record` |  |
 | `schema_version` | string | yes | enum `1` |  |
 | `intent_ref` | string | yes | minLength `1` |  |
-| `declared_work_class` | string | yes | enum `tiny`, `story`, `feature`, `epic` |  |
+| `declared_work_class` | string | yes | enum `XS`, `S`, `M`, `L` |  |
 | `change_stats` | array | yes |  | Deterministic per-path line/file stats. Generated, lockfile, and vendored paths remain in this input list but are excluded from included line totals. |
 | `sizing_floor` | object | yes | unevaluatedProperties `false` |  |
 
@@ -2506,10 +2506,10 @@ Properties:
 | `kind` | string | yes | const `sizing-record` |  |
 | `schema_version` | string | yes | enum `1` |  |
 | `intent_ref` | string | yes | minLength `1` | Value-free reference to the intake intent. The pure F1 function emits `unbound` because binding to a live intake is deferred. |
-| `work_class` | string | yes | enum `tiny`, `story`, `feature`, `epic` |  |
+| `work_class` | string | yes | enum `XS`, `S`, `M`, `L` |  |
 | `mutation_class` | string | yes | enum `none`, `docs`, `code`, `schema`, `deploy`, `governance`, `identity`, `security`, `attestation`, `redaction` |  |
 | `artifact_set` | array | yes | minItems `1`<br>uniqueItems `true` |  |
-| `decomposition_depth` | integer | yes | minimum `0`<br>maximum `3` | Size-axis depth: 0=tiny/no decomposition, 1=story/tasks, 2=feature/stories/tasks, 3=epic/features/stories/thin slice. |
+| `decomposition_depth` | integer | yes | minimum `0`<br>maximum `3` | Size-axis depth: 0=XS/no decomposition, 1=S/tasks, 2=M/stories/tasks, 3=L/features/stories/thin slice. |
 | `ratification_gates` | array | yes | minItems `1`<br>uniqueItems `true` |  |
 | `adr_required` | boolean | yes |  |  |
 

@@ -21,6 +21,7 @@ import yaml
 
 from .reporting import ValidationError
 from .schema import validate_with_schema
+from .work_sizing import WORK_CLASSES, normalize_work_class
 
 
 CONTRACT = "docs/contracts/playbook-format.md"
@@ -35,7 +36,7 @@ GOVERNED_COMMAND_DENY_EXIT = 121
 STATUS_VALUES = {"active", "draft", "deprecated"}
 MODE_VALUES = {"ceo", "dev"}
 GATE_VALUES = ("plan", "author", "review", "merge")
-WORK_CLASS_VALUES = {"tiny", "story", "feature", "epic"}
+WORK_CLASS_VALUES = set(WORK_CLASSES)
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,96}$")
 
 _SPINE_DIRS = {"plan", "author", "review", "merge", "operate", "ceo-mode"}
@@ -85,7 +86,7 @@ class PublicPlaybook:
             "id": self.id,
             "title": playbook["title"],
             "mode": metadata.get("mode", "dev"),
-            "work_class": metadata.get("work_class", "story"),
+            "work_class": metadata.get("work_class", "S"),
             "status": playbook["status"],
             "path": str(self.path),
             "source_format": self.source_format,
@@ -218,8 +219,14 @@ def _validate_public_frontmatter(path: Path, data: dict[str, Any], body: str) ->
         errors.append(_error(path, "/status", f"status must be one of {sorted(STATUS_VALUES)}"))
     if data.get("mode") not in MODE_VALUES:
         errors.append(_error(path, "/mode", f"mode must be one of {sorted(MODE_VALUES)}"))
-    if data.get("work_class") not in WORK_CLASS_VALUES:
-        errors.append(_error(path, "/work_class", f"work_class must be one of {sorted(WORK_CLASS_VALUES)}"))
+    try:
+        normalize_work_class(str(data.get("work_class", "")))
+    except ValueError:
+        errors.append(_error(
+            path,
+            "/work_class",
+            f"work_class must be one of {list(WORK_CLASSES)} (legacy aliases: tiny, story, feature, epic)",
+        ))
 
     gates = data.get("gates")
     if not isinstance(gates, list) or not gates:
@@ -335,7 +342,7 @@ def project_public_playbook(data: dict[str, Any], *, source_path: Path | None = 
         "metadata": {
             "public_playbook": True,
             "mode": data["mode"],
-            "work_class": data["work_class"],
+            "work_class": normalize_work_class(str(data["work_class"])),
         },
     }
     if source_path is not None:
@@ -433,7 +440,7 @@ def load_workflow_playbook(path: str | Path) -> PublicPlaybook:
         "goal": playbook.get("summary", ""),
         "status": playbook["status"],
         "mode": metadata.get("mode", "dev"),
-        "work_class": metadata.get("work_class", "story"),
+        "work_class": metadata.get("work_class", "S"),
     }
     return PublicPlaybook(
         path=resolved,
@@ -502,7 +509,7 @@ def dry_run_plan(playbook: PublicPlaybook) -> dict[str, Any]:
         "id": playbook.id,
         "title": descriptor["playbook"]["title"],
         "mode": metadata.get("mode", "dev"),
-        "work_class": metadata.get("work_class", "story"),
+        "work_class": metadata.get("work_class", "S"),
         "status": descriptor["playbook"]["status"],
         "gates": descriptor["gates"],
         "stages": _step_plan(playbook),

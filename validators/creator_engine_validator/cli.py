@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .reporting import CheckResult
+from .work_sizing import WORK_CLASS_INPUTS
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -216,7 +217,7 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_work_sizing_floor.add_argument(
         "--declared-work-class",
         required=True,
-        choices=["tiny", "story", "feature", "epic"],
+        choices=WORK_CLASS_INPUTS,
         help="declared work class to compare against the derived PR-diff floor",
     )
     verify_work_sizing_floor.add_argument("paths", nargs="*", default=["."], help="paths to scope")
@@ -439,7 +440,7 @@ def _build_parser() -> argparse.ArgumentParser:
     release.add_argument(
         "--preflight-declared-work-class",
         default=None,
-        choices=["tiny", "story", "feature", "epic"],
+        choices=WORK_CLASS_INPUTS,
         help="explicit work class for validate-pr preflight when carrier discovery is not desired",
     )
     release.add_argument(

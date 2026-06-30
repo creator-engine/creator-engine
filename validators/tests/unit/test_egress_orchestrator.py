@@ -576,9 +576,9 @@ def test_render_pr_body_carries_declared_work_class():
     )
     matches = DECLARED_WORK_CLASS_PATTERN.findall(body)
 
-    assert matches == ["story"]
-    assert body.count("- **Declared work class:** story") == 1
-    assert body.index("- **Declared work class:** story") < body.index("- head branch:")
+    assert matches == ["S"]
+    assert body.count("- **Declared work class:** S") == 1
+    assert body.index("- **Declared work class:** S") < body.index("- head branch:")
 
 
 def test_courier_auto_discovers_work_class_from_carrier(tmp_path):

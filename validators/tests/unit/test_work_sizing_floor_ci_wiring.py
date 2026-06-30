@@ -144,7 +144,8 @@ def test_validate_workflow_runs_work_sizing_floor_gate_from_pr_body():
     assert "GITHUB_EVENT_PATH" in run
     assert "pull_request" in run and "body" in run
     assert "len(values) != 1" in run
-    assert 'allowed = ("tiny", "story", "feature", "epic")' in run
+    assert '"tiny": "XS"' in run
+    assert 'allowed = ("XS", "S", "M", "L")' in run
     assert "verify-work-sizing-floor" in run
     assert '--base "${comparison_base}"' in run
     assert "--declared-work-class" in run
@@ -186,4 +187,4 @@ def test_pull_request_template_declares_work_class_field():
     template = _PR_TEMPLATE.read_text()
 
     assert "- **Declared work class:**" in template
-    assert "tiny / story / feature / epic" in template
+    assert "XS / S / M / L" in template

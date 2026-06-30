@@ -90,7 +90,7 @@ def test_public_playbook_projects_to_internal_schema(tmp_path: Path):
     assert descriptor["kind"] == "ce-playbook"
     assert descriptor["playbook"]["name"] == "first-governed-pr"
     assert descriptor["metadata"]["mode"] == "dev"
-    assert descriptor["metadata"]["work_class"] == "tiny"
+    assert descriptor["metadata"]["work_class"] == "XS"
     assert {gate["id"]: gate["type"] for gate in descriptor["gates"]}["author"] == "dod"
     assert descriptor["stages"][1] == {
         "id": "author",
@@ -143,7 +143,7 @@ def test_list_show_and_run_dry_run_cli(tmp_path: Path, capsys):
     assert planned["dry_run"] is True
     assert planned["has_authority"] is False
     assert planned["mode"] == "dev"
-    assert planned["work_class"] == "tiny"
+    assert planned["work_class"] == "XS"
     assert [gate["type"] for gate in planned["gates"] if gate["id"] == "author"] == ["dod"]
     assert planned["plan"]["dry_run"] is True
     assert planned["plan"]["mode"] == "dev"
@@ -189,7 +189,7 @@ def test_v3_cli_exposes_playbook_dry_run(tmp_path: Path, capsys):
     assert payload["dry_run"] is True
     assert payload["has_authority"] is False
     assert payload["mode"] == "dev"
-    assert payload["plan"]["work_class"] == "tiny"
+    assert payload["plan"]["work_class"] == "XS"
 
 
 def test_smoke_first_governed_pr_exemplar_projects_to_schema():
@@ -200,7 +200,7 @@ def test_smoke_first_governed_pr_exemplar_projects_to_schema():
     playbook = playbook_runtime.load_playbook(exemplar)
 
     assert playbook.id == "first-governed-pr"
-    assert playbook.descriptor["metadata"]["work_class"] == "tiny"
+    assert playbook.descriptor["metadata"]["work_class"] == "XS"
     assert validate_with_schema(
         playbook.descriptor,
         "schemas/playbook.schema.yaml",

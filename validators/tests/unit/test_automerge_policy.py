@@ -211,7 +211,7 @@ def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
     assert decision.mutation_class == "docs"
     assert decision.gates == tuple(size_ceremony("tiny", "docs")["ratification_gates"])
     assert decision.decision == AUTOMERGE_DECISION_AUTO
-    assert decision.to_payload()["class"] == "tiny"
+    assert decision.to_payload()["class"] == "XS"
     assert decision.to_payload()["repo"] == "creator-engine/creator-engine"
     assert decision.to_payload()["branch"] == "ce/docs"
     assert decision.to_payload()["base"] == "main"
@@ -480,9 +480,9 @@ class FakeActuateGh:
 
 def _strange_loop_decision(**overrides):
     payload = {
-        "class": "story",
+        "class": "S",
         "size_band": "target_advisory",
-        "minimum_work_class": "story",
+        "minimum_work_class": "S",
         "mutation_class": "docs",
         "gates": ["auto_back_gate"],
         "decision": "AUTO",

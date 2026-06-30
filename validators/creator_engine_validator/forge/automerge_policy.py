@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from ..checks.work_sizing_floor import ChangeStat, classify_change_size
-from ..work_sizing import MUTATION_CLASSES, size_ceremony
+from ..work_sizing import MUTATION_CLASSES, normalize_work_class, size_ceremony
 from .mutation_classifier import (
     AUTO_CLASSES,
     GESTURE_CLASSES,
@@ -33,7 +33,7 @@ AUTOMERGE_RUN_MODE_STRANGE_LOOP: Final[str] = "strangeLoop"
 AUTOMERGE_ARMING_RUN_MODES: Final[frozenset[str]] = frozenset(
     {AUTOMERGE_RUN_MODE_CEO, AUTOMERGE_RUN_MODE_STRANGE_LOOP}
 )
-AUTOMERGE_CANARY_WORK_CLASSES: Final[frozenset[str]] = frozenset({"tiny", "story"})
+AUTOMERGE_CANARY_WORK_CLASSES: Final[frozenset[str]] = frozenset({"XS", "S"})
 
 
 class AutoMergePolicyStateError(Exception):
@@ -305,7 +305,7 @@ def materialize_automerge_policy_state_from_variables(
 def decide_automerge(
     numstat: Iterable[ChangeStat | Mapping[str, Any]] | None = None,
     paths: Sequence[str] | None = None,
-    declared_work_class: str = "story",
+    declared_work_class: str = "S",
     policy_state: AutoMergePolicyState | None = None,
     checks: Mapping[str, Any] | None = None,
     *,
@@ -344,6 +344,11 @@ def decide_automerge(
     checks_snapshot = _jsonable(checks or {})
     resolved_review_decision = _review_decision(checks, legacy_review_decision=review_decision)
     rationale: list[str] = []
+
+    try:
+        declared_work_class = normalize_work_class(declared_work_class)
+    except ValueError:
+        declared_work_class = str(declared_work_class)
 
     mutation_class = mutation_class_for_paths(resolved_paths, resolved_policy)
     size_projection = _classify_size_fail_closed(resolved_numstat)
@@ -596,7 +601,7 @@ def _classify_size_fail_closed(
             "excluded_lines": 0,
             "excluded_path_categories": [],
             "size_band": "split_required",
-            "minimum_work_class": "epic",
+            "minimum_work_class": "L",
         }
 
 

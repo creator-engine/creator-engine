@@ -28,7 +28,7 @@ properties:
   declared_work_class:
     type: string
     # CE ceremony tiers (depth/floor), not Agile work-item types.
-    enum: [tiny, story, feature, epic]
+    enum: [XS, S, M, L]
   change_stats:
     type: array
     description: |
@@ -86,6 +86,6 @@ properties:
         enum: [target_advisory, warn, explain_or_split, split_required]
       minimum_work_class:
         type: string
-        enum: [tiny, story, feature, epic]
+        enum: [XS, S, M, L]
       floor_met:
         type: boolean

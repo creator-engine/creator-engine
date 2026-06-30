@@ -366,7 +366,7 @@ territory_map_ref: string
 gate:
   validation: unknown | pending | green | red
   independent_review: missing | pending | satisfied | changes_requested
-  declared_work_class: tiny | story | feature | epic | unknown
+  declared_work_class: XS | S | M | L | unknown
   ratification: missing | satisfied | not_required
 operator_decisions: [string]
 next_action: string

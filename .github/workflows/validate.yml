@@ -409,7 +409,21 @@ jobs:
           import re
           import sys
 
-          allowed = ("tiny", "story", "feature", "epic")
+          aliases = {
+              "XS": "XS",
+              "S": "S",
+              "M": "M",
+              "L": "L",
+              "xs": "XS",
+              "s": "S",
+              "m": "M",
+              "l": "L",
+              "tiny": "XS",
+              "story": "S",
+              "feature": "M",
+              "epic": "L",
+          }
+          allowed = ("XS", "S", "M", "L")
           event_path = os.environ.get("GITHUB_EVENT_PATH")
           try:
               with open(event_path, encoding="utf-8") as handle:
@@ -426,19 +440,21 @@ jobs:
           if len(values) != 1:
               print(
                   "FAIL: PR body must contain exactly one declared work class line: "
-                  "'- **Declared work class:** <tiny|story|feature|epic>'",
+                  "'- **Declared work class:** <XS|S|M|L>'",
                   file=sys.stderr,
               )
               sys.exit(1)
           declared = values[0]
-          if declared not in allowed:
+          normalized = aliases.get(declared.strip())
+          if normalized is None:
               print(
-                  f"FAIL: declared work class {declared!r} is invalid; "
-                  f"expected one of: {', '.join(allowed)}",
+                  "FAIL: declared work class is invalid; "
+                  f"expected one of: {', '.join(allowed)} "
+                  "(legacy aliases: tiny, story, feature, epic)",
                   file=sys.stderr,
               )
               sys.exit(1)
-          print(declared)
+          print(normalized)
           PYEOF
           )"
           echo "Declared work class: ${declared_work_class}"

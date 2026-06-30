@@ -12,7 +12,7 @@ from creator_engine_validator.checks import work_sizing_floor as chk
 from creator_engine_validator.cli import main
 
 
-def _record(declared_work_class="story", change_stats=None, **overrides):
+def _record(declared_work_class="S", change_stats=None, **overrides):
     stats = change_stats if change_stats is not None else [
         {"path": "validators/creator_engine_validator/checks/work_sizing_floor.py", "additions": 180, "deletions": 20},
     ]
@@ -97,7 +97,7 @@ def test_parse_numstat_rejects_malformed_lines_with_value_free_error():
     assert message == "invalid numstat line"
 
 
-def test_thresholds_are_grounded_at_200_400_and_800_to_1000():
+def test_thresholds_map_to_xs_s_m_l_without_changing_line_metric():
     assert chk.classify_change_size([{"path": "a.py", "additions": 200, "deletions": 0}]) == {
         "included_files": 1,
         "included_lines": 200,
@@ -105,7 +105,7 @@ def test_thresholds_are_grounded_at_200_400_and_800_to_1000():
         "excluded_lines": 0,
         "excluded_path_categories": [],
         "size_band": "target_advisory",
-        "minimum_work_class": "tiny",
+        "minimum_work_class": "XS",
     }
     assert (
         chk.classify_change_size([{"path": "a.py", "additions": 201, "deletions": 0}])["size_band"]
@@ -113,10 +113,10 @@ def test_thresholds_are_grounded_at_200_400_and_800_to_1000():
     )
     assert (
         chk.classify_change_size([{"path": "a.py", "additions": 399, "deletions": 0}])["minimum_work_class"]
-        == "tiny"
+        == "XS"
     )
     assert chk.classify_change_size([{"path": "a.py", "additions": 400, "deletions": 0}])["size_band"] == "warn"
-    assert chk.classify_change_size([{"path": "a.py", "additions": 799, "deletions": 0}])["minimum_work_class"] == "story"
+    assert chk.classify_change_size([{"path": "a.py", "additions": 799, "deletions": 0}])["minimum_work_class"] == "S"
     assert chk.classify_change_size([{"path": "a.py", "additions": 800, "deletions": 0}]) == {
         "included_files": 1,
         "included_lines": 800,
@@ -124,7 +124,7 @@ def test_thresholds_are_grounded_at_200_400_and_800_to_1000():
         "excluded_lines": 0,
         "excluded_path_categories": [],
         "size_band": "explain_or_split",
-        "minimum_work_class": "feature",
+        "minimum_work_class": "M",
     }
     assert chk.classify_change_size([{"path": "a.py", "additions": 1000, "deletions": 0}])["size_band"] == "explain_or_split"
     assert chk.classify_change_size([{"path": "a.py", "additions": 1001, "deletions": 0}]) == {
@@ -134,7 +134,7 @@ def test_thresholds_are_grounded_at_200_400_and_800_to_1000():
         "excluded_lines": 0,
         "excluded_path_categories": [],
         "size_band": "split_required",
-        "minimum_work_class": "epic",
+        "minimum_work_class": "L",
     }
 
 
@@ -157,7 +157,7 @@ def test_generated_lockfile_and_vendored_lines_are_excluded_from_floor():
         "excluded_lines": 4911,
         "excluded_path_categories": ["generated", "lockfile", "vendored"],
         "size_band": "target_advisory",
-        "minimum_work_class": "tiny",
+        "minimum_work_class": "XS",
     }
 
 
@@ -180,7 +180,7 @@ def test_schema_error_fires_on_bad_declared_class():
         "excluded_lines": 0,
         "excluded_path_categories": [],
         "size_band": "target_advisory",
-        "minimum_work_class": "tiny",
+        "minimum_work_class": "XS",
         "floor_met": True,
     }))
 
@@ -193,7 +193,7 @@ def test_projection_drift_fires_on_schema_valid_mismatched_floor():
         "excluded_lines": 0,
         "excluded_path_categories": [],
         "size_band": "target_advisory",
-        "minimum_work_class": "tiny",
+        "minimum_work_class": "XS",
         "floor_met": True,
     })
     assert chk.CODE_INVALID in _codes(record)
@@ -201,7 +201,7 @@ def test_projection_drift_fires_on_schema_valid_mismatched_floor():
 
 def test_underdeclared_work_class_fails_floor_check():
     record = _record(
-        declared_work_class="story",
+        declared_work_class="S",
         change_stats=[{"path": "feature.py", "additions": 800, "deletions": 0}],
     )
     assert record["sizing_floor"]["floor_met"] is False
@@ -285,7 +285,7 @@ def test_run_with_base_sizes_source_added_lines_not_test_added_lines(tmp_path):
     )
 
     assert projection["included_lines"] == 399
-    assert projection["minimum_work_class"] == "tiny"
+    assert projection["minimum_work_class"] == "XS"
     result = chk.run_with_base([repo], base, declared_work_class="tiny")
 
     assert result.ok, [e.format() for e in result.errors]
@@ -314,7 +314,7 @@ def test_run_with_base_pure_relocation_remains_tiny(tmp_path):
     )
 
     assert projection["included_lines"] == 0
-    assert projection["minimum_work_class"] == "tiny"
+    assert projection["minimum_work_class"] == "XS"
     result = chk.run_with_base([repo], base, declared_work_class="tiny")
 
     assert result.ok, [e.format() for e in result.errors]
@@ -325,12 +325,14 @@ def test_run_with_base_large_source_change_still_requires_higher_tier(tmp_path):
     _write_repo_file(repo, "src/large_feature.py", lines=801)
     _commit_all(repo)
 
-    tiny_result = chk.run_with_base([repo], base, declared_work_class="tiny")
-    feature_result = chk.run_with_base([repo], base, declared_work_class="feature")
+    xs_result = chk.run_with_base([repo], base, declared_work_class="XS")
+    m_result = chk.run_with_base([repo], base, declared_work_class="M")
+    legacy_feature_result = chk.run_with_base([repo], base, declared_work_class="feature")
 
-    assert not tiny_result.ok
-    assert {e.code for e in tiny_result.errors} == {chk.CODE_INVALID}
-    assert feature_result.ok, [e.format() for e in feature_result.errors]
+    assert not xs_result.ok
+    assert {e.code for e in xs_result.errors} == {chk.CODE_INVALID}
+    assert m_result.ok, [e.format() for e in m_result.errors]
+    assert legacy_feature_result.ok, [e.format() for e in legacy_feature_result.errors]
 
 
 def test_cli_verify_work_sizing_floor_exits_nonzero_on_underfloor(capsys, tmp_path):
@@ -343,7 +345,7 @@ def test_cli_verify_work_sizing_floor_exits_nonzero_on_underfloor(capsys, tmp_pa
         "--base",
         base,
         "--declared-work-class",
-        "story",
+        "S",
         str(repo),
     ])
 
@@ -366,7 +368,7 @@ def test_cli_verify_work_sizing_floor_exits_zero_when_declared_class_satisfies_f
         "--base",
         base,
         "--declared-work-class",
-        "feature",
+        "M",
         str(repo),
     ])
 

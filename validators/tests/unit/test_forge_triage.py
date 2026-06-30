@@ -606,7 +606,7 @@ def test_items_carry_declared_work_and_mutation_sizing():
     )
 
     item = result.items[0].to_dict()
-    assert item["work_class"] == "tiny"
+    assert item["work_class"] == "XS"
     assert item["mutation_class"] == "docs"
     assert item["sizing"]["kind"] == "sizing-record"
     assert item["sizing"]["intent_ref"] == "creator-engine/ce-ops:issue:9"

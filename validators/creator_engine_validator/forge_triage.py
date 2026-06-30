@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import work_claims
-from .work_sizing import MUTATION_CLASSES, WORK_CLASSES, size_ceremony
+from .work_sizing import MUTATION_CLASSES, WORK_CLASSES, WORK_CLASS_ALIASES, normalize_work_class, size_ceremony
 
 GhRunner = Callable[[Sequence[str], "str | None"], subprocess.CompletedProcess]
 
@@ -750,8 +750,11 @@ def _is_aggregate_issue(candidate: IssueCandidate) -> bool:
     labels = {_label_key(label) for label in candidate.labels}
     if labels.intersection(_AGGREGATE_LABELS):
         return True
-    if candidate.work_class == "epic":
-        return True
+    try:
+        if normalize_work_class(candidate.work_class or "") == "L":
+            return True
+    except ValueError:
+        pass
     if _AGGREGATE_TITLE_RE.search(candidate.title):
         return True
     raw = candidate.raw or {}
@@ -932,17 +935,20 @@ def _skip_record(candidate: IssueCandidate, reason: str) -> dict[str, Any]:
 
 
 def _infer_work_class(candidate: IssueCandidate) -> str:
-    declared = (candidate.work_class or "").strip().lower()
-    if declared in WORK_CLASSES:
-        return declared
+    declared = (candidate.work_class or "").strip()
+    try:
+        return normalize_work_class(declared)
+    except ValueError:
+        pass
     labels = {_label_key(label) for label in candidate.labels}
-    for work_class in WORK_CLASSES:
-        if work_class in labels:
+    for alias, work_class in WORK_CLASS_ALIASES.items():
+        label_value = alias.lower()
+        if label_value in labels:
             return work_class
         for prefix in ("work:", "work/", "work_class:", "work-class:", "size:", "size/"):
-            if f"{prefix}{work_class}" in labels:
+            if f"{prefix}{label_value}" in labels:
                 return work_class
-    return "story"
+    return "S"
 
 
 def _infer_mutation_class(candidate: IssueCandidate) -> str:

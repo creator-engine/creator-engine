@@ -232,7 +232,7 @@
       "ce validate-pr is canonical."
     ],
     "g5_body_line_rule": [
-      "Every PR body has exactly one line: - **Declared work class:** <tiny|story|feature|epic>.",
+      "Every PR body has exactly one line: - **Declared work class:** <XS|S|M|L>.",
       "The rule is case-insensitive.",
       "A **Work class:** header or [PASS] log line does not satisfy the rule.",
       "Pick the smallest honest class the floor accepts."

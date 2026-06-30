@@ -142,7 +142,7 @@ def test_cli_human_output_prints_one_line_per_item_with_seat_and_work_class(tmp_
     item_lines = [line for line in lines if line.strip().startswith("- ")]
     assert len(item_lines) == 2
     assert all("-> dev-1" in line for line in item_lines)
-    assert all("(story/code)" in line for line in item_lines)
+    assert all("(S/code)" in line for line in item_lines)
 
 
 def test_cli_json_flag_accepts_stdin_and_outputs_valid_json(monkeypatch, capsys):

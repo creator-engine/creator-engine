@@ -44,7 +44,7 @@ def _checkpoint() -> dict[str, object]:
         "gate": {
             "validation": "green",
             "independent_review": "pending",
-            "declared_work_class": "feature",
+            "declared_work_class": "M",
             "ratification": "not_required",
         },
         "operator_decisions": ["decision-001"],

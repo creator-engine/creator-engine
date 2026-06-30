@@ -158,12 +158,12 @@ def test_apply_creates_one_pr_then_reread_verifies():
     assert body["head"] == "ce/run-abc" and body["base"] == "main"
     assert f"ce-policy-sha: {_PLAN_REF}" in body["body"]
     assert "- **Mutation class:** governed" in body["body"]
-    assert "- **Declared work class:** epic" in body["body"]
+    assert "- **Declared work class:** L" in body["body"]
     assert "- **Path manifest carrier:** `.ce/pr-manifests/ce-run-abc.md`" in body["body"]
     assert "- **Changelog fragment:** `.ce/changelog/<branch-slug>.md`" in body["body"]
     assert "scaffold fallback" in body["body"]
     assert "`verify-work-sizing-floor` / computed G5 floor result" in body["body"]
-    assert "must be at least that floor (`tiny`, `story`, `feature`, or `epic`)" in body["body"]
+    assert "must be at least that floor (`XS`, `S`, `M`, or `L`)" in body["body"]
     for p in _MANIFEST:
         assert p in body["body"]
     # Sequence: GET (read) -> POST (create) -> GET (re-read).
@@ -177,7 +177,7 @@ def test_apply_accepts_explicit_declared_work_class_in_pr_scaffold():
 
     post_idx = next(i for i, c in enumerate(runner.calls) if "POST" in c)
     body = json.loads(runner.inputs[post_idx])
-    assert "- **Declared work class:** feature" in body["body"]
+    assert "- **Declared work class:** M" in body["body"]
 
 
 def test_apply_is_idempotent_no_duplicate_pr_when_one_exists():

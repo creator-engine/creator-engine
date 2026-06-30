@@ -36,6 +36,7 @@ from creator_engine_validator.forge._redact import redact_gh_stderr
 from creator_engine_validator.forge.credential_runner import authenticated_gh_runner
 from creator_engine_validator.forge.scoped_token import ScopedToken, revoke_scoped_token
 from creator_engine_validator.pr_preflight import DECLARED_WORK_CLASS_PATTERN, WORK_CLASSES
+from creator_engine_validator.work_sizing import normalize_work_class
 from egress_broker.audit import append_audit, count_recent_pushes
 from egress_broker.commit_facts import CommitFactsError, read_commit_facts
 from egress_broker.config import BrokerConfig, BrokerConfigError, SeatAppConfig
@@ -142,13 +143,13 @@ def discover_declared_work_class(repo_path: str, branch: str) -> str:
             f"{carrier_path}, found {len(matches)}"
         )
 
-    work_class = matches[0].strip().lower()
-    if work_class not in WORK_CLASSES:
+    try:
+        return normalize_work_class(matches[0])
+    except ValueError:
         raise EgressRefused(
             f"declared work class {matches[0]!r} in {carrier_path} is not one of "
-            f"{', '.join(WORK_CLASSES)}"
-        )
-    return work_class
+            f"{', '.join(WORK_CLASSES)} (legacy aliases: tiny, story, feature, epic)"
+        ) from None
 
 
 def render_pr_body(*, seat_id: str, branch: str, head_sha: str, declared_work_class: str) -> str:
@@ -158,6 +159,7 @@ def render_pr_body(*, seat_id: str, branch: str, head_sha: str, declared_work_cl
     gateway pushed)." This is the human/audit mirror of that anchor; the verified-author fact is
     the commit signature itself.
     """
+    declared_work_class = normalize_work_class(declared_work_class)
     return (
         f"Authored by `{seat_id}`, gateway-pushed (ADR-0007 egress broker — deterministic v0).\n\n"
         f"The contained seat `{seat_id}` authored and **signed** this commit locally; the "
@@ -376,11 +378,11 @@ def courier(
 
     try:
         resolved_declared_work_class = (
-            declared_work_class.strip().lower()
+            normalize_work_class(declared_work_class)
             if declared_work_class is not None
             else discover_declared_work_class(repo_path, branch)
         )
-    except EgressRefused as exc:
+    except (EgressRefused, ValueError) as exc:
         rec = append_audit(
             audit_log,
             {**base, "decision": "deny", "applied": False, "pushed": False,
@@ -391,7 +393,7 @@ def courier(
     if resolved_declared_work_class not in WORK_CLASSES:
         reason = (
             f"declared work class {resolved_declared_work_class!r} is not one of "
-            f"{', '.join(WORK_CLASSES)}"
+            f"{', '.join(WORK_CLASSES)} (legacy aliases: tiny, story, feature, epic)"
         )
         rec = append_audit(
             audit_log,

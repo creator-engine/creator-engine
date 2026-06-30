@@ -99,7 +99,7 @@ def _config(tmp_path: Path, **overrides) -> pr_preflight.PreflightConfig:
     values = {
         "repo_root": tmp_path,
         "base": "origin/main",
-        "declared_work_class": "feature",
+        "declared_work_class": "M",
         "head_ref": "dev4-night-lane0-pr-preflight",
         "allow_dirty": False,
     }
@@ -181,7 +181,7 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
         "--base",
         "abc1234",
         "--declared-work-class",
-        "feature",
+        "M",
         ".",
     ] in calls
     assert [
@@ -280,7 +280,7 @@ def test_preflight_reports_manifest_count_or_sha_desync(tmp_path: Path, monkeypa
     assert "path_manifest_hash_mismatch" in out.getvalue()
 
 
-def test_preflight_discovers_declared_work_class_from_carrier(tmp_path: Path, monkeypatch):
+def test_preflight_discovers_legacy_declared_work_class_from_carrier(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
     monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
@@ -302,7 +302,7 @@ def test_preflight_discovers_declared_work_class_from_carrier(tmp_path: Path, mo
     )
 
     assert rc == 0
-    assert "[PASS] declared work class: feature" in out.getvalue()
+    assert "[PASS] declared work class: M" in out.getvalue()
 
 
 def test_preflight_fails_when_declared_work_class_line_missing(tmp_path: Path, monkeypatch):

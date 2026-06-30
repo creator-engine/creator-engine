@@ -44,7 +44,7 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    The PR manifest must list the closed `origin/main..HEAD` path set, include itself, and include exactly one PR-body line:
 
    ```md
-   - **Declared work class:** <tiny|story|feature|epic>
+   - **Declared work class:** <XS|S|M|L>
    ```
 
    These are CE ceremony tiers, not Agile work item types. The declaration

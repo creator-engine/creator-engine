@@ -23,10 +23,10 @@ properties:
   class:
     type: string
     enum:
-      - tiny
-      - story
-      - feature
-      - epic
+      - XS
+      - S
+      - M
+      - L
   size_band:
     type: string
     enum:
@@ -37,10 +37,10 @@ properties:
   minimum_work_class:
     type: string
     enum:
-      - tiny
-      - story
-      - feature
-      - epic
+      - XS
+      - S
+      - M
+      - L
   mutation_class:
     type: string
     enum:

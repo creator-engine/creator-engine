@@ -71,9 +71,9 @@ class FakeActuatorGh:
 
 def _decision(**overrides):
     payload = {
-        "class": "tiny",
+        "class": "XS",
         "size_band": "target_advisory",
-        "minimum_work_class": "tiny",
+        "minimum_work_class": "XS",
         "mutation_class": "docs",
         "gates": ["auto_back_gate"],
         "decision": "AUTO",
@@ -186,7 +186,7 @@ def test_refuses_missing_enabling_ref(tmp_path: Path) -> None:
 
 def test_refuses_work_class_outside_canary(tmp_path: Path) -> None:
     gh = FakeActuatorGh()
-    result = actuate_if_ready(_write(tmp_path, _decision(**{"class": "feature"})), gh_runner=gh)
+    result = actuate_if_ready(_write(tmp_path, _decision(**{"class": "M"})), gh_runner=gh)
 
     assert result.refused is True
     assert result.reason == "work_class_outside_canary"
