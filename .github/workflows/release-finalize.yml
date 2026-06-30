@@ -1,0 +1,322 @@
+name: Release Finalize
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the v prefix, for refs/tags/release/vX.Y.Z"
+        required: true
+        type: string
+      signature_base64:
+        description: "Public detached SSHSIG base64 for llms-install.canonical"
+        required: true
+        type: string
+      dry_run:
+        description: "Verify through finalization but do not push, open, approve, or auto-merge the PR"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  finalize:
+    name: Finalize signed release and open publish PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release inputs
+        id: release-inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release-finalize only accepts X.Y.Z versions: ${VERSION}" >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "tag_name=release/v${VERSION}"
+            echo "publish_branch=release-publish/v${VERSION}"
+            echo "dry_run=${DRY_RUN}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout release tag
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ format('refs/tags/release/v{0}', inputs.version) }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify annotated release tag
+        run: |
+          set -euo pipefail
+          tag_name="${{ steps.release-inputs.outputs.tag_name }}"
+          tag_type="$(git cat-file -t "${tag_name}")"
+          if [[ "${tag_type}" != "tag" ]]; then
+            echo "release tag must be annotated; ${tag_name} is ${tag_type}" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator (offline, from repo wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            -r validators/requirements.txt
+
+      - name: Install validator build deps (offline, from dev wheelhouse)
+        run: |
+          pip install --no-index \
+            --find-links validators/wheelhouse \
+            --find-links validators/wheelhouse-dev \
+            -r validators/requirements-dev.txt
+
+      - name: Run release orchestrator
+        id: orchestrate
+        env:
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+          TAG_NAME: ${{ steps.release-inputs.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          packet_dir="${RUNNER_TEMP}/ce-finalize-packet-${VERSION}"
+          stage_dir="${RUNNER_TEMP}/ce-release-stage-${VERSION}"
+          mkdir -p "${packet_dir}"
+
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
+            python -m creator_engine_validator \
+            --json \
+            release \
+            --repo-root . \
+            --tag "${TAG_NAME}" \
+            --out "${stage_dir}" \
+            --changelog-out "${packet_dir}/RELEASE-NOTES.md" \
+            --github-out "${packet_dir}/GITHUB-RELEASE-BODY.md" \
+            --preflight-mode release-tag \
+            --preflight-head-ref "${TAG_NAME}" \
+            --force \
+            | tee "${packet_dir}/release.json"
+
+          {
+            echo "packet_dir=${packet_dir}"
+            echo "stage_dir=${stage_dir}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Write public detached signature
+        id: signature
+        env:
+          SIGNATURE_BASE64: ${{ inputs.signature_base64 }}
+        run: |
+          set -euo pipefail
+
+          signature_file="${RUNNER_TEMP}/llms-install.md.sig.b64"
+          printf '%s' "${SIGNATURE_BASE64}" > "${signature_file}"
+          echo "signature_file=${signature_file}" >> "${GITHUB_OUTPUT}"
+
+      - name: Finalize signed release
+        id: finalize
+        env:
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+          STAGE_DIR: ${{ steps.orchestrate.outputs.stage_dir }}
+          SIGNATURE_FILE: ${{ steps.signature.outputs.signature_file }}
+        run: |
+          set -euo pipefail
+
+          signed_dir="${RUNNER_TEMP}/ce-release-finalized-${VERSION}"
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
+            python -m creator_engine_validator \
+            --json \
+            release-finalize \
+            --stage "${STAGE_DIR}" \
+            --signature-file "${SIGNATURE_FILE}" \
+            --out "${signed_dir}" \
+            --force \
+            | tee "${RUNNER_TEMP}/release-finalize-${VERSION}.json"
+
+          echo "signed_dir=${signed_dir}" >> "${GITHUB_OUTPUT}"
+
+      - name: Prepare release publish branch
+        id: prepare-publish
+        env:
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+          PUBLISH_BRANCH: ${{ steps.release-inputs.outputs.publish_branch }}
+          SIGNED_DIR: ${{ steps.finalize.outputs.signed_dir }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git switch -C "${PUBLISH_BRANCH}" origin/main
+          cp -a "${SIGNED_DIR}/." docs/
+
+          {
+            echo "publish_branch=${PUBLISH_BRANCH}"
+            echo "signed_dir=${SIGNED_DIR}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Commit finalized docs
+        id: commit-docs
+        env:
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          git add docs
+          if git diff --cached --quiet; then
+            echo "has_changes=false" >> "${GITHUB_OUTPUT}"
+            echo "No finalized docs changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Finalize signed Creator Engine v${VERSION} release"
+          echo "has_changes=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate carrier and changelog
+        if: ${{ steps.commit-docs.outputs.has_changes == 'true' }}
+        env:
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+          PUBLISH_BRANCH: ${{ steps.release-inputs.outputs.publish_branch }}
+        run: |
+          set -euo pipefail
+
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators python - <<'PYEOF'
+          import os
+          from datetime import date
+          from pathlib import Path
+
+          from creator_engine_validator.carrier_gen import CarrierSpec, write_carriers
+
+          version = os.environ["VERSION"]
+          branch = os.environ["PUBLISH_BRANCH"]
+          spec = CarrierSpec(
+              head_ref=branch,
+              issue=f"release/v{version}",
+              title=f"Finalize signed Creator Engine v{version}",
+              kind="changed",
+              scope="release publishing",
+              body=(
+                  f"- Publishes finalized signed release v{version} artifacts into docs/.\n"
+                  "- Adds CI-generated carrier and changelog records for the release-publish PR."
+              ),
+              date=date.today().isoformat(),
+              base="origin/main",
+          )
+          written = write_carriers(Path("."), spec)
+          text = written.manifest_path.read_text(encoding="utf-8")
+          marker = "\n\nCanonicalization:"
+          if "- **Declared work class:**" not in text:
+              text = text.replace(marker, "\n\n- **Declared work class:** tiny" + marker, 1)
+          written.manifest_path.write_text(text, encoding="utf-8")
+          print(f"carrier={written.manifest_path}")
+          print(f"changelog={written.changelog_path}")
+          PYEOF
+
+      - name: Commit release publish branch
+        id: commit
+        if: ${{ steps.commit-docs.outputs.has_changes == 'true' }}
+        env:
+          HAS_CHANGES: ${{ steps.commit-docs.outputs.has_changes }}
+        run: |
+          set -euo pipefail
+
+          git add .ce/changelog .ce/pr-manifests
+          if git diff --cached --quiet; then
+            echo "has_changes=${HAS_CHANGES}" >> "${GITHUB_OUTPUT}"
+            echo "No carrier changes to amend."
+            exit 0
+          fi
+
+          git commit --amend --no-edit
+          echo "has_changes=${HAS_CHANGES}" >> "${GITHUB_OUTPUT}"
+
+      - name: Push release publish branch
+        if: ${{ steps.release-inputs.outputs.dry_run != 'true' && steps.commit.outputs.has_changes == 'true' }}
+        env:
+          PUBLISH_BRANCH: ${{ steps.release-inputs.outputs.publish_branch }}
+        run: |
+          set -euo pipefail
+          git push --force-with-lease origin "HEAD:${PUBLISH_BRANCH}"
+
+      - name: Open release publish PR
+        id: open-pr
+        if: ${{ steps.release-inputs.outputs.dry_run != 'true' && steps.commit.outputs.has_changes == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release-inputs.outputs.version }}
+          TAG_NAME: ${{ steps.release-inputs.outputs.tag_name }}
+          PUBLISH_BRANCH: ${{ steps.release-inputs.outputs.publish_branch }}
+        run: |
+          set -euo pipefail
+
+          pr_body="${RUNNER_TEMP}/release-publish-pr-${VERSION}.md"
+          cat > "${pr_body}" <<EOF
+          Finalize signed Creator Engine v${VERSION} from ${TAG_NAME}.
+
+          - **Declared work class:** tiny
+          - Publishes the finalized signed release artifacts into docs/.
+          - Uses the public detached signature supplied to release-finalize.yml.
+          - Requires CE_RELEASE_REVIEWER_TOKEN to belong to a non-author reviewer before auto-merge is enabled.
+
+          CE_RELEASE_REVIEWER_TOKEN must be provisioned as a repository secret for the approval step. The token holder must not be github-actions[bot] and must not be the PR author.
+          EOF
+
+          existing_pr="$(gh pr list --head "${PUBLISH_BRANCH}" --base main --state open --json url --jq '.[0].url // ""')"
+          if [[ -n "${existing_pr}" ]]; then
+            gh pr edit "${existing_pr}" --body-file "${pr_body}"
+            pr_url="${existing_pr}"
+          else
+            pr_url="$(gh pr create \
+              --base main \
+              --head "${PUBLISH_BRANCH}" \
+              --title "Finalize signed Creator Engine v${VERSION}" \
+              --body-file "${pr_body}")"
+          fi
+
+          echo "pr_url=${pr_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Approve release publish PR with reviewer token
+        if: ${{ steps.release-inputs.outputs.dry_run != 'true' && steps.commit.outputs.has_changes == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWER_TOKEN: ${{ secrets.CE_RELEASE_REVIEWER_TOKEN }}
+          PR_URL: ${{ steps.open-pr.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${REVIEWER_TOKEN}" ]]; then
+            echo "CE_RELEASE_REVIEWER_TOKEN is required to approve the release publish PR before auto-merge." >&2
+            exit 1
+          fi
+
+          author="$(GH_TOKEN="${GITHUB_TOKEN}" gh pr view "${PR_URL}" --json author --jq '.author.login')"
+          reviewer="$(GH_TOKEN="${REVIEWER_TOKEN}" gh api user --jq '.login')"
+          if [[ "${reviewer}" == "${author}" || "${reviewer}" == "github-actions[bot]" ]]; then
+            echo "CE_RELEASE_REVIEWER_TOKEN resolved to ${reviewer}, which cannot approve PRs authored by ${author}." >&2
+            exit 1
+          fi
+
+          GH_TOKEN="${REVIEWER_TOKEN}" gh pr review "${PR_URL}" \
+            --approve \
+            --body "Release finalization reviewed by ${reviewer}; PR author is ${author}."
+
+      - name: Enable auto-merge for release publish PR
+        if: ${{ steps.release-inputs.outputs.dry_run != 'true' && steps.commit.outputs.has_changes == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.open-pr.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          gh pr merge "${PR_URL}" --auto --merge
