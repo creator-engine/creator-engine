@@ -65,7 +65,13 @@ class CheckDetail:
 Runner = Callable[[Sequence[str], Path, Mapping[str, str] | None], CommandResult]
 
 
-def default_runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> CommandResult:
+def default_runner(
+    argv: Sequence[str],
+    cwd: Path,
+    env: Mapping[str, str] | None = None,
+    *,
+    timeout: float | None = None,
+) -> CommandResult:
     """Run a command without raising."""
     try:
         result = subprocess.run(
@@ -75,6 +81,7 @@ def default_runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None
             capture_output=True,
             text=True,
             check=False,
+            timeout=timeout,
         )
     except (FileNotFoundError, OSError) as exc:
         return CommandResult(127, "", str(exc))
@@ -284,11 +291,16 @@ def _resolve_test_coupling_pr_body(
     if not config.head_ref:
         return None
 
-    result = runner(
-        ["gh", "pr", "view", config.head_ref, "--json", "body", "--jq", ".body"],
-        config.repo_root,
-        None,
-    )
+    try:
+        result = runner(
+            ["gh", "pr", "view", config.head_ref, "--json", "body", "--jq", ".body"],
+            config.repo_root,
+            None,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        print("WARNING: timed out reading PR body via gh for test-coupling exemption", file=out)
+        return None
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
         suffix = f": {detail}" if detail else ""

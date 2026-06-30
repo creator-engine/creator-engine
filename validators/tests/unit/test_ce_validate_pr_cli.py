@@ -15,6 +15,8 @@ def test_ce_validate_pr_dispatches_to_preflight(monkeypatch):
         captured["head_ref"] = args.head_ref
         captured["allow_dirty"] = args.allow_dirty
         captured["test_command"] = args.test_command
+        captured["pr_body_file"] = args.pr_body_file
+        captured["pr_body"] = args.pr_body
         return 17
 
     monkeypatch.setattr(ce_cli.pr_preflight, "run_cli", fake_run_cli)
@@ -42,6 +44,8 @@ def test_ce_validate_pr_dispatches_to_preflight(monkeypatch):
         "head_ref": "dev4-night-lane0-pr-preflight",
         "allow_dirty": True,
         "test_command": ce_cli.pr_preflight.DEFAULT_TEST_COMMAND,
+        "pr_body_file": None,
+        "pr_body": None,
     }
 
 

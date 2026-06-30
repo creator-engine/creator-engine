@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,7 +42,7 @@ class FakeRunner:
         self.changed_paths = changed_paths
         self.calls: list[tuple[list[str], Path, dict[str, str] | None]] = []
 
-    def __call__(self, argv, cwd, env=None):
+    def __call__(self, argv, cwd, env=None, *, timeout=None):
         argv = list(argv)
         self.calls.append((argv, cwd, dict(env) if env is not None else None))
         if argv == ["git", "rev-parse", "--show-toplevel"]:
@@ -394,6 +395,30 @@ def test_preflight_passes_resolved_pr_body_to_test_coupling_gate(tmp_path: Path,
     assert "PASS: PR preflight" in out.getvalue()
 
 
+def test_preflight_pr_body_file_marker_exempts_test_coupling_gate(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    pr_body_file = tmp_path / "body.md"
+    pr_body_file.write_text(f"Documented exemption: {coupling_chk.OPT_OUT_MARKER}\n", encoding="utf-8")
+    runner = FakeRunner(
+        tmp_path,
+        test_coupling_requires_marker=True,
+        gh_pr_body_returncode=1,
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, pr_body_file=pr_body_file),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
+    assert "--pr-body-file" in coupling_call
+    assert "PASS: PR preflight" in out.getvalue()
+
+
 def test_preflight_without_exemption_marker_still_flags_test_coupling(tmp_path: Path, monkeypatch):
     _stub_expensive_preflight_checks(monkeypatch)
     runner = FakeRunner(
@@ -425,4 +450,24 @@ def test_preflight_keeps_strict_behavior_when_pr_body_unresolvable(tmp_path: Pat
     coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
     assert "--pr-body-file" not in coupling_call
     assert "could not read PR body via gh" in out.getvalue()
+    assert coupling_chk.CODE_MISSING_TEST in out.getvalue()
+
+
+def test_preflight_keeps_strict_behavior_when_pr_body_lookup_times_out(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(tmp_path, test_coupling_requires_marker=True)
+
+    def timeout_runner(argv, cwd, env=None, *, timeout=None):
+        if list(argv)[:3] == ["gh", "pr", "view"]:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return runner(argv, cwd, env, timeout=timeout)
+
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=timeout_runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
+    assert "--pr-body-file" not in coupling_call
+    assert "timed out reading PR body via gh" in out.getvalue()
     assert coupling_chk.CODE_MISSING_TEST in out.getvalue()
