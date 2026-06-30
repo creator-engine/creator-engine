@@ -70,9 +70,9 @@ records:
 - claim:
     object: merge-queue-checks-requested
     predicate: verified-by-sha256
-    sha256: c07f6dbe6cc364f10e1b6eb388eeae722da6b3c3b7f0736424418fcd66f13a39
+    sha256: 5b0138b44627b023499bbf124c3702f386e520a17daa6f1c75166a2e912dddc1
     subject: convention
-  content_hash: 9557fa77a60ef52e5c3040be83e051263803dd46994ff2f9d5db8364a59db717
+  content_hash: 47a526c2e3db343b1fcc47aa41e87487a1e0cbe1046b4f5b69d11557acd1c03c
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-fleet-mergequeue-trigger
   kind: brain-assertion
@@ -93,11 +93,11 @@ records:
     predicate: verified-by-sha256
     sha256: 88f8e46c67288c456bb72f2f7ba17e1ed3445bebc8285fe9b0e7fbdd8f07029a
     subject: convention
-  content_hash: 0e68916076c041b7d55c63192c0eeaa2823e5d889dbfb3f4bda750a0ba65eb6b
+  content_hash: 3a6b57f60e8241b8f730dedad9cc960e2a2d6f5e25609e7906be87ad829f1a22
   evidence_ref: docs/contracts/authoring-a-governed-pr.md
   id: brain-assertion-fleet-carrier-discipline
   kind: brain-assertion
-  prev_hash: 9557fa77a60ef52e5c3040be83e051263803dd46994ff2f9d5db8364a59db717
+  prev_hash: 47a526c2e3db343b1fcc47aa41e87487a1e0cbe1046b4f5b69d11557acd1c03c
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -114,11 +114,11 @@ records:
     predicate: verified-by-sha256
     sha256: aa96a707b218958acafb1d9bdd561fbe8416a76234c0408e73a4c7fd8ac9111b
     subject: convention
-  content_hash: 11dd7253b1044b068c765d8039bdec7da364882baa5cae131cc923ff43f81db2
+  content_hash: 41fbd9d6ae0972558d6a7299e2f99ad44cd49aa37f6350446dab8f7fb15d4898
   evidence_ref: docs/architecture/work-claim-locks.md
   id: brain-assertion-fleet-claim-lock-discipline
   kind: brain-assertion
-  prev_hash: 0e68916076c041b7d55c63192c0eeaa2823e5d889dbfb3f4bda750a0ba65eb6b
+  prev_hash: 3a6b57f60e8241b8f730dedad9cc960e2a2d6f5e25609e7906be87ad829f1a22
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -143,11 +143,11 @@ records:
       - types
       type: yaml-path
     subject: workflow
-  content_hash: a1479a13760375c6ebab6066d643524fadb57f5a2299bcd8e7dd07922da453a5
+  content_hash: 8efae65f290721e4f0827f79a4b12df81c8793c219f7349900f3a4b30f0267d5
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-validate-workflow-drift-gate
   kind: brain-assertion
-  prev_hash: 11dd7253b1044b068c765d8039bdec7da364882baa5cae131cc923ff43f81db2
+  prev_hash: 41fbd9d6ae0972558d6a7299e2f99ad44cd49aa37f6350446dab8f7fb15d4898
   record_type: brain_assertion
   schema_version: '1'
   scope:
@@ -170,11 +170,11 @@ records:
     predicate: probe-evidence
     subject: self-identity
     verdict: present
-  content_hash: 952168aa00de000e669a72a1a4b221bf8d75b8e5c4851a0c8e6aee51ba0ff49b
+  content_hash: 675d705049a30d4183d9383fed03da08277eb38c21600a53e3285bfa9f1aab8d
   evidence_ref: probe:self_identity
   id: brain-assertion-fleet-self-identity-live
   kind: brain-assertion
-  prev_hash: a1479a13760375c6ebab6066d643524fadb57f5a2299bcd8e7dd07922da453a5
+  prev_hash: 8efae65f290721e4f0827f79a4b12df81c8793c219f7349900f3a4b30f0267d5
   record_type: brain_assertion
   schema_version: '1'
   scope:
@@ -193,11 +193,11 @@ records:
     predicate: probe-verdict
     subject: capability
     verdict: present
-  content_hash: 74ef5f696dc3071fb654509d56fd362e4c3dff3c377a7856a0cf660be7d41b1d
+  content_hash: e4bce5a4daa10df01d18f56fcc0bc499e4ed326e4f57c34ca5265be12dae4cad
   evidence_ref: probe:worker_spawn_runtime_support
   id: brain-assertion-fleet-worker-spawn-runtime-support
   kind: brain-assertion
-  prev_hash: 952168aa00de000e669a72a1a4b221bf8d75b8e5c4851a0c8e6aee51ba0ff49b
+  prev_hash: 675d705049a30d4183d9383fed03da08277eb38c21600a53e3285bfa9f1aab8d
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -227,11 +227,11 @@ records:
     predicate: requires
     source_sha256: 51b59ac94fc70f9e69ddaf2891ae7f89d6c9dde441d8a049c0517d83d5ab2236
     subject: doc_grounded_support_agent
-  content_hash: 9bc21e6074f0bebff25a595c4032a964f01a3a13bd9f679715a10139746667a3
+  content_hash: 91a5d4896c070706fe99f4e1ea24c542d0cd7d2b5ec5e17b607f3cbcb2217ba1
   evidence_ref: .ce/brain/notes/deterministic-citations.md
   id: brain-assertion-4f8eb4d1be3e0b0ce8c29edb
   kind: brain-assertion
-  prev_hash: 74ef5f696dc3071fb654509d56fd362e4c3dff3c377a7856a0cf660be7d41b1d
+  prev_hash: e4bce5a4daa10df01d18f56fcc0bc499e4ed326e4f57c34ca5265be12dae4cad
   record_type: brain_assertion
   schema_version: '1'
   scope: global

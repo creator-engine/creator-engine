@@ -730,6 +730,33 @@ def run_preflight(
     )
     checks.append(
         _run_check(
+            "Creator Engine validator - test-coupling PR-diff gate",
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - test-coupling PR-diff gate",
+                    [
+                        py,
+                        "-m",
+                        "creator_engine_validator",
+                        "verify-test-coupling",
+                        "--base",
+                        comparison_base["value"],
+                        ".",
+                    ],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Creator Engine validator - path-manifest PR-diff gate",
             lambda: (
                 _run_checked(
