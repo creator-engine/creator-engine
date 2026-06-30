@@ -11,3 +11,4 @@ issue: ce-374-prepitch-docs-slice
 - Add a styled public overview page for Creator Engine.
 - Link the rendered page from the existing docs section without removing existing markdown docs links.
 - Include a public-safe architecture-at-a-glance diagram for controller, seats, forge, and containment.
+- Update the docs navigation test so the docs section keeps required markdown links and explicitly permits this rendered overview page.
