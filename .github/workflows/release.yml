@@ -63,9 +63,11 @@ jobs:
           persist-credentials: false
 
       - name: Verify annotated release tag
+        env:
+          TAG_NAME: ${{ steps.release-inputs.outputs.tag_name }}
         run: |
           set -euo pipefail
-          tag_name="${{ steps.release-inputs.outputs.tag_name }}"
+          tag_name="${TAG_NAME}"
           tag_type="$(git cat-file -t "${tag_name}")"
           if [[ "${tag_type}" != "tag" ]]; then
             echo "release tag must be annotated; ${tag_name} is ${tag_type}" >&2
