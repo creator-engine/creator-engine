@@ -265,12 +265,7 @@ def ssh_keygen_verifier() -> Verifier | None:
 
 @register(CHECK_NAME, [CODE_MISSING, CODE_PLACEHOLDER, CODE_BASE64, CODE_CONTENT, CODE_VERIFY])
 def run(paths: Iterable[Path]) -> CheckResult:
-    """Temporarily advisory registry adapter.
-
-    ``validate_repo`` is fail-closed and the CLI can return non-zero. The generic
-    registry emits warnings until the controller re-signs the spec and flips this
-    guard to a blocking required gate.
-    """
+    """Aggregate-check adapter; required gates use the fail-closed CLI scanner."""
     roots: list[Path] = []
     seen: set[Path] = set()
     for raw in paths:

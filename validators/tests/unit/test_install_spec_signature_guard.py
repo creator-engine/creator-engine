@@ -130,7 +130,7 @@ def test_validate_repo_checks_versioned_mirrors_when_present(tmp_path: Path):
     assert "docs/downloads/0.3.0/llms-install.md" in errors[0].path
 
 
-def test_registered_adapter_is_advisory_until_spec_is_resigned(tmp_path: Path):
+def test_registered_adapter_reports_placeholder_signature_warning(tmp_path: Path):
     _repo_with_spec(tmp_path, "<RESIGN-REQUIRED-ce-root-v1>")
 
     result = run([tmp_path])

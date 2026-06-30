@@ -166,7 +166,7 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
     ] in calls
 
 
-def test_preflight_keeps_install_spec_signature_guard_advisory(tmp_path: Path, monkeypatch):
+def test_preflight_blocks_install_spec_signature_guard_failure(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
     monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
@@ -181,10 +181,10 @@ def test_preflight_keeps_install_spec_signature_guard_advisory(tmp_path: Path, m
 
     rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=err)
 
-    assert rc == 0
-    assert "[PASS] Install-spec signature guard (advisory/non-blocking)" in out.getvalue()
-    assert "advisory findings present (exit 1); not blocking this PR" in out.getvalue()
-    assert "controller re-signs docs/llms-install.md" in err.getvalue()
+    assert rc == 1
+    assert "[FAIL] Install-spec signature guard" in out.getvalue()
+    assert "Install-spec signature guard failed with exit code 1" in out.getvalue()
+    assert "FAIL install_spec_signature_placeholder" in out.getvalue()
 
 
 def test_preflight_reports_missing_required_carrier(tmp_path: Path, monkeypatch):
