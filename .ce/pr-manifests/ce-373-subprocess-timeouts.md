@@ -8,6 +8,8 @@ AUTHORIZED_PATHS_COUNT=6
 
 AUTHORIZED_PATHS_SHA256=d338134ca317cc52eb8038ba035fa198ecc30ecf3ef96e4b786e9d74504fec4f
 
+- **Declared work class:** M
+
 ```text
 .ce/changelog/ce-373-subprocess-timeouts.md
 .ce/pr-manifests/ce-373-subprocess-timeouts.md
