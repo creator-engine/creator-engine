@@ -213,9 +213,157 @@ def _driver(forge: _ModeBForge) -> onboard_apply_live.LiveForgeApplyDriver:
     return onboard_apply_live.LiveForgeApplyDriver(config)
 
 
+def _scoped_token(value: str = _MINTED) -> onboard_apply_live.ScopedToken:
+    return onboard_apply_live.ScopedToken(
+        run_id="timeout-test",
+        repo=_REPO,
+        policy_sha="a" * 64,
+        secret_name="forge_read",
+        permissions=(),
+        expires_at="2026-06-15T15:00:00Z",
+        token_ref="timeout-test",
+        value=value,
+    )
+
+
+def _timeout_config(**overrides) -> onboard_apply_live.LiveForgeConfig:
+    values = {
+        "repo": _REPO,
+        "installation_id": 140271364,
+        "app_client_id": "Iv1.testclient",
+        "signer": None,
+        "policy_sha": "a" * 64,
+        "run_id": "timeout-test",
+        "token_minter": lambda _request: _scoped_token(),
+    }
+    values.update(overrides)
+    return onboard_apply_live.LiveForgeConfig(**values)
+
+
 # ---------------------------------------------------------------------------
 # Detection — real already-CE signals (repo_exists + verify_workflow@digest + protection)
 # ---------------------------------------------------------------------------
+def test_live_forge_read_gh_api_receives_network_timeout(monkeypatch):
+    monkeypatch.setenv(onboard_apply_live.NETWORK_SUBPROCESS_TIMEOUT_ENV, "6.5")
+    calls: list[dict[str, Any]] = []
+
+    def spawn(argv, input_text, env, *, timeout=None):
+        calls.append({"argv": list(argv), "timeout": timeout})
+        return subprocess.CompletedProcess(
+            list(argv),
+            0,
+            stdout=json.dumps({"full_name": _REPO, "default_branch": "main", "private": True}),
+            stderr="",
+        )
+
+    driver = onboard_apply_live.LiveForgeApplyDriver(_timeout_config(spawn=spawn))
+
+    result = driver.verify_repo(
+        repo=_REPO,
+        default_branch="main",
+        visibility="private",
+        spec_digest="a" * 64,
+        ledger=None,
+    )
+
+    assert result["ok"] is True
+    assert calls[0]["argv"] == ["gh", "api", f"repos/{_REPO}"]
+    assert calls[0]["timeout"] == 6.5
+
+
+def test_live_forge_bootstrap_probe_receives_network_timeout(monkeypatch):
+    monkeypatch.setenv(onboard_apply_live.NETWORK_SUBPROCESS_TIMEOUT_ENV, "9")
+    calls: list[dict[str, Any]] = []
+    user_response = "HTTP/2 200\nX-OAuth-Scopes: repo\n\n" + json.dumps({"login": "ce-dev"})
+
+    def spawn(argv, input_text, env, *, timeout=None):
+        calls.append({"argv": list(argv), "timeout": timeout})
+        return subprocess.CompletedProcess(list(argv), 0, stdout=user_response, stderr="")
+
+    driver = onboard_apply_live.LiveForgeApplyDriver(_timeout_config(spawn=spawn))
+
+    result = driver.probe_bootstrap_token(token=_BOOTSTRAP_PAT, repo=_REPO, org_create_needed=False)
+
+    assert result["ok"] is True
+    assert calls[0]["argv"] == ["gh", "api", "-i", "user"]
+    assert calls[0]["timeout"] == 9
+
+
+def test_live_forge_checkout_clone_receives_network_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv(onboard_apply_live.NETWORK_SUBPROCESS_TIMEOUT_ENV, "11")
+    calls: list[dict[str, Any]] = []
+
+    def git_spawn(argv, input_text, env, *, timeout=None):
+        calls.append({"argv": list(argv), "timeout": timeout})
+        Path(argv[4]).mkdir(parents=True)
+        return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
+
+    driver = onboard_apply_live.LiveForgeApplyDriver(_timeout_config(git_spawn=git_spawn))
+
+    result = driver.checkout_workspace(repo=_REPO, branch="main", workspace_root=tmp_path)
+
+    assert result["ok"] is True
+    assert calls[0]["argv"][:4] == ["gh", "repo", "clone", _REPO]
+    assert calls[0]["timeout"] == 11
+
+
+def test_live_forge_adoption_writer_receives_network_timeout(monkeypatch):
+    monkeypatch.setenv(onboard_apply_live.NETWORK_SUBPROCESS_TIMEOUT_ENV, "12")
+    calls: list[dict[str, Any]] = []
+
+    def spawn(argv, input_text, env, *, timeout=None):
+        calls.append({"argv": list(argv), "timeout": timeout})
+        return subprocess.CompletedProcess(list(argv), 0, stdout="{}", stderr="")
+
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(_timeout_config(spawn=spawn))
+
+    proc = driver._writer()(["gh", "api", f"repos/{_REPO}"], None)
+
+    assert proc.returncode == 0
+    assert calls[0]["timeout"] == 12
+
+
+def test_live_forge_gh_timeout_surfaces_actionable_error(monkeypatch):
+    monkeypatch.setenv(onboard_apply_live.NETWORK_SUBPROCESS_TIMEOUT_ENV, "2")
+
+    def spawn(argv, input_text, env, *, timeout=None):
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    driver = onboard_apply_live.LiveForgeApplyDriver(_timeout_config(spawn=spawn))
+
+    result = driver.verify_repo(
+        repo=_REPO,
+        default_branch="main",
+        visibility="private",
+        spec_digest="a" * 64,
+        ledger=None,
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "repo_read_failed"
+    assert "forge read gh api timed out after 2s" in result["detail"]
+    assert f"gh api repos/{_REPO}" in result["detail"]
+    assert "network connectivity" in result["detail"]
+    assert "GitHub availability" in result["detail"]
+    assert "gh authentication" in result["detail"]
+
+
+def test_live_forge_local_git_spawn_does_not_receive_network_timeout(tmp_path):
+    calls: list[dict[str, Any]] = []
+
+    def git_spawn(argv, input_text, env, *, timeout=None):
+        calls.append({"argv": list(argv), "timeout": timeout})
+        return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
+
+    driver = onboard_apply_live.LiveForgeAdoptionDriver(_timeout_config(git_spawn=git_spawn))
+
+    proc = driver._git(["status", "--short"], cwd=tmp_path)
+
+    assert proc.returncode == 0
+    assert calls[0]["argv"][:3] == ["git", "-C", str(tmp_path)]
+    assert calls[0]["timeout"] is None
+
+
 def test_already_ce_detection_true_via_real_forge_reads():
     forge = _ModeBForge()
     driver = _driver(forge)

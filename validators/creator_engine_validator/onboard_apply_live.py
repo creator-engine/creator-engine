@@ -39,6 +39,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -138,6 +139,8 @@ ENV_MINT_BROKER_URL = "CE_FORGE_MINT_BROKER_URL"
 #: ce-ops#157 — the caller's ``ghu_`` user token (from the S1 device flow) the broker uses for
 #: its user->installation binding check. Carried host-side, never in the portable answers file.
 ENV_MINT_BROKER_USER_TOKEN = "CE_FORGE_MINT_BROKER_USER_TOKEN"
+NETWORK_SUBPROCESS_TIMEOUT_ENV = "CE_NETWORK_SUBPROCESS_TIMEOUT_SECONDS"
+DEFAULT_NETWORK_SUBPROCESS_TIMEOUT_SECONDS = 60.0
 
 #: ce-ops#85 §6.1 — the least-privilege join-PR WRITE ceiling. GitHub installation-token
 #: permissions are a ``scope -> level`` map, so ``contents:write`` SUBSUMES ``contents:read``
@@ -416,6 +419,75 @@ def _default_mirror_fetch(url: str) -> bytes:
         return resp.read()
 
 
+def _network_subprocess_timeout_seconds() -> float:
+    raw = os.environ.get(NETWORK_SUBPROCESS_TIMEOUT_ENV)
+    if raw is None or raw.strip() == "":
+        return DEFAULT_NETWORK_SUBPROCESS_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError:
+        raise ForgeConfigRefused(
+            f"{NETWORK_SUBPROCESS_TIMEOUT_ENV} must be a positive number of seconds"
+        ) from None
+    if timeout <= 0:
+        raise ForgeConfigRefused(f"{NETWORK_SUBPROCESS_TIMEOUT_ENV} must be a positive number of seconds")
+    return timeout
+
+
+def _network_timeout_detail(*, context: str, argv: Sequence[str], timeout: float | None) -> str:
+    rendered = " ".join(str(part) for part in argv)
+    suffix = f" after {timeout:g}s" if timeout else ""
+    return (
+        f"{context} timed out{suffix}: {rendered}. "
+        "Check network connectivity, GitHub availability, and gh authentication."
+    )
+
+
+def _spawn_accepts_timeout(spawn: Any) -> bool:
+    try:
+        sig = inspect.signature(spawn)
+    except (TypeError, ValueError):
+        return True
+    return "timeout" in sig.parameters or any(
+        param.kind is inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values()
+    )
+
+
+def _network_spawn(spawn: Any, *, context: str):
+    """Wrap a live/injected gh spawn with the CE network subprocess timeout."""
+
+    def run(argv: Sequence[str], input_text: str | None, env: dict[str, str]) -> subprocess.CompletedProcess:
+        argv_list = list(argv)
+        timeout = _network_subprocess_timeout_seconds()
+        try:
+            if spawn is None:
+                return subprocess.run(  # noqa: S603 — fixed gh argv assembled by CE forge callers
+                    argv_list,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    input=input_text,
+                    env=env,
+                    timeout=timeout,
+                )
+            if _spawn_accepts_timeout(spawn):
+                return spawn(argv_list, input_text, env, timeout=timeout)
+            return spawn(argv_list, input_text, env)
+        except subprocess.TimeoutExpired as exc:
+            return subprocess.CompletedProcess(
+                argv_list,
+                124,
+                stdout="",
+                stderr=_network_timeout_detail(
+                    context=context,
+                    argv=argv_list,
+                    timeout=exc.timeout or timeout,
+                ),
+            )
+
+    return run
+
+
 @dataclass(frozen=True)
 class LiveForgeConfig:
     """Everything the live driver needs to mint + use + revoke its own forge-read token.
@@ -470,7 +542,11 @@ class LiveForgeConfig:
 
 def _gh_get(runner: GhRunner, path: str) -> tuple[int, object, str]:
     """``gh api <path>`` through an authenticated runner; never raises. ``(code, json|None, stderr)``."""
-    proc = runner(["gh", "api", path], None)
+    argv = ["gh", "api", path]
+    try:
+        proc = runner(argv, None)
+    except subprocess.TimeoutExpired as exc:
+        return 124, None, _network_timeout_detail(context="gh api", argv=argv, timeout=exc.timeout)
     out = (proc.stdout or "").strip()
     parsed: object = None
     if out:
@@ -587,11 +663,21 @@ def _find_ce_ruleset(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     code, parsed, stderr = _gh_get(runner, f"repos/{repo}/rulesets")
     if code != 0:
+        if code == 124:
+            return None, {
+                "ok": False,
+                "reason": "protection_read_failed",
+                "surface": "rulesets",
+                "detail": stderr,
+            }
         if protection_floor_unenforceable(parsed, stderr):
             return None, protection_floor_unenforceable_diagnostic(
                 surface="rulesets", parsed=parsed, stderr=stderr
             )
-        return None, {"ok": False, "reason": "protection_read_failed", "surface": "rulesets"}
+        result = {"ok": False, "reason": "protection_read_failed", "surface": "rulesets"}
+        if stderr:
+            result["detail"] = stderr
+        return None, result
     for ruleset in _rulesets_from_payload(parsed):
         if ruleset.get("name") == CE_PROTECTION_RULESET_NAME:
             return ruleset, None
@@ -818,7 +904,10 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
                 escalation_authority=PHASE1_ESCALATION_AUTHORITY,
             )
             self._token = self._mint(request)
-            self._read_runner = authenticated_gh_runner(self._token, spawn=self._cfg.spawn)
+            self._read_runner = authenticated_gh_runner(
+                self._token,
+                spawn=_network_spawn(self._cfg.spawn, context="forge read gh api"),
+            )
         return self._read_runner
 
     def close(self) -> None:
@@ -857,11 +946,14 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         ledger: "onboard_apply.Ledger",
     ) -> dict[str, Any]:
         try:
-            code, parsed, _ = _gh_get(self._reader(), f"repos/{repo}")
+            code, parsed, stderr = _gh_get(self._reader(), f"repos/{repo}")
         except Exception:  # noqa: BLE001
             return {"ok": False, "reason": "repo_read_failed"}
         if code != 0 or not isinstance(parsed, dict):
-            return {"ok": False, "reason": "repo_read_failed"}
+            result = {"ok": False, "reason": "repo_read_failed"}
+            if stderr:
+                result["detail"] = stderr
+            return result
         live_branch = str(parsed.get("default_branch") or "")
         live_visibility = "private" if bool(parsed.get("private")) else "public"
         # Plain-join verifies the repo is reachable and CE governance lives on the branch we
@@ -883,9 +975,11 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         (so a joining dev learns *why* detection failed) — never a blanket brownfield refuse.
         """
         try:
-            code, parsed, _ = _gh_get(self._reader(), f"repos/{repo}/contents/{path}?ref={branch}")
+            code, parsed, stderr = _gh_get(self._reader(), f"repos/{repo}/contents/{path}?ref={branch}")
         except Exception:  # noqa: BLE001
             return {"ok": False, "reason": "workflow_read_failed"}
+        if code == 124:
+            return {"ok": False, "reason": "workflow_read_failed", "detail": stderr}
         if code != 0 or not isinstance(parsed, dict) or "content" not in parsed:
             return {"ok": False, "reason": "workflow_absent"}
         try:
@@ -993,12 +1087,29 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
                 token_ref="bootstrap",
                 value=token,
             )
-            runner = authenticated_gh_runner(holder, spawn=self._cfg.spawn)
+            runner = authenticated_gh_runner(
+                holder,
+                spawn=_network_spawn(self._cfg.spawn, context="bootstrap gh api user"),
+            )
             proc = runner(["gh", "api", "-i", "user"], None)
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "ok": False,
+                "reason": "bootstrap_probe_failed",
+                "detail": _network_timeout_detail(
+                    context="bootstrap gh api user",
+                    argv=["gh", "api", "-i", "user"],
+                    timeout=exc.timeout,
+                ),
+            }
         except Exception:  # noqa: BLE001
             return {"ok": False, "reason": "bootstrap_probe_failed"}
         if proc.returncode != 0:
-            return {"ok": False, "reason": "bootstrap_probe_failed"}
+            detail = (proc.stderr or "").strip()
+            result = {"ok": False, "reason": "bootstrap_probe_failed"}
+            if detail:
+                result["detail"] = detail
+            return result
         raw = proc.stdout or ""
         body = raw.split("\n\n", 1)[-1].strip()
         login = None
@@ -1565,10 +1676,24 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
                 ["gh", "repo", "clone", repo, str(repo_dir), "--", "--branch", branch, "--depth", "1"],
                 None,
             )
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "ok": False,
+                "reason": "checkout_failed",
+                "detail": _network_timeout_detail(
+                    context="gh repo clone",
+                    argv=["gh", "repo", "clone", repo, str(repo_dir), "--", "--branch", branch, "--depth", "1"],
+                    timeout=exc.timeout,
+                ),
+            }
         except Exception:  # noqa: BLE001
             return {"ok": False, "reason": "checkout_failed"}
         if proc.returncode != 0:
-            return {"ok": False, "reason": "checkout_failed"}
+            detail = (proc.stderr or "").strip()
+            result = {"ok": False, "reason": "checkout_failed"}
+            if detail:
+                result["detail"] = detail
+            return result
         return {"ok": True, "path": str(repo_dir), "created": True}
 
     def _clone_runner(self) -> GhRunner:
@@ -1576,7 +1701,10 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         self._reader()  # ensure the read token is minted
         assert self._token is not None
         spawn = self._cfg.git_spawn if self._cfg.git_spawn is not None else self._cfg.spawn
-        return authenticated_gh_runner(self._token, spawn=spawn)
+        return authenticated_gh_runner(
+            self._token,
+            spawn=_network_spawn(spawn, context="gh repo clone"),
+        )
 
     def verify_checkout(self, *, repo: str, branch: str, path: Path) -> dict[str, Any]:
         """Local-filesystem verification of the clone the live ``checkout_workspace`` just made.
@@ -1641,7 +1769,10 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
             # minter raises TokenMintRefused BEFORE any forge call (defence-in-depth, §6.3). The
             # broker path (ce-ops#157) mints the write token server-side at the SAME ceiling.
             self._write_token = self._mint(request)
-            self._write_runner = authenticated_gh_runner(self._write_token, spawn=self._cfg.spawn)
+            self._write_runner = authenticated_gh_runner(
+                self._write_token,
+                spawn=_network_spawn(self._cfg.spawn, context="adoption write gh api"),
+            )
         return self._write_runner
 
     def _revoke_write(self) -> None:

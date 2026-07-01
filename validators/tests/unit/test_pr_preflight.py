@@ -42,11 +42,11 @@ class FakeRunner:
         self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.changed_paths = changed_paths
-        self.calls: list[tuple[list[str], Path, dict[str, str] | None]] = []
+        self.calls: list[tuple[list[str], Path, dict[str, str] | None, float | None]] = []
 
     def __call__(self, argv, cwd, env=None, *, timeout=None):
         argv = list(argv)
-        self.calls.append((argv, cwd, dict(env) if env is not None else None))
+        self.calls.append((argv, cwd, dict(env) if env is not None else None, timeout))
         if argv == ["git", "rev-parse", "--show-toplevel"]:
             return pr_preflight.CommandResult(0, str(self.repo_root) + "\n", "")
         if argv == ["git", "status", "--porcelain"]:
@@ -114,6 +114,54 @@ def _stub_expensive_preflight_checks(monkeypatch) -> None:
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
     monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
     monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+
+
+def test_fetch_base_passes_network_timeout(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv(pr_preflight.NETWORK_SUBPROCESS_TIMEOUT_ENV, "7.5")
+    runner = FakeRunner(tmp_path)
+
+    pr_preflight._fetch_base("origin/main", tmp_path, runner, io.StringIO(), io.StringIO())
+
+    fetch_call = next(call for call in runner.calls if call[0][:2] == ["git", "fetch"])
+    assert fetch_call[3] == 7.5
+
+
+def test_fetch_base_timeout_surfaces_actionable_error(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv(pr_preflight.NETWORK_SUBPROCESS_TIMEOUT_ENV, "3")
+
+    def timeout_runner(argv, cwd, env=None, *, timeout=None):
+        if list(argv)[:2] == ["git", "fetch"]:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return FakeRunner(tmp_path)(argv, cwd, env, timeout=timeout)
+
+    with pytest.raises(RuntimeError) as exc:
+        pr_preflight._fetch_base("origin/main", tmp_path, timeout_runner, io.StringIO(), io.StringIO())
+
+    message = str(exc.value)
+    assert "git fetch for base branch 'main' timed out after 3s" in message
+    assert "network connectivity" in message
+    assert "GitHub availability" in message
+    assert "origin remote" in message
+
+
+def test_pr_body_lookup_passes_network_timeout(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv(pr_preflight.NETWORK_SUBPROCESS_TIMEOUT_ENV, "8")
+    runner = FakeRunner(tmp_path, gh_pr_body_returncode=0, gh_pr_body="body")
+
+    body = pr_preflight._resolve_test_coupling_pr_body(_config(tmp_path), runner, io.StringIO())
+
+    assert body == "body"
+    gh_call = next(call for call in runner.calls if call[0][:3] == ["gh", "pr", "view"])
+    assert gh_call[3] == 8
+
+
+def test_local_preflight_calls_do_not_receive_network_timeout(tmp_path: Path):
+    runner = FakeRunner(tmp_path)
+
+    pr_preflight._assert_clean_tree(_config(tmp_path), runner, io.StringIO())
+
+    status_call = next(call for call in runner.calls if call[0] == ["git", "status", "--porcelain"])
+    assert status_call[3] is None
 
 
 def test_preflight_refuses_dirty_tree_before_gates(tmp_path: Path):
