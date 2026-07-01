@@ -8,7 +8,7 @@ below; this carrier lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** M
+- **Declared work class:** story
 - **CE-TEST-COUPLING-EXEMPT:** pure deploy/runbook artifacts; no daemon Python
   logic or production application behavior changed.
 
