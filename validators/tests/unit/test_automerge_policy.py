@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 from pathlib import Path
@@ -855,3 +856,124 @@ def _assert_materialize_step_before(steps: list[dict], *, later_step: str) -> No
     assert "materialize_automerge_policy_state_from_variables" in run
     assert 'Path(".ce/state/automerge/policy.json")' in run
     assert "kill_switch_variable" in run
+
+
+def test_pull_request_paths_use_pr_file_list_not_stale_base_diff(tmp_path: Path) -> None:
+    steps = _workflow_steps(REPO_ROOT / ".github/workflows/automerge-decide.yml")
+    resolve_step = next(step for step in steps if step.get("name") == "Resolve changed paths")
+    run_script = resolve_step["run"]
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    git("init")
+    git("checkout", "-b", "main")
+    git("config", "user.email", "ci@example.test")
+    git("config", "user.name", "CI")
+
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "base")
+    stale_base_sha = git("rev-parse", "HEAD")
+
+    github_path = repo / ".github" / "workflows" / "deploy.yml"
+    github_path.parent.mkdir(parents=True)
+    github_path.write_text("name: deploy\n", encoding="utf-8")
+    git("add", ".github/workflows/deploy.yml")
+    git("commit", "-m", "main deploy workflow")
+
+    git("checkout", "-b", "docs-pr")
+    docs_path = repo / "docs" / "usage.md"
+    docs_path.parent.mkdir()
+    docs_path.write_text("usage\n", encoding="utf-8")
+    git("add", "docs/usage.md")
+    git("commit", "-m", "docs update")
+    head_sha = git("rev-parse", "HEAD")
+
+    stale_two_dot_paths = git(
+        "diff",
+        "--name-only",
+        "--find-renames",
+        f"{stale_base_sha}..{head_sha}",
+    ).splitlines()
+    assert ".github/workflows/deploy.yml" in stale_two_dot_paths
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    gh_args = fake_bin / "gh-args.txt"
+    fake_gh = fake_bin / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"printf '%s\\n' \"$@\" > '{gh_args.as_posix()}'\n"
+        "if [[ \"$#\" -eq 7 && \"$1\" == 'pr' && \"$2\" == 'view' && \"$3\" == '704' "
+        "&& \"$4\" == '--json' && \"$5\" == 'files' && \"$6\" == '--jq' "
+        "&& \"$7\" == '.files[].path' ]]; then\n"
+        "  printf 'docs/usage.md\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 64\n",
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o755)
+
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
+    github_output = tmp_path / "github-output.txt"
+    env = {
+        **os.environ,
+        "EVENT_NAME": "pull_request",
+        "GH_TOKEN": "test-token",
+        "GITHUB_OUTPUT": str(github_output),
+        "GITHUB_SHA": head_sha,
+        "MERGE_GROUP_BASE_REF": "",
+        "MERGE_GROUP_BASE_SHA": "",
+        "MERGE_GROUP_HEAD_REF": "",
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "PR_AUTHOR_LOGIN": "author-dev",
+        "PR_BASE_REF": "main",
+        "PR_BASE_SHA": stale_base_sha,
+        "PR_HEAD_REF": "docs-pr",
+        "PR_HEAD_SHA": head_sha,
+        "PR_NUMBER": "704",
+        "RUNNER_TEMP": str(runner_temp),
+    }
+    subprocess.run(["bash", "-c", run_script], cwd=repo, env=env, check=True)
+
+    outputs = dict(
+        line.split("=", 1)
+        for line in github_output.read_text(encoding="utf-8").splitlines()
+    )
+    resolved_paths = Path(outputs["paths-file"]).read_text(encoding="utf-8").splitlines()
+
+    assert gh_args.read_text(encoding="utf-8").splitlines() == [
+        "pr",
+        "view",
+        "704",
+        "--json",
+        "files",
+        "--jq",
+        ".files[].path",
+    ]
+    assert resolved_paths == ["docs/usage.md"]
+
+    decision = decide_automerge(
+        numstat=numstat_for(resolved_paths),
+        paths=resolved_paths,
+        declared_work_class="tiny",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        **canary_identity(),
+    )
+    assert decision.mutation_class == "docs"
+    assert decision.mutation_class != "deploy"
