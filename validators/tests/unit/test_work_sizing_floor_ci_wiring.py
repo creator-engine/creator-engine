@@ -138,9 +138,11 @@ exit 99
 def test_validate_workflow_runs_work_sizing_floor_gate_from_pr_body():
     step = _validate_step("Creator Engine validator — work-sizing floor PR-diff gate (G5)")
     assert step.get("if") == "${{ github.event_name == 'pull_request' }}"
+    assert step.get("env", {}).get("COMPARISON_BASE") == "${{ steps.live-base.outputs.comparison_base }}"
 
     run = step["run"]
-    assert 'comparison_base="${{ steps.live-base.outputs.comparison_base }}"' in run
+    assert "${{" not in run
+    assert 'comparison_base="${COMPARISON_BASE}"' in run
     assert "GITHUB_EVENT_PATH" in run
     assert "pull_request" in run and "body" in run
     assert "len(values) != 1" in run
@@ -157,11 +159,14 @@ def test_validate_workflow_runs_work_sizing_floor_gate_from_pr_body():
 def test_validate_workflow_runs_path_manifest_gate_from_live_base_and_head_ref():
     step = _validate_step("Creator Engine validator — path-manifest PR-diff gate (G-ii)")
     assert step.get("if") == "${{ github.event_name == 'pull_request' }}"
+    assert step.get("env", {}).get("COMPARISON_BASE") == "${{ steps.live-base.outputs.comparison_base }}"
+    assert step.get("env", {}).get("HEAD_REF") == "${{ steps.live-base.outputs.head_ref }}"
 
     run = step["run"]
     run_without_comments = _run_without_comment_lines(run)
-    assert 'comparison_base="${{ steps.live-base.outputs.comparison_base }}"' in run
-    assert 'head_ref="${{ steps.live-base.outputs.head_ref }}"' in run
+    assert "${{" not in run
+    assert 'comparison_base="${COMPARISON_BASE}"' in run
+    assert 'head_ref="${HEAD_REF}"' in run
     assert "live PR head ref was not resolved" in run
     assert "verify-path-manifest" in run
     assert '--base "${comparison_base}"' in run
