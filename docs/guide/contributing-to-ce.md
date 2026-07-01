@@ -92,6 +92,14 @@ fi
 
 Those names and commands mirror the workflow steps in `.github/workflows/validate.yml:43-46`, `.github/workflows/validate.yml:83-94`. For smaller documentation PRs, the existing `CONTRIBUTING.md` also asks contributors to run `git diff --check`, `check-examples`, and `scan-no-limitless` locally (`CONTRIBUTING.md:108-125`).
 
+Before you push, run the full PR gate set once and keep going until it is green:
+
+```bash
+TMPDIR=/var/tmp ce validate-pr
+```
+
+`ce validate-pr` is the canonical local preflight. It is a superset of the individual pytest and validator commands above, resolves the committed comparison base, and prints one final `GREEN` or `FAIL` summary (`docs/contracts/authoring-a-governed-pr.md:18-61`, `validators/creator_engine_validator/pr_preflight.py:175-180`). Use the single preflight as the final local evidence pass before push.
+
 > **Running from an isolated worktree?** Set
 > `CE_VALIDATOR_PYTHON` to the dependency interpreter. See [`../../validators/README.md`](../../validators/README.md).
 
@@ -129,13 +137,22 @@ Use the PR template's scope section to state what changed, what did not change, 
 
 Path scope is not informal. The live CI path-manifest gate uses per-PR carriers under `.ce/pr-manifests/<branch-slug>.md`, discovered from the PR diff, and enforces that the PR diff equals the carrier path set (`.github/workflows/validate.yml:100-118`). Do not invent a different carrier name for live PRs unless a ratified change updates the validator and workflow.
 
+Work size is not informal either. The PR body must contain exactly one declared work class line:
+
+```text
+- **Declared work class:** <XS|S|M|L>
+```
+
+Use only `XS`, `S`, `M`, or `L`, and choose a class at or above the diff-LOC floor. The live work-sizing gate reads the PR event body and normalizes that single line before checking the committed diff (`.github/workflows/validate.yml:396-465`). Editing the body alone does not re-trigger an already failed run; close and reopen the PR to start a fresh `pull_request` run with the corrected body.
+
 Checklist for the first PR:
 
 - Reference the issue/spec/Scope that authorizes the change.
 - Declare mutation class: `docs`, `code`, `schema`, or another baseline class from the mutation taxonomy.
 - Keep the changed-file boundary tight.
-- Add the path-manifest carrier when the PR is governed by a manifest.
-- Paste validation evidence, including the three local checks above when they apply.
+- Add the per-PR changelog fragment at `.ce/changelog/<branch-slug>.md`.
+- Add the path-manifest carrier at `.ce/pr-manifests/<branch-slug>.md` when the PR is governed by a manifest (`docs/contracts/authoring-a-governed-pr.md:72-90`).
+- Paste validation evidence, including `ce validate-pr` and the focused local checks above when they apply.
 - Do not include secrets, local session state, generated logs, or machine-local paths. `CONTRIBUTING.md` explicitly excludes instance-local state and credentials (`CONTRIBUTING.md:91-106`).
 
 ## 6. Review And Independence
