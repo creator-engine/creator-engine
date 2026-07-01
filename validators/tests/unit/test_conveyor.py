@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from creator_engine_validator.conveyor import ConveyorCommandResult, ConveyorHarvestSpec, prepare_harvest
+from creator_engine_validator.conveyor import ConveyorCommandResult, ConveyorHarvestSpec, land_bundle, prepare_harvest
 
 
 class FakeGit:
@@ -46,12 +47,60 @@ class FakeValidate:
         return ConveyorCommandResult(self.returncode, "ok\n", "" if self.returncode == 0 else "failed\n")
 
 
+class FakeLandingGit:
+    def __init__(self, rebase_returncode: int = 0):
+        self.rebase_returncode = rebase_returncode
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
+        self.calls.append(tuple(args))
+        if tuple(args) == ("bundle", "verify", "/tmp/ce-test-bundle.bundle"):
+            return ConveyorCommandResult(0, "The bundle is okay\n", "")
+        if tuple(args) == (
+            "fetch",
+            "/tmp/ce-test-bundle.bundle",
+            "ce-test-bundle-landing:ce-test-bundle-landing",
+        ):
+            return ConveyorCommandResult(0, "", "")
+        if tuple(args) == ("fetch", "origin", "main"):
+            return ConveyorCommandResult(0, "", "")
+        if tuple(args) == ("switch", "ce-test-bundle-landing"):
+            return ConveyorCommandResult(0, "", "")
+        if tuple(args) == ("rebase", "origin/main"):
+            if self.rebase_returncode:
+                return ConveyorCommandResult(self.rebase_returncode, "", "base conflict\n")
+            return ConveyorCommandResult(0, "", "")
+        if tuple(args) == ("rev-parse", "HEAD"):
+            return ConveyorCommandResult(0, "0123456789abcdef0123456789abcdef01234567\n", "")
+        if tuple(args) == ("rev-list", "--left-right", "--count", "origin/main...HEAD"):
+            return ConveyorCommandResult(0, "0\t2\n", "")
+        return ConveyorCommandResult(1, "", f"unexpected git call: {args}")
+
+
 def _repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     (root / "validators" / "build").mkdir(parents=True)
     (root / "validators" / "creator_engine_validator").mkdir(parents=True)
     (root / "validators" / "old.egg-info").mkdir()
     return root
+
+
+def _run_git(cwd: Path, args: Sequence[str]) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return completed.stdout
+
+
+def _init_repo(path: Path) -> None:
+    path.mkdir()
+    _run_git(path, ["init", "--initial-branch=main"])
+    _run_git(path, ["config", "user.name", "CE Test"])
+    _run_git(path, ["config", "user.email", "ce-test@example.invalid"])
 
 
 def test_prepare_harvest_renames_branch_cleans_artifacts_writes_carriers_and_validates(tmp_path: Path):
@@ -160,3 +209,97 @@ def test_prepare_harvest_can_verify_base_without_rebase(tmp_path: Path):
     assert result.ready is True
     assert ("rebase", "origin/main") not in git.calls
     assert ("merge-base", "--is-ancestor", "origin/main", "HEAD") in git.calls
+
+
+def test_land_bundle_with_fake_git_fetches_rebases_and_reports_ahead_behind(tmp_path: Path):
+    git = FakeLandingGit()
+
+    result = land_bundle(
+        "/tmp/ce-test-bundle.bundle",
+        "ce-test-bundle-landing",
+        "origin/main",
+        repo_path=tmp_path,
+        git_runner=git,
+    )
+
+    assert result.ready is True
+    assert result.reasons == ()
+    assert result.branch == "ce-test-bundle-landing"
+    assert result.branch_slug == "ce-test-bundle-landing"
+    assert result.base_ref == "origin/main"
+    assert result.head_sha == "0123456789abcdef0123456789abcdef01234567"
+    assert result.ahead == 2
+    assert result.behind == 0
+    assert git.calls == [
+        ("bundle", "verify", "/tmp/ce-test-bundle.bundle"),
+        ("fetch", "/tmp/ce-test-bundle.bundle", "ce-test-bundle-landing:ce-test-bundle-landing"),
+        ("fetch", "origin", "main"),
+        ("switch", "ce-test-bundle-landing"),
+        ("rebase", "origin/main"),
+        ("rev-parse", "HEAD"),
+        ("rev-list", "--left-right", "--count", "origin/main...HEAD"),
+    ]
+
+
+def test_land_bundle_imports_real_tiny_bundle(tmp_path: Path):
+    branch = "ce-test-bundle-landing"
+    source = tmp_path / "source"
+    _init_repo(source)
+    (source / "README.md").write_text("base\n", encoding="utf-8")
+    _run_git(source, ["add", "README.md"])
+    _run_git(source, ["commit", "-m", "base"])
+    _run_git(source, ["switch", "-c", branch])
+    (source / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _run_git(source, ["add", "feature.txt"])
+    _run_git(source, ["commit", "-m", "feature"])
+    bundle = tmp_path / "feature.bundle"
+    _run_git(source, ["bundle", "create", str(bundle), branch])
+
+    landing = tmp_path / "landing"
+    _init_repo(landing)
+    _run_git(landing, ["remote", "add", "origin", str(source)])
+    _run_git(landing, ["fetch", "origin", "main"])
+    _run_git(landing, ["switch", "-c", "main", "origin/main"])
+
+    result = land_bundle(bundle, branch, "origin/main", repo_path=landing)
+
+    assert result.ready is True
+    assert result.reasons == ()
+    assert result.branch == branch
+    assert result.branch_slug == branch
+    assert result.head_sha is not None
+    assert len(result.head_sha) == 40
+    assert result.ahead == 1
+    assert result.behind == 0
+    assert _run_git(landing, ["branch", "--show-current"]).strip() == branch
+    assert (landing / "feature.txt").read_text(encoding="utf-8") == "feature\n"
+
+
+def test_land_bundle_rejects_malformed_bundle(tmp_path: Path):
+    landing = tmp_path / "landing"
+    _init_repo(landing)
+    malformed = tmp_path / "not-a.bundle"
+    malformed.write_text("not a bundle\n", encoding="utf-8")
+
+    result = land_bundle(malformed, "ce-test-bundle-landing", "origin/main", repo_path=landing)
+
+    assert result.ready is False
+    assert [reason.code for reason in result.reasons] == ["bundle_verify_failed"]
+    assert "bundle" in result.reasons[0].message
+
+
+def test_land_bundle_wrong_base_rebase_failure_is_not_ready(tmp_path: Path):
+    git = FakeLandingGit(rebase_returncode=1)
+
+    result = land_bundle(
+        "/tmp/ce-test-bundle.bundle",
+        "ce-test-bundle-landing",
+        "origin/main",
+        repo_path=tmp_path,
+        git_runner=git,
+    )
+
+    assert result.ready is False
+    assert [reason.code for reason in result.reasons] == ["base_rebase_failed"]
+    assert "base conflict" in result.reasons[0].detail
+    assert ("rev-parse", "HEAD") not in git.calls
