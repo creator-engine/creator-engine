@@ -59,6 +59,7 @@ jobs:
         id: inputs
         env:
           EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
@@ -90,14 +91,30 @@ jobs:
             base_ref="${PR_BASE_REF}"
             author_login="${PR_AUTHOR_LOGIN}"
 
-            if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "${base_sha}" || true
-            fi
-            if ! git cat-file -e "${head_sha}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "refs/pull/${pr_number}/head"
-            fi
+            api_paths="${work_dir}/changed-paths.api.txt"
+            if gh pr view "${PR_NUMBER}" --json files --jq '.files[].path' > "${api_paths}"; then
+              mv "${api_paths}" "${paths_file}"
+            else
+              rm -f "${api_paths}"
 
-            git diff --name-only --find-renames "${base_sha}..${head_sha}" > "${paths_file}"
+              if ! git cat-file -e "${head_sha}^{commit}" 2>/dev/null; then
+                git fetch --no-tags --depth=1 origin "refs/pull/${pr_number}/head"
+              fi
+              if [[ -n "${base_ref}" ]]; then
+                git fetch --no-tags origin "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
+                base_diff_ref="origin/${base_ref}"
+              elif [[ -n "${base_sha}" ]]; then
+                if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+                  git fetch --no-tags --depth=1 origin "${base_sha}"
+                fi
+                base_diff_ref="${base_sha}"
+              else
+                echo "could not resolve PR base for git diff fallback" >&2
+                exit 1
+              fi
+
+              git diff --name-only --find-renames "${base_diff_ref}...${head_sha}" > "${paths_file}"
+            fi
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
             head_sha="${GITHUB_SHA}"
             base_sha="${MERGE_GROUP_BASE_SHA}"
