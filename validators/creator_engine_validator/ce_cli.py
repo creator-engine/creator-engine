@@ -60,6 +60,7 @@ ce containment-status   # probe fleet seat containment from live pids and runtim
 ce validate-pr          # run local PR preflight against committed base..HEAD state
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
 ce automerge-status     # read dry-run automerge decision logs (read-only; no merge)
+ce automerge-kill-switch # read or toggle durable live-policy automerge kill-switch
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -194,7 +195,9 @@ def _herdr_session_module():
 # are never silent). `herdr` (authenticated remote reach-plane) is internal pending
 # internal testing and GRADUATES to a public product command in a later release
 # (ce-ops#237).
-INTERNAL_COMMAND_GROUPS = frozenset({"herdr", "ask", "support", "triage"})
+INTERNAL_COMMAND_GROUPS = frozenset(
+    {"herdr", "ask", "support", "triage", "automerge-kill-switch"}
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1697,6 +1700,39 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="json_output",
         help="emit machine-readable JSON decision records",
+    )
+
+    # ce automerge-kill-switch — governed live-policy disarm/re-arm switch.
+    automerge_kill_switch = groups.add_parser(
+        "automerge-kill-switch",
+        help="read or toggle the durable live-policy automerge kill-switch",
+    )
+    automerge_kill_switch.add_argument(
+        "action",
+        choices=("status", "on", "off"),
+        help="status reads, on disarms, off clears the live-policy kill-switch",
+    )
+    automerge_kill_switch.add_argument(
+        "--repo-root",
+        default=".",
+        dest="repo_root",
+        help="repo root for default policy state path (default: current directory)",
+    )
+    automerge_kill_switch.add_argument(
+        "--policy-state",
+        default=None,
+        dest="policy_state_path",
+        metavar="PATH",
+        help=(
+            "path to the automerge policy state JSON "
+            "(default: .ce/state/automerge/policy.json relative to --repo-root)"
+        ),
+    )
+    automerge_kill_switch.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable JSON policy state",
     )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
@@ -4075,6 +4111,65 @@ def _automerge_status(args) -> int:
     return 0
 
 
+def _automerge_kill_switch(args) -> int:
+    """ce automerge-kill-switch — read or toggle durable live-policy state."""
+
+    from .forge.automerge_policy import (
+        AutoMergePolicyStateError,
+        automerge_policy_state_path,
+        load_automerge_policy_state,
+        update_automerge_policy_kill_switch,
+    )
+
+    repo_root = Path(getattr(args, "repo_root", "."))
+    policy_state_path_arg = getattr(args, "policy_state_path", None)
+    policy_path = (
+        Path(policy_state_path_arg)
+        if policy_state_path_arg
+        else automerge_policy_state_path(repo_root / ".ce/state")
+    )
+    action = getattr(args, "action")
+
+    try:
+        if action == "status":
+            policy_state = load_automerge_policy_state(policy_path)
+        elif action == "on":
+            policy_state = update_automerge_policy_kill_switch(policy_path, active=True)
+        elif action == "off":
+            policy_state = update_automerge_policy_kill_switch(policy_path, active=False)
+        else:
+            print("ERROR: ce automerge-kill-switch: unknown action", file=sys.stderr)
+            return 2
+    except AutoMergePolicyStateError as exc:
+        print(f"ERROR: ce automerge-kill-switch {action}: policy state error: {exc}", file=sys.stderr)
+        if action == "on":
+            print(
+                "Manual fallback: set CE_AUTOMERGE_KILL_SWITCH=true in the GitHub Actions environment.",
+                file=sys.stderr,
+            )
+        return 1
+
+    payload = {
+        "path": str(policy_path),
+        "kill_switch": policy_state.kill_switch,
+        "run_mode": policy_state.run_mode,
+        "enabling_ref": policy_state.enabling_decision_ref,
+    }
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    state_label = "ON" if policy_state.kill_switch else "OFF"
+    effect_label = "DISARMED" if policy_state.kill_switch else "READY"
+    print(f"ce automerge-kill-switch: {state_label}")
+    print(f"  live_policy    : {effect_label}")
+    print(f"  policy_state   : {policy_path}")
+    print(f"  run_mode       : {policy_state.run_mode}")
+    print(f"  enabling_ref   : {_automerge_status_value(policy_state.enabling_decision_ref)}")
+    return 0
+
+
 def _automerge_status_decision(value) -> str:
     decision = str(value) if value is not None else "UNKNOWN"
     if decision == "GESTURE":
@@ -4812,6 +4907,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _automerge_decide(args)
     if args.group == "automerge-status":
         return _automerge_status(args)
+    if args.group == "automerge-kill-switch":
+        return _automerge_kill_switch(args)
     if args.group == "containment-status":
         return _containment_status(args)
     if args.group == "init":

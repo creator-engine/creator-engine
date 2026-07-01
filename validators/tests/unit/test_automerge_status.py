@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import ce_cli
+from creator_engine_validator.forge import automerge_policy
 from creator_engine_validator.forge.automerge_policy import (
     AutoMergeClassPolicy,
     AutoMergePolicyState,
     AutoMergePolicyStateError,
+    load_automerge_policy_state,
     save_automerge_policy_state,
     load_decision_records,
 )
@@ -127,3 +129,94 @@ def test_automerge_status_reports_malformed_record(tmp_path: Path, capsys) -> No
     assert result == 1
     err = capsys.readouterr().err
     assert "ERROR: ce automerge-status: decision records unreadable" in err
+
+
+def test_automerge_kill_switch_status_reads_live_policy_state(tmp_path: Path, capsys) -> None:
+    policy_path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+    save_automerge_policy_state(
+        policy_path,
+        AutoMergePolicyState(
+            run_mode="ceo",
+            kill_switch=True,
+            classes={"docs": AutoMergeClassPolicy(auto_merge=True)},
+            enabling_decision_ref="ce-ops#313-enable",
+        ),
+    )
+
+    result = ce_cli.main(["automerge-kill-switch", "status", "--repo-root", str(tmp_path)])
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "ce automerge-kill-switch: ON" in out
+    assert "live_policy    : DISARMED" in out
+    assert "run_mode       : ceo" in out
+
+
+def test_automerge_kill_switch_on_sets_live_policy_state(tmp_path: Path, capsys) -> None:
+    policy_path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+    save_automerge_policy_state(
+        policy_path,
+        AutoMergePolicyState(
+            run_mode="ceo",
+            kill_switch=False,
+            classes={"docs": AutoMergeClassPolicy(auto_merge=True)},
+            enabling_decision_ref="ce-ops#313-enable",
+        ),
+    )
+
+    result = ce_cli.main(["automerge-kill-switch", "on", "--repo-root", str(tmp_path)])
+
+    assert result == 0
+    assert load_automerge_policy_state(policy_path).kill_switch is True
+    out = capsys.readouterr().out
+    assert "ce automerge-kill-switch: ON" in out
+    assert "live_policy    : DISARMED" in out
+
+
+def test_automerge_kill_switch_off_clears_live_policy_state(tmp_path: Path, capsys) -> None:
+    policy_path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+    save_automerge_policy_state(
+        policy_path,
+        AutoMergePolicyState(
+            run_mode="ceo",
+            kill_switch=True,
+            classes={"docs": AutoMergeClassPolicy(auto_merge=True)},
+            enabling_decision_ref="ce-ops#313-enable",
+        ),
+    )
+
+    result = ce_cli.main(["automerge-kill-switch", "off", "--repo-root", str(tmp_path)])
+
+    assert result == 0
+    assert load_automerge_policy_state(policy_path).kill_switch is False
+    out = capsys.readouterr().out
+    assert "ce automerge-kill-switch: OFF" in out
+    assert "live_policy    : READY" in out
+
+
+def test_automerge_kill_switch_on_write_failure_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    policy_path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
+    save_automerge_policy_state(
+        policy_path,
+        AutoMergePolicyState(
+            run_mode="ceo",
+            kill_switch=False,
+            classes={"docs": AutoMergeClassPolicy(auto_merge=True)},
+            enabling_decision_ref="ce-ops#313-enable",
+        ),
+    )
+
+    def refuse_write(path, state) -> None:
+        raise AutoMergePolicyStateError("disk refused write")
+
+    monkeypatch.setattr(automerge_policy, "save_automerge_policy_state", refuse_write)
+
+    result = ce_cli.main(["automerge-kill-switch", "on", "--repo-root", str(tmp_path)])
+
+    assert result == 1
+    assert load_automerge_policy_state(policy_path).kill_switch is False
+    err = capsys.readouterr().err
+    assert "ERROR: ce automerge-kill-switch on: policy state error: disk refused write" in err
+    assert "CE_AUTOMERGE_KILL_SWITCH" in err
