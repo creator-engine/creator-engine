@@ -55,7 +55,7 @@ def test_as_built_ce_inventory_matches_expected():
     # additions are never silent, but are exempt from the public-README docs
     # requirement below — see ce_cli.INTERNAL_COMMAND_GROUPS.
     assert _ce_command_groups() == {
-        "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain",
+        "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain", "speckit",
         "orchestrator", "connector", "containment-probe", "reviewer-triage", "claim",
         "pickup", "dispatch", "playbook", "check", "doctor", "init", "launch", "hud",
         "verify-install", "update", "clean-main-install", "onboard", "bootstrap", "publish-branch", "harness-matrix",

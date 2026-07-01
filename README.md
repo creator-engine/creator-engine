@@ -104,12 +104,12 @@ platform evolves:
 
 - **`ce`** is the retained v1 command-line runtime. It wraps the validator and
   provides local repo-native operations such as `check`, `doctor`, `init`,
-  `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `dequeue`, `event`, `pcl`,
+  `speckit`, `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `dequeue`, `event`, `pcl`,
   `brain`, `orchestrator`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
   `pickup`, `dispatch`, `playbook`, `surfaces`, `bootstrap`, `verify-install`, `update`, `clean-main-install`, `onboard`, `publish-branch`,
   `harness-matrix`, `containment-status`, `validate-pr`, `automerge-decide`, and `automerge-status`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
-  `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
+  `ce speckit`, `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce dequeue`, `ce event`, `ce pcl`, `ce brain`, `ce orchestrator`, `ce connector`,
   `ce containment-probe`, `ce reviewer-triage`, `ce claim`, `ce pickup`,
   `ce dispatch`, `ce playbook`, `ce surfaces`, `ce bootstrap`

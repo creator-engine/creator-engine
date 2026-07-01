@@ -48,6 +48,7 @@ ce brain recall      # hybrid (semantic+keyword) recall: SSOT-precedence, tier-t
 ce brain verify      # validate the local brain assertion ledger
 ce brain probe       # freshly interrogate named Knowledge-SSOT capability probes
 ce brain bootstrap   # emit the deterministic injection bootstrap payload
+ce speckit init      # scaffold .specify/ + speckit skill artifacts into a target project
 ce orchestrator status # read Orchestrator runtime records (read-only)
 ce connector verify     # validate a connector descriptor + Mission-Brief pair (offline) (G2.005.1)
 ce connector plan       # build + validate a read-only read plan (offline)
@@ -122,6 +123,7 @@ from . import (
     pr_preflight,
     reviewer_triage,
     seat_lifecycle,
+    speckit_init,
     support_runtime,
     side_effect_ledger_runtime,
     transcript_archive,
@@ -1104,6 +1106,20 @@ def _build_parser() -> argparse.ArgumentParser:
     bb.add_argument("--role", default=brain_bootstrap.DEFAULT_ROLE, help="bootstrap role label")
     bb.add_argument("--seat-class", default=brain_bootstrap.DEFAULT_SEAT_CLASS, help="foreman/worker; unknown fails closed to foreman")
     bb.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    speckit = groups.add_parser("speckit", help="spec-kit scaffold commands")
+    speckit_sub = speckit.add_subparsers(dest="speckit_cmd")
+    speckit_init_p = speckit_sub.add_parser(
+        "init",
+        help="scaffold .specify/ and speckit skill artifacts into a target project",
+    )
+    speckit_init_p.add_argument("--target", default=None, help="target project directory (default: cwd)")
+    speckit_init_p.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing scaffold files instead of skipping them",
+    )
+    speckit_init_p.add_argument("--json", action="store_true", dest="json_output")
 
     orchestrator = groups.add_parser(
         "orchestrator",
@@ -3651,6 +3667,37 @@ def _init(args) -> int:
     return 0
 
 
+def _speckit(args) -> int:
+    if getattr(args, "speckit_cmd", None) != "init":
+        print("usage: ce speckit {init} ...", file=sys.stderr)
+        return 2
+    target = args.target if args.target is not None else Path.cwd()
+    try:
+        result = speckit_init.scaffold_speckit(target, force=bool(args.force))
+    except speckit_init.SpeckitInitError as exc:
+        print(f"ERROR: ce speckit init failed [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(
+            "ce speckit init: "
+            f"{len(result.created)} created, "
+            f"{len(result.skipped)} skipped, "
+            f"{len(result.overwritten)} overwritten -> {result.target}"
+        )
+        for label, paths in (
+            ("created", result.created),
+            ("skipped", result.skipped),
+            ("overwritten", result.overwritten),
+        ):
+            if paths:
+                print(f"{label}:")
+                for path in paths:
+                    print(f"  {path}")
+    return 0
+
+
 def _harness_matrix(args) -> int:
     """Emit the PROBED harness-support capability matrix.
 
@@ -4806,6 +4853,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.parse_args(["brain", "--help"])  # prints brain help, exits
             return 2
         return handler(args)
+    if args.group == "speckit":
+        return _speckit(args)
     if args.group == "orchestrator":
         orchestrator_cmd = getattr(args, "orchestrator_cmd", None)
         handler = _ORCHESTRATOR_DISPATCH.get(orchestrator_cmd)
