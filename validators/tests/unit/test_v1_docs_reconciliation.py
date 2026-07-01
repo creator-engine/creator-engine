@@ -60,7 +60,8 @@ def test_as_built_ce_inventory_matches_expected():
         "pickup", "dispatch", "playbook", "check", "doctor", "init", "launch", "hud",
         "verify-install", "update", "clean-main-install", "onboard", "bootstrap", "publish-branch", "harness-matrix",
         "containment-status", "herdr", "validate-pr", "dequeue", "surfaces",
-        "automerge-decide", "automerge-status", "ask", "support", "triage",
+        "automerge-decide", "automerge-status", "automerge-kill-switch",
+        "ask", "support", "triage",
     }
 
 

@@ -265,6 +265,24 @@ def save_automerge_policy_state(path: str | Path, state: AutoMergePolicyState) -
         raise AutoMergePolicyStateError(str(exc)) from exc
 
 
+def update_automerge_policy_kill_switch(
+    path: str | Path,
+    *,
+    active: bool,
+) -> AutoMergePolicyState:
+    """Set the durable live-policy kill-switch while preserving all other state."""
+
+    current = load_automerge_policy_state(path)
+    updated = AutoMergePolicyState(
+        run_mode=current.run_mode,
+        kill_switch=active,
+        classes=current.classes,
+        enabling_decision_ref=current.enabling_decision_ref,
+    )
+    save_automerge_policy_state(path, updated)
+    return updated
+
+
 def materialize_automerge_policy_state_from_variables(
     path: str | Path,
     *,

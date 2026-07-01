@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import ce_cli
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
 
@@ -365,6 +366,24 @@ def test_stale_decision_armed_but_live_policy_kill_switch_refuses(
         _write(tmp_path, _decision(run_mode="ceo", kill_switch=False)), gh_runner=gh
     )
 
+    assert result.refused is True
+    assert result.reason == "live_kill_switch_active"
+    assert result.acted is False
+    assert gh.calls == []
+
+
+def test_kill_switch_cli_on_makes_actuator_refuse_live_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, run_mode="ceo", kill_switch=False)
+
+    cli_result = ce_cli.main(["automerge-kill-switch", "on", "--repo-root", str(tmp_path)])
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(
+        _write(tmp_path, _decision(run_mode="ceo", kill_switch=False)), gh_runner=gh
+    )
+
+    assert cli_result == 0
     assert result.refused is True
     assert result.reason == "live_kill_switch_active"
     assert result.acted is False
