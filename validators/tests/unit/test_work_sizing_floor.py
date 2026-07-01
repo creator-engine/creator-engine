@@ -138,6 +138,25 @@ def test_thresholds_map_to_xs_s_m_l_without_changing_line_metric():
     }
 
 
+def test_floor_projection_treats_canonical_and_legacy_work_classes_equally():
+    cases = (
+        ("XS", "tiny", 399, True, "XS"),
+        ("XS", "tiny", 400, False, "S"),
+        ("S", "story", 799, True, "S"),
+        ("S", "story", 800, False, "M"),
+        ("M", "feature", 1000, True, "M"),
+        ("M", "feature", 1001, False, "L"),
+        ("L", "epic", 1001, True, "L"),
+    )
+
+    for canonical, legacy, changed_lines, floor_met, minimum in cases:
+        stats = [{"path": "a.py", "additions": changed_lines, "deletions": 0}]
+
+        assert chk.sizing_floor_projection(canonical, stats) == chk.sizing_floor_projection(legacy, stats)
+        assert chk.sizing_floor_projection(canonical, stats)["floor_met"] is floor_met
+        assert chk.sizing_floor_projection(canonical, stats)["minimum_work_class"] == minimum
+
+
 def test_generated_lockfile_and_vendored_lines_are_excluded_from_floor():
     stats = [
         {"path": "src/app.py", "additions": 150, "deletions": 50},
