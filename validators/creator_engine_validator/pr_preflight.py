@@ -262,6 +262,7 @@ def _resolve_declared_work_class(
         raise RuntimeError(
             "PR body/carrier must contain exactly one declared work class line: "
             "'- **Declared work class:** <XS|S|M|L>' "
+            "(legacy aliases accepted: tiny, story, feature, epic) "
             f"(found {len(values)}; locations: {locations})"
         )
     declared = values[0]
@@ -898,7 +899,10 @@ def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
     parser.add_argument(
         "--declared-work-class",
         choices=WORK_CLASS_INPUTS,
-        help="declared PR work class; when omitted, read exactly one declared-work-class line from the PR carrier/body",
+        help=(
+            "declared PR work class <XS|S|M|L>; legacy aliases tiny/story/feature/epic are accepted; "
+            "when omitted, read exactly one declared-work-class line from the PR carrier/body"
+        ),
     )
     parser.add_argument("--head-ref", default=None, help="PR head branch name for carrier slug (default: current branch)")
     parser.add_argument(

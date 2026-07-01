@@ -307,6 +307,58 @@ def test_preflight_discovers_legacy_declared_work_class_from_carrier(tmp_path: P
     assert "[PASS] declared work class: M" in out.getvalue()
 
 
+def test_preflight_discovers_canonical_declared_work_class_from_carrier(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    carrier = tmp_path / ".ce" / "pr-manifests" / "dev4-night-lane0-pr-preflight.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text("- **Declared work class:** S\n", encoding="utf-8")
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths=".ce/pr-manifests/dev4-night-lane0-pr-preflight.md\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, declared_work_class=None),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    assert "[PASS] declared work class: S" in out.getvalue()
+
+
+def test_preflight_rejects_unknown_declared_work_class_from_carrier(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    carrier = tmp_path / ".ce" / "pr-manifests" / "dev4-night-lane0-pr-preflight.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text("- **Declared work class:** bogus\n", encoding="utf-8")
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths=".ce/pr-manifests/dev4-night-lane0-pr-preflight.md\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, declared_work_class=None),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 1
+    assert "expected one of: XS, S, M, L" in out.getvalue()
+    assert "legacy aliases: tiny, story, feature, epic" in out.getvalue()
+    assert not any("verify-work-sizing-floor" in call for call in runner.argv_calls())
+
+
 def test_preflight_build_parser_accepts_canonical_and_legacy_work_class_inputs():
     parser = pr_preflight.build_parser()
 
@@ -358,6 +410,7 @@ def test_preflight_fails_when_declared_work_class_line_missing(tmp_path: Path, m
 
     assert rc == 1
     assert "exactly one declared work class line" in out.getvalue()
+    assert "legacy aliases accepted: tiny, story, feature, epic" in out.getvalue()
     assert not any("verify-work-sizing-floor" in call for call in runner.argv_calls())
 
 
