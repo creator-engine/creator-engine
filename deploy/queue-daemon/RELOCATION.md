@@ -53,6 +53,7 @@ runs the unit: CE-DEV-1 VPS for cutover, or DGX again during rollback.
    CE_APPROVAL_WALL_SECRET_PATH=forge/approval-capability/wall
    CE_APPROVAL_WALL_SECRET_FIELD=signing_secret
    CE_APPROVAL_WALL_POLICY_SHA=<approval-policy-sha-or-id>
+   CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA=<approval-wall-secret-ref-policy-sha-or-id>
    ```
 
    The unit pins `BAO_ADDR=https://100.72.252.20:8200`, and sets runtime/state

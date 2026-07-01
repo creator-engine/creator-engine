@@ -19,6 +19,7 @@ Required environment:
   CE_APPROVAL_WALL_SECRET_PATH             OpenBao secret path, for example forge/approval-capability/wall
   CE_APPROVAL_WALL_SECRET_FIELD            OpenBao field, for example signing_secret
   CE_APPROVAL_WALL_POLICY_SHA              approval wall policy sha/id
+  CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA   approval wall secret-ref policy sha/id (refs the policy that governs the secret fetch)
 
 Optional environment:
   BAO_CACERT                                OpenBao CA certificate path
@@ -69,6 +70,7 @@ validate_required_env() {
   require_env CE_APPROVAL_WALL_SECRET_PATH
   require_env CE_APPROVAL_WALL_SECRET_FIELD
   require_env CE_APPROVAL_WALL_POLICY_SHA
+  require_env CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA
 }
 
 resolve_queue_daemon_command() {
@@ -184,6 +186,7 @@ main() {
     --approval-wall-secret-field "$CE_APPROVAL_WALL_SECRET_FIELD"
     --approval-wall-secret-purpose "${CE_APPROVAL_WALL_SECRET_PURPOSE:-approval-capability-wall}"
     --approval-wall-secret-owner-ref "${CE_APPROVAL_WALL_SECRET_OWNER_REF:-controller:integrator}"
+    --approval-wall-secret-ref-policy-sha "$CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA"
     --approval-wall-secret-target-ref "file:$CE_APPROVAL_WALL_SECRET_TARGET_FILE"
     --approval-wall-secret-repo "$CE_GATE_REPO"
     --approval-wall-secret-run-id "${CE_APPROVAL_WALL_SECRET_RUN_ID:-approval-wall-daemon}"
