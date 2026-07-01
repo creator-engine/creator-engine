@@ -186,9 +186,11 @@ else
   echo &quot;OK: malformed examples correctly rejected&quot;
 fi</code></pre>
 <p>Those names and commands mirror the workflow steps in <code>.github/workflows/validate.yml:43-46</code>, <code>.github/workflows/validate.yml:83-94</code>. For smaller documentation PRs, the existing <code>CONTRIBUTING.md</code> also asks contributors to run <code>git diff --check</code>, <code>check-examples</code>, and <code>scan-no-limitless</code> locally (<code>CONTRIBUTING.md:108-125</code>).</p>
+<p>Before you push, run the full PR gate set once and keep going until it is green:</p>
+<pre><code class="language-bash">TMPDIR=/var/tmp ce validate-pr</code></pre>
+<p><code>ce validate-pr</code> is the canonical local preflight. It is a superset of the individual pytest and validator commands above, resolves the committed comparison base, and prints one final <code>GREEN</code> or <code>FAIL</code> summary (<code>docs/contracts/authoring-a-governed-pr.md:18-61</code>, <code>validators/creator_engine_validator/pr_preflight.py:175-180</code>). Use the single preflight as the final local evidence pass before push.</p>
 <blockquote>
-<p><strong>Running from an isolated worktree?</strong> Set</p>
-<p><code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/validators/README.md"><code>../../validators/README.md</code></a>.</p>
+<p><strong>Running from an isolated worktree?</strong> Set <code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/validators/README.md"><code>../../validators/README.md</code></a>.</p>
 </blockquote>
 <h2 id="4-the-governed-cycle">4. The Governed Cycle</h2>
 <p>The user-facing cycle is:</p>
@@ -214,13 +216,17 @@ fi</code></pre>
 <p>Keep the PR boring and bounded.</p>
 <p>Use the PR template&#x27;s scope section to state what changed, what did not change, and the mutation class (<code>.github/pull_request_template.md:3-12</code>). The privileged mutation section asks for the Source ratification envelope reference, authorized scope, dominant mutation class, and confirmation that no deploy, live branch-protection mutation, merge, or secrets action occurred (<code>.github/pull_request_template.md:29-49</code>).</p>
 <p>Path scope is not informal. The live CI path-manifest gate uses per-PR carriers under <code>.ce/pr-manifests/&lt;branch-slug&gt;.md</code>, discovered from the PR diff, and enforces that the PR diff equals the carrier path set (<code>.github/workflows/validate.yml:100-118</code>). Do not invent a different carrier name for live PRs unless a ratified change updates the validator and workflow.</p>
+<p>Work size is not informal either. The PR body must contain exactly one declared work class line:</p>
+<pre><code class="language-text">- **Declared work class:** &lt;XS|S|M|L&gt;</code></pre>
+<p>Use only <code>XS</code>, <code>S</code>, <code>M</code>, or <code>L</code>, and choose a class at or above the diff-LOC floor. The live work-sizing gate reads the PR event body and normalizes that single line before checking the committed diff (<code>.github/workflows/validate.yml:396-465</code>). Editing the body alone does not re-trigger an already failed run; close and reopen the PR to start a fresh <code>pull_request</code> run with the corrected body.</p>
 <p>Checklist for the first PR:</p>
 <ul>
 <li>Reference the issue/spec/Scope that authorizes the change.</li>
 <li>Declare mutation class: <code>docs</code>, <code>code</code>, <code>schema</code>, or another baseline class from the mutation taxonomy.</li>
 <li>Keep the changed-file boundary tight.</li>
-<li>Add the path-manifest carrier when the PR is governed by a manifest.</li>
-<li>Paste validation evidence, including the three local checks above when they apply.</li>
+<li>Add the per-PR changelog fragment at <code>.ce/changelog/&lt;branch-slug&gt;.md</code>.</li>
+<li>Add the path-manifest carrier at <code>.ce/pr-manifests/&lt;branch-slug&gt;.md</code> when the PR is governed by a manifest (<code>docs/contracts/authoring-a-governed-pr.md:72-90</code>).</li>
+<li>Paste validation evidence, including <code>ce validate-pr</code> and the focused local checks above when they apply.</li>
 <li>Do not include secrets, local session state, generated logs, or machine-local paths. <code>CONTRIBUTING.md</code> explicitly excludes instance-local state and credentials (<code>CONTRIBUTING.md:91-106</code>).</li>
 </ul>
 <h2 id="6-review-and-independence">6. Review And Independence</h2>
