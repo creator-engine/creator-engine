@@ -44,13 +44,18 @@ class FakeGhRunner:
         issues=None,
         fail_search: bool = False,
         fail_patch: bool = False,
+        fail_label_issues=None,
+        existing_repo_labels=None,
     ):
         self.comments = comments if comments is not None else []
         self.issues = issues if issues is not None else []
         self.fail_search = fail_search
         self.fail_patch = fail_patch
+        self.fail_label_issues = set(fail_label_issues or [])
+        self.existing_repo_labels = set(existing_repo_labels or [])
         self.calls: list[tuple[list[str], str | None]] = []
         self.write_calls: list[tuple[list[str], str | None]] = []
+        self.label_write_calls: list[tuple[list[str], str | None]] = []
 
     def __call__(self, argv, input_text=None):
         argv = list(argv)
@@ -59,6 +64,8 @@ class FakeGhRunner:
         method = self._method(argv)
         if method in {"POST", "PATCH"}:
             self.write_calls.append((argv, input_text))
+        if self._is_label_write(path, method):
+            self.label_write_calls.append((argv, input_text))
         if path.startswith("repos/creator-engine/ce-ops/issues/67/comments"):
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.comments), stderr="")
         if path.startswith("search/issues"):
@@ -74,6 +81,20 @@ class FakeGhRunner:
             if self.fail_patch:
                 return subprocess.CompletedProcess(argv, 1, stdout="", stderr="patch unavailable")
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": 123}), stderr="")
+        if path.startswith("repos/creator-engine/ce-ops/labels/"):
+            label = path.rsplit("/", 1)[-1].replace("%3A", ":")
+            if label in self.existing_repo_labels:
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"name": label}), stderr="")
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="not found")
+        if path == "repos/creator-engine/ce-ops/labels" and method == "POST":
+            body = json.loads(input_text or "{}")
+            self.existing_repo_labels.add(body["name"])
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"name": body["name"]}), stderr="")
+        if "/issues/" in path and "/labels" in path:
+            issue_number = self._issue_number_from_label_path(path)
+            if issue_number in self.fail_label_issues:
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="label unavailable")
+            return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
 
     @staticmethod
@@ -92,6 +113,19 @@ class FakeGhRunner:
                 rest = rest[2:]
             return next(item for item in rest if not item.startswith("-"))
         raise AssertionError(f"no gh api path in {argv!r}")
+
+    @staticmethod
+    def _is_label_write(path: str, method: str) -> bool:
+        if method not in {"POST", "DELETE"}:
+            return False
+        return path == "repos/creator-engine/ce-ops/labels" or (
+            "/issues/" in path and "/labels" in path
+        )
+
+    @staticmethod
+    def _issue_number_from_label_path(path: str) -> int:
+        parts = path.split("/")
+        return int(parts[parts.index("issues") + 1])
 
 
 def _queue_comment(entries) -> dict:
@@ -213,10 +247,16 @@ def test_dry_run_makes_zero_write_calls():
 
     assert result["applied"] is False
     assert fake.write_calls == []
+    assert result["labels"]["planned"] is True
+    assert result["labels"]["deltas"][0]["add"] == ["triage:ready", "wc:S"]
+    assert fake.label_write_calls == []
 
 
 def test_apply_patches_existing_queue_comment():
-    fake = FakeGhRunner(comments=[_queue_comment([])], issues=[_issue(9)])
+    fake = FakeGhRunner(
+        comments=[_queue_comment([])],
+        issues=[_issue(9, labels=[{"name": "triage:ready"}, {"name": "wc:S"}])],
+    )
 
     result = qt.scan_and_triage(gh_runner=fake, apply=True, now="2026-06-30T00:00:00Z")
 
@@ -226,6 +266,55 @@ def test_apply_patches_existing_queue_comment():
     assert "--method" in argv and "PATCH" in argv
     assert "repos/creator-engine/ce-ops/issues/comments/123" in argv
     assert body is not None and qt.QUEUE_SENTINEL in json.loads(body)["body"]
+    assert fake.label_write_calls == []
+
+
+def test_label_delta_only_manages_work_class_and_readiness_namespaces():
+    delta = qt.plan_label_delta(
+        _entry(10, blockers=("dependency",)),
+        ["wc:S", "triage:ready", "external", "lane:l3"],
+    )
+
+    assert delta.current_managed == ("triage:ready", "wc:S")
+    assert delta.desired == ("triage:blocked", "wc:S")
+    assert delta.add == ("triage:blocked",)
+    assert delta.remove == ("triage:ready",)
+
+
+def test_apply_label_idempotent_re_run_is_noop_for_managed_labels():
+    fake = FakeGhRunner(
+        comments=[_queue_comment([])],
+        issues=[_issue(11, labels=[{"name": "triage:ready"}, {"name": "wc:S"}])],
+    )
+
+    result = qt.scan_and_triage(gh_runner=fake, apply=True, now="2026-06-30T00:00:00Z")
+
+    assert result["labels"]["delta_count"] == 0
+    assert result["labels"]["deltas"][0]["add"] == []
+    assert result["labels"]["deltas"][0]["remove"] == []
+    assert fake.label_write_calls == []
+
+
+def test_apply_label_error_isolated_per_issue_and_queue_still_posts():
+    fake = FakeGhRunner(
+        comments=[_queue_comment([])],
+        issues=[
+            _issue(12, labels=[{"name": "wc:M"}, {"name": "triage:blocked"}]),
+            _issue(13, labels=[{"name": "wc:M"}, {"name": "triage:blocked"}]),
+        ],
+        fail_label_issues={12},
+    )
+
+    result = qt.scan_and_triage(gh_runner=fake, apply=True, now="2026-06-30T00:00:00Z")
+
+    label_deltas = {delta["issue_number"]: delta for delta in result["labels"]["deltas"]}
+    assert result["applied"] is True
+    assert result["labels"]["error_count"] == 1
+    assert result["labels"]["missing_label_policy"] == "create_missing"
+    assert label_deltas[12]["applied"] is False
+    assert "error" in label_deltas[12]
+    assert label_deltas[13]["applied"] is True
+    assert any("label_apply_failed:creator-engine/ce-ops#12" in warning for warning in result["warnings"])
 
 
 def test_audit_record_is_valid_json_with_advisory_statement(tmp_path):

@@ -32,6 +32,37 @@ SCHEMA_VERSION = 1
 
 GhRunner = Callable[[Sequence[str], "str | None"], subprocess.CompletedProcess]
 
+WORK_CLASS_LABELS = frozenset({"wc:XS", "wc:S", "wc:M", "wc:L"})
+READINESS_LABELS = frozenset({"triage:ready", "triage:blocked"})
+MANAGED_LABEL_PREFIXES = ("wc:", "triage:")
+MISSING_LABEL_POLICY = "create_missing"
+LABEL_SPECS: Mapping[str, Mapping[str, str]] = {
+    "wc:XS": {
+        "color": "c2e0c6",
+        "description": "Advisory CE triage work-class classification: XS.",
+    },
+    "wc:S": {
+        "color": "bfdadc",
+        "description": "Advisory CE triage work-class classification: S.",
+    },
+    "wc:M": {
+        "color": "fef2c0",
+        "description": "Advisory CE triage work-class classification: M.",
+    },
+    "wc:L": {
+        "color": "d93f0b",
+        "description": "Advisory CE triage work-class classification: L.",
+    },
+    "triage:ready": {
+        "color": "0e8a16",
+        "description": "Advisory CE triage readiness classification: ready.",
+    },
+    "triage:blocked": {
+        "color": "d93f0b",
+        "description": "Advisory CE triage readiness classification: blocked.",
+    },
+}
+
 LANE_LABEL_MAP: Mapping[str, str] = {
     "lane:l1": "L1",
     "lane/l1": "L1",
@@ -81,6 +112,28 @@ class QueueEntry:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["blockers"] = list(self.blockers)
+        return payload
+
+
+@dataclass(frozen=True)
+class LabelDelta:
+    issue_number: int
+    repo: str
+    current_managed: tuple[str, ...]
+    desired: tuple[str, ...]
+    add: tuple[str, ...]
+    remove: tuple[str, ...]
+    applied: bool = False
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["current_managed"] = list(self.current_managed)
+        payload["desired"] = list(self.desired)
+        payload["add"] = list(self.add)
+        payload["remove"] = list(self.remove)
+        if self.error is None:
+            payload.pop("error")
         return payload
 
 
@@ -287,12 +340,16 @@ def scan_and_triage(
     if issue_warning:
         warnings.append(issue_warning)
 
-    planned_entries = [
-        entry
-        for raw in raw_issues
-        if (entry := plan_triage_entry(raw, default_repo=repo, triaged_at=triaged_at))
-        is not None
-    ]
+    planned_entries: list[QueueEntry] = []
+    label_plans: list[tuple[QueueEntry, Sequence[str]]] = []
+    for raw in raw_issues:
+        entry = plan_triage_entry(raw, default_repo=repo, triaged_at=triaged_at)
+        if entry is None:
+            continue
+        planned_entries.append(entry)
+        label_plans.append((entry, _current_issue_labels(raw, default_repo=repo)))
+    label_result = sync_classification_labels(label_plans, apply=apply, gh_runner=runner)
+    warnings.extend(str(warning) for warning in label_result.get("warnings", ()))
     merged = _dedupe_last_write([*existing_entries, *planned_entries])
     write_result = upsert_queue_comment(
         repo,
@@ -317,12 +374,67 @@ def scan_and_triage(
         "queue_entry_count": len(merged),
         "entries": [entry.to_dict() for entry in merged],
         "write": write_result,
+        "labels": label_result,
         "warnings": warnings,
     }
     audit_path = write_audit_record(audit_root, result, triaged_at=triaged_at)
     if audit_path is not None:
         result["audit_path"] = str(audit_path)
     return result
+
+
+def plan_label_delta(entry: QueueEntry, current_labels: Sequence[str]) -> LabelDelta:
+    desired = _desired_classification_labels(entry)
+    current_managed = tuple(
+        sorted(
+            {
+                label.strip()
+                for label in current_labels
+                if _is_managed_label(label.strip())
+            }
+        )
+    )
+    return LabelDelta(
+        issue_number=entry.issue_number,
+        repo=entry.repo,
+        current_managed=current_managed,
+        desired=desired,
+        add=tuple(label for label in desired if label not in current_managed),
+        remove=tuple(label for label in current_managed if label not in desired),
+    )
+
+
+def sync_classification_labels(
+    issue_plans: Sequence[tuple[QueueEntry, Sequence[str]]],
+    *,
+    apply: bool = False,
+    gh_runner: GhRunner | None = None,
+) -> dict[str, Any]:
+    runner = gh_runner or default_gh_runner
+    deltas: list[LabelDelta] = []
+    warnings: list[str] = []
+    for entry, current_labels in issue_plans:
+        delta = plan_label_delta(entry, current_labels)
+        if apply and (delta.add or delta.remove):
+            delta = _apply_label_delta(delta, gh_runner=runner)
+            if delta.error:
+                warnings.append(
+                    f"label_apply_failed:{delta.repo}#{delta.issue_number}:{delta.error}"
+                )
+        deltas.append(delta)
+
+    error_count = sum(1 for delta in deltas if delta.error)
+    return {
+        "applied": bool(apply),
+        "planned": not apply,
+        "managed_prefixes": list(MANAGED_LABEL_PREFIXES),
+        "missing_label_policy": MISSING_LABEL_POLICY,
+        "issue_count": len(deltas),
+        "delta_count": sum(1 for delta in deltas if delta.add or delta.remove),
+        "error_count": error_count,
+        "deltas": [delta.to_dict() for delta in deltas],
+        "warnings": warnings,
+    }
 
 
 def upsert_queue_comment(
@@ -368,6 +480,132 @@ def upsert_queue_comment(
         "body_sha256": _sha256(body),
         **({"warning": f"patch_failed:{stderr.strip() or code}"} if code != 0 else {}),
     }
+
+
+def _apply_label_delta(delta: LabelDelta, *, gh_runner: GhRunner) -> LabelDelta:
+    try:
+        for label in delta.add:
+            ok, detail = _ensure_label(delta.repo, label, gh_runner=gh_runner)
+            if not ok:
+                return _label_delta_error(delta, f"ensure_label_failed:{label}:{detail}")
+        if delta.add:
+            ok, detail = _add_issue_labels(
+                delta.repo,
+                delta.issue_number,
+                delta.add,
+                gh_runner=gh_runner,
+            )
+            if not ok:
+                return _label_delta_error(delta, f"add_failed:{detail}")
+        for label in delta.remove:
+            ok, detail = _remove_issue_label(
+                delta.repo,
+                delta.issue_number,
+                label,
+                gh_runner=gh_runner,
+            )
+            if not ok:
+                return _label_delta_error(delta, f"remove_failed:{label}:{detail}")
+    except Exception as exc:  # noqa: BLE001 - advisory labels must fail open per issue.
+        return _label_delta_error(delta, str(exc))
+    return LabelDelta(
+        issue_number=delta.issue_number,
+        repo=delta.repo,
+        current_managed=delta.current_managed,
+        desired=delta.desired,
+        add=delta.add,
+        remove=delta.remove,
+        applied=True,
+    )
+
+
+def _label_delta_error(delta: LabelDelta, error: str) -> LabelDelta:
+    return LabelDelta(
+        issue_number=delta.issue_number,
+        repo=delta.repo,
+        current_managed=delta.current_managed,
+        desired=delta.desired,
+        add=delta.add,
+        remove=delta.remove,
+        applied=False,
+        error=error,
+    )
+
+
+def _desired_classification_labels(entry: QueueEntry) -> tuple[str, ...]:
+    labels: list[str] = []
+    work_label = f"wc:{entry.work_class}"
+    if work_label in WORK_CLASS_LABELS:
+        labels.append(work_label)
+    readiness_label = f"triage:{entry.readiness}"
+    if readiness_label in READINESS_LABELS:
+        labels.append(readiness_label)
+    return tuple(sorted(labels))
+
+
+def _is_managed_label(label: str) -> bool:
+    return any(label.startswith(prefix) for prefix in MANAGED_LABEL_PREFIXES)
+
+
+def _current_issue_labels(raw: Any, *, default_repo: str) -> tuple[str, ...]:
+    candidate = forge_triage.normalize_issue(raw, default_repo=default_repo)
+    return () if candidate is None else candidate.labels
+
+
+def _ensure_label(repo: str, label: str, *, gh_runner: GhRunner) -> tuple[bool, str]:
+    spec = LABEL_SPECS.get(label)
+    if spec is None:
+        return False, "missing_label_spec"
+    path = f"repos/{repo}/labels/{_path_label(label)}"
+    code, _payload, stderr = _gh_api(gh_runner, path, method="GET")
+    if code == 0:
+        return True, ""
+    code, _payload, stderr = _gh_api(
+        gh_runner,
+        f"repos/{repo}/labels",
+        method="POST",
+        body={
+            "name": label,
+            "color": spec["color"],
+            "description": spec["description"],
+        },
+    )
+    return code == 0, stderr.strip() or str(code)
+
+
+def _add_issue_labels(
+    repo: str,
+    issue_number: int,
+    labels: Sequence[str],
+    *,
+    gh_runner: GhRunner,
+) -> tuple[bool, str]:
+    code, _payload, stderr = _gh_api(
+        gh_runner,
+        f"repos/{repo}/issues/{issue_number}/labels",
+        method="POST",
+        body={"labels": list(labels)},
+    )
+    return code == 0, stderr.strip() or str(code)
+
+
+def _remove_issue_label(
+    repo: str,
+    issue_number: int,
+    label: str,
+    *,
+    gh_runner: GhRunner,
+) -> tuple[bool, str]:
+    code, _payload, stderr = _gh_api(
+        gh_runner,
+        f"repos/{repo}/issues/{issue_number}/labels/{_path_label(label)}",
+        method="DELETE",
+    )
+    return code == 0, stderr.strip() or str(code)
+
+
+def _path_label(label: str) -> str:
+    return urllib.parse.quote(label, safe="")
 
 
 def write_audit_record(
