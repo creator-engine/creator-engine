@@ -1,0 +1,85 @@
+name: Release Auto Tag
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  auto-tag:
+    name: Create release tag from version source
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version from source
+        id: release-version
+        run: |
+          set -euo pipefail
+
+          python - <<'PYEOF'
+          import ast
+          import os
+          import re
+          from pathlib import Path
+
+          version_path = Path("validators/creator_engine_validator/version.py")
+          module = ast.parse(version_path.read_text(encoding="utf-8"), filename=str(version_path))
+          version = None
+          for node in module.body:
+              if not isinstance(node, ast.Assign):
+                  continue
+              if not any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets):
+                  continue
+              if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                  version = node.value.value
+              break
+
+          if version is None:
+              raise SystemExit("__version__ string literal not found in validators/creator_engine_validator/version.py")
+          if "\n" in version or "\r" in version:
+              raise SystemExit("__version__ must be a single-line string literal")
+
+          is_semver = re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is not None
+          if not is_semver:
+              print(f"::notice title=Release auto-tag skipped::version {version!r} is not stable semver X.Y.Z")
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+              output.write(f"tag_name=release/v{version}\n")
+              output.write(f"should_tag={'true' if is_semver else 'false'}\n")
+          PYEOF
+
+      - name: Create annotated release tag
+        if: steps.release-version.outputs.should_tag == 'true'
+        env:
+          VERSION: ${{ steps.release-version.outputs.version }}
+          TAG_NAME: ${{ steps.release-version.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/${TAG_NAME}" >/dev/null 2>&1
+          remote_status=$?
+          set -e
+
+          if [[ "${remote_status}" -eq 0 ]]; then
+            echo "::notice title=Release auto-tag skipped::${TAG_NAME} already exists"
+            exit 0
+          fi
+          if [[ "${remote_status}" -ne 2 ]]; then
+            echo "git ls-remote failed while checking ${TAG_NAME}" >&2
+            exit "${remote_status}"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG_NAME}" -m "Creator Engine v${VERSION}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG_NAME}"
