@@ -8,5 +8,5 @@ issue: ce-ops#347
 
 **AutoReview run-mode CLI wiring.**
 
-- **Declared work class:** S
+- **Declared work class:** story
 - Added focused tests for AutoReview broker `--run-mode` CLI behavior, including `strangeLoop` host selection, fail-closed absent/dev mode, payload injection refusal, and help output coverage.
