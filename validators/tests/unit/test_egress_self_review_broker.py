@@ -238,7 +238,16 @@ def test_approve_refused_when_run_mode_none():
     assert "APPROVE is controller approval-wall only" in str(exc.value)
 
 
-def test_main_default_run_mode_dev_reaches_serve_and_approve_stays_refused(monkeypatch):
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--serve", "--config", "broker.json"],
+        ["--serve", "--config", "broker.json", "--run-mode", "dev"],
+    ],
+)
+def test_main_absent_and_dev_run_mode_reach_serve_and_approve_stays_refused(
+    argv, monkeypatch
+):
     seen = {}
 
     def fake_serve(**kwargs):
@@ -248,7 +257,7 @@ def test_main_default_run_mode_dev_reaches_serve_and_approve_stays_refused(monke
     monkeypatch.setattr(broker, "systemd_activated_unix_socket", lambda: None)
     monkeypatch.setattr(broker, "serve", fake_serve)
 
-    assert broker.main(["--serve", "--config", "broker.json"]) == broker.EXIT_OK
+    assert broker.main(argv) == broker.EXIT_OK
 
     assert seen["run_mode"] == "dev"
     with pytest.raises(broker.SelfReviewRefused) as exc:
@@ -272,6 +281,36 @@ def test_main_strangeloop_run_mode_reaches_serve(monkeypatch):
     )
 
     assert seen["run_mode"] == "strangeLoop"
+    request = broker.parse_request(
+        {
+            **_payload(event="APPROVE"),
+            "reviewer_authority_envelope": _reviewer_authority_envelope(),
+        },
+        run_mode=seen["run_mode"],
+    )
+    assert request.event == "APPROVE"
+
+
+@pytest.mark.parametrize("host_run_mode", [None, "dev"])
+def test_payload_run_mode_cannot_relax_approval_guard(host_run_mode):
+    payload = {
+        **_payload(event="APPROVE"),
+        "run_mode": "strangeLoop",
+        "reviewer_authority_envelope": _reviewer_authority_envelope(),
+    }
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(payload, run_mode=host_run_mode)
+
+    assert "APPROVE is controller approval-wall only" in str(exc.value)
+
+
+def test_parser_help_lists_run_mode_flag_and_choices():
+    help_text = broker._build_parser().format_help()
+
+    assert "--run-mode" in help_text
+    assert "dev" in help_text
+    assert "strangeLoop" in help_text
 
 
 def test_main_invalid_run_mode_rejects_fail_closed():
