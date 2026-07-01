@@ -190,8 +190,7 @@ fi</code></pre>
 <pre><code class="language-bash">TMPDIR=/var/tmp ce validate-pr</code></pre>
 <p><code>ce validate-pr</code> is the canonical local preflight. It is a superset of the individual pytest and validator commands above, resolves the committed comparison base, and prints one final <code>GREEN</code> or <code>FAIL</code> summary (<code>docs/contracts/authoring-a-governed-pr.md:18-61</code>, <code>validators/creator_engine_validator/pr_preflight.py:175-180</code>). Use the single preflight as the final local evidence pass before push.</p>
 <blockquote>
-<p><strong>Running from an isolated worktree?</strong> Set</p>
-<p><code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/validators/README.md"><code>../../validators/README.md</code></a>.</p>
+<p><strong>Running from an isolated worktree?</strong> Set <code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/validators/README.md"><code>../../validators/README.md</code></a>.</p>
 </blockquote>
 <h2 id="4-the-governed-cycle">4. The Governed Cycle</h2>
 <p>The user-facing cycle is:</p>
