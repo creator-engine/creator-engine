@@ -610,7 +610,7 @@ def test_run_registers_drift_check_and_discovers_brain_ledger(tmp_path: Path):
     assert any(error.code == ce_brain_drift.CODE_UNVERIFIABLE for error in result.errors)
 
 
-def test_run_reports_stale_loaded_ledger_against_authoritative_once(tmp_path: Path):
+def test_run_ignores_stale_loaded_ledger_when_authoritative_exists(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     authoritative = _ledger_text(
@@ -637,14 +637,8 @@ def test_run_reports_stale_loaded_ledger_against_authoritative_once(tmp_path: Pa
 
     result = ce_brain_drift.run([repo, repo / ".ce" / "state"])
 
-    mismatch_errors = [
-        error
-        for error in result.errors
-        if error.code == ce_brain_drift.CODE_AUTHORITATIVE_MISMATCH
-    ]
-    assert not result.ok
-    assert len(mismatch_errors) == 1
-    assert ".ce/state/brain/assertions.yaml" in str(mismatch_errors[0].path)
+    assert result.ok
+    assert result.errors == ()
 
 
 def test_verify_state_root_resolves_artifacts_from_repo_root(tmp_path: Path, monkeypatch):
@@ -677,7 +671,7 @@ def test_verify_state_root_resolves_artifacts_from_repo_root(tmp_path: Path, mon
     assert drift.findings == ()
 
 
-def test_verify_state_root_reports_stale_loaded_ledger_against_authoritative(tmp_path: Path):
+def test_verify_state_root_ignores_stale_loaded_ledger_when_authoritative_exists(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     authoritative = _ledger_text(
@@ -704,8 +698,11 @@ def test_verify_state_root_reports_stale_loaded_ledger_against_authoritative(tmp
 
     drift = ce_brain_drift.verify_state_root(repo / ".ce" / "state")
 
-    assert not drift.ok
-    assert any(error.code == ce_brain_drift.CODE_AUTHORITATIVE_MISMATCH for error in drift.findings)
+    assert drift.ok
+    assert drift.ledger_path == repo / ".ce" / "brain" / "assertions.yaml"
+    assert drift.record_count == 1
+    assert drift.active_count == 1
+    assert drift.findings == ()
 
 
 def test_verify_state_root_missing_runtime_copy_does_not_fail_fresh_checkout(tmp_path: Path):
@@ -751,6 +748,38 @@ def test_verify_state_root_falls_back_to_authoritative_ledger_and_reports_drift(
     assert drift.active_count == 1
     assert not drift.ok
     assert [finding.code for finding in drift.findings] == [ce_brain_drift.CODE_DRIFT]
+    assert "artifact projection drifted" in drift.findings[0].message
+
+
+def test_verify_state_root_reports_authoritative_drift_with_stale_loaded_ledger_present(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_text(
+        repo / ".github" / "workflows" / "validate.yml",
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [other_event]\n",
+    )
+    authoritative = _write_authoritative_validate_workflow_ledger(repo)
+    _write_ledger(
+        repo,
+        _ledger_text(
+            assertion_id="brain-assertion-drift-stale1",
+            claim={
+                "subject": "artifact",
+                "predicate": "value",
+                "object": "evidence",
+                "value": "stale local state",
+            },
+        ),
+    )
+
+    drift = ce_brain_drift.verify_state_root(repo / ".ce" / "state")
+
+    assert drift.ledger_path == authoritative
+    assert not drift.ok
+    assert [finding.code for finding in drift.findings] == [ce_brain_drift.CODE_DRIFT]
+    assert ".ce/state/brain/assertions.yaml" not in str(drift.findings[0].path)
     assert "artifact projection drifted" in drift.findings[0].message
 
 
