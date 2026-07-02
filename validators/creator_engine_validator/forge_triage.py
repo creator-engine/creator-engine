@@ -598,7 +598,9 @@ def _has_milestone(candidate: IssueCandidate) -> bool:
         return bool(value.strip())
     if isinstance(value, Mapping):
         return bool(value)
-    return True
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return bool(value)
+    return bool(value)
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:

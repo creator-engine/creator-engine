@@ -243,6 +243,43 @@ def test_plan_triage_surfaces_commissioned_unscheduled_advisory_section():
     assert payload["commissioned_unscheduled"][1]["commissioned_by"] == ["author:Operator"]
 
 
+@pytest.mark.parametrize(
+    ("milestone", "expected_unscheduled"),
+    [
+        ({"title": "Night arc"}, []),
+        ([{"title": "Night arc"}], []),
+        (None, [20]),
+        ("", [20]),
+        ("Night arc", []),
+        (391, []),
+    ],
+    ids=[
+        "dict-shape",
+        "list-shape",
+        "none",
+        "empty-string",
+        "bare-string",
+        "int",
+    ],
+)
+def test_commissioned_unscheduled_classifies_milestone_shapes(
+    milestone, expected_unscheduled
+):
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={
+            "items": [
+                _issue(187, title="Arc", body="Active arc includes #10."),
+                _issue(20, labels=[{"name": "user-story"}], milestone=milestone),
+            ]
+        },
+    )
+
+    assert [
+        item.issue.number for item in result.commissioned_unscheduled
+    ] == expected_unscheduled
+
+
 def test_commissioned_unscheduled_predicate_is_configurable():
     payload = {
         "items": [
