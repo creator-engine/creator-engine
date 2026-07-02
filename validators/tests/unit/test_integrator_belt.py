@@ -988,6 +988,105 @@ def test_daemon_mints_missing_approval_capability_for_trusted_authorized_reviewe
     assert gh.merge_calls == []
 
 
+def test_daemon_remints_stale_head_marker_for_trusted_current_head_approval():
+    old_head = "c" * 40
+    stale_marker = _approval_marker(head_sha=old_head, approved_by=AUTHORIZED_REVIEWER)
+    pr = _daemon_pr(body=_body_with_approval(stale_marker), changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issued: list[tuple[belt.DaemonPullRequest, belt.DaemonApprovalWitness]] = []
+    updates: list[str] = []
+
+    def issuer(candidate, witness):
+        issued.append((candidate, witness))
+        return _approval_marker(
+            repo=candidate.repo,
+            pr_number=candidate.pr_number,
+            head_sha=candidate.head_sha,
+            approved_by=witness.reviewer_login,
+        )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=issuer,
+        pr_body_updater=lambda candidate, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.defer_count == 1
+    assert result.decisions[0].reason == "approval_capability_minted"
+    assert "approval_capability_reason=head_mismatch" in result.decisions[0].evidence
+    assert len(issued) == 1
+    assert issued[0][1].reviewer_login == AUTHORIZED_REVIEWER
+    assert len(updates) == 1
+    assert stale_marker not in updates[0]
+    marker = extract_approval_capability_marker(updates[0])
+    assert marker is not None
+    verification = _approval_verifier().verify(
+        marker,
+        repo=REPO,
+        pr_number=PR,
+        head_sha=HEAD,
+        approved_by_candidates=(AUTHORIZED_REVIEWER,),
+    )
+    assert verification.valid is True
+    assert gh.merge_calls == []
+
+
+def test_daemon_head_mismatch_without_current_authorized_approval_skips_with_reason():
+    old_head = "c" * 40
+    stale_marker = _approval_marker(head_sha=old_head, approved_by="unvetted-reviewer")
+    pr = _daemon_pr(
+        body=_body_with_approval(stale_marker),
+        changed_paths=(CARRIER, "docs/a.md"),
+        approving_reviewers=("unvetted-reviewer",),
+        approval_witnesses=(
+            belt.DaemonApprovalWitness(
+                reviewer_login="unvetted-reviewer",
+                commit_oid=HEAD,
+                state="APPROVED",
+                review_id="review-unvetted",
+            ),
+        ),
+    )
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issuer_calls: list[str] = []
+    updates: list[str] = []
+    logs: list[dict] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=lambda _pr, _witness: issuer_calls.append("called") or _approval_marker(),
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+        log_sink=lambda payload: logs.append(dict(payload)),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "head_mismatch_no_current_approval"
+    assert "approval_capability_reason=head_mismatch" in result.decisions[0].evidence
+    assert "current_approval_reason=approval_reviewer_unauthorized" in result.decisions[0].evidence
+    assert logs[-1]["action"] == "daemon_decision"
+    assert logs[-1]["status"] == "skip"
+    assert logs[-1]["reason"] == "head_mismatch_no_current_approval"
+    assert issuer_calls == []
+    assert updates == []
+    assert gh.merge_calls == []
+
+
 def test_daemon_following_pass_with_minted_marker_enqueues_normally():
     marker = _approval_marker(approved_by=AUTHORIZED_REVIEWER)
     pr = _daemon_pr(body=f"Controller approval wall\n\n{marker}\n", changed_paths=(CARRIER, "docs/a.md"))
@@ -1118,6 +1217,35 @@ def test_daemon_invalid_existing_capability_does_not_mint_or_update():
     assert gh.calls == []
 
 
+def test_daemon_policy_mismatch_existing_capability_does_not_mint_or_update():
+    wrong_policy_marker = _approval_marker(policy_sha="approval-wall-policy-v0")
+    pr = _daemon_pr(body=_body_with_approval(wrong_policy_marker), changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issuer_calls: list[str] = []
+    updates: list[str] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=lambda _pr, _witness: issuer_calls.append("called") or _approval_marker(),
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_capability_invalid"
+    assert "approval_capability_reason=policy_mismatch" in result.decisions[0].evidence
+    assert issuer_calls == []
+    assert updates == []
+    assert gh.calls == []
+
+
 def test_daemon_unauthorized_reviewer_does_not_mint_missing_capability():
     pr = _daemon_pr(
         body="Controller approval wall\n",
@@ -1212,7 +1340,7 @@ def test_daemon_skips_invalid_signature_head_mismatch_and_expired_capability_bef
     assert result.enqueue_count == 0
     assert [decision.reason for decision in result.decisions] == [
         "approval_capability_invalid",
-        "approval_capability_invalid",
+        "head_mismatch_no_current_approval",
         "approval_capability_invalid",
     ]
     assert gh.merge_calls == []
