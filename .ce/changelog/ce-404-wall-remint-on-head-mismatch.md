@@ -10,3 +10,4 @@ issue: ce-404
 
 - Treat stale approval-capability markers with `head_mismatch` as remintable only when a trusted authorized current-head approval exists.
 - Emit `head_mismatch_no_current_approval` when a stale marker cannot be reminted because no trusted current-head approval is present.
+- Supersede d1b-10, d1b-11, and d1b-12 brain assertions to re-pin integrator belt evidence for this branch.
