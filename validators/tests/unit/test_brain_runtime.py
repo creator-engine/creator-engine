@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from creator_engine_validator import brain_runtime as rt
 SCOPE = "creator-engine"
 CLAIM = {"subject": "brain", "predicate": "mode", "object": "ssot"}
 CORRECTED = {"subject": "brain", "predicate": "mode", "object": "deterministic-ssot"}
+REPINNED = {"subject": "brain", "predicate": "mode", "object": "evidence-repinned-ssot"}
 EVIDENCE = "docs/operations/PCL_PROTOCOL.md#hash-chain"
 
 
@@ -43,6 +45,44 @@ def _assert(records=None, write=None, **override) -> rt.AssertResult:
     }
     kwargs.update(override)
     return rt.assert_claim(**kwargs)
+
+
+def _chained_correction_records() -> list[dict]:
+    first_sink = CaptureWrite()
+    _assert(write=first_sink)
+
+    second_sink = CaptureWrite()
+    rt.correct_claim(
+        assertion_id="brain-assertion-runtime-0001",
+        new_assertion_id="brain-assertion-runtime-0002",
+        claim=CORRECTED,
+        evidence_ref="docs/operations/PCL_PROTOCOL.md#correction",
+        records=first_sink.records,
+        write=second_sink,
+        state_root=Path(".ce/state"),
+    )
+
+    third_sink = CaptureWrite()
+    rt.correct_claim(
+        assertion_id="brain-assertion-runtime-0002",
+        new_assertion_id="brain-assertion-runtime-0003",
+        claim=REPINNED,
+        evidence_ref="docs/operations/PCL_PROTOCOL.md#repin",
+        records=second_sink.records,
+        write=third_sink,
+        state_root=Path(".ce/state"),
+    )
+    return third_sink.records
+
+
+def _rehash_records(records: list[dict], start: int) -> list[dict]:
+    updated = copy.deepcopy(records)
+    for idx in range(start, len(updated)):
+        updated[idx]["sequence"] = idx
+        prev_hash = rt.GENESIS_PREV_HASH if idx == 0 else updated[idx - 1][rt.CONTENT_HASH_FIELD]
+        updated[idx]["prev_hash"] = prev_hash
+        updated[idx][rt.CONTENT_HASH_FIELD] = rt.canonical_content_hash(updated[idx])
+    return updated
 
 
 def test_assert_check_roundtrip_with_injected_write():
@@ -87,6 +127,63 @@ def test_correct_appends_supersede_marker_and_new_active_assertion():
     assert checked.status == "active"
     assert checked.record is not None
     assert checked.record["id"] == "brain-assertion-runtime-0002"
+
+
+def test_chained_supersede_validates_and_current_view_resolves_to_latest_active():
+    records = _chained_correction_records()
+
+    assert rt.validate_records(records) == []
+    assert rt.check_claim(claim=CLAIM, scope=SCOPE, records=records).status == "unknown"
+    assert rt.check_claim(claim=CORRECTED, scope=SCOPE, records=records).status == "unknown"
+    checked = rt.check_claim(claim=REPINNED, scope=SCOPE, records=records)
+
+    assert checked.status == "active"
+    assert checked.record is not None
+    assert checked.record["id"] == "brain-assertion-runtime-0003"
+
+
+def test_supersede_cycle_is_rejected():
+    records = _chained_correction_records()
+    v2_tombstone_idx = max(
+        idx
+        for idx, record in enumerate(records)
+        if record["id"] == "brain-assertion-runtime-0002" and record["status"] == "superseded"
+    )
+    records[v2_tombstone_idx]["superseded_by"] = "brain-assertion-runtime-0001"
+    records = _rehash_records(records, v2_tombstone_idx)
+
+    errors = rt.validate_records(records)
+
+    assert not any(error.code == rt.CODE_CONTENT_ADDRESS for error in errors), [error.format() for error in errors]
+    assert any(
+        error.code == rt.CODE_SUPERSEDE_TARGET and "superseded assertion chain contains a cycle" in error.message
+        for error in errors
+    ), [error.format() for error in errors]
+
+
+def test_supersede_chain_dead_ending_in_missing_id_is_rejected():
+    records = _chained_correction_records()
+    v2_tombstone_idx = max(
+        idx
+        for idx, record in enumerate(records)
+        if record["id"] == "brain-assertion-runtime-0002" and record["status"] == "superseded"
+    )
+    records[v2_tombstone_idx]["superseded_by"] = "brain-assertion-runtime-9999"
+    records = _rehash_records(records, v2_tombstone_idx)
+
+    errors = rt.validate_records(records)
+
+    assert not any(error.code == rt.CODE_CONTENT_ADDRESS for error in errors), [error.format() for error in errors]
+    assert any(
+        error.code == rt.CODE_SUPERSEDE_TARGET
+        and error.message == "superseded assertion must point at an existing assertion id"
+        for error in errors
+    ), [error.format() for error in errors]
+    assert any(
+        error.code == rt.CODE_SUPERSEDE_TARGET
+        and error.message == "superseded assertion must point at a currently active assertion"
+        for error in errors
+    ), [error.format() for error in errors]
 
 
 def test_tamper_is_caught_by_content_hash_check():
