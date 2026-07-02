@@ -1,4 +1,4 @@
-# ADR-0003 — Conveyor daemon arm-safety by construction
+# ADR-0004 — Conveyor daemon arm-safety by construction
 
 - **Status:** Proposed — awaiting Operator ratification of the arm-safety model.
 - **Date:** 2026-07-02
