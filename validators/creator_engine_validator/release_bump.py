@@ -23,8 +23,11 @@ import os
 import re
 import subprocess
 import tempfile
+from datetime import date
 from dataclasses import dataclass
 from pathlib import Path
+
+from .carrier_gen import CarrierSpec, WrittenCarriers, write_carriers
 
 #: ``MAJOR.MINOR.PATCH`` with an optional ``-pre``/``+build`` suffix, matching
 #: :data:`.release_publish.SEMVER_RE` so a bumped version is always stageable.
@@ -47,6 +50,15 @@ class BumpResult:
     source: str  # "tag" or "part:<major|minor|patch>"
     version_py: Path
     pyproject: Path
+
+
+@dataclass(frozen=True)
+class CommitBumpResult:
+    bump: BumpResult
+    branch: str
+    commit_sha: str
+    commit_message: str
+    carriers: WrittenCarriers
 
 
 def version_from_tag(tag: str) -> str:
@@ -100,6 +112,32 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def _git_required(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    proc = _git(repo_root, *args)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "unknown git failure"
+        raise ReleaseBumpError(f"git {' '.join(args)} failed: {detail}")
+    return proc
+
+
+def _git_status_porcelain(repo_root: Path) -> str:
+    return _git_required(repo_root, "status", "--porcelain=v1").stdout
+
+
+def _git_paths(repo_root: Path, *args: str) -> tuple[str, ...]:
+    proc = _git_required(repo_root, *args)
+    return tuple(line.strip() for line in proc.stdout.splitlines() if line.strip())
+
+
+def _relpath(repo_root: Path, path: Path) -> str:
+    return path.resolve().relative_to(repo_root.resolve()).as_posix()
+
+
+def _carrier_git_runner(args, cwd: Path) -> tuple[int, str, str]:
+    proc = _git(cwd, *args)
+    return proc.returncode, proc.stdout, proc.stderr
 
 
 def _latest_release_tag_version(repo_root: Path) -> str | None:
@@ -302,4 +340,89 @@ def bump_release_version(
         source=source,
         version_py=version_py,
         pyproject=pyproject,
+    )
+
+
+def commit_release_bump(
+    *,
+    repo_root: Path | str,
+    out_branch: str,
+    tag: str | None = None,
+    part: str | None = None,
+    carrier_date: str | None = None,
+) -> CommitBumpResult:
+    """Commit only the canonical version bump to a fresh local branch.
+
+    The generated carrier/changelog files are intentionally written after the
+    version commit. This keeps the release-cycle commit limited to the two
+    canonical version sources while still leaving the local branch prepared for
+    the normal PR carrier flow. No push, PR creation, signing, tagging, or
+    network operation is performed here.
+    """
+    if not out_branch.strip():
+        raise ReleaseBumpError("provide --out-branch with --commit")
+
+    root = Path(repo_root).resolve()
+    _git_required(root, "rev-parse", "--show-toplevel")
+
+    dirty = _git_status_porcelain(root)
+    if dirty.strip():
+        raise ReleaseBumpError("refusing commit mode with a dirty working tree")
+
+    exists = _git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{out_branch}")
+    if exists.returncode == 0:
+        raise ReleaseBumpError(f"refusing to reuse existing branch {out_branch!r}")
+    if exists.returncode not in (0, 1):
+        detail = exists.stderr.strip() or exists.stdout.strip() or "unknown git failure"
+        raise ReleaseBumpError(f"git show-ref failed: {detail}")
+
+    base_sha = _git_required(root, "rev-parse", "--verify", "HEAD").stdout.strip()
+    _git_required(root, "switch", "-c", out_branch)
+
+    bump = bump_release_version(repo_root=root, tag=tag, part=part)
+    version_py = _relpath(root, bump.version_py)
+    pyproject = _relpath(root, bump.pyproject)
+    expected_paths = tuple(sorted((pyproject, version_py)))
+
+    _git_required(root, "add", "--", version_py, pyproject)
+    staged_paths = tuple(sorted(_git_paths(root, "diff", "--cached", "--name-only")))
+    if staged_paths != expected_paths:
+        raise ReleaseBumpError(
+            "refusing to commit unexpected paths: "
+            f"expected={expected_paths!r} staged={staged_paths!r}"
+        )
+
+    commit_message = f"release-bump: {bump.previous_version} -> {bump.version}"
+    _git_required(root, "commit", "-m", commit_message)
+    commit_sha = _git_required(root, "rev-parse", "--verify", "HEAD").stdout.strip()
+
+    committed_paths = tuple(sorted(_git_paths(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")))
+    if committed_paths != expected_paths:
+        raise ReleaseBumpError(
+            "version bump commit changed unexpected paths: "
+            f"expected={expected_paths!r} committed={committed_paths!r}"
+        )
+
+    carriers = write_carriers(
+        root,
+        CarrierSpec(
+            head_ref=out_branch,
+            issue=f"release/v{bump.version}",
+            title=f"Bump release version to {bump.version}",
+            kind="changed",
+            scope="release",
+            body=f"- Bump canonical validator version sources from {bump.previous_version} to {bump.version}.",
+            date=carrier_date or date.today().isoformat(),
+            base=base_sha,
+            declared_work_class="S",
+        ),
+        git_runner=_carrier_git_runner,
+    )
+
+    return CommitBumpResult(
+        bump=bump,
+        branch=out_branch,
+        commit_sha=commit_sha,
+        commit_message=commit_message,
+        carriers=carriers,
     )
