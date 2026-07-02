@@ -3641,6 +3641,17 @@ def _pickup_triage(args) -> int:
                 f"  - {item.issue.repo}#{item.issue.number}{seat} "
                 f"({item.work_class}/{item.mutation_class})"
             )
+        print(
+            "  commissioned unscheduled advisory: "
+            f"{len(result.commissioned_unscheduled)} item(s) "
+            f"({result.commissioned_unscheduled_status})"
+        )
+        for item in result.commissioned_unscheduled:
+            commissioned_by = ", ".join(item.commissioned_by) or "unknown"
+            print(
+                f"    - {item.issue.repo}#{item.issue.number} "
+                f"(commissioned_by: {commissioned_by}; advisory_only: true)"
+            )
     return 0
 
 
