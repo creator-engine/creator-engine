@@ -50,6 +50,43 @@ PLAN_ACTIONS = ("prepare-harvest", "land-bundle", "push", "pr-open")
 DEFAULT_BASE = "origin/main"
 DEFAULT_REMOTE = "origin"
 
+# --- Trust boundary for filesystem paths -----------------------------------
+#
+# The discovery payload is DATA describing *which* branch/issue/PR text to
+# use. It must never hand the daemon execution CONTROL over *where on the
+# filesystem* git operates. Two payload fields are filesystem paths that
+# reach git argv or become a git ``cwd``:
+#
+#   * ``bundle_path`` is passed as a bare positional to
+#     ``git bundle verify <bundle>`` and ``git fetch <bundle> ...``
+#     (conveyor.land_bundle). A value shaped like ``ext::sh -c '<cmd>'``
+#     makes ``git fetch`` invoke an arbitrary transport-helper command
+#     (RCE), independent of whatever bytes happen to live at that literal
+#     path (``git bundle verify`` only checks the bundle is well-formed; it
+#     does not constrain the *name* used to reach it).
+#   * ``repo_path`` / ``worktree_path`` are used as the ``cwd`` for every
+#     git/gh subprocess the daemon runs for an item (prepare, land, push,
+#     pr-open). Even with ``remote``/``base`` pinned to trusted literal
+#     strings, a cwd pointed at an attacker-staged directory can carry a
+#     ``.git/config`` that redefines what those trusted literal names
+#     *resolve to* (e.g. ``[remote "origin"] url = ext::sh -c '<cmd>'``),
+#     which is RCE that bypasses the remote/base pin entirely.
+#
+# The fix is confinement, not a per-field allow/deny list: every payload
+# path is resolved (symlinks + ``..`` collapsed) and REJECTED, fail-closed,
+# unless it resolves under a daemon-pinned trusted root. This single
+# invariant blocks both directory-redirection (an absolute path entirely
+# outside the trusted tree) and ``..``-traversal (a path that starts under
+# the root but walks back out). ``bundle_path`` additionally gets the same
+# argv-gadget shape rejection as base/remote/validate_command below, as
+# belt-and-suspenders: a confined *filename* still shouldn't be
+# ``ext::``-shaped.
+#
+# There is no safe default trusted root (unlike base/remote, "no config
+# supplied" cannot fall back to something world-writable like ``/tmp``), so
+# ``repo_root``/``bundle_root`` are REQUIRED constructor arguments when the
+# daemon is armed, exactly like the other armed-mode seams below.
+
 
 @dataclass(frozen=True)
 class ConveyorDaemonItem:
@@ -94,6 +131,16 @@ class ConveyorDaemonItem:
         # We only note here whether the payload tried to supply one so the
         # daemon can log-and-skip the attempted override; the field values
         # below are never derived from the payload.
+        #
+        # worktree_path/bundle_path/repo_path/pr_base ARE genuinely per-item
+        # data (which branch's worktree, which bundle file, which landing
+        # repo, which PR base) that must come from the discovery payload --
+        # unlike base/remote/validate_command there is no single daemon-wide
+        # value to pin them to. They are still untrusted here: the daemon
+        # confines/shape-validates them fail-closed in
+        # ConveyorDaemon._path_confinement_violations before any of them
+        # reach a git/gh subprocess argv or cwd (see the module comment
+        # above DEFAULT_BASE).
         return cls(
             branch=str(payload["branch"]),
             worktree_path=Path(payload["worktree_path"]),
@@ -226,6 +273,8 @@ class ConveyorDaemon:
         validate_command: Sequence[str] | None = None,
         base: str | None = None,
         remote: str | None = None,
+        repo_root: Path | str | None = None,
+        bundle_root: Path | str | None = None,
     ) -> None:
         self.discovery_runner = discovery_runner
         self.armed = armed
@@ -257,6 +306,14 @@ class ConveyorDaemon:
         self.remote: str = _reject_git_argv_gadget(
             str(remote) if remote is not None else DEFAULT_REMOTE, label="remote"
         )
+        # repo_root/bundle_root are the trusted confinement anchors for the
+        # untrusted discovery payload's filesystem paths (see the module
+        # comment above DEFAULT_BASE). There is no safe implicit default, so
+        # they are resolved here if supplied and required below when armed;
+        # every payload bundle_path/repo_path/worktree_path must resolve
+        # under one of these before the daemon will touch it.
+        self.repo_root: Path | None = Path(repo_root).resolve() if repo_root is not None else None
+        self.bundle_root: Path | None = Path(bundle_root).resolve() if bundle_root is not None else None
         self._completed_keys: set[str] = set()
 
         if self.armed:
@@ -271,6 +328,10 @@ class ConveyorDaemon:
                 missing.append("now")
             if self.ledger_writer is None:
                 missing.append("ledger_writer")
+            if self.repo_root is None:
+                missing.append("repo_root")
+            if self.bundle_root is None:
+                missing.append("bundle_root")
             if missing:
                 raise ValueError(f"armed conveyor daemon requires injected {', '.join(missing)}")
 
@@ -353,6 +414,15 @@ class ConveyorDaemon:
 
     def _process_armed(self, item: ConveyorDaemonItem) -> ConveyorDaemonItemResult:
         records: list[ConveyorDaemonLedgerRecord] = []
+        # Confine/validate every untrusted-payload filesystem path and the
+        # pr_base shape BEFORE any prepare/land/push/pr-open action runs, so
+        # a rejected item never reaches git_runner/gh_runner at all (fail
+        # closed, log, skip). This is checked first, ahead of the try/except
+        # below, so a violation is reported as its own precise reason rather
+        # than folded into a generic "exception: ..." message.
+        violations = self._path_confinement_violations(item)
+        if violations:
+            return self._failed(item, violations, ledger_records=records)
         try:
             assert self.git_runner is not None
             assert self.validate_runner is not None
@@ -435,6 +505,53 @@ class ConveyorDaemon:
             )
         except Exception as exc:
             return self._failed(item, (f"exception: {exc}",), ledger_records=records)
+
+    def _path_confinement_violations(self, item: ConveyorDaemonItem) -> tuple[str, ...]:
+        """Fail-closed audit of every untrusted-payload path/branch-shape
+        field that reaches a git/gh argv or becomes a subprocess cwd.
+
+        Returns an empty tuple if the item is safe to process; otherwise a
+        tuple of human-readable violation reasons (one per failed check —
+        an item can fail more than one check at once).
+        """
+
+        assert self.repo_root is not None
+        assert self.bundle_root is not None
+
+        violations: list[str] = []
+
+        # bundle_path reaches a bare positional git argv slot (see the
+        # module comment above DEFAULT_BASE), so it gets both the
+        # argv-gadget shape rejection (mirrors base/remote/validate_command)
+        # AND path confinement.
+        try:
+            _reject_git_argv_gadget(str(item.bundle_path), label="bundle_path")
+        except ValueError as exc:
+            violations.append(str(exc))
+
+        for label, value, root in (
+            ("bundle_path", item.bundle_path, self.bundle_root),
+            ("repo_path", item.repo_path, self.repo_root),
+            ("worktree_path", item.worktree_path, self.repo_root),
+        ):
+            try:
+                _confine_path(value, root=root, label=label)
+            except ValueError as exc:
+                violations.append(str(exc))
+
+        # pr_base is not a filesystem path, but it flows into a fixed
+        # flag-value slot (`gh pr create --base <pr_base>`); it is not RCE
+        # (the value can never be reinterpreted as another flag or as a
+        # transport-helper invocation from a fixed slot) but a payload could
+        # still misdirect the PR at an unintended branch, so reject the same
+        # dangerous shapes defense-in-depth.
+        if item.pr_base is not None:
+            try:
+                _reject_git_argv_gadget(item.pr_base, label="pr_base")
+            except ValueError as exc:
+                violations.append(str(exc))
+
+        return tuple(violations)
 
     def _record_mutation(
         self,
@@ -547,10 +664,20 @@ def _reject_git_argv_gadget(value: str, *, label: str) -> str:
     """Fail closed if a value destined for a bare git argv slot is shaped
     like an option or a transport-helper gadget.
 
-    Applied to the daemon-pinned ``base``/``remote`` config themselves
-    (defense-in-depth for a misconfigured/compromised launcher) on top of
-    the primary control, which is that these values are never sourced from
-    the untrusted discovery payload in the first place.
+    Applied to:
+
+    * the daemon-pinned ``base``/``remote`` config themselves
+      (defense-in-depth for a misconfigured/compromised launcher) on top of
+      the primary control, which is that these values are never sourced
+      from the untrusted discovery payload in the first place;
+    * the untrusted payload's ``bundle_path``, as belt-and-suspenders on top
+      of ``_confine_path`` confinement -- a confined *filename* still
+      shouldn't be ``ext::``-shaped before it reaches
+      ``git bundle verify``/``git fetch``;
+    * the untrusted payload's ``pr_base``, which reaches a fixed
+      ``gh pr create --base <value>`` flag-value slot (not RCE from that
+      slot, but rejecting the same shapes is cheap defense-in-depth against
+      branch misdirection).
     """
 
     if not value:
@@ -560,6 +687,29 @@ def _reject_git_argv_gadget(value: str, *, label: str) -> str:
     if "::" in value:
         raise ValueError(f"{label} must not contain '::' (git transport-helper shape): {value!r}")
     return value
+
+
+def _confine_path(value: Path, *, root: Path, label: str) -> Path:
+    """Fail closed unless *value* resolves under the trusted *root*.
+
+    Both *value* and *root* are resolved (symlinks followed, ``..``
+    collapsed) before comparison, so this single check rejects both a
+    directory-redirection (an absolute path entirely outside the trusted
+    tree, e.g. an attacker-staged repo elsewhere on disk) and a
+    ``..``-traversal path that starts under the root but walks back out.
+    ``root`` itself is accepted (a path equal to the root is "under" it).
+    """
+
+    resolved_root = Path(root).resolve()
+    resolved_value = Path(value).resolve()
+    try:
+        resolved_value.relative_to(resolved_root)
+    except ValueError:
+        raise ValueError(
+            f"{label} must resolve under the trusted root {resolved_root} "
+            f"(got {value!r} -> resolved {resolved_value})"
+        ) from None
+    return resolved_value
 
 
 def _first_stdout_line(stdout: str) -> str | None:

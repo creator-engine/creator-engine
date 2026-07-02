@@ -21,6 +21,17 @@ from creator_engine_validator.conveyor_daemon import (
 
 HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 
+# Trusted confinement roots for armed-daemon tests. All fake item paths below
+# (worktree_path/repo_path under /tmp/..., bundle_path under
+# /tmp/....bundle) are constructed to resolve under these roots so the new
+# path-confinement gate (ConveyorDaemon._path_confinement_violations) does
+# not reject otherwise-legitimate test fixtures. Hostile-payload tests below
+# deliberately point OUTSIDE these roots (or use gadget-shaped filenames) to
+# exercise the rejection path.
+TRUSTED_REPO_ROOT = Path("/tmp")
+TRUSTED_BUNDLE_ROOT = Path("/tmp")
+ARMED_ROOTS = {"repo_root": TRUSTED_REPO_ROOT, "bundle_root": TRUSTED_BUNDLE_ROOT}
+
 
 class FakeGit:
     def __init__(self, push_returncode: int = 0):
@@ -176,6 +187,7 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     result = ConveyorDaemon(
         discovery_runner=lambda: [_item()],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -220,6 +232,7 @@ def test_per_item_failure_isolated_and_loop_continues():
     result = ConveyorDaemon(
         discovery_runner=lambda: [_item("Feature/One"), _item("Feature/Two")],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -243,6 +256,7 @@ def test_armed_push_failure_records_ledger_and_skips_pr_open():
     result = ConveyorDaemon(
         discovery_runner=lambda: [_item()],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=FakeGit(push_returncode=1),
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -283,6 +297,7 @@ def test_hostile_payload_validate_command_override_is_ignored():
     daemon = ConveyorDaemon(
         discovery_runner=lambda: [hostile_payload],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -321,6 +336,7 @@ def test_daemon_pinned_validate_command_used_regardless_of_payload():
             }
         ],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=FakeGit(),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
@@ -367,6 +383,7 @@ def test_hostile_payload_base_override_is_ignored():
     daemon = ConveyorDaemon(
         discovery_runner=lambda: [hostile_payload],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -414,6 +431,7 @@ def test_hostile_payload_remote_override_is_ignored():
     daemon = ConveyorDaemon(
         discovery_runner=lambda: [hostile_payload],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -460,6 +478,7 @@ def test_daemon_pinned_base_and_remote_used_regardless_of_payload():
             }
         ],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=git_runner,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -499,6 +518,7 @@ def test_idempotent_re_discovery_skips_completed_item():
     daemon = ConveyorDaemon(
         discovery_runner=lambda: [_item()],
         armed=True,
+        **ARMED_ROOTS,
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -514,3 +534,208 @@ def test_idempotent_re_discovery_skips_completed_item():
     assert second.results[0].status == "skipped"
     assert len(git.calls) == 1
     assert len(gh.calls) == 1
+
+
+def test_hostile_payload_bundle_path_transport_gadget_is_rejected_never_reaches_git():
+    """A compromised harvest seat authors the bundle file, so it controls
+    the bundle's FILENAME. Naming it `ext::sh -c '<cmd>'` would pass
+    `git bundle verify` (real bundle bytes can live at that literal path)
+    and then `git fetch` resolves `ext::` as a transport-helper invocation
+    -- RCE. This must be rejected before the item ever reaches git_runner,
+    not merely before the fetch call."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+
+    hostile_payload = {
+        "branch": "Feature/One",
+        "worktree_path": "/tmp/feature-one",
+        "bundle_path": "ext::sh -c 'touch /tmp/pwned'",
+        "repo_path": "/tmp/landing",
+        "title": "Land Feature/One",
+        "body": "- Conveyor item.",
+    }
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    )
+    result = daemon.run_once()
+
+    assert result.results[0].status == "failed"
+    assert any("bundle_path" in reason for reason in result.results[0].reasons)
+    assert prepare.calls == []
+    assert land.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+    assert ledger == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("bundle_path", "/var/tmp/attacker-repo/evil.bundle"),
+        ("repo_path", "/var/tmp/attacker-repo"),
+        ("worktree_path", "/var/tmp/attacker-repo/worktree"),
+    ],
+)
+def test_hostile_payload_path_outside_trusted_root_is_rejected(field: str, value: str):
+    """A payload path (bundle_path/repo_path/worktree_path) that resolves
+    OUTSIDE the daemon's pinned trusted root must be rejected fail-closed
+    and the item skipped -- this is what stops an attacker-staged repo
+    (with a poisoned `.git/config` remote) from ever becoming the git cwd,
+    which would let a trusted literal `remote`/`base` resolve to an
+    attacker-controlled transport-helper URL."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+
+    hostile_payload = {
+        "branch": "Feature/One",
+        "worktree_path": "/tmp/feature-one",
+        "bundle_path": "/tmp/feature-one.bundle",
+        "repo_path": "/tmp/landing",
+        "title": "Land Feature/One",
+        "body": "- Conveyor item.",
+    }
+    hostile_payload[field] = value
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    )
+    result = daemon.run_once()
+
+    assert result.results[0].status == "failed"
+    assert any(field in reason and "trusted root" in reason for reason in result.results[0].reasons)
+    assert prepare.calls == []
+    assert land.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+    assert ledger == []
+
+
+def test_hostile_payload_dotdot_traversal_path_is_rejected():
+    """A path that starts under the trusted root syntactically but walks
+    back out via `..` must resolve to outside the root and be rejected,
+    the same as an absolute directory-redirection path."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+
+    hostile_payload = {
+        "branch": "Feature/One",
+        "worktree_path": "/tmp/feature-one",
+        "bundle_path": "/tmp/feature-one.bundle",
+        "repo_path": "/tmp/../var/tmp/attacker-repo",
+        "title": "Land Feature/One",
+        "body": "- Conveyor item.",
+    }
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    )
+    result = daemon.run_once()
+
+    assert result.results[0].status == "failed"
+    assert any("repo_path" in reason and "trusted root" in reason for reason in result.results[0].reasons)
+    assert prepare.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+
+
+def test_hostile_payload_pr_base_gadget_is_rejected():
+    """`pr_base` reaches a fixed `gh pr create --base <value>` flag-value
+    slot (not RCE from that slot), but a gadget-shaped value must still be
+    rejected fail-closed rather than silently misdirecting the PR."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+
+    hostile_payload = {
+        "branch": "Feature/One",
+        "worktree_path": "/tmp/feature-one",
+        "bundle_path": "/tmp/feature-one.bundle",
+        "repo_path": "/tmp/landing",
+        "title": "Land Feature/One",
+        "body": "- Conveyor item.",
+        "pr_base": "ext::sh -c 'touch /tmp/pwned'",
+    }
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    )
+    result = daemon.run_once()
+
+    assert result.results[0].status == "failed"
+    assert any("pr_base" in reason for reason in result.results[0].reasons)
+    assert prepare.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+
+
+def test_daemon_construction_requires_repo_root_and_bundle_root_when_armed():
+    """Armed mode has no safe default trusted root (unlike base/remote),
+    so repo_root/bundle_root must be supplied explicitly, mirroring the
+    other armed-mode required seams (git_runner, validate_runner, ...)."""
+
+    with pytest.raises(ValueError):
+        ConveyorDaemon(
+            discovery_runner=lambda: [],
+            armed=True,
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+        )
