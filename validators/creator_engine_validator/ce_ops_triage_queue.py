@@ -36,6 +36,48 @@ WORK_CLASS_LABELS = frozenset({"wc:XS", "wc:S", "wc:M", "wc:L"})
 READINESS_LABELS = frozenset({"triage:ready", "triage:blocked"})
 MANAGED_LABEL_PREFIXES = ("wc:", "triage:")
 MISSING_LABEL_POLICY = "create_missing"
+PICKUP_IN_PROGRESS_LABELS = frozenset(
+    {
+        "assigned",
+        "claimed",
+        "in progress",
+        "in-progress",
+        "in_progress",
+        "running",
+        "status:assigned",
+        "status:claimed",
+        "status:in progress",
+        "status:in-progress",
+        "status:in_progress",
+        "status:running",
+        "status/assigned",
+        "status/claimed",
+        "status/in progress",
+        "status/in-progress",
+        "status/in_progress",
+        "status/running",
+    }
+)
+PICKUP_IN_PROGRESS_LABEL_PREFIXES = (
+    "assigned:",
+    "assigned/",
+    "claimed:",
+    "claimed/",
+    "in-progress:",
+    "in-progress/",
+    "in_progress:",
+    "in_progress/",
+    "status:assigned:",
+    "status:assigned/",
+    "status:claimed:",
+    "status:claimed/",
+    "status:in-progress:",
+    "status:in-progress/",
+    "status:in_progress:",
+    "status:in_progress/",
+    "status:running:",
+    "status:running/",
+)
 LABEL_SPECS: Mapping[str, Mapping[str, str]] = {
     "wc:XS": {
         "color": "c2e0c6",
@@ -135,6 +177,28 @@ class LabelDelta:
         if self.error is None:
             payload.pop("error")
         return payload
+
+
+@dataclass(frozen=True)
+class PickupCandidate:
+    issue_number: int
+    repo: str
+    labels: tuple[str, ...]
+    work_class: str
+    mutation_class: str
+    lane: str
+    readiness: str = "ready"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "issue_number": self.issue_number,
+            "repo": self.repo,
+            "labels": list(self.labels),
+            "work_class": self.work_class,
+            "mutation_class": self.mutation_class,
+            "lane": self.lane,
+            "readiness": self.readiness,
+        }
 
 
 def default_gh_runner(
@@ -308,6 +372,53 @@ def plan_triage_entry(
     )
 
 
+def pickup_candidates_from_issues(
+    raw_issues: Sequence[Any],
+    *,
+    default_repo: str | None = DEFAULT_REPO,
+    triaged_at: str,
+) -> tuple[PickupCandidate, ...]:
+    """Return advisory ready-to-dispatch candidates from raw triage inputs.
+
+    This is a pure projection: it reuses the queue planner for classification
+    and readiness, reads assignee/label state from normalized issues, and never
+    performs GitHub I/O or mutations.
+    """
+    candidates: list[PickupCandidate] = []
+    for raw in raw_issues:
+        issue = forge_triage.normalize_issue(raw, default_repo=default_repo)
+        if issue is None:
+            continue
+        entry = plan_triage_entry(raw, default_repo=default_repo, triaged_at=triaged_at)
+        if entry is None:
+            continue
+        if entry.readiness != "ready" or entry.blockers:
+            continue
+        if issue.assignees or _has_pickup_in_progress_label(issue.labels):
+            continue
+        candidates.append(
+            PickupCandidate(
+                issue_number=entry.issue_number,
+                repo=entry.repo,
+                labels=tuple(sorted(issue.labels, key=str.lower)),
+                work_class=entry.work_class,
+                mutation_class=entry.mutation_class,
+                lane=entry.lane,
+            )
+        )
+    return tuple(sorted(candidates, key=_pickup_candidate_sort_key))
+
+
+def pickup_payload(candidates: Sequence[PickupCandidate]) -> dict[str, Any]:
+    return {
+        "kind": "ce-triage-pickup-candidates",
+        "schema_version": SCHEMA_VERSION,
+        "advisory": NON_AUTHORITY_STATEMENT,
+        "candidate_count": len(candidates),
+        "candidates": [candidate.to_dict() for candidate in candidates],
+    }
+
+
 def scan_and_triage(
     *,
     repo: str = DEFAULT_REPO,
@@ -339,6 +450,11 @@ def scan_and_triage(
     )
     if issue_warning:
         warnings.append(issue_warning)
+    pickup_candidates = pickup_candidates_from_issues(
+        raw_issues,
+        default_repo=repo,
+        triaged_at=triaged_at,
+    )
 
     planned_entries: list[QueueEntry] = []
     label_plans: list[tuple[QueueEntry, Sequence[str]]] = []
@@ -373,6 +489,7 @@ def scan_and_triage(
         "planned_entry_count": len(planned_entries),
         "queue_entry_count": len(merged),
         "entries": [entry.to_dict() for entry in merged],
+        "pickup": pickup_payload(pickup_candidates),
         "write": write_result,
         "labels": label_result,
         "warnings": warnings,
@@ -541,6 +658,35 @@ def _desired_classification_labels(entry: QueueEntry) -> tuple[str, ...]:
     if readiness_label in READINESS_LABELS:
         labels.append(readiness_label)
     return tuple(sorted(labels))
+
+
+def _has_pickup_in_progress_label(labels: Sequence[str]) -> bool:
+    normalized = {forge_triage._label_key(label) for label in labels}
+    return bool(normalized.intersection(PICKUP_IN_PROGRESS_LABELS)) or any(
+        label.startswith(PICKUP_IN_PROGRESS_LABEL_PREFIXES) for label in normalized
+    )
+
+
+def _pickup_candidate_sort_key(candidate: PickupCandidate) -> tuple[Any, ...]:
+    return (
+        _lane_sort_key(candidate.lane),
+        _work_class_sort_key(candidate.work_class),
+        candidate.issue_number,
+        candidate.repo.lower(),
+    )
+
+
+def _lane_sort_key(lane: str) -> tuple[int, Any]:
+    text = str(lane or "").strip().upper()
+    if text.startswith("L") and text[1:].isdigit():
+        return (0, int(text[1:]))
+    return (1, text.lower())
+
+
+def _work_class_sort_key(work_class: str) -> tuple[int, str]:
+    order = {"XS": 0, "S": 1, "M": 2, "L": 3}
+    text = str(work_class or "").strip().upper()
+    return (order.get(text, 99), text)
 
 
 def _is_managed_label(label: str) -> bool:
