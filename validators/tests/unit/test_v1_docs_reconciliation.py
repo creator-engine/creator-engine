@@ -93,6 +93,17 @@ def test_readme_states_launch_hud_alias_no_rename():
     assert "creator-engine-validator" in text
 
 
+def test_readme_documents_ce_init_project_scaffold():
+    text = _readme_text()
+    assert "ce init" in text
+    assert "CE-native project scaffolding" in text
+    assert "path-manifest carriers" in text
+    assert "declared work-class lines" in text
+    assert "ce validate-pr" in text
+    assert ("Spec" + " Kit") not in text
+    assert ("." + "specify/") not in text
+
+
 # ---------------------------------------------------------------------------
 # RV1-080 — Option B install story (validators/README.md)
 # ---------------------------------------------------------------------------

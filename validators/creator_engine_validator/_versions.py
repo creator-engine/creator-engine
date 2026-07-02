@@ -114,6 +114,9 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # imports no v3 forge modules, with git push authority behind an
         # injectable host runner and Side-Effect Ledger audit trail.
         "publish_gate",
+        # ce-ops#367: public CE-native `ce init` project scaffolding. This is
+        # an offline v1 CLI runtime with embedded templates and no v3 imports.
+        "project_init",
         "side_effect_ledger_runtime",
         "worker_runtime",
         # ce-ops#163 REQ-2: first-class worker-spawn primitive. This is a v1

@@ -109,6 +109,8 @@ def _option_actions(parser: argparse.ArgumentParser) -> list[argparse.Action]:
             continue
         if not action.option_strings:
             continue
+        if action.help is argparse.SUPPRESS:
+            continue
         out.append(action)
     return out
 
@@ -120,6 +122,8 @@ def _positional_actions(parser: argparse.ArgumentParser) -> list[argparse.Action
         if isinstance(action, argparse._SubParsersAction):
             continue
         if action.option_strings:
+            continue
+        if action.help is argparse.SUPPRESS:
             continue
         out.append(action)
     return out

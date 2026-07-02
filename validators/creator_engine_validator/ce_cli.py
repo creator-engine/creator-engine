@@ -57,6 +57,7 @@ ce connector write-plan # build + validate a strict-mode tracker_mirror write pl
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
 ce surfaces check-updates # read-only upstream version detection from surfaces/manifest.yaml
 ce surfaces fleet-rollout # seat-by-seat fleet rollout of updated surface versions
+ce init              # scaffold a CE-governed project with local templates
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
 ce validate-pr          # run local PR preflight against committed base..HEAD state
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
@@ -119,6 +120,7 @@ from . import (
     orchestrator_status,
     pcl_runtime,
     playbook_runtime,
+    project_init,
     publish_gate,
     pr_preflight,
     reviewer_triage,
@@ -1748,11 +1750,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="emit machine-readable JSON policy state",
     )
 
-    # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
+    # ce init — idempotent CE-native project scaffolding.
     init = groups.add_parser(
-        "init", help="idempotently initialize local .hermes/ kernel state (refuses ungoverned state)"
+        "init", help="scaffold a CE-governed project with offline templates"
     )
-    init.add_argument("--repo-root", default=".", help="repo root to initialize (default: cwd)")
+    init.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="target project directory (default: cwd)",
+    )
+    init.add_argument("--repo-root", default=None, help=argparse.SUPPRESS)
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite CE scaffold files that differ from the embedded templates",
+    )
     init.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce claim acquire|release|status — the ce-ops#38 work-claim-lock MVP. The
@@ -3685,21 +3698,43 @@ def _check(args) -> int:
 
 
 def _init(args) -> int:
+    if args.repo_root is not None and args.target is None:
+        try:
+            result = init_runtime.init_repo(args.repo_root)
+        except init_runtime.InitRefused as exc:
+            print(f"ERROR: ce init refused [{exc.code}]: {exc}", file=sys.stderr)
+            return 1
+        except init_runtime.InitError as exc:
+            print(f"ERROR: ce init failed [{exc.code}]: {exc}", file=sys.stderr)
+            return 1
+        if getattr(args, "json_output", False):
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(
+                f"ce init: {len(result.created)} dir(s) created, "
+                f"{len(result.existing)} present -> {result.marker_path}"
+            )
+        return 0
+
+    target = args.target or "."
     try:
-        result = init_runtime.init_repo(args.repo_root)
-    except init_runtime.InitRefused as exc:
+        result = project_init.init_project(target, force=getattr(args, "force", False))
+    except project_init.ProjectInitRefused as exc:
         print(f"ERROR: ce init refused [{exc.code}]: {exc}", file=sys.stderr)
         return 1
-    except init_runtime.InitError as exc:
+    except project_init.ProjectInitError as exc:
         print(f"ERROR: ce init failed [{exc.code}]: {exc}", file=sys.stderr)
         return 1
     if getattr(args, "json_output", False):
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     else:
         print(
-            f"ce init: {len(result.created)} dir(s) created, "
-            f"{len(result.existing)} present -> {result.marker_path}"
+            f"ce init: {len(result.created)} created, "
+            f"{len(result.skipped)} skipped, {len(result.overwritten)} overwritten "
+            f"-> {result.target}"
         )
+        for action in result.actions:
+            print(f"  {action.status}: {action.path} ({action.reason})")
     return 0
 
 
