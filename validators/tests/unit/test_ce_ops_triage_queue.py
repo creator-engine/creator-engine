@@ -16,11 +16,12 @@ def _issue(
     title: str | None = None,
     body: str = "",
     assignees=None,
+    state: str = "open",
 ) -> dict:
     return {
         "number": number,
         "title": title or f"issue {number}",
-        "state": "open",
+        "state": state,
         "body": body,
         "html_url": f"https://github.com/creator-engine/ce-ops/issues/{number}",
         "repository_url": "https://api.github.com/repos/creator-engine/ce-ops",
@@ -270,6 +271,68 @@ def test_pickup_filter_deterministic_ordering():
     )
 
     assert [candidate.issue_number for candidate in candidates] == [41, 42, 43]
+
+
+def test_pickup_filter_excludes_awaiting_operator_hold_marker():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(61, body="Parked. ⏸ AWAITING-OPERATOR confirm before proceeding."),
+            _issue(62),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [62]
+
+
+def test_pickup_filter_excludes_aggregate_epic_issue():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(63, labels=[{"name": "epic"}]),
+            _issue(64),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [64]
+
+
+def test_pickup_filter_excludes_closed_issue():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(65, state="closed"),
+            _issue(66),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [66]
+
+
+def test_pickup_filter_excludes_done_labeled_issue():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(67, labels=[{"name": "done"}]),
+            _issue(68),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [68]
+
+
+def test_pickup_filter_dedupes_by_issue_number_last_write_wins():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(71, title="stale", labels=[{"name": "lane:l1"}]),
+            _issue(71, title="fresh", labels=[{"name": "lane:l1"}, {"name": "work:M"}]),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].issue_number == 71
+    assert candidates[0].work_class == "M"
 
 
 def test_pickup_filter_emit_mode_dry_run_no_mutation():

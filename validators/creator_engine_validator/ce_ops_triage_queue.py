@@ -181,6 +181,13 @@ class LabelDelta:
 
 @dataclass(frozen=True)
 class PickupCandidate:
+    """One advisory ready-to-dispatch candidate.
+
+    Security note: ``labels`` is untrusted text sourced verbatim from the
+    upstream issue. Consumers must never interpolate it into a shell command,
+    branch name, or filesystem path without independent sanitization.
+    """
+
     issue_number: int
     repo: str
     labels: tuple[str, ...]
@@ -381,8 +388,24 @@ def pickup_candidates_from_issues(
     """Return advisory ready-to-dispatch candidates from raw triage inputs.
 
     This is a pure projection: it reuses the queue planner for classification
-    and readiness, reads assignee/label state from normalized issues, and never
-    performs GitHub I/O or mutations.
+    and readiness, reads assignee/label/body state from normalized issues, and
+    never performs GitHub I/O or mutations.
+
+    Every candidate is also gated through ``forge_triage._skip_reason`` (with
+    no ``gh_runner``) — the same pickup-safety predicate
+    ``forge_triage.plan_triage`` uses before labeling an issue ready. That
+    excludes ``⏸ AWAITING-OPERATOR`` hold-marker issues, aggregate/epic/
+    tracker/rollup issues and work-class L, done-labeled issues, and issues
+    whose ``state`` is not ``"open"``, in addition to the existing
+    blocking-label/dependency and assignee/in-progress-label checks.
+
+    IMPORTANT: because no ``gh_runner`` is supplied here, this does NOT run
+    the live, network-dependent checks that ``_skip_reason`` performs when a
+    ``gh_runner`` is available — in-flight/merged linked-PR status and active
+    work-claim status. A ``readiness: "ready"`` candidate from this function
+    is therefore advisory only; any consumer that actually dispatches a seat
+    onto an issue MUST re-run the full ``forge_triage`` pickup gate (e.g.
+    ``forge_triage.plan_triage``) with a live ``gh_runner`` first.
     """
     candidates: list[PickupCandidate] = []
     for raw in raw_issues:
@@ -393,6 +416,14 @@ def pickup_candidates_from_issues(
         if entry is None:
             continue
         if entry.readiness != "ready" or entry.blockers:
+            continue
+        skip_reason = forge_triage._skip_reason(
+            issue,
+            arc_work_key=None,
+            arc_held_refs={},
+            gh_runner=None,
+        )
+        if skip_reason is not None:
             continue
         if issue.assignees or _has_pickup_in_progress_label(issue.labels):
             continue
@@ -406,7 +437,8 @@ def pickup_candidates_from_issues(
                 lane=entry.lane,
             )
         )
-    return tuple(sorted(candidates, key=_pickup_candidate_sort_key))
+    deduped = _dedupe_pickup_candidates(candidates)
+    return tuple(sorted(deduped, key=_pickup_candidate_sort_key))
 
 
 def pickup_payload(candidates: Sequence[PickupCandidate]) -> dict[str, Any]:
@@ -869,6 +901,15 @@ def _dedupe_last_write(entries: Sequence[QueueEntry]) -> tuple[QueueEntry, ...]:
     by_number: dict[int, QueueEntry] = {}
     for entry in entries:
         by_number[entry.issue_number] = entry
+    return tuple(by_number[number] for number in sorted(by_number))
+
+
+def _dedupe_pickup_candidates(
+    candidates: Sequence[PickupCandidate],
+) -> tuple[PickupCandidate, ...]:
+    by_number: dict[int, PickupCandidate] = {}
+    for candidate in candidates:
+        by_number[candidate.issue_number] = candidate
     return tuple(by_number[number] for number in sorted(by_number))
 
 
