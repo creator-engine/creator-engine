@@ -515,7 +515,35 @@ def _validate_current_view(records: Sequence[dict[str, Any]], path: Path | str) 
                     "superseded assertion must point at an existing assertion id",
                 )
             )
-        elif target.get("status") != "active":
+            continue
+
+        seen = {str(record.get("id"))}
+        current_id = str(target_id)
+        current = target
+        cycle_detected = False
+        while current.get("status") == "superseded":
+            if current_id in seen:
+                errors.append(
+                    _err(
+                        CODE_SUPERSEDE_TARGET,
+                        path,
+                        ("records", idx, "superseded_by"),
+                        "superseded assertion chain contains a cycle before reaching a currently active assertion",
+                    )
+                )
+                cycle_detected = True
+                break
+            seen.add(current_id)
+            next_id = current.get("superseded_by")
+            current_id = str(next_id)
+            next_record = latest.get(current_id)
+            if next_record is None:
+                break
+            current = next_record
+
+        if cycle_detected:
+            continue
+        if current.get("status") != "active":
             errors.append(
                 _err(
                     CODE_SUPERSEDE_TARGET,
