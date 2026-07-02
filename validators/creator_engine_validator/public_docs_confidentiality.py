@@ -31,6 +31,7 @@ patterns it forbids.
 from __future__ import annotations
 
 import re
+import stat
 import subprocess
 from pathlib import Path
 
@@ -220,7 +221,7 @@ confidential ce-ops# ticket reference|.ce/changelog/ce-preflight-before-push-sso
 confidential ce-ops# ticket reference|.ce/changelog/ce105-s1-deploy-classifier.md,.ce/changelog/ce107b-sec7-forge-guard.md,.ce/changelog/ce109-ring1-fs-mediation.md,.ce/changelog/ce11-test-tier-split.md
 confidential ce-ops# ticket reference|.ce/changelog/ce119-tasks-handoff-contract.md,.ce/changelog/ce121-134-aarch64-wheelhouse.md
 confidential ce-ops# ticket reference|.ce/changelog/ce128-backend-selector-policy.md,.ce/changelog/ce128-contained-launch-proof.md,.ce/changelog/ce128-docker-runsc-plan.md,.ce/changelog/ce128-launch-runner-integration.md,.ce/changelog/ce128-vps-contained-herdr.md,.ce/changelog/ce132-cleanroom-install-s1.md,.ce/changelog/ce133-adr0006-design.md,.ce/changelog/ce133-remove-committed-app-wheel.md,.ce/changelog/ce135-openbao-secret-zero-broker.md
-confidential ce-ops# ticket reference|.ce/changelog/ce146-ssdf-slsa-matrix.md,.ce/changelog/ce148-seat-provisioning.md,.ce/changelog/ce149-launcher-hermes-to-ce.md,.ce/changelog/ce154-autoclose.md
+confidential ce-ops# ticket reference|.ce/changelog/ce146-ssdf-slsa-matrix.md,.ce/changelog/ce148-seat-provisioning.md,.ce/changelog/ce154-autoclose.md
 confidential ce-ops# ticket reference|.ce/changelog/ce163-born-foreman-inject.md,.ce/changelog/ce163-foreman-canon-enforced.md,.ce/changelog/ce163-foreman-hard-deny.md,.ce/changelog/ce163-foreman-seat-class.md,.ce/changelog/ce163-foreman-warn-arm.md,.ce/changelog/ce163-worker-spawn-primitive.md,.ce/changelog/ce164-fwheel1-author-gate.md
 confidential ce-ops# ticket reference|.ce/changelog/ce164-work-sizing-floor.md,.ce/changelog/ce166-knowledge-ssot-slice1.md,.ce/changelog/ce166-knowledge-ssot-slice2.md,.ce/changelog/ce167-brain-assertion-ledger.md,.ce/changelog/ce168-work-sizing.md,.ce/changelog/ce173-idempotent-reinstall.md,.ce/changelog/ce173-null-probe-prior-app.md,.ce/changelog/ce174-stale-base-rerun.md,.ce/changelog/ce176-brain-probe.md
 confidential ce-ops# ticket reference|.ce/changelog/ce177-brain-drift-ci.md,.ce/changelog/ce177-knowledge-ssot-drift-ci.md,.ce/changelog/ce178-brain-bootstrap.md,.ce/changelog/ce179-brain-recall-adapter.md,.ce/changelog/ce180-brain-ingest-sqlite-gemma.md,.ce/changelog/ce181-brain-recall-surface.md,.ce/changelog/ce182-pickup-feed-422-test-guard.md,.ce/changelog/ce182-search-pickup-feed.md,.ce/changelog/ce185-devops-privileged-action-broker.md,.ce/changelog/ce186-g6-seat-class-enforce.md
@@ -238,7 +239,7 @@ confidential ce-ops# ticket reference|.ce/changelog/ce262-cross-repo-autoclose.m
 confidential ce-ops# ticket reference|.ce/changelog/ce281-broker-optional-signature.md,.ce/changelog/ce282-broker-socket-reachability.md,.ce/changelog/ce289-sopeercred-attestation.md,.ce/changelog/ce293-activate-belt-daemon.md
 confidential ce-ops# ticket reference|.ce/changelog/ce298-human-contributor-role.md,.ce/changelog/ce303-preflight-before-push-directive.md,.ce/changelog/ce316-doc-autogen-cli-reference.md,.ce/changelog/ce323-install-shell-fix.md,.ce/changelog/ce337-rereview-phase2-autowire.md,.ce/changelog/ce39-merge-queue.md
 confidential ce-ops# ticket reference|.ce/changelog/ce55-pickup-search-type-qualifier.md,.ce/changelog/ce80-republish-233.md,.ce/changelog/ce80-republish-post241.md,.ce/changelog/ce80-signed-publish.md,.ce/changelog/ce81-trustroot-fingerprint-anchor.md,.ce/changelog/ce88-live-forge-applydriver.md,.ce/changelog/ce89-spawn-repo-root.md
-confidential ce-ops# ticket reference|.ce/changelog/ce94-127-forge-identity.md,.ce/changelog/ce99-p1-devops.md,.ce/changelog/ceops95-seat-lifecycle-phase1.md,.ce/changelog/docs-agile-to-ce-sdlc.md,.ce/changelog/feat-ce314-skills-pilot-antidrift-guard.md
+confidential ce-ops# ticket reference|.ce/changelog/ce94-127-forge-identity.md,.ce/changelog/ce99-p1-devops.md,.ce/changelog/ceops95-seat-lifecycle-phase1.md,.ce/changelog/feat-ce314-skills-pilot-antidrift-guard.md
 confidential ce-ops# ticket reference|.ce/changelog/feat-runsc-detached-launch-mode.md,.ce/changelog/feat-vps-seat-validator-venv.md,.ce/changelog/fix-ce-ops-328-brownfield-forge-identity.md,.ce/changelog/ga2-runner-ring1-impl.md,.ce/changelog/livedriver-uv-mirror.md,.ce/changelog/release-0-3-0-publish.md,.ce/changelog/release-0-3-0-staging.md
 confidential ce-ops# ticket reference|.ce/changelog/v35-roadmap-plan.md,.ce/pr-manifests/b8-operator-alerting.md,.ce/pr-manifests/bugfix-54-56-58.md,.ce/pr-manifests/ce-279-surfaces-render.md,.ce/pr-manifests/ce-286-host-uds-persist.md,.ce/pr-manifests/ce-287-broker-brokenpipe.md,.ce/pr-manifests/ce-288-count-agnostic-checks.md,.ce/pr-manifests/ce-290-broker-pr-body-workclass.md,.ce/pr-manifests/ce-292-autoreview-enforcement.md,.ce/pr-manifests/ce-292-autoreview.md
 confidential ce-ops# ticket reference|.ce/pr-manifests/ce-295-w5-g5-body-emit.md,.ce/pr-manifests/ce-326-onboard-os-native-default.md,.ce/pr-manifests/ce-327-per-user-app.md,.ce/pr-manifests/ce-333-contributor-dev-install.md,.ce/pr-manifests/ce-334-packaging-test-skip-guard.md,.ce/pr-manifests/ce-335-rename-aware-gates.md
@@ -273,7 +274,7 @@ confidential ce-ops# ticket reference|.ce/pr-manifests/ce297-claude-code-adapter
 confidential ce-ops# ticket reference|.ce/pr-manifests/ce43-seat-reaper.md,.ce/pr-manifests/ce45-journey-cockpit.md,.ce/pr-manifests/ce55-pickup-search-type-qualifier.md,.ce/pr-manifests/ce57-datebomb-fix.md,.ce/pr-manifests/ce63-d1-contributing-guide.md,.ce/pr-manifests/ce65-changelog-0-2-0.md,.ce/pr-manifests/ce69-mirror-rescope.md,.ce/pr-manifests/ce71-userlevel-apply.md,.ce/pr-manifests/ce80-republish-233.md,.ce/pr-manifests/ce80-republish-post238.md,.ce/pr-manifests/ce80-republish-post241.md,.ce/pr-manifests/ce80-republish-s2.md
 confidential ce-ops# ticket reference|.ce/pr-manifests/ce80-signed-publish.md,.ce/pr-manifests/ce81-trustroot-fingerprint-anchor.md,.ce/pr-manifests/ce82-lane-venv-docs.md,.ce/pr-manifests/ce83-issue-intake-role-contract.md,.ce/pr-manifests/ce84-identity-semantics-doc.md,.ce/pr-manifests/ce85-e3-adoption-apply.md,.ce/pr-manifests/ce85-plain-join.md,.ce/pr-manifests/ce88-apply-driver.md,.ce/pr-manifests/ce88-live-forge-applydriver.md,.ce/pr-manifests/ce88-pco-release-pane-terminalize.md,.ce/pr-manifests/ce89-controller-seat-exclusivity-doc.md,.ce/pr-manifests/ce89-spawn-repo-root.md
 confidential ce-ops# ticket reference|.ce/pr-manifests/ce9-role-boundary-design.md,.ce/pr-manifests/ce94-127-forge-identity.md,.ce/pr-manifests/ce94-finegrained-pat.md,.ce/pr-manifests/ce95-seats-ls.md,.ce/pr-manifests/ce97-test-notification-hygiene.md,.ce/pr-manifests/ce98-pco-release-collision.md,.ce/pr-manifests/ce99-p1-devops.md,.ce/pr-manifests/ceops94-finegrained-bootstrap.md,.ce/pr-manifests/ceops95-phase1.md,.ce/pr-manifests/codex-ce142-computer-use-authority-envelope.md,.ce/pr-manifests/codex-ce145-playbooks-scaffold.md,.ce/pr-manifests/codex-ce171-forge-plan-protection-floor.md
-confidential ce-ops# ticket reference|.ce/pr-manifests/codex-ce172-windows-wsl2-remediation.md,.ce/pr-manifests/codex-ce177-brain-drift-ci.md,.ce/pr-manifests/codex-ce182-search-pickup-feed.md,.ce/pr-manifests/codex-drive-bridge.md,.ce/pr-manifests/d3-mcp-fix.md,.ce/pr-manifests/docs-agile-to-ce-sdlc.md,.ce/pr-manifests/f6-phase0-restamp.md,.ce/pr-manifests/feat-ce207-w1-visibility-backend.md
+confidential ce-ops# ticket reference|.ce/pr-manifests/codex-ce172-windows-wsl2-remediation.md,.ce/pr-manifests/codex-ce177-brain-drift-ci.md,.ce/pr-manifests/codex-ce182-search-pickup-feed.md,.ce/pr-manifests/codex-drive-bridge.md,.ce/pr-manifests/d3-mcp-fix.md,.ce/pr-manifests/f6-phase0-restamp.md,.ce/pr-manifests/feat-ce207-w1-visibility-backend.md
 confidential ce-ops# ticket reference|.ce/pr-manifests/feat-runsc-detached-launch-mode.md,.ce/pr-manifests/feat-vps-seat-validator-venv.md,.ce/pr-manifests/fix-ce-ops-328-brownfield-forge-identity.md,.ce/pr-manifests/fix-ce315-b1-anchor-footgun.md,.ce/pr-manifests/fix-publish-answers-schema.md,.ce/pr-manifests/g2f-spawn-hardening.md,.ce/pr-manifests/ga2-runner-ring1-impl.md,.ce/pr-manifests/livedriver-uv-mirror.md,.ce/pr-manifests/livedriver-uv-verify-fix.md
 confidential ce-ops# ticket reference|.ce/pr-manifests/seat-sentinels.md,.ce/pr-manifests/sentinel-readiness-fix.md,.ce/pr-manifests/site-v8-factory-floor.md,.ce/pr-manifests/track-b-openbao-completion.md,.ce/pr-manifests/u1-herdr-ce-side-scaffold.md,.ce/pr-manifests/v020-bump.md,.ce/pr-manifests/v35-roadmap-plan.md,.ce/pr-manifests/v35e-prime-wave.md,.ce/pr-manifests/w3-evidence-bundle-press-merge.md,.ce/reference/cli.generated.md
 confidential ce-ops# ticket reference|.ce/reference/schemas.generated.md,.claude/agents/README.md,.claude/agents/reviewer.md,.github/scripts/ceops_autoclose.py,.github/workflows/ce-ops-autoclose.yml,.github/workflows/ce-ops-triage-queue.yml,.github/workflows/validate.yml,BUILD_NOTE.md,deploy/dgx-controller-runsc/DESIGN.md,deploy/dgx-controller-runsc/README.md,deploy/dgx-controller-runsc/ce-controller-gh-guard.sh,deploy/systemd/ce-belt-daemon-observed-run.md
@@ -378,6 +379,11 @@ def _is_binary_file(path: Path) -> bool:
     return BINARY_SENTINEL in path.read_bytes()
 
 
+def _is_regular_file(path: Path) -> bool:
+    """True only for regular files, failing closed on stat errors."""
+    return stat.S_ISREG(path.stat().st_mode)
+
+
 def public_repo_text_files(*, repo_root: Path | None = None) -> list[Path]:
     """All tracked text files in the public repository, excluding this module."""
     root = (repo_root or globals()["repo_root"]()).resolve()
@@ -387,7 +393,7 @@ def public_repo_text_files(*, repo_root: Path | None = None) -> list[Path]:
         if rel == _SELF_REL or path.resolve() == _SELF:
             continue
         try:
-            if not path.is_file():
+            if not _is_regular_file(path):
                 continue
             if _is_binary_file(path):
                 continue
@@ -395,11 +401,6 @@ def public_repo_text_files(*, repo_root: Path | None = None) -> list[Path]:
             raise ConfidentialityScanError(f"{rel}: unreadable file: {exc}") from exc
         files.append(path)
     return files
-
-
-def public_doc_files(*, repo_root: Path | None = None) -> list[Path]:
-    """Compatibility alias for callers of the old docs-only surface helper."""
-    return public_repo_text_files(repo_root=repo_root)
 
 
 def display_rel(path: Path, *, repo_root: Path) -> str:
@@ -534,6 +535,8 @@ def scan_offenses(*, repo_root: Path | None = None) -> list[str]:
         files = public_repo_text_files(repo_root=root)
     except ConfidentialityScanError as exc:
         return [_scan_error(".", str(exc))]
+    if not files:
+        return [_scan_error(".", "tracked text scan found no files")]
     for path in files:
         rel = path.resolve().relative_to(root).as_posix()
         try:
