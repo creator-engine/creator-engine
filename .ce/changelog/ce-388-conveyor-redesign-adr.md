@@ -6,6 +6,8 @@ scope: conveyor daemon security-redesign ADR
 issue: ce-ops#388
 ---
 
+**conveyor daemon security-redesign ADR.**
+
 Added ADR-0004 proposing the conveyor daemon arm-safety-by-construction model.
 The ADR makes discovery payloads data-only, moves checkout and git/gh authority
 to daemon-owned working directories and pinned daemon config, treats imported
