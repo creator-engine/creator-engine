@@ -52,6 +52,11 @@ from pathlib import Path
 from typing import Any
 
 from . import pco_allocator, seat_lifecycle, work_claims
+from .pickup_payload_schema import (
+    AuditSink as ConveyorDiscoveryAuditSink,
+    ConveyorDiscoveryPayload,
+    validate_discovery_payload,
+)
 
 # The deterministic Search/transport/token primitives are shared (boundary-neutral)
 # with the v3 controller review-pickup; re-exported here so the v1 ``ce pickup``
@@ -219,6 +224,16 @@ def _dedupe_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         out.append(item)
     return out
+
+
+def parse_conveyor_discovery_payload(
+    payload: Mapping[str, Any],
+    *,
+    audit_sink: ConveyorDiscoveryAuditSink | None = None,
+) -> ConveyorDiscoveryPayload:
+    """Validate an ADR-0004 conveyor discovery payload as data only."""
+
+    return validate_discovery_payload(payload, audit_sink=audit_sink, source="pickup")
 
 
 # ===========================================================================
