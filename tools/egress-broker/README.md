@@ -116,6 +116,20 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
 PY
 ```
 
+Contained-seat canary script:
+
+```bash
+python3 tools/egress-broker/ce_self_push_canary.py \
+  --branch "$(git rev-parse --abbrev-ref HEAD)" \
+  --require-noop
+```
+
+The canary uses `CE_SEAT_ID` and `CE_EGRESS_BROKER_SOCKET` by default. It sends the same
+value-only request as the template above, requires an applied broker response, and fails loudly
+on stale socket mounts (`ECONNREFUSED`), broker refusals, or non-no-op responses when
+`--require-noop` is set. VPS contained seats should mount the broker socket directory, not the
+socket inode, so a daemon restart does not strand the container on a stale Unix socket.
+
 The zero-credential contained environment cannot run
 `tools/egress-broker/ce_egress_broker.py --apply` directly. A direct `--apply`
 smoke is host-only and requires the host config, trust store, App PEM, mint
