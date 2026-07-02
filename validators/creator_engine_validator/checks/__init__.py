@@ -83,6 +83,7 @@ from . import ce_computer_use_authority_envelope as ce_computer_use_authority_en
 from . import ce_runtime_policy as ce_runtime_policy  # noqa: E402,F401
 from . import ce_runtime_evidence as ce_runtime_evidence  # noqa: E402,F401
 from . import ce_brain_assertions as ce_brain_assertions  # noqa: E402,F401
+from . import ce_brain_doctrine_coverage as ce_brain_doctrine_coverage  # noqa: E402,F401
 from . import brownfield_baseline_attestation as brownfield_baseline_attestation  # noqa: E402,F401
 from . import ce_brain_drift as ce_brain_drift  # noqa: E402,F401
 from . import version_boundary as version_boundary  # noqa: E402,F401
