@@ -219,6 +219,86 @@ def test_plan_triage_explicit_arc_refs_exclude_unreferenced_cross_repo_candidate
     ]
 
 
+def test_plan_triage_surfaces_commissioned_unscheduled_advisory_section():
+    payload = {
+        "items": [
+            _issue(187, title="Arc", body="Active arc includes #10."),
+            _issue(10, labels=[{"name": "user-story"}]),
+            _issue(20, labels=[{"name": "user-story"}], milestone=None),
+            _issue(30, user={"login": "Operator"}, milestone=None),
+            _issue(40, labels=[{"name": "user-story"}], milestone={"title": "Night arc"}),
+            _issue(50, labels=[{"name": "bug"}], milestone=None),
+        ]
+    }
+
+    result = ft.plan_triage(arc_ticket="creator-engine/ce-ops#187", issues=payload)
+    payload = result.to_dict()
+
+    assert [item.issue.number for item in result.items] == [10]
+    assert [item["issue"]["number"] for item in payload["commissioned_unscheduled"]] == [20, 30]
+    assert payload["commissioned_unscheduled_count"] == 2
+    assert payload["commissioned_unscheduled"][0]["commissioned_by"] == ["label:user-story"]
+    assert payload["commissioned_unscheduled"][0]["advisory_only"] is True
+    assert payload["commissioned_unscheduled"][0]["planned_mutations"] == []
+    assert payload["commissioned_unscheduled"][1]["commissioned_by"] == ["author:Operator"]
+
+
+def test_commissioned_unscheduled_predicate_is_configurable():
+    payload = {
+        "items": [
+            _issue(187, title="Arc", body="Active arc includes #10."),
+            _issue(10),
+            _issue(20, labels=[{"name": "customer-story"}], user={"login": "requestor"}),
+            _issue(30, labels=[{"name": "user-story"}], user={"login": "Operator"}),
+            _issue(40, user={"login": "ProductOps"}),
+        ]
+    }
+
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues=payload,
+        commissioned_predicate={
+            "user_story_labels": ("customer-story",),
+            "operator_author_logins": ("ProductOps",),
+        },
+    )
+
+    assert [
+        item.issue.number for item in result.commissioned_unscheduled
+    ] == [20, 40]
+    assert result.commissioned_unscheduled[0].commissioned_by == ("label:customer-story",)
+    assert result.commissioned_unscheduled[1].commissioned_by == ("author:ProductOps",)
+
+
+def test_commissioned_unscheduled_requires_arc_body_context():
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={"items": [_issue(20, labels=[{"name": "user-story"}])]},
+    )
+
+    assert result.commissioned_unscheduled == ()
+
+
+def test_apply_triage_preserves_commissioned_unscheduled_without_mutation():
+    result = ft.plan_triage(
+        arc_ticket="creator-engine/ce-ops#187",
+        issues={
+            "items": [
+                _issue(187, title="Arc", body="Active arc includes #10."),
+                _issue(10),
+                _issue(20, labels=[{"name": "user-story"}]),
+            ]
+        },
+    )
+    fake = FakeGh()
+
+    applied = ft.apply_triage_result(result, fake)
+
+    assert [item.issue.number for item in applied.items] == [10]
+    assert [item.issue.number for item in applied.commissioned_unscheduled] == [20]
+    assert all("/issues/20/" not in call[0][-1] for call in fake.calls)
+
+
 @pytest.mark.parametrize(
     "body",
     [
