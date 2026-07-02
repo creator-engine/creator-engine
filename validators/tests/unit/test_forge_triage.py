@@ -726,6 +726,92 @@ def test_cli_dry_run_outputs_json_without_gh_runner(tmp_path, monkeypatch, capsy
     ]
 
 
+def test_cli_dry_run_text_outputs_commissioned_unscheduled_advisory(
+    tmp_path, monkeypatch, capsys
+):
+    issues = tmp_path / "issues.json"
+    issues.write_text(
+        json.dumps(
+            {
+                "items": [
+                    _issue(187, title="Arc", body="Active arc includes #10."),
+                    _issue(10),
+                    _issue(20, labels=[{"name": "user-story"}], milestone=None),
+                    _issue(30, user={"login": "Operator"}, milestone=None),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _boom():
+        raise AssertionError("dry-run triage must not create a gh runner")
+
+    monkeypatch.setattr(ce_cli, "_make_gh_runner", _boom)
+    rc = ce_cli.main(
+        [
+            "pickup",
+            "triage",
+            "--arc-ticket",
+            "creator-engine/ce-ops#187",
+            "--issues-json",
+            str(issues),
+        ]
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "ce pickup triage: planned 1 pickup item(s)" in out
+    assert "commissioned unscheduled advisory: 2 item(s) (verified)" in out
+    assert (
+        "creator-engine/ce-ops#20 "
+        "(commissioned_by: label:user-story; advisory_only: true)"
+    ) in out
+    assert (
+        "creator-engine/ce-ops#30 "
+        "(commissioned_by: author:Operator; advisory_only: true)"
+    ) in out
+
+
+def test_cli_dry_run_text_outputs_commissioned_unscheduled_advisory_empty(
+    tmp_path, monkeypatch, capsys
+):
+    issues = tmp_path / "issues.json"
+    issues.write_text(
+        json.dumps(
+            {
+                "items": [
+                    _issue(187, title="Arc", body="Active arc includes #10."),
+                    _issue(10),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _boom():
+        raise AssertionError("dry-run triage must not create a gh runner")
+
+    monkeypatch.setattr(ce_cli, "_make_gh_runner", _boom)
+    rc = ce_cli.main(
+        [
+            "pickup",
+            "triage",
+            "--arc-ticket",
+            "creator-engine/ce-ops#187",
+            "--issues-json",
+            str(issues),
+        ]
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "ce pickup triage: planned 1 pickup item(s)" in out
+    assert "commissioned unscheduled advisory: 0 item(s) (verified)" in out
+    assert "commissioned_by:" not in out
+    assert "advisory_only: true" not in out
+
+
 def test_cli_check_claims_dry_run_uses_runner_and_skips_active_claim(
     tmp_path, monkeypatch, capsys
 ):
