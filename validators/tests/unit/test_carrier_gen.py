@@ -77,6 +77,28 @@ def test_render_manifest_round_trips_through_verifier_parser():
     assert identity.paths == (f"{MANIFEST_DIR}/ce-test.md", "a.py", "b.py")
 
 
+def test_render_manifest_can_include_declared_work_class_without_affecting_path_identity():
+    paths = ("b.py", f"{MANIFEST_DIR}/ce-test.md", "a.py")
+    count = len(set(paths))
+    sha = _sha(paths)
+
+    text = render_manifest(
+        "ce-test",
+        "ce-ops#1",
+        "Carrier generator",
+        paths,
+        count,
+        sha,
+        declared_work_class="M",
+    )
+    identity = parse_carrier(text)
+
+    assert text.count("- **Declared work class:** M") == 1
+    assert identity is not None
+    assert identity.consistent is True
+    assert identity.paths == (f"{MANIFEST_DIR}/ce-test.md", "a.py", "b.py")
+
+
 def test_render_changelog_frontmatter_and_body():
     text = render_changelog(
         "ce-test",
@@ -126,6 +148,7 @@ def test_write_carriers_writes_changelog_before_manifest_and_uses_diff_paths(tmp
         body="- Added carrier generation helpers.",
         date="2026-06-24",
         base="origin/main",
+        declared_work_class="S",
     )
     slug = branch_slug(spec.head_ref)
     events = []
@@ -164,3 +187,4 @@ def test_write_carriers_writes_changelog_before_manifest_and_uses_diff_paths(tmp
     assert identity is not None
     assert identity.consistent is True
     assert identity.paths == written.paths
+    assert written.manifest_path.read_text(encoding="utf-8").count("- **Declared work class:** S") == 1

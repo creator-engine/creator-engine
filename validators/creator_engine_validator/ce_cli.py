@@ -43,6 +43,7 @@ ce brain init        # idempotently bootstrap a valid genesis brain assertion le
 ce brain assert      # append a structured Knowledge-SSOT assertion under .ce/state
 ce brain check       # deterministically return the active assertion or unknown
 ce brain correct     # append a supersession marker plus corrected assertion
+ce brain sync        # reconcile ignored local brain runtime state from tracked canonical brain sources
 ce brain ingest      # derive/update the local rebuildable recall vector store
 ce brain recall      # hybrid (semantic+keyword) recall: SSOT-precedence, tier-tagged pointers
 ce brain verify      # validate the local brain assertion ledger
@@ -922,7 +923,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "brain",
         help=(
             "local Knowledge-SSOT assertion ledger + recall "
-            "(assert/check/correct/ingest/recall/verify/probe/bootstrap)"
+            "(assert/check/correct/sync/ingest/recall/verify/probe/bootstrap)"
         ),
     )
     brain_sub = brain.add_subparsers(dest="brain_cmd")
@@ -994,6 +995,18 @@ def _build_parser() -> argparse.ArgumentParser:
     bco.add_argument("--claim-json", required=True, help="corrected structured claim mapping as JSON")
     bco.add_argument("--evidence-ref", required=True, help="required correction evidence reference")
     bco.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    bs = brain_sub.add_parser(
+        "sync",
+        help="reconcile ignored local brain runtime state from tracked canonical brain sources",
+    )
+    _add_state_root(bs)
+    bs.add_argument(
+        "--repo-root",
+        default=None,
+        help="repo root containing .ce/brain/assertions.yaml (default: derived from --state-root)",
+    )
+    bs.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     bi = brain_sub.add_parser("ingest", help="derive/update the local rebuildable recall vector store")
     _add_state_root(bi)
@@ -2975,7 +2988,46 @@ def _brain_verify(args) -> int:
         print(f"ce brain verify{suffix}: {status} ({summary.get('record_count', 0)} record(s))")
         for error in errors:
             print(f"  ERROR: {error}", file=sys.stderr)
+        if getattr(args, "drift", False) and not ok:
+            print(
+                "  NOTE: If this is ignored instance-local .ce/state/brain drift, "
+                "run `ce brain sync` to reconcile from tracked .ce/brain sources; "
+                "CI is unaffected by ignored instance-local runtime state. "
+                "PR changes to tracked .ce/brain sources are still gated.",
+                file=sys.stderr,
+            )
     return 0 if ok else 1
+
+
+def _brain_sync(args) -> int:
+    try:
+        result = brain_runtime.sync_authoritative_ledger(
+            state_root=args.state_root,
+            repo_root=getattr(args, "repo_root", None),
+        )
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("sync", exc)
+    payload = {
+        "active_count": result.active_count,
+        "authoritative_exists": result.authoritative_exists,
+        "authoritative_path": str(result.authoritative_path),
+        "head_content_hash": result.head_content_hash,
+        "ledger_path": str(result.ledger_path),
+        "record_count": result.record_count,
+        "updated": result.updated,
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    elif result.authoritative_exists:
+        action = "reconciled" if result.updated else "already in sync"
+        print(f"ce brain sync: {action} ({result.record_count} record(s))")
+        print(f"source: {result.authoritative_path}")
+        print(f"target: {result.ledger_path}")
+        if result.head_content_hash is not None:
+            print(f"head_content_hash: {result.head_content_hash}")
+    else:
+        print(f"ce brain sync: no canonical brain ledger at {result.authoritative_path}; nothing to reconcile")
+    return 0
 
 
 def _brain_probe(args) -> int:
@@ -4679,6 +4731,7 @@ _BRAIN_DISPATCH = {
     "ingest": _brain_ingest,
     "recall": _brain_recall,
     "probe": _brain_probe,
+    "sync": _brain_sync,
     "verify": _brain_verify,
 }
 
