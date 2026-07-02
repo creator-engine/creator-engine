@@ -285,6 +285,42 @@ def test_pickup_filter_excludes_awaiting_operator_hold_marker():
     assert [candidate.issue_number for candidate in candidates] == [62]
 
 
+def test_pickup_filter_excludes_awaiting_operator_label_no_body_marker():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(69, labels=[{"name": "awaiting-operator"}]),
+            _issue(70),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [70]
+
+
+def test_pickup_filter_excludes_awaiting_operator_hold_label_variant_case_and_whitespace():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(75, labels=[{"name": " Awaiting-Operator/Hold "}]),
+            _issue(76),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [76]
+
+
+def test_pickup_payload_carries_requires_live_recheck_signal():
+    payload = qt.pickup_payload(
+        qt.pickup_candidates_from_issues(
+            [_issue(77)],
+            triaged_at="2026-06-30T00:00:00Z",
+        )
+    )
+
+    assert payload["requires_live_recheck"] is True
+    assert "gh_runner" in payload["requires_live_recheck_note"]
+
+
 def test_pickup_filter_excludes_aggregate_epic_issue():
     candidates = qt.pickup_candidates_from_issues(
         [

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import forge_triage
+from .forge.controller_inbox import AWAITING_OPERATOR_LABELS
 
 QUEUE_SENTINEL = "<!-- ce-triage-queue-issue:v1 -->"
 NON_AUTHORITY_STATEMENT = (
@@ -394,10 +395,14 @@ def pickup_candidates_from_issues(
     Every candidate is also gated through ``forge_triage._skip_reason`` (with
     no ``gh_runner``) — the same pickup-safety predicate
     ``forge_triage.plan_triage`` uses before labeling an issue ready. That
-    excludes ``⏸ AWAITING-OPERATOR`` hold-marker issues, aggregate/epic/
-    tracker/rollup issues and work-class L, done-labeled issues, and issues
-    whose ``state`` is not ``"open"``, in addition to the existing
-    blocking-label/dependency and assignee/in-progress-label checks.
+    excludes the body-text form of the ``⏸ AWAITING-OPERATOR`` hold marker,
+    aggregate/epic/tracker/rollup issues and work-class L, done-labeled
+    issues, and issues whose ``state`` is not ``"open"``, in addition to the
+    existing blocking-label/dependency and assignee/in-progress-label
+    checks. Separately, this function also excludes any issue whose LABELS
+    intersect ``AWAITING_OPERATOR_LABELS`` (``forge.controller_inbox``'s
+    canonical hold-marker label set), so both the label form and the
+    body-text form of the AWAITING-OPERATOR convention are excluded.
 
     IMPORTANT: because no ``gh_runner`` is supplied here, this does NOT run
     the live, network-dependent checks that ``_skip_reason`` performs when a
@@ -405,7 +410,8 @@ def pickup_candidates_from_issues(
     work-claim status. A ``readiness: "ready"`` candidate from this function
     is therefore advisory only; any consumer that actually dispatches a seat
     onto an issue MUST re-run the full ``forge_triage`` pickup gate (e.g.
-    ``forge_triage.plan_triage``) with a live ``gh_runner`` first.
+    ``forge_triage.plan_triage``) with a live ``gh_runner`` first. See
+    ``pickup_payload``'s ``requires_live_recheck`` field.
     """
     candidates: list[PickupCandidate] = []
     for raw in raw_issues:
@@ -424,6 +430,8 @@ def pickup_candidates_from_issues(
             gh_runner=None,
         )
         if skip_reason is not None:
+            continue
+        if _has_awaiting_operator_label(issue.labels):
             continue
         if issue.assignees or _has_pickup_in_progress_label(issue.labels):
             continue
@@ -446,6 +454,15 @@ def pickup_payload(candidates: Sequence[PickupCandidate]) -> dict[str, Any]:
         "kind": "ce-triage-pickup-candidates",
         "schema_version": SCHEMA_VERSION,
         "advisory": NON_AUTHORITY_STATEMENT,
+        "requires_live_recheck": True,
+        "requires_live_recheck_note": (
+            "readiness on each candidate here was computed without a live "
+            "gh_runner (no in-flight/merged linked-PR or work-claim check). "
+            "Any consumer that dispatches a seat onto a candidate MUST "
+            "re-run the full forge_triage pickup gate "
+            "(forge_triage.plan_triage / forge_triage._skip_reason) with a "
+            "live gh_runner before dispatch."
+        ),
         "candidate_count": len(candidates),
         "candidates": [candidate.to_dict() for candidate in candidates],
     }
@@ -690,6 +707,11 @@ def _desired_classification_labels(entry: QueueEntry) -> tuple[str, ...]:
     if readiness_label in READINESS_LABELS:
         labels.append(readiness_label)
     return tuple(sorted(labels))
+
+
+def _has_awaiting_operator_label(labels: Sequence[str]) -> bool:
+    normalized = {forge_triage._label_key(label) for label in labels}
+    return bool(normalized.intersection(AWAITING_OPERATOR_LABELS))
 
 
 def _has_pickup_in_progress_label(labels: Sequence[str]) -> bool:
