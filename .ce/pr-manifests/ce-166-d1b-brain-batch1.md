@@ -6,13 +6,14 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** L
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=2afb4e60150c7c4b58dab447b4afb5c439ccd20e02238b0b691cb615e04e8182
+AUTHORIZED_PATHS_SHA256=b2abb71665b4168e119f7aca4794484fd5bc35bd592307e59b4ed094bc6ebce7
 
 ```text
 .ce/brain/assertions.yaml
 .ce/brain/doctrine-coverage.yaml
 .ce/changelog/ce-166-d1b-brain-batch1.md
 .ce/pr-manifests/ce-166-d1b-brain-batch1.md
+validators/tests/unit/test_ce_brain_drift.py
 ```
