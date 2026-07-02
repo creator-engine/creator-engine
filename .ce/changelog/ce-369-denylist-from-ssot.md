@@ -6,10 +6,10 @@ scope: validators
 issue: ce-369
 ---
 
-**Hash identity denylist from registry source.**
+**Generate the identity denylist from registry source at runtime.**
 
-- Added a generated, hashed identity denylist artifact and loader so fleet manifest checks no longer keep CE-internal identifiers in plaintext source.
-- Added a required-registry generator plus offline autogen sync check; the PR gate verifies artifact structure, hashed-only contents, and guard wiring.
-- Added a scheduled freshness workflow that checks the private identity registry with `secrets.CE_OPS_READ_TOKEN` and fails loudly on drift without auto-push or auto-PR behavior.
-- Seeded this PR with a like-for-like migration of the prior hand-maintained literal list into hashes only. The workflow begins enforcing freshness once the controller provisions `CE_OPS_READ_TOKEN`; controller regeneration against the live registry remains the immediate follow-up because this worker cannot read the private registry.
-- Superseded the d1b-39 brain assertion to re-pin `validators/pyproject.toml` after this branch's package-data change.
+- Added a required-registry generator that writes the CE-internal identity denylist only as a gitignored runtime artifact where the private ce-ops registry is available.
+- Updated the fleet manifest guard to fail open with an explicit advisory when that runtime artifact is absent, while preserving structural regex protections and using generated runtime data when present.
+- Removed the committed generated artifact and package-data shipping for it; committed content no longer carries registry-derived identity summaries.
+- Added a scheduled freshness workflow that checks out ce-ops with `secrets.CE_OPS_READ_TOKEN`, generates the runtime artifact, and verifies it against the private registry without auto-push or auto-PR behavior.
+- Superseded the d1b-39 brain assertion again to re-pin `validators/pyproject.toml` after the rework removed generated artifact package data.

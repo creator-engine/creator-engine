@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   check:
-    name: Check generated identity denylist
+    name: Check runtime identity denylist generation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout creator-engine
@@ -42,8 +42,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install PyYAML==6.0.3
 
-      # Drift fails the scheduled run loudly. V1 intentionally does not auto-push,
-      # auto-commit, or open a PR; propose-a-governed-diff is a follow-up.
-      - name: Check identity denylist freshness
+      # The runtime artifact is generated only in registry-backed contexts and
+      # remains gitignored. V1 intentionally does not auto-push, auto-commit, or
+      # open a PR; propose-a-governed-diff is a follow-up.
+      - name: Generate fresh runtime identity denylist
+        run: |
+          python scripts/gen_identity_denylist.py --registry ce-ops/infra/identity-registry.yaml --write
+
+      - name: Check runtime identity denylist freshness
         run: |
           python scripts/gen_identity_denylist.py --registry ce-ops/infra/identity-registry.yaml --check

@@ -11,6 +11,33 @@ from creator_engine_validator.checks import fleet_manifest_guard as chk
 from creator_engine_validator.fleet_manifest import iter_fleet_manifest_paths, load_fleet_manifest
 
 
+LEGACY_RUNTIME_TOKENS = (
+    "creator-engine/creator-engine",
+    "ce-ops",
+    "dev-4",
+    "ce-dgx-codex",
+    "DGX",
+    "spark-b824",
+    "dgx-spark",
+    "Hetzner",
+    "cedev4",
+    "ce-kv/prod",
+    "forge/shared-app",
+    "ce-overwatch",
+    "cedev1vps-cmd",
+    "cedev3vps-coder",
+    "ubuntuaws745-cmyk",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_runtime_denylist_cache(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("CE_IDENTITY_DENYLIST_PATH", raising=False)
+    chk._runtime_identity_denylist.cache_clear()
+    yield
+    chk._runtime_identity_denylist.cache_clear()
+
+
 def _manifest() -> dict[str, object]:
     return {
         "kind": "fleet-manifest",
@@ -58,6 +85,36 @@ def _codes(result) -> set[str]:
     return {error.code for error in result.errors}
 
 
+def _warning_codes(result) -> set[str]:
+    return {warning.code for warning in result.warnings}
+
+
+def _write_runtime_denylist(root: Path, tokens: tuple[str, ...] = LEGACY_RUNTIME_TOKENS) -> Path:
+    artifact = root / "identity_denylist.generated.yaml"
+    artifact.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "generated_by": "scripts/gen_identity_denylist.py",
+                "source": "identity-registry",
+                "normalization": "casefold",
+                "entries": [
+                    {"token": token, "categories": ["legacy-internal-literal"]}
+                    for token in tokens
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return artifact
+
+
+def _use_runtime_denylist(monkeypatch: pytest.MonkeyPatch, artifact: Path) -> None:
+    monkeypatch.setenv("CE_IDENTITY_DENYLIST_PATH", str(artifact))
+    chk._runtime_identity_denylist.cache_clear()
+
+
 def test_fleet_manifest_guard_is_registered():
     assert chk.CHECK_NAME in registered_checks()
 
@@ -68,8 +125,23 @@ def test_clean_manifest_passes_schema_and_guard(tmp_path: Path):
     result = chk.run([tmp_path])
 
     assert result.ok, [error.format() for error in result.errors]
+    assert chk.CODE_IDENTITY_DENYLIST_UNAVAILABLE in _warning_codes(result)
     loaded = load_fleet_manifest(tmp_path / "fleet-manifest.yaml")
     assert loaded.data["tier"] == "fleet"
+
+
+def test_absent_runtime_denylist_fails_open_with_advisory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CE_IDENTITY_DENYLIST_PATH", str(tmp_path / "missing.generated.yaml"))
+    chk._runtime_identity_denylist.cache_clear()
+    doc = _manifest()
+    doc["project"]["repo"] = "creator-engine/creator-engine"  # type: ignore[index]
+    _write_manifest(tmp_path, doc)
+
+    result = chk.run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+    assert chk.CODE_INTERNAL_IDENTIFIER not in _codes(result)
+    assert chk.CODE_IDENTITY_DENYLIST_UNAVAILABLE in _warning_codes(result)
 
 
 def test_fleet_manifest_schema_file_is_not_treated_as_manifest(tmp_path: Path):
@@ -119,7 +191,14 @@ def test_surfaces_manifest_under_fleet_named_parent_is_not_treated_as_fleet_mani
         ("vllm endpoint", ("project", "description"), "http://vllm.internal:8000"),
     ],
 )
-def test_internal_identifier_categories_fail(tmp_path: Path, category: str, path: tuple[object, ...], value: str):
+def test_internal_identifier_categories_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    category: str,
+    path: tuple[object, ...],
+    value: str,
+):
+    _use_runtime_denylist(monkeypatch, _write_runtime_denylist(tmp_path))
     doc = deepcopy(_manifest())
     target = doc
     for part in path[:-1]:

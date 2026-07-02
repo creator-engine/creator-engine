@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Generate the hashed CE-internal identity denylist artifact.
+"""Generate the runtime CE-internal identity denylist artifact.
 
 The source registry is private and must be supplied explicitly via
-``--registry``. This generator stores only SHA-256 digests of normalized
-identifier values in the committed artifact.
+``--registry``. The output is plaintext runtime data and is gitignored; do not
+commit or package it.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
+import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -20,6 +20,7 @@ import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_RELATIVE = Path("validators/creator_engine_validator/data/identity_denylist.generated.yaml")
+ARTIFACT_ENV = "CE_IDENTITY_DENYLIST_PATH"
 MIN_TOKEN_LENGTH = 3
 SKIP_VALUES = frozenset({"TODO_VERIFY"})
 
@@ -40,10 +41,11 @@ def _iter_mapping_items(data: dict[str, Any], key: str) -> Iterable[dict[str, An
 def _candidate(value: Any, category: str) -> Candidate | None:
     if not isinstance(value, str):
         return None
-    normalized = value.casefold()
-    if value in SKIP_VALUES or len(normalized) < MIN_TOKEN_LENGTH:
+    token = value.strip()
+    normalized = token.casefold()
+    if token in SKIP_VALUES or len(normalized) < MIN_TOKEN_LENGTH:
         return None
-    return Candidate(value=value, category=category)
+    return Candidate(value=token, category=category)
 
 
 def _field_candidate(item: dict[str, Any], key: str, category: str) -> Candidate | None:
@@ -113,26 +115,24 @@ def derive_candidates(registry: dict[str, Any]) -> tuple[Candidate, ...]:
 
 
 def _artifact_doc(candidates: Sequence[Candidate]) -> dict[str, Any]:
-    by_digest: dict[str, dict[str, Any]] = {}
-    categories_by_digest: defaultdict[str, set[str]] = defaultdict(set)
+    token_by_normalized: dict[str, str] = {}
+    categories_by_token: defaultdict[str, set[str]] = defaultdict(set)
 
     for candidate in candidates:
         normalized = candidate.value.casefold()
-        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        by_digest.setdefault(digest, {"sha256": digest, "length": len(normalized)})
-        categories_by_digest[digest].add(candidate.category)
+        token_by_normalized.setdefault(normalized, candidate.value)
+        categories_by_token[normalized].add(candidate.category)
 
     entries = [
-        {**entry, "categories": sorted(categories_by_digest[digest])}
-        for digest, entry in by_digest.items()
+        {"token": token_by_normalized[normalized], "categories": sorted(categories_by_token[normalized])}
+        for normalized in token_by_normalized
     ]
-    entries.sort(key=lambda entry: (entry["length"], entry["sha256"]))
+    entries.sort(key=lambda entry: entry["token"].casefold())
     return {
         "version": 1,
         "generated_by": "scripts/gen_identity_denylist.py",
         "source": "identity-registry",
         "normalization": "casefold",
-        "token_lengths": sorted({entry["length"] for entry in entries}),
         "entries": entries,
     }
 
@@ -156,10 +156,10 @@ def write(registry_path: Path, artifact_path: Path) -> None:
 def check(registry_path: Path, artifact_path: Path) -> bool:
     expected = render(registry_path)
     try:
-        committed = artifact_path.read_text(encoding="utf-8")
+        current = artifact_path.read_text(encoding="utf-8")
     except OSError:
         return False
-    return committed == expected
+    return current == expected
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -171,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--artifact",
         type=Path,
-        default=_REPO_ROOT / ARTIFACT_RELATIVE,
+        default=Path(os.environ.get(ARTIFACT_ENV, _REPO_ROOT / ARTIFACT_RELATIVE)),
         help=argparse.SUPPRESS,
     )
     return parser
@@ -191,7 +191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if check(registry, artifact):
             return 0
         print(
-            "identity denylist artifact is stale; run "
+            "runtime identity denylist artifact is absent or stale; run "
             f"`{Path(__file__).name} --registry <path> --write` with ce-ops access",
             file=sys.stderr,
         )
