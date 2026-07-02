@@ -3,7 +3,7 @@ slug: ce-393-command-deprecation-policy
 date: 2026-07-02
 kind: docs
 scope: contracts
-issue: ce-393
+issue: ce-ops#393
 ---
 
 **Command deprecation policy.**
