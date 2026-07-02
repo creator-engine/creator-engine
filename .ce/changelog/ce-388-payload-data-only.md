@@ -12,3 +12,4 @@ issue: ce-ops#388
 - Legacy command, base, remote, and path-bearing discovery mappings now reject with value-free audit records.
 - Schema-rejected discovery items are isolated per item so one bad payload cannot drop the rest of the batch.
 - Added daemon and schema regressions for missing, typed, non-mapping, and legacy-control payload failures.
+- Superseded d1b-10, d1b-11, and d1b-12 brain assertions to re-pin integrator belt evidence for this branch.
