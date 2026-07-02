@@ -99,10 +99,12 @@ PASS iff a newest resume file is identified, or the controller logs
 `cold start, no resume state` as explicit evidence. A missing local directory is
 not a failure by itself.
 
-## Step 3 - Brain Bootstrap Dry Run
+## Step 3 - Brain Bootstrap Hydration And Dry Run
 
 Always pass a claim ticket; controller brain bootstrap is gated on
-`--claim-ticket`.
+`--claim-ticket`. The launch dry run proves the standup launch plan is shaped,
+but it returns before the brain-bootstrap payload is built. Exercise the
+hydration seam directly for bootstrap payload assertions.
 
 ```bash
 ce launch \
@@ -123,22 +125,51 @@ import json
 from pathlib import Path
 
 payload = json.loads(Path("/tmp/ce-controller-standup-launch.json").read_text())
-text = json.dumps(payload, sort_keys=True)
-required = [
-    "foreman_charter",
-    "foreman_dispatch_contract",
-    "implementer",
-    "reviewer",
+if not isinstance(payload, dict):
+    raise SystemExit("FAIL launch-dry-run JSON payload is not an object")
+print("PASS launch-dry-run-plan-shape")
+PY
+
+PYTHONPATH=validators python3 - <<'PY'
+import sys
+
+from creator_engine_validator import brain_bootstrap
+
+try:
+    payload = brain_bootstrap.build_bootstrap_payload()
+except brain_bootstrap.BrainBootstrapRefused as exc:
+    print(f"FAIL brain-bootstrap-refused: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+operating_mode = payload.get("operating_mode")
+if not isinstance(operating_mode, dict):
+    raise SystemExit("FAIL brain-bootstrap missing operating_mode")
+
+missing = [
+    key
+    for key in ("foreman_charter", "foreman_dispatch_contract")
+    if key not in operating_mode
 ]
-missing = [needle for needle in required if needle not in text]
+contract = operating_mode.get("foreman_dispatch_contract")
+roles = contract.get("roles") if isinstance(contract, dict) else None
+if not isinstance(roles, dict):
+    missing.append("foreman_dispatch_contract.roles")
+else:
+    missing.extend(
+        f"foreman_dispatch_contract.roles.{role}"
+        for role in ("researcher", "implementer", "reviewer")
+        if role not in roles
+    )
 if missing:
     raise SystemExit(f"FAIL brain-bootstrap missing={missing}")
-print("PASS brain-bootstrap-dry-run")
+print("PASS brain-bootstrap-hydration")
 PY
 ```
 
-PASS iff dry-run exits 0 and the rendered payload includes the foreman charter,
-dispatch contract, and implementer/reviewer role evidence.
+PASS iff dry-run exits 0 with JSON object output and direct hydration returns a
+payload containing the foreman charter, dispatch contract, and
+researcher/implementer/reviewer role evidence. `BrainBootstrapRefused` is a
+standup FAIL.
 
 ## Step 4 - Duty Manifest Health
 
@@ -176,7 +207,13 @@ Self-test:
 
 ```bash
 test "${IDENTITY_REGISTRY_PATH:?set external identity registry path}" != ""
-PYTHONPATH=validators python3 -m creator_engine_validator.secret_identity --help >/dev/null
+PYTHONPATH=validators python3 - <<'PY'
+from creator_engine_validator.secret_identity import OpenBaoSecretIdentityBackend, SecretRef
+
+assert OpenBaoSecretIdentityBackend.backend_key == "openbao"
+assert SecretRef.__name__ == "SecretRef"
+print("PASS secret-identity-imports")
+PY
 test -f validators/creator_engine_validator/schemas/identity-registry.schema.yaml
 ```
 
