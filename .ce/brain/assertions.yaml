@@ -2611,4 +2611,166 @@ records:
   verification_method:
     evidence_ref: validators/creator_engine_validator/pr_preflight.py
     type: static
+- claim:
+    details: Local PR preflight uses the full validator test tree invocation by default,
+      matching CI parity rather than a unit-only subset.
+    evidence_sha256: 364b601d5cc4c9c495ab25b10bf03ee19468a8b585fff64c8afa1e4bd05c99ec
+    item: 1
+    object: local-preflight-ci-parity
+    predicate: asserts
+    refs:
+    - .github/workflows/validate.yml
+    subject: doctrine-item
+  content_hash: 7e908e64a52e97cd1fa9745c245b252c6f7525aceed76664425b6ced2d17df68
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-01-local-preflight-ci-parity-v2
+  kind: brain-assertion
+  prev_hash: 3026ae8409b8e471df160446c50e697f5395a98617763eba5be577387ae9af05
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 100
+  statement: Local PR preflight uses the full validator test tree invocation by default,
+    matching CI parity rather than a unit-only subset.
+  status: superseded
+  superseded_by: brain-assertion-d1b-01-local-preflight-ci-parity-v3
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local PR preflight uses the full validator test tree invocation by default,
+      matching CI parity rather than a unit-only subset.
+    evidence_sha256: 05d6c6a9b4724093c97a73161d1e51a69855b69db39a0cbc8fc39341275d47f1
+    item: 1
+    object: local-preflight-ci-parity
+    predicate: asserts
+    refs:
+    - .github/workflows/validate.yml
+    subject: doctrine-item
+  content_hash: 3c9ed80babca15b138d82b26ba4747ebc4dd76e24a72b615f8596db8efe88406
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-01-local-preflight-ci-parity-v3
+  kind: brain-assertion
+  prev_hash: 7e908e64a52e97cd1fa9745c245b252c6f7525aceed76664425b6ced2d17df68
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 101
+  statement: Local PR preflight uses the full validator test tree invocation by default,
+    matching CI parity rather than a unit-only subset.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local PR preflight validates committed base..HEAD state and refuses dirty
+      working trees unless explicitly allowed for committed-state inspection.
+    evidence_sha256: 364b601d5cc4c9c495ab25b10bf03ee19468a8b585fff64c8afa1e4bd05c99ec
+    item: 42
+    object: preflight-committed-clean-tree
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: 870ab54e6696a246501b3a431143c600f89ec1b8ad44ab515e02b66840193eec
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-42-preflight-committed-clean-tree-v2
+  kind: brain-assertion
+  prev_hash: 3c9ed80babca15b138d82b26ba4747ebc4dd76e24a72b615f8596db8efe88406
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 102
+  statement: Local PR preflight validates committed base..HEAD state and refuses dirty
+    working trees unless explicitly allowed for committed-state inspection.
+  status: superseded
+  superseded_by: brain-assertion-d1b-42-preflight-committed-clean-tree-v3
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local PR preflight validates committed base..HEAD state and refuses dirty
+      working trees unless explicitly allowed for committed-state inspection.
+    evidence_sha256: 05d6c6a9b4724093c97a73161d1e51a69855b69db39a0cbc8fc39341275d47f1
+    item: 42
+    object: preflight-committed-clean-tree
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: 25eb47cfdc69621edea74e7eb8fc5d04af12cc75f6698106470c3e31610d215e
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-42-preflight-committed-clean-tree-v3
+  kind: brain-assertion
+  prev_hash: 870ab54e6696a246501b3a431143c600f89ec1b8ad44ab515e02b66840193eec
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 103
+  statement: Local PR preflight validates committed base..HEAD state and refuses dirty
+    working trees unless explicitly allowed for committed-state inspection.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local preflight removes credential-bearing environment from pytest subprocesses
+      so local runs match CI token hygiene.
+    evidence_sha256: 364b601d5cc4c9c495ab25b10bf03ee19468a8b585fff64c8afa1e4bd05c99ec
+    item: 43
+    object: preflight-scrubs-credential-env
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: f56a5ecaaf6ac430af1b1048cb9724e08209765c203b1860de4b3f207a186cf0
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v2
+  kind: brain-assertion
+  prev_hash: 25eb47cfdc69621edea74e7eb8fc5d04af12cc75f6698106470c3e31610d215e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 104
+  statement: Local preflight removes credential-bearing environment from pytest subprocesses
+    so local runs match CI token hygiene.
+  status: superseded
+  superseded_by: brain-assertion-d1b-43-preflight-scrubs-credential-env-v3
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local preflight removes credential-bearing environment from pytest subprocesses
+      so local runs match CI token hygiene.
+    evidence_sha256: 05d6c6a9b4724093c97a73161d1e51a69855b69db39a0cbc8fc39341275d47f1
+    item: 43
+    object: preflight-scrubs-credential-env
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: 93cf9e3ee921d1a89b0034cfdc25868a873aebf81659be7e9ab2387a861c7156
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v3
+  kind: brain-assertion
+  prev_hash: f56a5ecaaf6ac430af1b1048cb9724e08209765c203b1860de4b3f207a186cf0
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 105
+  statement: Local preflight removes credential-bearing environment from pytest subprocesses
+    so local runs match CI token hygiene.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
 schema_version: '1'

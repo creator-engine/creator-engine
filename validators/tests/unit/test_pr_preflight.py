@@ -37,8 +37,8 @@ class FakeRunner:
         self.path_manifest_returncode = path_manifest_returncode
         self.path_manifest_stdout = path_manifest_stdout
         self.test_coupling_requires_marker = test_coupling_requires_marker
-        self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "ok\n", "")
-        self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "ok\n", "")
+        self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "1 passed in 0.01s\n", "")
+        self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "1 passed in 0.01s\n", "")
         self.changed_paths = changed_paths
         self.brain_drift_result = brain_drift_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.calls: list[tuple[list[str], Path, dict[str, str] | None, float | None]] = []
@@ -556,7 +556,7 @@ def test_preflight_fails_on_planted_new_test_failure(tmp_path: Path, monkeypatch
         baseline_test_result=pr_preflight.CommandResult(0, "1 passed\n", ""),
         head_test_result=pr_preflight.CommandResult(
             1,
-            "FAILED validators/tests/unit/test_example.py::test_planted\n",
+            "FAILED validators/tests/unit/test_example.py::test_planted\n1 failed in 0.01s\n",
             "",
         ),
     )
@@ -568,6 +568,74 @@ def test_preflight_fails_on_planted_new_test_failure(tmp_path: Path, monkeypatch
     assert "baseline-diff test gate found new failure(s)" in out.getvalue()
     assert "validators/tests/unit/test_example.py::test_planted" in out.getvalue()
     assert not any("verify-path-manifest" in call for call in runner.argv_calls())
+
+
+def test_preflight_fails_closed_when_pytest_missing_on_both_sides(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    missing_pytest = pr_preflight.CommandResult(1, "", "/usr/bin/python: No module named pytest\n")
+    runner = FakeRunner(
+        tmp_path,
+        baseline_test_result=missing_pytest,
+        head_test_result=missing_pytest,
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    output = out.getvalue()
+    assert "baseline-diff test command did not execute tests on baseline" in output
+    assert "CE_VALIDATOR_PYTHON" in output
+    assert "No module named pytest" in output
+    assert not any("verify-path-manifest" in call for call in runner.argv_calls())
+
+
+def test_preflight_fails_closed_when_one_side_collects_zero_tests(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    runner = FakeRunner(
+        tmp_path,
+        baseline_test_result=pr_preflight.CommandResult(0, "1 passed in 0.01s\n", ""),
+        head_test_result=pr_preflight.CommandResult(5, "collected 0 items\n\nno tests ran in 0.01s\n", ""),
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    output = out.getvalue()
+    assert "baseline-diff test command did not execute tests on head" in output
+    assert "collected zero tests" in output
+    assert not any("verify-path-manifest" in call for call in runner.argv_calls())
+
+
+def test_preflight_still_passes_genuine_identical_test_failures(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    identical_failure = pr_preflight.CommandResult(
+        1,
+        "FAILED validators/tests/unit/test_example.py::test_existing\n1 failed in 0.01s\n",
+        "",
+    )
+    runner = FakeRunner(
+        tmp_path,
+        baseline_test_result=identical_failure,
+        head_test_result=identical_failure,
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    assert "zero new failures (baseline=1, head=1" in out.getvalue()
+    assert "PASS: PR preflight" in out.getvalue()
 
 
 def test_pytest_env_scrubs_host_tokens_and_sets_tmpdir(tmp_path: Path, monkeypatch):
