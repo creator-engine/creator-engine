@@ -2924,6 +2924,156 @@ records:
     evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
     type: static
 - claim:
+    details: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+      merge state or conflict repair failures escalate instead of silently landing.
+    evidence_sha256: f83800f4e98e3db0d4f9039d00a77abec694b6e1d7f366a694b8ec0fd5937e12
+    item: 10
+    object: merge-queue-conflict-gate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 9f9719cba459709e3f85b1d779dcd51498d52e26c9fbf5798b80283f8c03ec4a
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-10-merge-queue-conflict-gate-v3
+  kind: brain-assertion
+  prev_hash: dd041bf8cb1729b264665c1f1e04b6aa8e29a6d7da7ddaf45d78d21f987de577
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 112
+  statement: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+    merge state or conflict repair failures escalate instead of silently landing.
+  status: superseded
+  superseded_by: brain-assertion-d1b-10-merge-queue-conflict-gate-v4
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+      merge state or conflict repair failures escalate instead of silently landing.
+    evidence_sha256: b1ba5413d9fee2459c63e8d47463127e39a35875975cc338bd52ada9d73230de
+    item: 10
+    object: merge-queue-conflict-gate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 94cd9cd4c41f6e4a4b2056139209329a7af978901736144dcafeab686fe412a7
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-10-merge-queue-conflict-gate-v4
+  kind: brain-assertion
+  prev_hash: 9f9719cba459709e3f85b1d779dcd51498d52e26c9fbf5798b80283f8c03ec4a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 113
+  statement: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+    merge state or conflict repair failures escalate instead of silently landing.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: A non-draft PR with current-head approval and green merge state is eligible
+      for autonomous queue or merge action; draft status is the hold mechanism.
+    evidence_sha256: f83800f4e98e3db0d4f9039d00a77abec694b6e1d7f366a694b8ec0fd5937e12
+    item: 11
+    object: approval-green-triggers-queue
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 67a87dd033c50eee82f8644d4c54efc609b78ae6200873d63b4b944e4321f11d
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-11-approval-green-triggers-queue-v3
+  kind: brain-assertion
+  prev_hash: 94cd9cd4c41f6e4a4b2056139209329a7af978901736144dcafeab686fe412a7
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 114
+  statement: A non-draft PR with current-head approval and green merge state is eligible
+    for autonomous queue or merge action; draft status is the hold mechanism.
+  status: superseded
+  superseded_by: brain-assertion-d1b-11-approval-green-triggers-queue-v4
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: A non-draft PR with current-head approval and green merge state is eligible
+      for autonomous queue or merge action; draft status is the hold mechanism.
+    evidence_sha256: b1ba5413d9fee2459c63e8d47463127e39a35875975cc338bd52ada9d73230de
+    item: 11
+    object: approval-green-triggers-queue
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 2e893b39ff6d88f66e969d174d42ad64c6e6064c5d81b8fbdc77a50f06f9db62
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-11-approval-green-triggers-queue-v4
+  kind: brain-assertion
+  prev_hash: 67a87dd033c50eee82f8644d4c54efc609b78ae6200873d63b4b944e4321f11d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 115
+  statement: A non-draft PR with current-head approval and green merge state is eligible
+    for autonomous queue or merge action; draft status is the hold mechanism.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge readiness requires an APPROVED review decision tied to the current
+      head; stale or dismissed review states are not sufficient.
+    evidence_sha256: f83800f4e98e3db0d4f9039d00a77abec694b6e1d7f366a694b8ec0fd5937e12
+    item: 12
+    object: approval-current-head-required
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: a901123d1a5144d0260e0cf1cc0a904a5e06b35b9934ca94056324801372f0bd
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-12-approval-current-head-required-v3
+  kind: brain-assertion
+  prev_hash: 2e893b39ff6d88f66e969d174d42ad64c6e6064c5d81b8fbdc77a50f06f9db62
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 116
+  statement: Merge readiness requires an APPROVED review decision tied to the current
+    head; stale or dismissed review states are not sufficient.
+  status: superseded
+  superseded_by: brain-assertion-d1b-12-approval-current-head-required-v4
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge readiness requires an APPROVED review decision tied to the current
+      head; stale or dismissed review states are not sufficient.
+    evidence_sha256: b1ba5413d9fee2459c63e8d47463127e39a35875975cc338bd52ada9d73230de
+    item: 12
+    object: approval-current-head-required
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 827c9b2445ca355361f009c4802184add3d129476db36396b24bc990fef81eae
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-12-approval-current-head-required-v4
+  kind: brain-assertion
+  prev_hash: a901123d1a5144d0260e0cf1cc0a904a5e06b35b9934ca94056324801372f0bd
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 117
+  statement: Merge readiness requires an APPROVED review decision tied to the current
+    head; stale or dismissed review states are not sufficient.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
     details: The full validator includes slow and integration test surfaces; long-running
       execution is expected and should not be treated as a hang without evidence.
     evidence_sha256: 01af7c1c9021489bb76282b630e65fea37d504e4014d40e28c00564a3498147d
@@ -2933,69 +3083,15 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: fc6a27b79889e89b78038a1ebf745bccfaac19447096c4c99404066e82416c3e
+  content_hash: ab4980f164d51fe70f0dd67c5d513440f9bf7b083c26f7cd83e7ebe3b31bfad6
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v2
   kind: brain-assertion
-  prev_hash: dd041bf8cb1729b264665c1f1e04b6aa8e29a6d7da7ddaf45d78d21f987de577
+  prev_hash: 827c9b2445ca355361f009c4802184add3d129476db36396b24bc990fef81eae
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
-  sequence: 112
-  statement: The full validator includes slow and integration test surfaces; long-running
-    execution is expected and should not be treated as a hang without evidence.
-  status: superseded
-  superseded_by: brain-assertion-d1b-39-full-validator-long-running-v3
-  type: convention
-  verification_method:
-    evidence_ref: validators/pyproject.toml
-    type: static
-- claim:
-    details: The full validator includes slow and integration test surfaces; long-running
-      execution is expected and should not be treated as a hang without evidence.
-    evidence_sha256: 6d096f86ea3ef8ed5a695c177a86ac6ff468f5714be2275a0f3b1eed520db986
-    item: 39
-    object: full-validator-long-running
-    predicate: asserts
-    refs:
-    - validators/pyproject.toml
-    subject: doctrine-item
-  content_hash: 5341c54dc44b1344500561f0a8cbc1a24666ac5ab8a5132cefb57a6861413188
-  evidence_ref: validators/pyproject.toml
-  id: brain-assertion-d1b-39-full-validator-long-running-v3
-  kind: brain-assertion
-  prev_hash: fc6a27b79889e89b78038a1ebf745bccfaac19447096c4c99404066e82416c3e
-  record_type: brain_assertion
-  schema_version: '1'
-  scope: doctrine/day1
-  sequence: 113
-  statement: The full validator includes slow and integration test surfaces; long-running
-    execution is expected and should not be treated as a hang without evidence.
-  status: active
-  superseded_by: null
-  type: convention
-  verification_method:
-    evidence_ref: validators/pyproject.toml
-    type: static
-- claim:
-    details: The full validator includes slow and integration test surfaces; long-running
-      execution is expected and should not be treated as a hang without evidence.
-    evidence_sha256: 6d096f86ea3ef8ed5a695c177a86ac6ff468f5714be2275a0f3b1eed520db986
-    item: 39
-    object: full-validator-long-running
-    predicate: asserts
-    refs:
-    - validators/pyproject.toml
-    subject: doctrine-item
-  content_hash: 278b96d32f01bf5b40fc8cddeee694a0f23764af0f5d75f443c0dd543f9eafd6
-  evidence_ref: validators/pyproject.toml
-  id: brain-assertion-d1b-39-full-validator-long-running-v3
-  kind: brain-assertion
-  prev_hash: 5341c54dc44b1344500561f0a8cbc1a24666ac5ab8a5132cefb57a6861413188
-  record_type: brain_assertion
-  schema_version: '1'
-  scope: doctrine/day1
-  sequence: 114
+  sequence: 118
   statement: The full validator includes slow and integration test surfaces; long-running
     execution is expected and should not be treated as a hang without evidence.
   status: superseded
@@ -3014,15 +3110,15 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: b8f84519e6e1de7eee569cff7879e5a9a92219904c9fe8fa6595f1f0a911875e
+  content_hash: ee495622b6e7b034fee85c35c65b1552807228dc0fe21da09429ae7b2755d8b8
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v4
   kind: brain-assertion
-  prev_hash: 278b96d32f01bf5b40fc8cddeee694a0f23764af0f5d75f443c0dd543f9eafd6
+  prev_hash: ab4980f164d51fe70f0dd67c5d513440f9bf7b083c26f7cd83e7ebe3b31bfad6
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
-  sequence: 115
+  sequence: 119
   statement: The full validator includes slow and integration test surfaces; long-running
     execution is expected and should not be treated as a hang without evidence.
   status: active
