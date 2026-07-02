@@ -754,19 +754,35 @@ def run_daemon_pass(
             approval_verifier=approval_verifier,
             approval_wall=approval_wall,
         )
+        head_mismatch_refusal = (
+            _approval_capability_invalid_reason(gate) == "head_mismatch"
+        )
         mint_needed = _approval_marker_mint_needed(
             gate,
             approval_verifier,
             approval_wall,
             approval_marker_issuer,
         )
+        if head_mismatch_refusal:
+            trusted_witness, trusted_refusal = _trusted_current_approval_witness(pr, authorized)
+            if trusted_witness is None:
+                gate = DaemonGateEvaluation(
+                    "head_mismatch_no_current_approval",
+                    (*gate.evidence, f"current_approval_reason={trusted_refusal}"),
+                )
+            elif _approval_marker_minting_available(
+                approval_verifier,
+                approval_wall,
+                approval_marker_issuer,
+            ):
+                mint_needed = True
         if mint_needed:
             non_wall_gate = _daemon_non_wall_gate(pr)
             if non_wall_gate.refusal_reason is not None:
                 gate = non_wall_gate
                 mint_needed = False
             else:
-                gate = DaemonGateEvaluation(None, non_wall_gate.evidence)
+                gate = DaemonGateEvaluation(None, (*gate.evidence, *non_wall_gate.evidence))
         if gate.refusal_reason is not None:
             _clear_approval_settle_for_pr(settle_seen, pr, settle_ready_at)
             decision = _decision(pr, "skip", gate.refusal_reason, evidence=gate.evidence)
@@ -1495,6 +1511,19 @@ def _authorized_approval_witness(
     return None, "approval_reviewer_unauthorized"
 
 
+def _trusted_current_approval_witness(
+    pr: DaemonPullRequest,
+    authorized_reviewers: frozenset[str] | None,
+) -> tuple[DaemonApprovalWitness | None, str]:
+    if pr.review_decision != "APPROVED":
+        return None, "review_not_approved"
+    if pr.head_sha.lower() not in pr.approving_review_commits:
+        return None, "approval_not_current_head"
+    if _current_approval_witness(pr) is None:
+        return None, "approval_reviewer_unconfirmed"
+    return _authorized_approval_witness(pr, authorized_reviewers)
+
+
 def _approval_settle_key(pr: DaemonPullRequest, witness: DaemonApprovalWitness) -> str:
     review_part = witness.review_id or witness.reviewer_login.lower()
     return f"{pr.repo}#{pr.pr_number}:{pr.head_sha.lower()}:{review_part}"
@@ -1649,11 +1678,33 @@ def _approval_marker_mint_needed(
 ) -> bool:
     if gate.refusal_reason != "approval_capability_missing":
         return False
+    return _approval_marker_minting_available(
+        approval_verifier,
+        approval_wall,
+        approval_marker_issuer,
+    )
+
+
+def _approval_marker_minting_available(
+    approval_verifier: ApprovalCapabilityVerifier | None,
+    approval_wall: ApprovalWallRuntime | None,
+    approval_marker_issuer: ApprovalMarkerIssuer | None,
+) -> bool:
     if approval_marker_issuer is None:
         return False
     if approval_wall is not None:
         return approval_wall.status == APPROVAL_WALL_ARMED
     return approval_verifier is not None
+
+
+def _approval_capability_invalid_reason(gate: DaemonGateEvaluation) -> str | None:
+    if gate.refusal_reason != "approval_capability_invalid":
+        return None
+    prefix = "approval_capability_reason="
+    for item in gate.evidence:
+        if item.startswith(prefix):
+            return item.removeprefix(prefix)
+    return None
 
 
 def _mint_approval_marker_before_enqueue(
