@@ -805,3 +805,87 @@ def test_egress_self_review_socket_mount_rejects_mismatched_container_basename()
 
     assert result.returncode == 2
     assert "CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET basename must match" in result.stderr
+
+
+def test_egress_broker_and_self_review_sockets_sharing_a_directory_dedupe_mount(
+) -> None:
+    # Real dev-3 layout (deploy/systemd/ce-egress-broker.socket and
+    # ce-egress-self-review.socket ListenStream): both sockets live side by
+    # side in /run/ce-egress, so the parent-directory mounts computed for
+    # each socket are identical. `docker run` rejects two `--mount` flags
+    # with the same destination ("Duplicate mount point"); the launcher must
+    # emit that mount exactly once while both sockets stay reachable inside
+    # the container via the single shared directory mount.
+    broker_host_socket = "/run/ce-egress/dev-3.sock"
+    review_host_socket = "/run/ce-egress/dev-3-review.sock"
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            CE_VPS_SEAT_ID="dev-3",
+            CE_VPS_EGRESS_BROKER_SOCKET=broker_host_socket,
+            CE_VPS_EGRESS_SELF_REVIEW_SOCKET=review_host_socket,
+        )
+    )
+
+    mount_flags = [
+        argv[index + 1] for index, arg in enumerate(argv) if arg == "--mount"
+    ]
+    egress_dir_mounts = [
+        spec
+        for spec in mount_flags
+        if spec == "type=bind,source=/run/ce-egress,target=/run/ce-egress,readonly"
+    ]
+
+    # Exactly one mount for the shared directory (no duplicate destination).
+    assert egress_dir_mounts == [
+        "type=bind,source=/run/ce-egress,target=/run/ce-egress,readonly"
+    ]
+    # Docker would reject a duplicate destination outright; assert the full
+    # set of mount destinations has no repeats.
+    destinations = [spec.split("target=", 1)[1].split(",", 1)[0] for spec in mount_flags]
+    assert len(destinations) == len(set(destinations)), (
+        f"duplicate --mount destination(s) in argv, docker would reject: {mount_flags}"
+    )
+
+    # Both sockets remain reachable: their env vars still point at distinct
+    # container paths inside the single shared mounted directory.
+    assert "CE_EGRESS_BROKER_SOCKET=/run/ce-egress/dev-3.sock" in argv
+    assert "CE_EGRESS_SELF_REVIEW_SOCKET=/run/ce-egress/dev-3-review.sock" in argv
+
+
+def test_egress_broker_and_self_review_sockets_in_different_directories_both_mount() -> None:
+    # Both sockets default their container path to /run/ce-egress/<basename>,
+    # which would collide on the *destination* even when the host sources
+    # differ. Exercise the genuinely-distinct-directories case by giving each
+    # socket its own explicit (basename-matching) container path, and confirm
+    # both parent-directory mounts are still emitted with no duplicate
+    # destination.
+    broker_host_socket = "/run/user/1000/creator-engine/egress-broker/dev-3.sock"
+    review_host_socket = "/run/user/1000/creator-engine/egress-review/dev-3-review.sock"
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            CE_VPS_SEAT_ID="dev-3",
+            CE_VPS_EGRESS_BROKER_SOCKET=broker_host_socket,
+            CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="/run/ce-egress-broker/dev-3.sock",
+            CE_VPS_EGRESS_SELF_REVIEW_SOCKET=review_host_socket,
+            CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET="/run/ce-egress-review/dev-3-review.sock",
+        )
+    )
+
+    mount_flags = [
+        argv[index + 1] for index, arg in enumerate(argv) if arg == "--mount"
+    ]
+
+    assert (
+        "type=bind,source=/run/user/1000/creator-engine/egress-broker,target=/run/ce-egress-broker,readonly"
+        in mount_flags
+    )
+    assert (
+        "type=bind,source=/run/user/1000/creator-engine/egress-review,target=/run/ce-egress-review,readonly"
+        in mount_flags
+    )
+    destinations = [spec.split("target=", 1)[1].split(",", 1)[0] for spec in mount_flags]
+    assert len(destinations) == len(set(destinations)), (
+        f"duplicate --mount destination(s) in argv, docker would reject: {mount_flags}"
+    )

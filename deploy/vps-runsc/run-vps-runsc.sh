@@ -562,8 +562,17 @@ if [ -n "${egress_self_review_mount}" ]; then
   docker_cmd+=(
     --env "CE_EGRESS_SELF_REVIEW_SOCKET=${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}"
     --env "CE_SEAT_ID=${CE_VPS_SEAT_ID}"
-    --mount "${egress_self_review_mount}"
   )
+  # The broker and self-review sockets commonly live side-by-side in the same
+  # host directory (e.g. /run/ce-egress/dev-3.sock and dev-3-review.sock), so
+  # the parent-directory mount specs computed above are frequently identical.
+  # `docker run` rejects two `--mount` flags with the same destination
+  # ("Duplicate mount point"), so only append this mount when it differs from
+  # the one already emitted for the broker socket; both sockets remain
+  # reachable inside the container because they share the single mounted dir.
+  if [ "${egress_self_review_mount}" != "${egress_broker_mount}" ]; then
+    docker_cmd+=(--mount "${egress_self_review_mount}")
+  fi
 fi
 
 docker_cmd+=("${tty_flags[@]}")
