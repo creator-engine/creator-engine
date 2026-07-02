@@ -379,6 +379,16 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["major", "minor", "patch"],
         help="compute next version by bumping this part of the current version (rehearsal path)",
     )
+    release_bump.add_argument(
+        "--commit",
+        action="store_true",
+        help="create a fresh local branch, commit only the version bump, and generate PR carriers; no push/PR",
+    )
+    release_bump.add_argument(
+        "--out-branch",
+        default=None,
+        help="fresh local branch to create when --commit is set",
+    )
 
     release_changelog = sub.add_parser(
         "release-changelog",
@@ -869,14 +879,44 @@ def _release_finalize(args) -> int:
 
 
 def _release_bump(args) -> int:
-    from .release_bump import ReleaseBumpError, bump_release_version
+    from .release_bump import ReleaseBumpError, bump_release_version, commit_release_bump
 
     try:
-        result = bump_release_version(
-            repo_root=args.repo_root,
-            tag=args.tag,
-            part=args.part,
-        )
+        if args.commit:
+            result = commit_release_bump(
+                repo_root=args.repo_root,
+                tag=args.tag,
+                part=args.part,
+                out_branch=args.out_branch or "",
+            )
+            payload = {
+                "version": result.bump.version,
+                "previous_version": result.bump.previous_version,
+                "source": result.bump.source,
+                "version_py": str(result.bump.version_py),
+                "pyproject": str(result.bump.pyproject),
+                "branch": result.branch,
+                "commit_sha": result.commit_sha,
+                "commit_message": result.commit_message,
+                "changelog": str(result.carriers.changelog_path),
+                "manifest": str(result.carriers.manifest_path),
+                "carrier_paths": list(result.carriers.paths),
+            }
+            if getattr(args, "json_output", False):
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(
+                    "release-bump commit: "
+                    f"{result.bump.previous_version} -> {result.bump.version} "
+                    f"on {result.branch}"
+                )
+                print(f"commit: {result.commit_sha}")
+                print(f"message: {result.commit_message}")
+                print(f"changelog: {result.carriers.changelog_path}")
+                print(f"manifest:  {result.carriers.manifest_path}")
+            return 0
+
+        result = bump_release_version(repo_root=args.repo_root, tag=args.tag, part=args.part)
     except ReleaseBumpError as exc:
         print(f"ERROR: release-bump refused: {exc}", file=sys.stderr)
         return 1
