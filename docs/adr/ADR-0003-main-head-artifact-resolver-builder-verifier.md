@@ -1,15 +1,64 @@
 # ADR-0003 — Ratified main-HEAD artifact resolver, builder, verifier, and promote surface
 
-- **Status:** Proposed — awaiting Operator ratification.
+- **Status:** Proposed — awaiting Operator ratification of an **already-live** trust surface (see
+  §0 Current State).
 - **Date:** 2026-07-02
 - **Gate:** Main-HEAD artifact trust surface — docs-only ADR/design.
 - **Mutation class:** docs/governance documentation only. This ADR changes no implementation code,
   release artifact, installer script, validator behavior, workflow, or download payload.
-- **Authority basis:** Operator-scoped seed brief for a ratification-gated design. This proposal grants no
-  implementation authority until the Operator ratifies the trust contract.
+- **Authority basis:** Operator-scoped seed brief for a ratification-gated design. This ADR does not
+  itself grant or withhold implementation authority — the described surface is already implemented and
+  shipping (see §0). It proposes retroactive ratification of that surface, with an explicit alternative
+  framing if the Operator instead wants a code-level ratification gate added (see §0's decision point).
 
-> This ADR **proposes** a new trust surface for `origin/main` HEAD artifacts. It is not accepted yet,
-> does not authorize implementation, and must be treated as **ratification-gated**.
+> This ADR **documents and proposes ratification of** the trust surface already implemented by
+> `ce clean-main-install` and `ce update --track main`. It is not yet formally ratified, but it is
+> **already built, merged to `main`, publicly documented, and reachable by any user** — see §0 for the
+> current state and the Operator's ratification framing choice. Nothing in this ADR authorizes new
+> implementation; it is a retroactive-ratification proposal for what already exists.
+
+---
+
+## 0. Current State — This Trust Surface Already Ships
+
+**`ce clean-main-install` and `ce update --track main` are live, top-level CLI subcommands today,
+reachable by any user running from `main`, with no ratification gate at the code level.**
+
+- `validators/creator_engine_validator/ce_cli.py` registers `clean-main-install` as a top-level
+  subcommand group and dispatches `ce update --track main` to `main_head_install.run_cli` (see the
+  `clean-main-install` argparse group and the `--track main` dispatch branch in `ce_cli.py`).
+- `validators/creator_engine_validator/main_head_install.py` implements the resolve/build/verify/promote
+  contract this ADR describes in §2 and recommends as Option A in §3 — commit-SHA pinning, local
+  reproducible build, and fail-closed hash verification. It contains **no ratification check** (a search
+  for "ratif" in that file returns no matches).
+- Both commands are documented as generally available today in `README.md` (the top-level `ce` command
+  list, plus the `ce update --track main` and `ce clean-main-install` descriptions) and in the generated
+  CLI reference `.ce/reference/cli.generated.md`.
+- The implementation shipped via `.ce/changelog/ce-366-main-head-resolver.md` (dated 2026-06-30,
+  `kind: feature`) — **three days before this ADR was proposed** (2026-07-02) — and already implements
+  exactly the Option A trust model this ADR recommends as the interim default.
+
+This means the ratification question below is not "should implementation begin" — implementation is
+already built, merged, documented, and in use. The live trust model is sound (fail-closed, SHA-pinned,
+no placeholder signing, no trust-on-first-use); the gap this ADR closes is **procedural** (ratification
+catching up to what already shipped), not a security gap.
+
+### Ratification framing — the Operator is choosing between two things
+
+(a) **Retroactive ratification (this ADR's recommended framing).** Formally ratify Option A (§3) as the
+trust contract that already governs the live `clean-main-install` / `ce update --track main` surface,
+as-built, with no further code change required. §§2–7 describe the contract as it already exists in
+`main_head_install.py` today.
+
+(b) **Add a code-level ratification gate.** If the Operator instead wants these commands to refuse to run
+until ratification is explicitly recorded (for example, a flag, config check, or environment gate
+enforced inside `main_head_install.py`), that is a **new, separate follow-up implementation action item**
+— it is not performed by this ADR (which remains docs-only per the Mutation class above) — and must be
+opened as its own ticket before it is built.
+
+If the Operator selects (a), no further code change follows from this ADR. If the Operator selects (b), a
+follow-up ticket should be opened to add the gate, and this ADR's Status should be revisited once that
+gate is ratified and implemented.
 
 ---
 
@@ -204,6 +253,9 @@ network-resolved dependencies during install.
 
 ## 8. References
 
+- `README.md` (documents `ce clean-main-install` and `ce update --track main` as live commands)
+- `.ce/reference/cli.generated.md` (generated CLI reference, includes both live subcommands)
+- `.ce/changelog/ce-366-main-head-resolver.md` (dated 2026-06-30, the shipped implementation)
 - `docs/install.sh`
 - `docs/downloads/0.3.1/install.sh`
 - `docs/downloads/0.3.1/SHA256SUMS`
