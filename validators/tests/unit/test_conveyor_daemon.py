@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator.conveyor import (
     ConveyorBundleLandingResult,
     ConveyorCommandResult,
@@ -336,6 +338,159 @@ def test_daemon_pinned_validate_command_used_regardless_of_payload():
         "creator_engine_validator.ce_cli",
         "validate-pr",
     )
+
+
+def test_hostile_payload_base_override_is_ignored():
+    """A malicious/compromised discovery payload must never control `base`:
+    it flows into a bare positional `git rebase <base>` / `git fetch`
+    argv slot, so `--exec=<cmd>` there is RCE. `base` is pinned at the
+    daemon level (mirrors validate_command) and any payload-supplied
+    override is dropped (and logged), not honored."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+
+    hostile_payload = {
+        "branch": "Feature/One",
+        "worktree_path": "/tmp/feature-one",
+        "bundle_path": "/tmp/feature-one.bundle",
+        "repo_path": "/tmp/landing",
+        "title": "Land Feature/One",
+        "body": "- Conveyor item.",
+        "base": "--exec=touch /tmp/pwned",
+    }
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_payload],
+        armed=True,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    )
+    result = daemon.run_once()
+
+    assert result.results[0].status == "pr-opened"
+    used_base = prepare.calls[0].base
+    assert used_base == daemon.base == "origin/main"
+    assert used_base != "--exec=touch /tmp/pwned"
+    assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
+    assert not any("--exec" in str(call) for call in git.calls)
+    assert any("attempted to override base" in message for message in logs)
+
+
+def test_hostile_payload_remote_override_is_ignored():
+    """A malicious/compromised discovery payload must never control
+    `remote`: it flows into the bare `<repository>` positional of
+    `git push <remote> ...`, so an `ext::<cmd>` transport-helper value there
+    is RCE. `remote` is pinned at the daemon level and any payload-supplied
+    override is dropped (and logged), not honored."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+
+    hostile_payload = {
+        "branch": "Feature/One",
+        "worktree_path": "/tmp/feature-one",
+        "bundle_path": "/tmp/feature-one.bundle",
+        "repo_path": "/tmp/landing",
+        "title": "Land Feature/One",
+        "body": "- Conveyor item.",
+        "remote": "ext::sh -c 'touch /tmp/pwned'",
+    }
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_payload],
+        armed=True,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    )
+    result = daemon.run_once()
+
+    assert result.results[0].status == "pr-opened"
+    assert daemon.remote == "origin"
+    assert git.calls == [(("push", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
+    assert not any("ext::" in str(call) for call in git.calls)
+    assert any("attempted to override remote" in message for message in logs)
+
+
+def test_daemon_pinned_base_and_remote_used_regardless_of_payload():
+    """Even benign-looking payload base/remote values are ignored: the
+    daemon's own configured base/remote (constructor-level) is always what
+    gets used for rebase/land/push."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git_calls: list[tuple[str, ...]] = []
+
+    def git_runner(args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
+        git_calls.append(tuple(args))
+        return ConveyorCommandResult(0, "pushed\n", "")
+
+    gh = FakeGh()
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [
+            {
+                "branch": "Feature/One",
+                "worktree_path": "/tmp/feature-one",
+                "bundle_path": "/tmp/feature-one.bundle",
+                "repo_path": "/tmp/landing",
+                "title": "Land Feature/One",
+                "body": "- Conveyor item.",
+                "base": "origin/release",
+                "remote": "upstream",
+            }
+        ],
+        armed=True,
+        git_runner=git_runner,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=land,
+        base="origin/main",
+        remote="origin",
+    )
+    daemon.run_once()
+
+    assert prepare.calls[0].base == "origin/main"
+    assert land.calls[0][2] == "origin/main"
+    assert ("push", "origin", "feature-one:feature-one") in git_calls
+
+
+def test_daemon_construction_rejects_dangerous_base():
+    """Defense-in-depth: even trusted constructor-level config is rejected
+    if it is shaped like a git argv-injection gadget."""
+
+    with pytest.raises(ValueError):
+        ConveyorDaemon(discovery_runner=lambda: [], base="--exec=touch /tmp/pwned")
+
+
+def test_daemon_construction_rejects_dangerous_remote():
+    """Defense-in-depth: even trusted constructor-level config is rejected
+    if it is shaped like a git transport-helper gadget."""
+
+    with pytest.raises(ValueError):
+        ConveyorDaemon(discovery_runner=lambda: [], remote="ext::sh -c 'touch /tmp/pwned'")
 
 
 def test_idempotent_re_discovery_skips_completed_item():

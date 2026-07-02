@@ -39,6 +39,17 @@ LogRunner = Callable[[str], None]
 
 PLAN_ACTIONS = ("prepare-harvest", "land-bundle", "push", "pr-open")
 
+# base and remote are pinned at the ConveyorDaemon level (mirrors
+# validate_command below) rather than being read from an untrusted discovery
+# payload. Both values flow into a *bare/positional* git argv slot
+# (``git rebase <base>``, ``git push <remote> ...``) that git reinterprets as
+# an option when the value starts with ``-`` (e.g. ``--exec=<cmd>`` on
+# rebase) or as a transport-helper invocation for values shaped like
+# ``ext::<cmd>`` (on push's <repository> positional). A compromised/malicious
+# discovery payload must never be able to reach either sink.
+DEFAULT_BASE = "origin/main"
+DEFAULT_REMOTE = "origin"
+
 
 @dataclass(frozen=True)
 class ConveyorDaemonItem:
@@ -65,23 +76,29 @@ class ConveyorDaemonItem:
     pr_base: str | None = None
     identity: str | None = None
     payload_requested_validate_command: bool = False
+    payload_requested_base: bool = False
+    payload_requested_remote: bool = False
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ConveyorDaemonItem":
-        # validate_command is intentionally NOT read from the untrusted discovery
-        # payload: it flows straight into a subprocess argv (see
-        # conveyor._run_validation), so a compromised/malicious seat payload
-        # could otherwise smuggle an arbitrary command into the daemon's
-        # execution context. The command is pinned at the ConveyorDaemon level
-        # (constructor/CLI, defaulting to DEFAULT_VALIDATE_COMMAND) instead.
+        # validate_command, base, and remote are intentionally NOT read from
+        # the untrusted discovery payload: each flows straight into a
+        # subprocess/git argv (see conveyor._run_validation and, for
+        # base/remote, conveyor.prepare_harvest's `git rebase <base>` and
+        # ConveyorDaemon._process_armed's `git push <remote> ...`), so a
+        # compromised/malicious seat payload could otherwise smuggle an
+        # argv-injection gadget (e.g. `--exec=<cmd>` as base, `ext::<cmd>` as
+        # remote) into the daemon's execution context. All three are pinned
+        # at the ConveyorDaemon level (constructor, defaulting to
+        # DEFAULT_VALIDATE_COMMAND / DEFAULT_BASE / DEFAULT_REMOTE) instead.
         # We only note here whether the payload tried to supply one so the
-        # daemon can log-and-skip the attempted override.
+        # daemon can log-and-skip the attempted override; the field values
+        # below are never derived from the payload.
         return cls(
             branch=str(payload["branch"]),
             worktree_path=Path(payload["worktree_path"]),
             bundle_path=Path(payload["bundle_path"]),
             repo_path=Path(payload["repo_path"]),
-            base=str(payload.get("base", "origin/main")),
             issue=str(payload.get("issue", "ce-conveyor")),
             title=str(payload.get("title", "Conveyor harvest")),
             kind=str(payload.get("kind", "changed")),
@@ -92,23 +109,26 @@ class ConveyorDaemonItem:
             rebase=bool(payload.get("rebase", True)),
             refresh_base=bool(payload.get("refresh_base", True)),
             allow_dirty_validation=bool(payload.get("allow_dirty_validation", True)),
-            remote=str(payload.get("remote", "origin")),
             pr_title=_optional_str(payload.get("pr_title")),
             pr_body=_optional_str(payload.get("pr_body")),
             pr_base=_optional_str(payload.get("pr_base")),
             identity=_optional_str(payload.get("identity")),
             payload_requested_validate_command="validate_command" in payload,
+            payload_requested_base="base" in payload,
+            payload_requested_remote="remote" in payload,
         )
 
     @property
     def key(self) -> str:
         return self.identity or branch_slug(self.branch)
 
-    def harvest_spec(self, *, carrier_date: str, validate_command: tuple[str, ...]) -> ConveyorHarvestSpec:
+    def harvest_spec(
+        self, *, carrier_date: str, validate_command: tuple[str, ...], base: str
+    ) -> ConveyorHarvestSpec:
         return ConveyorHarvestSpec(
             worktree_path=self.worktree_path,
             branch=self.branch,
-            base=self.base,
+            base=base,
             issue=self.issue,
             title=self.title,
             kind=self.kind,
@@ -204,6 +224,8 @@ class ConveyorDaemon:
         prepare_runner: PrepareRunner = prepare_harvest,
         land_runner: LandRunner = land_bundle,
         validate_command: Sequence[str] | None = None,
+        base: str | None = None,
+        remote: str | None = None,
     ) -> None:
         self.discovery_runner = discovery_runner
         self.armed = armed
@@ -219,6 +241,21 @@ class ConveyorDaemon:
         # never sourced from a discovery payload (see ConveyorDaemonItem.from_mapping).
         self.validate_command: tuple[str, ...] = tuple(
             str(part) for part in (validate_command if validate_command is not None else DEFAULT_VALIDATE_COMMAND)
+        )
+        # base and remote are likewise pinned here, at daemon construction
+        # time (trusted operator/CLI config), and are never sourced from a
+        # discovery payload (see ConveyorDaemonItem.from_mapping and the
+        # module docstring comment above DEFAULT_BASE). _process_armed uses
+        # self.base/self.remote exclusively; any per-item base/remote in a
+        # discovered payload is ignored (and logged) rather than honored.
+        # Defense-in-depth: even this trusted config value is rejected here
+        # if it is shaped like a git argv-injection gadget, so a
+        # misconfigured/compromised launcher can't smuggle one in either.
+        self.base: str = _reject_git_argv_gadget(
+            str(base) if base is not None else DEFAULT_BASE, label="base"
+        )
+        self.remote: str = _reject_git_argv_gadget(
+            str(remote) if remote is not None else DEFAULT_REMOTE, label="remote"
         )
         self._completed_keys: set[str] = set()
 
@@ -260,6 +297,16 @@ class ConveyorDaemon:
                 self._log(
                     f"conveyor discovery payload for {item.branch} attempted to override "
                     "validate_command; ignoring untrusted override, using daemon-pinned command"
+                )
+            if item.payload_requested_base:
+                self._log(
+                    f"conveyor discovery payload for {item.branch} attempted to override "
+                    "base; ignoring untrusted override, using daemon-pinned base"
+                )
+            if item.payload_requested_remote:
+                self._log(
+                    f"conveyor discovery payload for {item.branch} attempted to override "
+                    "remote; ignoring untrusted override, using daemon-pinned remote"
                 )
 
         seen_this_pass: set[str] = set()
@@ -312,7 +359,11 @@ class ConveyorDaemon:
             assert self.gh_runner is not None
             carrier_date = item.carrier_date or _date_from_timestamp(self._timestamp())
             prepared = self.prepare_runner(
-                item.harvest_spec(carrier_date=carrier_date, validate_command=self.validate_command),
+                item.harvest_spec(
+                    carrier_date=carrier_date,
+                    validate_command=self.validate_command,
+                    base=self.base,
+                ),
                 git_runner=self.git_runner,
                 validate_runner=self.validate_runner,
             )
@@ -322,7 +373,7 @@ class ConveyorDaemon:
             landed = self.land_runner(
                 item.bundle_path,
                 prepared.branch_slug,
-                item.base,
+                self.base,
                 repo_path=item.repo_path,
                 git_runner=self.git_runner,
             )
@@ -331,15 +382,15 @@ class ConveyorDaemon:
                 return self._failed(item, reasons, prepare_result=prepared, landing_result=landed, ledger_records=records)
 
             push_result = _coerce_result(
-                self.git_runner(["push", item.remote, f"{landed.branch}:{landed.branch}"], item.repo_path)
+                self.git_runner(["push", self.remote, f"{landed.branch}:{landed.branch}"], item.repo_path)
             )
             records.append(
                 self._record_mutation(
                     action="push",
-                    path=f"{item.remote}/{landed.branch}",
+                    path=f"{self.remote}/{landed.branch}",
                     sha=landed.head_sha or "",
                     branch=landed.branch,
-                    command=("git", "push", item.remote, f"{landed.branch}:{landed.branch}"),
+                    command=("git", "push", self.remote, f"{landed.branch}:{landed.branch}"),
                     result=push_result,
                 )
             )
@@ -352,15 +403,15 @@ class ConveyorDaemon:
                     ledger_records=records,
                 )
 
-            pr_result = _coerce_result(self.gh_runner(_pr_create_args(item, landed), item.repo_path))
+            pr_result = _coerce_result(self.gh_runner(_pr_create_args(self.base, item, landed), item.repo_path))
             pr_url = _first_stdout_line(pr_result.stdout)
             records.append(
                 self._record_mutation(
                     action="pr-open",
-                    path=pr_url or f"{_pr_base(item)}<-{landed.branch}",
+                    path=pr_url or f"{_pr_base(self.base, item)}<-{landed.branch}",
                     sha=landed.head_sha or "",
                     branch=landed.branch,
-                    command=("gh", *_pr_create_args(item, landed)),
+                    command=("gh", *_pr_create_args(self.base, item, landed)),
                     result=pr_result,
                 )
             )
@@ -467,12 +518,14 @@ def _jsonl_ledger_writer(path: Path) -> LedgerWriter:
     return write
 
 
-def _pr_create_args(item: ConveyorDaemonItem, landed: ConveyorBundleLandingResult) -> tuple[str, ...]:
+def _pr_create_args(
+    base: str, item: ConveyorDaemonItem, landed: ConveyorBundleLandingResult
+) -> tuple[str, ...]:
     return (
         "pr",
         "create",
         "--base",
-        _pr_base(item),
+        _pr_base(base, item),
         "--head",
         landed.branch,
         "--title",
@@ -482,12 +535,31 @@ def _pr_create_args(item: ConveyorDaemonItem, landed: ConveyorBundleLandingResul
     )
 
 
-def _pr_base(item: ConveyorDaemonItem) -> str:
+def _pr_base(base: str, item: ConveyorDaemonItem) -> str:
     if item.pr_base:
         return item.pr_base
-    if "/" in item.base:
-        return item.base.rsplit("/", 1)[1]
-    return item.base
+    if "/" in base:
+        return base.rsplit("/", 1)[1]
+    return base
+
+
+def _reject_git_argv_gadget(value: str, *, label: str) -> str:
+    """Fail closed if a value destined for a bare git argv slot is shaped
+    like an option or a transport-helper gadget.
+
+    Applied to the daemon-pinned ``base``/``remote`` config themselves
+    (defense-in-depth for a misconfigured/compromised launcher) on top of
+    the primary control, which is that these values are never sourced from
+    the untrusted discovery payload in the first place.
+    """
+
+    if not value:
+        raise ValueError(f"{label} must not be empty")
+    if value.startswith("-"):
+        raise ValueError(f"{label} must not start with '-' (git option/gadget shape): {value!r}")
+    if "::" in value:
+        raise ValueError(f"{label} must not contain '::' (git transport-helper shape): {value!r}")
+    return value
 
 
 def _first_stdout_line(stdout: str) -> str | None:
