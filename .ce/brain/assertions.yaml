@@ -247,4 +247,2368 @@ records:
   verification_method:
     evidence_ref: .ce/brain/notes/deterministic-citations.md
     type: static
+- claim:
+    details: Local PR preflight uses the full validator test tree invocation by default,
+      matching CI parity rather than a unit-only subset.
+    item: 1
+    object: local-preflight-ci-parity
+    predicate: asserts
+    refs:
+    - .github/workflows/validate.yml
+    subject: doctrine-item
+  content_hash: 6fa27318c9e868928dc0ca7dacd56594f6ca1cee5dfb2157ce2a59820f1f5a06
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-01-local-preflight-ci-parity
+  kind: brain-assertion
+  prev_hash: 65501cb45e65d69b73adf0282db94ed15d659eae06a6fc8289eabc46c900c1c3
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 10
+  statement: Local PR preflight uses the full validator test tree invocation by default,
+    matching CI parity rather than a unit-only subset.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Each PR carries a branch-slug path manifest whose canonical path set
+      and SHA256 must match base..HEAD, including the carrier itself.
+    item: 2
+    object: pr-path-manifest-fidelity
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/path_manifest_fidelity.py
+    subject: doctrine-item
+  content_hash: cbfc9774f5b5712466ccbced58b7ee312f3f9da0bc6e0dd17c8cfa924973b204
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-02-pr-path-manifest-fidelity
+  kind: brain-assertion
+  prev_hash: 6fa27318c9e868928dc0ca7dacd56594f6ca1cee5dfb2157ce2a59820f1f5a06
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 11
+  statement: Each PR carries a branch-slug path manifest whose canonical path set
+    and SHA256 must match base..HEAD, including the carrier itself.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: The path-manifest gate requires an added per-PR changelog fragment at
+      the branch slug path when a carrier is required.
+    item: 3
+    object: per-pr-changelog-fragment
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 2be5f3dd407bf41cfcbf0ad7eae2bfbb0a9167a708476faab86d985d3d698e5a
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-03-per-pr-changelog-fragment
+  kind: brain-assertion
+  prev_hash: cbfc9774f5b5712466ccbced58b7ee312f3f9da0bc6e0dd17c8cfa924973b204
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 12
+  statement: The path-manifest gate requires an added per-PR changelog fragment at
+    the branch slug path when a carrier is required.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: PR metadata must declare one work class accepted by the validator, and
+      that class must satisfy the computed diff floor.
+    item: 4
+    object: declared-work-class-floor
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/pr_preflight.py
+    subject: doctrine-item
+  content_hash: 206f980ea9b84aadb70c4dee508809f2ae1422e350b261e915574f6132add208
+  evidence_ref: validators/creator_engine_validator/checks/work_sizing_floor.py
+  id: brain-assertion-d1b-04-declared-work-class-floor
+  kind: brain-assertion
+  prev_hash: 2be5f3dd407bf41cfcbf0ad7eae2bfbb0a9167a708476faab86d985d3d698e5a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 13
+  statement: PR metadata must declare one work class accepted by the validator, and
+    that class must satisfy the computed diff floor.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/work_sizing_floor.py
+    type: static
+- claim:
+    details: Changes to validator packaging surfaces must keep the committed wheelhouse
+      and hash manifests in sync and avoid stale build metadata contaminating install
+      tests.
+    item: 6
+    object: validator-wheelhouse-coupling
+    predicate: asserts
+    refs:
+    - validators/tests/integration/test_install_bootstrap.py
+    subject: doctrine-item
+  content_hash: efb29d6a03b0cdfda2e54455cc32e4ead6f4039c5046d0ef856bd8c47a32c907
+  evidence_ref: validators/wheelhouse
+  id: brain-assertion-d1b-06-validator-wheelhouse-coupling
+  kind: brain-assertion
+  prev_hash: 206f980ea9b84aadb70c4dee508809f2ae1422e350b261e915574f6132add208
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 14
+  statement: Changes to validator packaging surfaces must keep the committed wheelhouse
+    and hash manifests in sync and avoid stale build metadata contaminating install
+    tests.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/wheelhouse
+    type: static
+- claim:
+    details: Published install scripts and versioned download artifacts are release
+      surfaces; changing them requires release-policy handling and refreshed signature
+      evidence.
+    item: 7
+    object: signed-release-artifact-freeze
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    subject: doctrine-item
+  content_hash: 855d8b1155f121cde803c67cb757f950fce025219e63ba12a09ae1ee26ce0229
+  evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+  id: brain-assertion-d1b-07-signed-release-artifact-freeze
+  kind: brain-assertion
+  prev_hash: efb29d6a03b0cdfda2e54455cc32e4ead6f4039c5046d0ef856bd8c47a32c907
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 15
+  statement: Published install scripts and versioned download artifacts are release
+    surfaces; changing them requires release-policy handling and refreshed signature
+    evidence.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    item: 9
+    object: ce-cli-doc-coupling
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: b324a929181707bc11b710fa6bac139b2ea706239896caa3f93d3dcad47ba485
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-d1b-09-ce-cli-doc-coupling
+  kind: brain-assertion
+  prev_hash: 855d8b1155f121cde803c67cb757f950fce025219e63ba12a09ae1ee26ce0229
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 16
+  statement: Adding a top-level ce CLI group couples docs reconciliation and generated
+    CLI reference updates in the same change.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+      merge state or conflict repair failures escalate instead of silently landing.
+    item: 10
+    object: merge-queue-conflict-gate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 31f3ca09f17db0f4a606cd546859ca0047f07482e25d5b5ba1780ffd746354b9
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-10-merge-queue-conflict-gate
+  kind: brain-assertion
+  prev_hash: b324a929181707bc11b710fa6bac139b2ea706239896caa3f93d3dcad47ba485
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 17
+  statement: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+    merge state or conflict repair failures escalate instead of silently landing.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: A non-draft PR with current-head approval and green merge state is eligible
+      for autonomous queue or merge action; draft status is the hold mechanism.
+    item: 11
+    object: approval-green-triggers-queue
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 043e05bbb40ef76b8f493f69fbeb178700f24b543f99d63a0f3ebebba4f84b05
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-11-approval-green-triggers-queue
+  kind: brain-assertion
+  prev_hash: 31f3ca09f17db0f4a606cd546859ca0047f07482e25d5b5ba1780ffd746354b9
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 18
+  statement: A non-draft PR with current-head approval and green merge state is eligible
+    for autonomous queue or merge action; draft status is the hold mechanism.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge readiness requires an APPROVED review decision tied to the current
+      head; stale or dismissed review states are not sufficient.
+    item: 12
+    object: approval-current-head-required
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: dd68cff31c69a8c0c52b6d7cd4a3dbc028d4bd96f98a1c09774167a2ab64a898
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-12-approval-current-head-required
+  kind: brain-assertion
+  prev_hash: 043e05bbb40ef76b8f493f69fbeb178700f24b543f99d63a0f3ebebba4f84b05
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 19
+  statement: Merge readiness requires an APPROVED review decision tied to the current
+    head; stale or dismissed review states are not sufficient.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: The authoring controller must not approve its own PR; review evidence
+      comes from a distinct governed reviewer venue.
+    item: 13
+    object: distinct-reviewer-venue
+    predicate: asserts
+    refs:
+    - .claude/agents/reviewer.md
+    subject: doctrine-item
+  content_hash: 69358d34824b5046062e6ff9b691310263c6f7d46f99c1a2ca42d04951a2a73c
+  evidence_ref: docs/operations/REVIEWER_VENUE_AUTHORITY.md
+  id: brain-assertion-d1b-13-distinct-reviewer-venue
+  kind: brain-assertion
+  prev_hash: dd68cff31c69a8c0c52b6d7cd4a3dbc028d4bd96f98a1c09774167a2ab64a898
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 20
+  statement: The authoring controller must not approve its own PR; review evidence
+    comes from a distinct governed reviewer venue.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/REVIEWER_VENUE_AUTHORITY.md
+    type: static
+- claim:
+    details: Reviewer workers are read-only and depend on the controller to provide
+      an already-prepared review worktree and context.
+    item: 14
+    object: reviewer-readonly-prepared-worktree
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 618478cf95bfbb298c000ed085327708035c318f3aa646d74bd62d747759c261
+  evidence_ref: .claude/agents/reviewer.md
+  id: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree
+  kind: brain-assertion
+  prev_hash: 69358d34824b5046062e6ff9b691310263c6f7d46f99c1a2ca42d04951a2a73c
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 21
+  statement: Reviewer workers are read-only and depend on the controller to provide
+    an already-prepared review worktree and context.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/reviewer.md
+    type: static
+- claim:
+    details: Cross-repository closing keywords are mention-only without the dedicated
+      close workflow; merged PRs rely on the close bot for issue closure.
+    item: 16
+    object: cross-repo-closes-bot
+    predicate: asserts
+    refs:
+    - .github/scripts/ceops_autoclose.py
+    - tools/ce-ops-autoclose/parse_issue_refs.py
+    subject: doctrine-item
+  content_hash: 57a609d0e33700996ce9fc45bff1cac0a6cf1e8a39440d754f19efdb2838bd74
+  evidence_ref: .github/workflows/ce-ops-autoclose.yml
+  id: brain-assertion-d1b-16-cross-repo-closes-bot
+  kind: brain-assertion
+  prev_hash: 618478cf95bfbb298c000ed085327708035c318f3aa646d74bd62d747759c261
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 22
+  statement: Cross-repository closing keywords are mention-only without the dedicated
+    close workflow; merged PRs rely on the close bot for issue closure.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/ce-ops-autoclose.yml
+    type: static
+- claim:
+    details: Governed worker push attempts are mediated by the Ring-1 hook path and
+      refused when no bounded write authority is provisioned.
+    item: 17
+    object: ring1-worker-push-block
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/hook_check.py
+    - validators/creator_engine_validator/runner/ring1_tool_guard.py
+    subject: doctrine-item
+  content_hash: 13992b5cc0482a89278482357fa94fdba49857952c35b6e6b08ecce944371709
+  evidence_ref: .claude/hooks/ce-pretooluse.sh
+  id: brain-assertion-d1b-17-ring1-worker-push-block
+  kind: brain-assertion
+  prev_hash: 57a609d0e33700996ce9fc45bff1cac0a6cf1e8a39440d754f19efdb2838bd74
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 23
+  statement: Governed worker push attempts are mediated by the Ring-1 hook path and
+    refused when no bounded write authority is provisioned.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/hooks/ce-pretooluse.sh
+    type: static
+- claim:
+    details: Re-signing the install apply spec requires the offline ce-root-v1 trust
+      root held by the controller; seats may produce spec bytes for signing but not
+      sign them.
+    item: 18
+    object: install-spec-resign-controller-root
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/release_publish.py
+    subject: doctrine-item
+  content_hash: 598fe9d13fe31eda54c2512d258b95d5b38f7c0223ad67337e993b97b51c28cc
+  evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
+  id: brain-assertion-d1b-18-install-spec-resign-controller-root
+  kind: brain-assertion
+  prev_hash: 13992b5cc0482a89278482357fa94fdba49857952c35b6e6b08ecce944371709
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 24
+  statement: Re-signing the install apply spec requires the offline ce-root-v1 trust
+    root held by the controller; seats may produce spec bytes for signing but not
+    sign them.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    type: static
+- claim:
+    details: Local brain drift can be caused by stale ignored runtime state; reconcile
+      local state from the canonical tracked ledger before treating it as repository
+      breakage.
+    item: 19
+    object: brain-drift-state-reconcile
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/pr_preflight.py
+    subject: doctrine-item
+  content_hash: a531132c30a3f6c0c18cbde3cc72d828d186d6776815e4e32a4c8c7ad1d5b51e
+  evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
+  id: brain-assertion-d1b-19-brain-drift-state-reconcile
+  kind: brain-assertion
+  prev_hash: 598fe9d13fe31eda54c2512d258b95d5b38f7c0223ad67337e993b97b51c28cc
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 25
+  statement: Local brain drift can be caused by stale ignored runtime state; reconcile
+    local state from the canonical tracked ledger before treating it as repository
+    breakage.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
+    type: static
+- claim:
+    details: The checked-in worker role definitions are the canonical governed worker
+      roles and must not be broadened by ad hoc role invention.
+    item: 20
+    object: canonical-worker-role-files
+    predicate: asserts
+    refs:
+    - .claude/agents/architect_research.md
+    - .claude/agents/implementer.md
+    - .claude/agents/verification.md
+    - .claude/agents/reviewer.md
+    subject: doctrine-item
+  content_hash: c1721e42407185da20e1a764c5d7b959eea59254fdf10bf236c8baf99747cc37
+  evidence_ref: .claude/agents/README.md
+  id: brain-assertion-d1b-20-canonical-worker-role-files
+  kind: brain-assertion
+  prev_hash: a531132c30a3f6c0c18cbde3cc72d828d186d6776815e4e32a4c8c7ad1d5b51e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 26
+  statement: The checked-in worker role definitions are the canonical governed worker
+    roles and must not be broadened by ad hoc role invention.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/README.md
+    type: static
+- claim:
+    details: Before dispatch, the controller must check the live in-flight territory
+      map and stop on path collisions.
+    item: 22
+    object: dispatch-territory-check
+    predicate: asserts
+    refs:
+    - playbooks/controller/briefs/dispatch.md
+    subject: doctrine-item
+  content_hash: cc20ffa07ed31a8658332d1dadf13b9dd88e4a0366b4e5316352ec3c8f1ed7a7
+  evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+  id: brain-assertion-d1b-22-dispatch-territory-check
+  kind: brain-assertion
+  prev_hash: c1721e42407185da20e1a764c5d7b959eea59254fdf10bf236c8baf99747cc37
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 27
+  statement: Before dispatch, the controller must check the live in-flight territory
+    map and stop on path collisions.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and green preflight evidence for the branch.
+    item: 25
+    object: harvest-requires-commit-sha
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 3c0ef3f233e0f5097efc4c1a7704f51966eafd7d93e83dce0f9003bae8a166d3
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-d1b-25-harvest-requires-commit-sha
+  kind: brain-assertion
+  prev_hash: cc20ffa07ed31a8658332d1dadf13b9dd88e4a0366b4e5316352ec3c8f1ed7a7
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 28
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and green preflight evidence for the branch.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    details: Execution work is split across restricted role-scoped workers; role envelopes
+      do not grant an Agent-style unrestricted delegation surface.
+    item: 28
+    object: role-scoped-dispatch-no-agent
+    predicate: asserts
+    refs:
+    - .claude/agents/README.md
+    subject: doctrine-item
+  content_hash: e14f64e3fb043ab6c6b972d1f012ea32753c7f245c3a88c10c7dc45140949916
+  evidence_ref: docs/contracts/forge-persona-catalog.md
+  id: brain-assertion-d1b-28-role-scoped-dispatch-no-agent
+  kind: brain-assertion
+  prev_hash: 3c0ef3f233e0f5097efc4c1a7704f51966eafd7d93e83dce0f9003bae8a166d3
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 29
+  statement: Execution work is split across restricted role-scoped workers; role envelopes
+    do not grant an Agent-style unrestricted delegation surface.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/forge-persona-catalog.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 82f6b68015963825fdaf6f69369ae84f61408a1770037d1917a7c80ad5161275
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-d1b-30-contained-not-airgapped
+  kind: brain-assertion
+  prev_hash: e14f64e3fb043ab6c6b972d1f012ea32753c7f245c3a88c10c7dc45140949916
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 30
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Governed seats relaunch through the canonical launch path; missing launch
+      or claim prerequisites are stop conditions rather than a reason to use a raw
+      harness.
+    item: 33
+    object: canonical-seat-launch-only
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 678b154d054da867fb3f6e05409cdff34c5eae96afc0488b546441540158cfdc
+  evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+  id: brain-assertion-d1b-33-canonical-seat-launch-only
+  kind: brain-assertion
+  prev_hash: 82f6b68015963825fdaf6f69369ae84f61408a1770037d1917a7c80ad5161275
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 31
+  statement: Governed seats relaunch through the canonical launch path; missing launch
+    or claim prerequisites are stop conditions rather than a reason to use a raw harness.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+    type: static
+- claim:
+    details: Containment is an isolation substrate and not an authority tier; approval
+      authority is determined by role, run mode, and author-not-equal-approver checks.
+    item: 34
+    object: containment-not-authority-tier
+    predicate: asserts
+    refs:
+    - docs/contracts/peer-authority.md
+    subject: doctrine-item
+  content_hash: 748eb2c59ada59490c817a12ee4c1b7ec3f285886e6a48d66a7e07f402f11019
+  evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+  id: brain-assertion-d1b-34-containment-not-authority-tier
+  kind: brain-assertion
+  prev_hash: 678b154d054da867fb3f6e05409cdff34c5eae96afc0488b546441540158cfdc
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 32
+  statement: Containment is an isolation substrate and not an authority tier; approval
+    authority is determined by role, run mode, and author-not-equal-approver checks.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+    type: static
+- claim:
+    details: Peer-controller authority is role and run-mode based; Ring-1 denials
+      apply when the governed context lacks bounded write authority rather than from
+      containment alone.
+    item: 35
+    object: peer-authority-substrate-independent
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/hook_check.py
+    subject: doctrine-item
+  content_hash: 5b0f9ed467d3b3d89a1a9a67b18a4b5ead5e125ec1f9cd4fead0d149cb5fab4d
+  evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+  id: brain-assertion-d1b-35-peer-authority-substrate-independent
+  kind: brain-assertion
+  prev_hash: 748eb2c59ada59490c817a12ee4c1b7ec3f285886e6a48d66a7e07f402f11019
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 33
+  statement: Peer-controller authority is role and run-mode based; Ring-1 denials
+    apply when the governed context lacks bounded write authority rather than from
+    containment alone.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+    type: static
+- claim:
+    details: Foreman seat-class policy requires implementation work to be routed through
+      launch-pinned worker dispatch instead of inline source mutation.
+    item: 36
+    object: foreman-delegates-implementation
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/seat_class.py
+    - validators/creator_engine_validator/brain_bootstrap.py
+    subject: doctrine-item
+  content_hash: 73284efb8bf2822d662792bcc7287c63af852204b2fda5ee8fd53f4c812d3c72
+  evidence_ref: docs/contracts/seat-class-policy.md
+  id: brain-assertion-d1b-36-foreman-delegates-implementation
+  kind: brain-assertion
+  prev_hash: 5b0f9ed467d3b3d89a1a9a67b18a4b5ead5e125ec1f9cd4fead0d149cb5fab4d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 34
+  statement: Foreman seat-class policy requires implementation work to be routed through
+    launch-pinned worker dispatch instead of inline source mutation.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/seat-class-policy.md
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: e07bd922c8234aa3df78de4ed156b5245c60e4a8008aad81dc0def687b4fd0e4
+  evidence_ref: validators/tests
+  id: brain-assertion-d1b-39-full-validator-long-running
+  kind: brain-assertion
+  prev_hash: 73284efb8bf2822d662792bcc7287c63af852204b2fda5ee8fd53f4c812d3c72
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 35
+  statement: The full validator includes slow and integration test surfaces; long-running
+    execution is expected and should not be treated as a hang without evidence.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests
+    type: static
+- claim:
+    details: Leaking checkout import paths into install-bootstrap subprocesses can
+      make console-script checks validate source instead of the installed wheel.
+    item: 40
+    object: pythonpath-install-bootstrap-footgun
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 05887807a69403b6aa4d80ee155741e5d4f6b65d31f1d4f674233ec8f77ee05a
+  evidence_ref: validators/tests/integration/test_install_bootstrap.py
+  id: brain-assertion-d1b-40-pythonpath-install-bootstrap-footgun
+  kind: brain-assertion
+  prev_hash: e07bd922c8234aa3df78de4ed156b5245c60e4a8008aad81dc0def687b4fd0e4
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 36
+  statement: Leaking checkout import paths into install-bootstrap subprocesses can
+    make console-script checks validate source instead of the installed wheel.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/integration/test_install_bootstrap.py
+    type: static
+- claim:
+    details: Do not trust a reported digest by transcription; recompute the canonical
+      path-manifest hash from the documented rule.
+    item: 41
+    object: hashes-must-be-recomputed
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 2030ffa37b70e90e0f8d5f6a66da2daff5f0544cab14b21d033884d73c0e7775
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-41-hashes-must-be-recomputed
+  kind: brain-assertion
+  prev_hash: 05887807a69403b6aa4d80ee155741e5d4f6b65d31f1d4f674233ec8f77ee05a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 37
+  statement: Do not trust a reported digest by transcription; recompute the canonical
+    path-manifest hash from the documented rule.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: Local PR preflight validates committed base..HEAD state and refuses dirty
+      working trees unless explicitly allowed for committed-state inspection.
+    item: 42
+    object: preflight-committed-clean-tree
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: 7af123dbd7052bc324b1da52d8657a6e0cf451e491131c6fc6da6100da0f8e02
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-42-preflight-committed-clean-tree
+  kind: brain-assertion
+  prev_hash: 2030ffa37b70e90e0f8d5f6a66da2daff5f0544cab14b21d033884d73c0e7775
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 38
+  statement: Local PR preflight validates committed base..HEAD state and refuses dirty
+    working trees unless explicitly allowed for committed-state inspection.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local preflight removes credential-bearing environment from pytest subprocesses
+      so local runs match CI token hygiene.
+    item: 43
+    object: preflight-scrubs-credential-env
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: efb9a0d629b447eb65ea133774816cd59be39b1b0d5452f5986b884ecc8f895d
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-43-preflight-scrubs-credential-env
+  kind: brain-assertion
+  prev_hash: 7af123dbd7052bc324b1da52d8657a6e0cf451e491131c6fc6da6100da0f8e02
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 39
+  statement: Local preflight removes credential-bearing environment from pytest subprocesses
+    so local runs match CI token hygiene.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local PR preflight uses the full validator test tree invocation by default,
+      matching CI parity rather than a unit-only subset.
+    item: 1
+    object: local-preflight-ci-parity
+    predicate: asserts
+    refs:
+    - .github/workflows/validate.yml
+    subject: doctrine-item
+  content_hash: 457a957528e1ac5610160f5ccf359c4c02c9812ff89313427bf212ae18dd99ab
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-01-local-preflight-ci-parity
+  kind: brain-assertion
+  prev_hash: efb9a0d629b447eb65ea133774816cd59be39b1b0d5452f5986b884ecc8f895d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 40
+  statement: Local PR preflight uses the full validator test tree invocation by default,
+    matching CI parity rather than a unit-only subset.
+  status: superseded
+  superseded_by: brain-assertion-d1b-01-local-preflight-ci-parity-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local PR preflight uses the full validator test tree invocation by default,
+      matching CI parity rather than a unit-only subset.
+    evidence_sha256: 364b601d5cc4c9c495ab25b10bf03ee19468a8b585fff64c8afa1e4bd05c99ec
+    item: 1
+    object: local-preflight-ci-parity
+    predicate: asserts
+    refs:
+    - .github/workflows/validate.yml
+    subject: doctrine-item
+  content_hash: 186666af7a556dcce32d5c8f88bf041224481c97dddf094ef5ff3e7a3d218843
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-01-local-preflight-ci-parity-v2
+  kind: brain-assertion
+  prev_hash: 457a957528e1ac5610160f5ccf359c4c02c9812ff89313427bf212ae18dd99ab
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 41
+  statement: Local PR preflight uses the full validator test tree invocation by default,
+    matching CI parity rather than a unit-only subset.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Each PR carries a branch-slug path manifest whose canonical path set
+      and SHA256 must match base..HEAD, including the carrier itself.
+    item: 2
+    object: pr-path-manifest-fidelity
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/path_manifest_fidelity.py
+    subject: doctrine-item
+  content_hash: 10a223276ac50cc694f28ca6d53ada235f3aa058ababc2b100c3b85800020b9d
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-02-pr-path-manifest-fidelity
+  kind: brain-assertion
+  prev_hash: 186666af7a556dcce32d5c8f88bf041224481c97dddf094ef5ff3e7a3d218843
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 42
+  statement: Each PR carries a branch-slug path manifest whose canonical path set
+    and SHA256 must match base..HEAD, including the carrier itself.
+  status: superseded
+  superseded_by: brain-assertion-d1b-02-pr-path-manifest-fidelity-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: Each PR carries a branch-slug path manifest whose canonical path set
+      and SHA256 must match base..HEAD, including the carrier itself.
+    evidence_sha256: 1045ba44de5f8d80775b03bb3e5f4a477933adf76f85aaa9c4d089694da6f44e
+    item: 2
+    object: pr-path-manifest-fidelity
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/path_manifest_fidelity.py
+    subject: doctrine-item
+  content_hash: defd54c78c022b25d5148cec9bf103a8aa108ff97fd8b241d796a0e9bbb64034
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-02-pr-path-manifest-fidelity-v2
+  kind: brain-assertion
+  prev_hash: 10a223276ac50cc694f28ca6d53ada235f3aa058ababc2b100c3b85800020b9d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 43
+  statement: Each PR carries a branch-slug path manifest whose canonical path set
+    and SHA256 must match base..HEAD, including the carrier itself.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: The path-manifest gate requires an added per-PR changelog fragment at
+      the branch slug path when a carrier is required.
+    item: 3
+    object: per-pr-changelog-fragment
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 51d0e4f0015fc255cb4ca3f10531237d4ed83151b8493aa7493eb6006429dd46
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-03-per-pr-changelog-fragment
+  kind: brain-assertion
+  prev_hash: defd54c78c022b25d5148cec9bf103a8aa108ff97fd8b241d796a0e9bbb64034
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 44
+  statement: The path-manifest gate requires an added per-PR changelog fragment at
+    the branch slug path when a carrier is required.
+  status: superseded
+  superseded_by: brain-assertion-d1b-03-per-pr-changelog-fragment-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: The path-manifest gate requires an added per-PR changelog fragment at
+      the branch slug path when a carrier is required.
+    evidence_sha256: 1045ba44de5f8d80775b03bb3e5f4a477933adf76f85aaa9c4d089694da6f44e
+    item: 3
+    object: per-pr-changelog-fragment
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 181b754b67f3bb2b0aa37645f764f42dce787ffd7878c477714d9b9db8a8c11c
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-03-per-pr-changelog-fragment-v2
+  kind: brain-assertion
+  prev_hash: 51d0e4f0015fc255cb4ca3f10531237d4ed83151b8493aa7493eb6006429dd46
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 45
+  statement: The path-manifest gate requires an added per-PR changelog fragment at
+    the branch slug path when a carrier is required.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: PR metadata must declare one work class accepted by the validator, and
+      that class must satisfy the computed diff floor.
+    item: 4
+    object: declared-work-class-floor
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/pr_preflight.py
+    subject: doctrine-item
+  content_hash: e1e02b0cc06c2dc2fc10517986376a1d340be4c395a2d471ea27781104f300fa
+  evidence_ref: validators/creator_engine_validator/checks/work_sizing_floor.py
+  id: brain-assertion-d1b-04-declared-work-class-floor
+  kind: brain-assertion
+  prev_hash: 181b754b67f3bb2b0aa37645f764f42dce787ffd7878c477714d9b9db8a8c11c
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 46
+  statement: PR metadata must declare one work class accepted by the validator, and
+    that class must satisfy the computed diff floor.
+  status: superseded
+  superseded_by: brain-assertion-d1b-04-declared-work-class-floor-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/work_sizing_floor.py
+    type: static
+- claim:
+    details: PR metadata must declare one work class accepted by the validator, and
+      that class must satisfy the computed diff floor.
+    evidence_sha256: 1c6f64f660faa34613b0d5ee999e21d04ad5e3c58890201a38b05a766621a384
+    item: 4
+    object: declared-work-class-floor
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/pr_preflight.py
+    subject: doctrine-item
+  content_hash: 7dbeb8c466fa0b8c7325792e77e4dd02d9159d552cd819c140572b5526deaa98
+  evidence_ref: validators/creator_engine_validator/checks/work_sizing_floor.py
+  id: brain-assertion-d1b-04-declared-work-class-floor-v2
+  kind: brain-assertion
+  prev_hash: e1e02b0cc06c2dc2fc10517986376a1d340be4c395a2d471ea27781104f300fa
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 47
+  statement: PR metadata must declare one work class accepted by the validator, and
+    that class must satisfy the computed diff floor.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/work_sizing_floor.py
+    type: static
+- claim:
+    details: Changes to validator packaging surfaces must keep the committed wheelhouse
+      and hash manifests in sync and avoid stale build metadata contaminating install
+      tests.
+    item: 6
+    object: validator-wheelhouse-coupling
+    predicate: asserts
+    refs:
+    - validators/tests/integration/test_install_bootstrap.py
+    subject: doctrine-item
+  content_hash: 29a592c7357c5d5ed22097b2df07334b77e6d9f235864f14951cf6b4b8d75477
+  evidence_ref: validators/wheelhouse/SHA256SUMS
+  id: brain-assertion-d1b-06-validator-wheelhouse-coupling
+  kind: brain-assertion
+  prev_hash: 7dbeb8c466fa0b8c7325792e77e4dd02d9159d552cd819c140572b5526deaa98
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 48
+  statement: Changes to validator packaging surfaces must keep the committed wheelhouse
+    and hash manifests in sync and avoid stale build metadata contaminating install
+    tests.
+  status: superseded
+  superseded_by: brain-assertion-d1b-06-validator-wheelhouse-coupling-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/wheelhouse
+    type: static
+- claim:
+    details: Changes to validator packaging surfaces must keep the committed wheelhouse
+      and hash manifests in sync and avoid stale build metadata contaminating install
+      tests.
+    evidence_sha256: 1b2ab0cd0c8e1c3bdb50eeef598769d9b2f570522c6c00118eb71735803269cd
+    item: 6
+    object: validator-wheelhouse-coupling
+    predicate: asserts
+    refs:
+    - validators/tests/integration/test_install_bootstrap.py
+    subject: doctrine-item
+  content_hash: 99c079ac52330e59c74ef231a7d5130be67d21b71adfcb8a86c5c26c7905dcdb
+  evidence_ref: validators/wheelhouse/SHA256SUMS
+  id: brain-assertion-d1b-06-validator-wheelhouse-coupling-v2
+  kind: brain-assertion
+  prev_hash: 29a592c7357c5d5ed22097b2df07334b77e6d9f235864f14951cf6b4b8d75477
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 49
+  statement: Changes to validator packaging surfaces must keep the committed wheelhouse
+    and hash manifests in sync and avoid stale build metadata contaminating install
+    tests.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/wheelhouse/SHA256SUMS
+    type: static
+- claim:
+    details: Published install scripts and versioned download artifacts are release
+      surfaces; changing them requires release-policy handling and refreshed signature
+      evidence.
+    item: 7
+    object: signed-release-artifact-freeze
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    subject: doctrine-item
+  content_hash: 87cb0f9e7c18466b0716c5015a75bba0b15fc7514572531079aebf7bb6022271
+  evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+  id: brain-assertion-d1b-07-signed-release-artifact-freeze
+  kind: brain-assertion
+  prev_hash: 99c079ac52330e59c74ef231a7d5130be67d21b71adfcb8a86c5c26c7905dcdb
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 50
+  statement: Published install scripts and versioned download artifacts are release
+    surfaces; changing them requires release-policy handling and refreshed signature
+    evidence.
+  status: superseded
+  superseded_by: brain-assertion-d1b-07-signed-release-artifact-freeze-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+    type: static
+- claim:
+    details: Published install scripts and versioned download artifacts are release
+      surfaces; changing them requires release-policy handling and refreshed signature
+      evidence.
+    evidence_sha256: 7f4f62ec2741f472911c6d7902fb3821c2022ad61a6de3f57c39ab745d0c04fe
+    item: 7
+    object: signed-release-artifact-freeze
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    subject: doctrine-item
+  content_hash: 6e5ac291181d971513338c677f4003104d651aa4afc42b2fa2c9a11874724b03
+  evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+  id: brain-assertion-d1b-07-signed-release-artifact-freeze-v2
+  kind: brain-assertion
+  prev_hash: 87cb0f9e7c18466b0716c5015a75bba0b15fc7514572531079aebf7bb6022271
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 51
+  statement: Published install scripts and versioned download artifacts are release
+    surfaces; changing them requires release-policy handling and refreshed signature
+    evidence.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    item: 9
+    object: ce-cli-doc-coupling
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: 62c9e24cd48e86a6e72d7417989b33572c152a0876662e6ca69db52e6b600232
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-d1b-09-ce-cli-doc-coupling
+  kind: brain-assertion
+  prev_hash: 6e5ac291181d971513338c677f4003104d651aa4afc42b2fa2c9a11874724b03
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 52
+  statement: Adding a top-level ce CLI group couples docs reconciliation and generated
+    CLI reference updates in the same change.
+  status: superseded
+  superseded_by: brain-assertion-d1b-09-ce-cli-doc-coupling-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: 2857ef723d2c3fabb643a22ed99eaa68695e72021bd32bbb63b7f990ff5558e1
+    item: 9
+    object: ce-cli-doc-coupling
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: aa3e41104fe0a660d01aca57d8a2f759c78a9734984bb25c88c59cd34ba23b49
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-d1b-09-ce-cli-doc-coupling-v2
+  kind: brain-assertion
+  prev_hash: 62c9e24cd48e86a6e72d7417989b33572c152a0876662e6ca69db52e6b600232
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 53
+  statement: Adding a top-level ce CLI group couples docs reconciliation and generated
+    CLI reference updates in the same change.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+      merge state or conflict repair failures escalate instead of silently landing.
+    item: 10
+    object: merge-queue-conflict-gate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: b7e4ef366f0b924f9be92d70c080c1705178e9da6e64a9ec18eb564ff6f4341e
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-10-merge-queue-conflict-gate
+  kind: brain-assertion
+  prev_hash: aa3e41104fe0a660d01aca57d8a2f759c78a9734984bb25c88c59cd34ba23b49
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 54
+  statement: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+    merge state or conflict repair failures escalate instead of silently landing.
+  status: superseded
+  superseded_by: brain-assertion-d1b-10-merge-queue-conflict-gate-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+      merge state or conflict repair failures escalate instead of silently landing.
+    evidence_sha256: 65ef448b49f59fc3bfa59bd0c7961a8c0d9c6f672f3479ef27c8b43d87760023
+    item: 10
+    object: merge-queue-conflict-gate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 5d03f6b0a909b61421b4d60a6ff27479ccf1b7030c093ab0012bf280892affb4
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-10-merge-queue-conflict-gate-v2
+  kind: brain-assertion
+  prev_hash: b7e4ef366f0b924f9be92d70c080c1705178e9da6e64a9ec18eb564ff6f4341e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 55
+  statement: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+    merge state or conflict repair failures escalate instead of silently landing.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: A non-draft PR with current-head approval and green merge state is eligible
+      for autonomous queue or merge action; draft status is the hold mechanism.
+    item: 11
+    object: approval-green-triggers-queue
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: ef8f429e9858e2137fee016a8f8ff7b40d01f1a5b3d53d75b01ebe3a50addccb
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-11-approval-green-triggers-queue
+  kind: brain-assertion
+  prev_hash: 5d03f6b0a909b61421b4d60a6ff27479ccf1b7030c093ab0012bf280892affb4
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 56
+  statement: A non-draft PR with current-head approval and green merge state is eligible
+    for autonomous queue or merge action; draft status is the hold mechanism.
+  status: superseded
+  superseded_by: brain-assertion-d1b-11-approval-green-triggers-queue-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: A non-draft PR with current-head approval and green merge state is eligible
+      for autonomous queue or merge action; draft status is the hold mechanism.
+    evidence_sha256: 65ef448b49f59fc3bfa59bd0c7961a8c0d9c6f672f3479ef27c8b43d87760023
+    item: 11
+    object: approval-green-triggers-queue
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 199c08831e55dbc542aedc51752f0ab79ec6b342b0820fab43c8697ad9971439
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-11-approval-green-triggers-queue-v2
+  kind: brain-assertion
+  prev_hash: ef8f429e9858e2137fee016a8f8ff7b40d01f1a5b3d53d75b01ebe3a50addccb
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 57
+  statement: A non-draft PR with current-head approval and green merge state is eligible
+    for autonomous queue or merge action; draft status is the hold mechanism.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge readiness requires an APPROVED review decision tied to the current
+      head; stale or dismissed review states are not sufficient.
+    item: 12
+    object: approval-current-head-required
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: a521faa1b02a08cc6e2b353355818d0b31c838fdc63d9c7c225b6613673b61ae
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-12-approval-current-head-required
+  kind: brain-assertion
+  prev_hash: 199c08831e55dbc542aedc51752f0ab79ec6b342b0820fab43c8697ad9971439
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 58
+  statement: Merge readiness requires an APPROVED review decision tied to the current
+    head; stale or dismissed review states are not sufficient.
+  status: superseded
+  superseded_by: brain-assertion-d1b-12-approval-current-head-required-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge readiness requires an APPROVED review decision tied to the current
+      head; stale or dismissed review states are not sufficient.
+    evidence_sha256: 65ef448b49f59fc3bfa59bd0c7961a8c0d9c6f672f3479ef27c8b43d87760023
+    item: 12
+    object: approval-current-head-required
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: bed86653b705eadc0893ac3a98fea1522fa734076b9f4f435419c1da865d3787
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-12-approval-current-head-required-v2
+  kind: brain-assertion
+  prev_hash: a521faa1b02a08cc6e2b353355818d0b31c838fdc63d9c7c225b6613673b61ae
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 59
+  statement: Merge readiness requires an APPROVED review decision tied to the current
+    head; stale or dismissed review states are not sufficient.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: The authoring controller must not approve its own PR; review evidence
+      comes from a distinct governed reviewer venue.
+    item: 13
+    object: distinct-reviewer-venue
+    predicate: asserts
+    refs:
+    - .claude/agents/reviewer.md
+    subject: doctrine-item
+  content_hash: f60d4ecbe9708a8b2f37216981f642018cc9bd8babb10333f4a2c26a40126510
+  evidence_ref: docs/operations/REVIEWER_VENUE_AUTHORITY.md
+  id: brain-assertion-d1b-13-distinct-reviewer-venue
+  kind: brain-assertion
+  prev_hash: bed86653b705eadc0893ac3a98fea1522fa734076b9f4f435419c1da865d3787
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 60
+  statement: The authoring controller must not approve its own PR; review evidence
+    comes from a distinct governed reviewer venue.
+  status: superseded
+  superseded_by: brain-assertion-d1b-13-distinct-reviewer-venue-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/REVIEWER_VENUE_AUTHORITY.md
+    type: static
+- claim:
+    details: The authoring controller must not approve its own PR; review evidence
+      comes from a distinct governed reviewer venue.
+    evidence_sha256: 5f9b9b950b40e4cd05c22fe65a8415203b6ee6310330e80c3a33f0db46de0de0
+    item: 13
+    object: distinct-reviewer-venue
+    predicate: asserts
+    refs:
+    - .claude/agents/reviewer.md
+    subject: doctrine-item
+  content_hash: 05b5e18f5a677a5f6b250bf066de77629dda66760de1e4a531d5fe4b3186d88e
+  evidence_ref: docs/operations/REVIEWER_VENUE_AUTHORITY.md
+  id: brain-assertion-d1b-13-distinct-reviewer-venue-v2
+  kind: brain-assertion
+  prev_hash: f60d4ecbe9708a8b2f37216981f642018cc9bd8babb10333f4a2c26a40126510
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 61
+  statement: The authoring controller must not approve its own PR; review evidence
+    comes from a distinct governed reviewer venue.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/REVIEWER_VENUE_AUTHORITY.md
+    type: static
+- claim:
+    details: Reviewer workers are read-only and depend on the controller to provide
+      an already-prepared review worktree and context.
+    item: 14
+    object: reviewer-readonly-prepared-worktree
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: b8f956c9a37092f7858a8e91a114b834292a5906be5f21abe8771445cf31ba78
+  evidence_ref: .claude/agents/reviewer.md
+  id: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree
+  kind: brain-assertion
+  prev_hash: 05b5e18f5a677a5f6b250bf066de77629dda66760de1e4a531d5fe4b3186d88e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 62
+  statement: Reviewer workers are read-only and depend on the controller to provide
+    an already-prepared review worktree and context.
+  status: superseded
+  superseded_by: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree-v2
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/reviewer.md
+    type: static
+- claim:
+    details: Reviewer workers are read-only and depend on the controller to provide
+      an already-prepared review worktree and context.
+    evidence_sha256: 80e36ae1280da0de79c1a6d7e42bfaf5488c906d8123d18cc579d84b34a1850b
+    item: 14
+    object: reviewer-readonly-prepared-worktree
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 9046e6dff67d1977a4ce12d8e77218e92d73829bd603dec721909a5b20d821e8
+  evidence_ref: .claude/agents/reviewer.md
+  id: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree-v2
+  kind: brain-assertion
+  prev_hash: b8f956c9a37092f7858a8e91a114b834292a5906be5f21abe8771445cf31ba78
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 63
+  statement: Reviewer workers are read-only and depend on the controller to provide
+    an already-prepared review worktree and context.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/reviewer.md
+    type: static
+- claim:
+    details: Cross-repository closing keywords are mention-only without the dedicated
+      close workflow; merged PRs rely on the close bot for issue closure.
+    item: 16
+    object: cross-repo-closes-bot
+    predicate: asserts
+    refs:
+    - .github/scripts/ceops_autoclose.py
+    - tools/ce-ops-autoclose/parse_issue_refs.py
+    subject: doctrine-item
+  content_hash: 48d2cf0a7c8058595f9d9930786c0ec309222921b33b050364ea1e5a528a28da
+  evidence_ref: .github/workflows/ce-ops-autoclose.yml
+  id: brain-assertion-d1b-16-cross-repo-closes-bot
+  kind: brain-assertion
+  prev_hash: 9046e6dff67d1977a4ce12d8e77218e92d73829bd603dec721909a5b20d821e8
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 64
+  statement: Cross-repository closing keywords are mention-only without the dedicated
+    close workflow; merged PRs rely on the close bot for issue closure.
+  status: superseded
+  superseded_by: brain-assertion-d1b-16-cross-repo-closes-bot-v2
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/ce-ops-autoclose.yml
+    type: static
+- claim:
+    details: Cross-repository closing keywords are mention-only without the dedicated
+      close workflow; merged PRs rely on the close bot for issue closure.
+    evidence_sha256: 24882022b91f667b3c29f0fb8a0b9a7600cb87cada9ce4428b7584b3d8c7b282
+    item: 16
+    object: cross-repo-closes-bot
+    predicate: asserts
+    refs:
+    - .github/scripts/ceops_autoclose.py
+    - tools/ce-ops-autoclose/parse_issue_refs.py
+    subject: doctrine-item
+  content_hash: e10f450a33c32f127c17474898876fde6234a31f76df11571a9d733c780f9707
+  evidence_ref: .github/workflows/ce-ops-autoclose.yml
+  id: brain-assertion-d1b-16-cross-repo-closes-bot-v2
+  kind: brain-assertion
+  prev_hash: 48d2cf0a7c8058595f9d9930786c0ec309222921b33b050364ea1e5a528a28da
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 65
+  statement: Cross-repository closing keywords are mention-only without the dedicated
+    close workflow; merged PRs rely on the close bot for issue closure.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/ce-ops-autoclose.yml
+    type: static
+- claim:
+    details: Governed worker push attempts are mediated by the Ring-1 hook path and
+      refused when no bounded write authority is provisioned.
+    item: 17
+    object: ring1-worker-push-block
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/hook_check.py
+    - validators/creator_engine_validator/runner/ring1_tool_guard.py
+    subject: doctrine-item
+  content_hash: c18be11ada7600d3d9ae3f72d8e8afa084681661637cd831c6a0ffbacc2372ea
+  evidence_ref: .claude/hooks/ce-pretooluse.sh
+  id: brain-assertion-d1b-17-ring1-worker-push-block
+  kind: brain-assertion
+  prev_hash: e10f450a33c32f127c17474898876fde6234a31f76df11571a9d733c780f9707
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 66
+  statement: Governed worker push attempts are mediated by the Ring-1 hook path and
+    refused when no bounded write authority is provisioned.
+  status: superseded
+  superseded_by: brain-assertion-d1b-17-ring1-worker-push-block-v2
+  type: convention
+  verification_method:
+    evidence_ref: .claude/hooks/ce-pretooluse.sh
+    type: static
+- claim:
+    details: Governed worker push attempts are mediated by the Ring-1 hook path and
+      refused when no bounded write authority is provisioned.
+    evidence_sha256: 721dec60c519b02a477fe6231c64ccbc171c88a49980e96cb4297881aeab3ee1
+    item: 17
+    object: ring1-worker-push-block
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/hook_check.py
+    - validators/creator_engine_validator/runner/ring1_tool_guard.py
+    subject: doctrine-item
+  content_hash: 6d4f4f91b933b8e0cbd4733d766da9f45872acf600427b863b4b5a381802ccc2
+  evidence_ref: .claude/hooks/ce-pretooluse.sh
+  id: brain-assertion-d1b-17-ring1-worker-push-block-v2
+  kind: brain-assertion
+  prev_hash: c18be11ada7600d3d9ae3f72d8e8afa084681661637cd831c6a0ffbacc2372ea
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 67
+  statement: Governed worker push attempts are mediated by the Ring-1 hook path and
+    refused when no bounded write authority is provisioned.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/hooks/ce-pretooluse.sh
+    type: static
+- claim:
+    details: Re-signing the install apply spec requires the offline ce-root-v1 trust
+      root held by the controller; seats may produce spec bytes for signing but not
+      sign them.
+    item: 18
+    object: install-spec-resign-controller-root
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/release_publish.py
+    subject: doctrine-item
+  content_hash: 5a4d813bf1857241b833704fac2241854e78951c172257b3e83ce7f415fc42b1
+  evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
+  id: brain-assertion-d1b-18-install-spec-resign-controller-root
+  kind: brain-assertion
+  prev_hash: 6d4f4f91b933b8e0cbd4733d766da9f45872acf600427b863b4b5a381802ccc2
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 68
+  statement: Re-signing the install apply spec requires the offline ce-root-v1 trust
+    root held by the controller; seats may produce spec bytes for signing but not
+    sign them.
+  status: superseded
+  superseded_by: brain-assertion-d1b-18-install-spec-resign-controller-root-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    type: static
+- claim:
+    details: Re-signing the install apply spec requires the offline ce-root-v1 trust
+      root held by the controller; seats may produce spec bytes for signing but not
+      sign them.
+    evidence_sha256: 90da52620dc2f096a4416ada5770e6527d119c20ce6d3a0874b33c003fabff82
+    item: 18
+    object: install-spec-resign-controller-root
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/release_publish.py
+    subject: doctrine-item
+  content_hash: 423485ad899298625ad92d17030038d73f95eb813adbb3a4ead1f748b6cc1cff
+  evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
+  id: brain-assertion-d1b-18-install-spec-resign-controller-root-v2
+  kind: brain-assertion
+  prev_hash: 5a4d813bf1857241b833704fac2241854e78951c172257b3e83ce7f415fc42b1
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 69
+  statement: Re-signing the install apply spec requires the offline ce-root-v1 trust
+    root held by the controller; seats may produce spec bytes for signing but not
+    sign them.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    type: static
+- claim:
+    details: Local brain drift can be caused by stale ignored runtime state; reconcile
+      local state from the canonical tracked ledger before treating it as repository
+      breakage.
+    item: 19
+    object: brain-drift-state-reconcile
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/pr_preflight.py
+    subject: doctrine-item
+  content_hash: 523ec7ab847fbf6c38dbb876fa587f9add784519479510c0ecab995e7638bca7
+  evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
+  id: brain-assertion-d1b-19-brain-drift-state-reconcile
+  kind: brain-assertion
+  prev_hash: 423485ad899298625ad92d17030038d73f95eb813adbb3a4ead1f748b6cc1cff
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 70
+  statement: Local brain drift can be caused by stale ignored runtime state; reconcile
+    local state from the canonical tracked ledger before treating it as repository
+    breakage.
+  status: superseded
+  superseded_by: brain-assertion-d1b-19-brain-drift-state-reconcile-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
+    type: static
+- claim:
+    details: Local brain drift can be caused by stale ignored runtime state; reconcile
+      local state from the canonical tracked ledger before treating it as repository
+      breakage.
+    evidence_sha256: 8e5e22ea2dbbd12462759254395c1ad017aa875330d808935606b179c8b32505
+    item: 19
+    object: brain-drift-state-reconcile
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/pr_preflight.py
+    subject: doctrine-item
+  content_hash: b6c2b1ac174874bcef60a446ff43eb39ac28c1c0fb9967db14f02f1bf480f384
+  evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
+  id: brain-assertion-d1b-19-brain-drift-state-reconcile-v2
+  kind: brain-assertion
+  prev_hash: 523ec7ab847fbf6c38dbb876fa587f9add784519479510c0ecab995e7638bca7
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 71
+  statement: Local brain drift can be caused by stale ignored runtime state; reconcile
+    local state from the canonical tracked ledger before treating it as repository
+    breakage.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
+    type: static
+- claim:
+    details: The checked-in worker role definitions are the canonical governed worker
+      roles and must not be broadened by ad hoc role invention.
+    item: 20
+    object: canonical-worker-role-files
+    predicate: asserts
+    refs:
+    - .claude/agents/architect_research.md
+    - .claude/agents/implementer.md
+    - .claude/agents/verification.md
+    - .claude/agents/reviewer.md
+    subject: doctrine-item
+  content_hash: ca49d2f36339bed7c3b5f458725392cf1443517e75c34346f62a9b9b95e24e7a
+  evidence_ref: .claude/agents/README.md
+  id: brain-assertion-d1b-20-canonical-worker-role-files
+  kind: brain-assertion
+  prev_hash: b6c2b1ac174874bcef60a446ff43eb39ac28c1c0fb9967db14f02f1bf480f384
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 72
+  statement: The checked-in worker role definitions are the canonical governed worker
+    roles and must not be broadened by ad hoc role invention.
+  status: superseded
+  superseded_by: brain-assertion-d1b-20-canonical-worker-role-files-v2
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/README.md
+    type: static
+- claim:
+    details: The checked-in worker role definitions are the canonical governed worker
+      roles and must not be broadened by ad hoc role invention.
+    evidence_sha256: 42cce4f44c389029cdb22462d19740bf2a971fb979054cf3abbd0f9ba241d124
+    item: 20
+    object: canonical-worker-role-files
+    predicate: asserts
+    refs:
+    - .claude/agents/architect_research.md
+    - .claude/agents/implementer.md
+    - .claude/agents/verification.md
+    - .claude/agents/reviewer.md
+    subject: doctrine-item
+  content_hash: 8ae7b840322b09d59cfd8ddec46d94e5804d46228ac690c810d5db010b0b0996
+  evidence_ref: .claude/agents/README.md
+  id: brain-assertion-d1b-20-canonical-worker-role-files-v2
+  kind: brain-assertion
+  prev_hash: ca49d2f36339bed7c3b5f458725392cf1443517e75c34346f62a9b9b95e24e7a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 73
+  statement: The checked-in worker role definitions are the canonical governed worker
+    roles and must not be broadened by ad hoc role invention.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/README.md
+    type: static
+- claim:
+    details: Before dispatch, the controller must check the live in-flight territory
+      map and stop on path collisions.
+    item: 22
+    object: dispatch-territory-check
+    predicate: asserts
+    refs:
+    - playbooks/controller/briefs/dispatch.md
+    subject: doctrine-item
+  content_hash: 09bfb3729e507db7108b6733a0e0f2b40a053c6656dc8ad8a7c8a41b7daf8e7f
+  evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+  id: brain-assertion-d1b-22-dispatch-territory-check
+  kind: brain-assertion
+  prev_hash: 8ae7b840322b09d59cfd8ddec46d94e5804d46228ac690c810d5db010b0b0996
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 74
+  statement: Before dispatch, the controller must check the live in-flight territory
+    map and stop on path collisions.
+  status: superseded
+  superseded_by: brain-assertion-d1b-22-dispatch-territory-check-v2
+  type: convention
+  verification_method:
+    evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+    type: static
+- claim:
+    details: Before dispatch, the controller must check the live in-flight territory
+      map and stop on path collisions.
+    evidence_sha256: c17c783a729bd4e86ed1c41fe4a1983e9ece1d8db067227495d2cdf738ba88db
+    item: 22
+    object: dispatch-territory-check
+    predicate: asserts
+    refs:
+    - playbooks/controller/briefs/dispatch.md
+    subject: doctrine-item
+  content_hash: 976a8da6d595992d006e5231f536e858d6ed85ed47a3e71e0011a53f9f9e4d0d
+  evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+  id: brain-assertion-d1b-22-dispatch-territory-check-v2
+  kind: brain-assertion
+  prev_hash: 09bfb3729e507db7108b6733a0e0f2b40a053c6656dc8ad8a7c8a41b7daf8e7f
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 75
+  statement: Before dispatch, the controller must check the live in-flight territory
+    map and stop on path collisions.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and green preflight evidence for the branch.
+    item: 25
+    object: harvest-requires-commit-sha
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 31303353a4d254597a52ac5697ffccc1c6d53d8ff94295f862aee931e3f36abc
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-d1b-25-harvest-requires-commit-sha
+  kind: brain-assertion
+  prev_hash: 976a8da6d595992d006e5231f536e858d6ed85ed47a3e71e0011a53f9f9e4d0d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 76
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and green preflight evidence for the branch.
+  status: superseded
+  superseded_by: brain-assertion-d1b-25-harvest-requires-commit-sha-v2
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and green preflight evidence for the branch.
+    evidence_sha256: 1e8c2051d8356fd7282b07f8b666008696f5e850fd288d56a3dabdf419a1b94d
+    item: 25
+    object: harvest-requires-commit-sha
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 9987463b3ff4e6e8a8d079047125b26b2acca0498e300ae80391156bff7863e4
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-d1b-25-harvest-requires-commit-sha-v2
+  kind: brain-assertion
+  prev_hash: 31303353a4d254597a52ac5697ffccc1c6d53d8ff94295f862aee931e3f36abc
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 77
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and green preflight evidence for the branch.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    details: Execution work is split across restricted role-scoped workers; role envelopes
+      do not grant an Agent-style unrestricted delegation surface.
+    item: 28
+    object: role-scoped-dispatch-no-agent
+    predicate: asserts
+    refs:
+    - .claude/agents/README.md
+    subject: doctrine-item
+  content_hash: 5c6ae566d44ae15d041885529cc2b1033da2742f8fa67762baf508a6851f6bda
+  evidence_ref: docs/contracts/forge-persona-catalog.md
+  id: brain-assertion-d1b-28-role-scoped-dispatch-no-agent
+  kind: brain-assertion
+  prev_hash: 9987463b3ff4e6e8a8d079047125b26b2acca0498e300ae80391156bff7863e4
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 78
+  statement: Execution work is split across restricted role-scoped workers; role envelopes
+    do not grant an Agent-style unrestricted delegation surface.
+  status: superseded
+  superseded_by: brain-assertion-d1b-28-role-scoped-dispatch-no-agent-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/forge-persona-catalog.md
+    type: static
+- claim:
+    details: Execution work is split across restricted role-scoped workers; role envelopes
+      do not grant an Agent-style unrestricted delegation surface.
+    evidence_sha256: 5e781ea10555deb21c41ca69be6d8a6e11db40aeca3969f0c874287227525faf
+    item: 28
+    object: role-scoped-dispatch-no-agent
+    predicate: asserts
+    refs:
+    - .claude/agents/README.md
+    subject: doctrine-item
+  content_hash: e0003c0097a6db93da81a425b43e794bed5a62de7fbd1a1c4fefb7e47d3d0b53
+  evidence_ref: docs/contracts/forge-persona-catalog.md
+  id: brain-assertion-d1b-28-role-scoped-dispatch-no-agent-v2
+  kind: brain-assertion
+  prev_hash: 5c6ae566d44ae15d041885529cc2b1033da2742f8fa67762baf508a6851f6bda
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 79
+  statement: Execution work is split across restricted role-scoped workers; role envelopes
+    do not grant an Agent-style unrestricted delegation surface.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/forge-persona-catalog.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 7320db3a662bbcf1d29142a2e03383319b86f86d61f927eea0c25cc08b31ba64
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-d1b-30-contained-not-airgapped
+  kind: brain-assertion
+  prev_hash: e0003c0097a6db93da81a425b43e794bed5a62de7fbd1a1c4fefb7e47d3d0b53
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 80
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: superseded
+  superseded_by: brain-assertion-d1b-30-contained-not-airgapped-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 051217ab82841da95dc808b1361f3f8c576642133b0b132dbb4043ab1753be9d
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 388edfb9bdfc4dc4c0fdcb5f750debde0726d11235cd3688f885e06872dbbc0f
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-d1b-30-contained-not-airgapped-v2
+  kind: brain-assertion
+  prev_hash: 7320db3a662bbcf1d29142a2e03383319b86f86d61f927eea0c25cc08b31ba64
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 81
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Governed seats relaunch through the canonical launch path; missing launch
+      or claim prerequisites are stop conditions rather than a reason to use a raw
+      harness.
+    item: 33
+    object: canonical-seat-launch-only
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: ef4469ccb89ca7029dfbf385072391024eda8c88920986ebbe63f061432224be
+  evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+  id: brain-assertion-d1b-33-canonical-seat-launch-only
+  kind: brain-assertion
+  prev_hash: 388edfb9bdfc4dc4c0fdcb5f750debde0726d11235cd3688f885e06872dbbc0f
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 82
+  statement: Governed seats relaunch through the canonical launch path; missing launch
+    or claim prerequisites are stop conditions rather than a reason to use a raw harness.
+  status: superseded
+  superseded_by: brain-assertion-d1b-33-canonical-seat-launch-only-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+    type: static
+- claim:
+    details: Governed seats relaunch through the canonical launch path; missing launch
+      or claim prerequisites are stop conditions rather than a reason to use a raw
+      harness.
+    evidence_sha256: 211e8e2e893b62f8209776b563d17501d072d0ed3a20958f20bf41a2d492698a
+    item: 33
+    object: canonical-seat-launch-only
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 90cb0c72a71c740f5c88fb73c2e40847359c7d6acc45edeb28c5d79b22452fe7
+  evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+  id: brain-assertion-d1b-33-canonical-seat-launch-only-v2
+  kind: brain-assertion
+  prev_hash: ef4469ccb89ca7029dfbf385072391024eda8c88920986ebbe63f061432224be
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 83
+  statement: Governed seats relaunch through the canonical launch path; missing launch
+    or claim prerequisites are stop conditions rather than a reason to use a raw harness.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+    type: static
+- claim:
+    details: Containment is an isolation substrate and not an authority tier; approval
+      authority is determined by role, run mode, and author-not-equal-approver checks.
+    item: 34
+    object: containment-not-authority-tier
+    predicate: asserts
+    refs:
+    - docs/contracts/peer-authority.md
+    subject: doctrine-item
+  content_hash: 77c934dcc9fedcd5f6b9eea6d24b2d11405e3b8d0e679eee4b22bc3516c665ff
+  evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+  id: brain-assertion-d1b-34-containment-not-authority-tier
+  kind: brain-assertion
+  prev_hash: 90cb0c72a71c740f5c88fb73c2e40847359c7d6acc45edeb28c5d79b22452fe7
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 84
+  statement: Containment is an isolation substrate and not an authority tier; approval
+    authority is determined by role, run mode, and author-not-equal-approver checks.
+  status: superseded
+  superseded_by: brain-assertion-d1b-34-containment-not-authority-tier-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+    type: static
+- claim:
+    details: Containment is an isolation substrate and not an authority tier; approval
+      authority is determined by role, run mode, and author-not-equal-approver checks.
+    evidence_sha256: 3ec2bcdc290873a570270e3e8e46efea9773e851adf83af48139a9787657de5f
+    item: 34
+    object: containment-not-authority-tier
+    predicate: asserts
+    refs:
+    - docs/contracts/peer-authority.md
+    subject: doctrine-item
+  content_hash: ccbec35a53791150a727bfd363191543793e87beed48a0549b25da981b30a593
+  evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+  id: brain-assertion-d1b-34-containment-not-authority-tier-v2
+  kind: brain-assertion
+  prev_hash: 77c934dcc9fedcd5f6b9eea6d24b2d11405e3b8d0e679eee4b22bc3516c665ff
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 85
+  statement: Containment is an isolation substrate and not an authority tier; approval
+    authority is determined by role, run mode, and author-not-equal-approver checks.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+    type: static
+- claim:
+    details: Peer-controller authority is role and run-mode based; Ring-1 denials
+      apply when the governed context lacks bounded write authority rather than from
+      containment alone.
+    item: 35
+    object: peer-authority-substrate-independent
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/hook_check.py
+    subject: doctrine-item
+  content_hash: 68c0ca895e0020c0aeab630c72046a70d0fbd3fcca173ff8b8eff239554cb41d
+  evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+  id: brain-assertion-d1b-35-peer-authority-substrate-independent
+  kind: brain-assertion
+  prev_hash: ccbec35a53791150a727bfd363191543793e87beed48a0549b25da981b30a593
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 86
+  statement: Peer-controller authority is role and run-mode based; Ring-1 denials
+    apply when the governed context lacks bounded write authority rather than from
+    containment alone.
+  status: superseded
+  superseded_by: brain-assertion-d1b-35-peer-authority-substrate-independent-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+    type: static
+- claim:
+    details: Peer-controller authority is role and run-mode based; Ring-1 denials
+      apply when the governed context lacks bounded write authority rather than from
+      containment alone.
+    evidence_sha256: 3ec2bcdc290873a570270e3e8e46efea9773e851adf83af48139a9787657de5f
+    item: 35
+    object: peer-authority-substrate-independent
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/hook_check.py
+    subject: doctrine-item
+  content_hash: 571dcbe907731ce43d27d74c299bfdda5fc79966991646bc80540311c97ae370
+  evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+  id: brain-assertion-d1b-35-peer-authority-substrate-independent-v2
+  kind: brain-assertion
+  prev_hash: 68c0ca895e0020c0aeab630c72046a70d0fbd3fcca173ff8b8eff239554cb41d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 87
+  statement: Peer-controller authority is role and run-mode based; Ring-1 denials
+    apply when the governed context lacks bounded write authority rather than from
+    containment alone.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
+    type: static
+- claim:
+    details: Foreman seat-class policy requires implementation work to be routed through
+      launch-pinned worker dispatch instead of inline source mutation.
+    item: 36
+    object: foreman-delegates-implementation
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/seat_class.py
+    - validators/creator_engine_validator/brain_bootstrap.py
+    subject: doctrine-item
+  content_hash: e09026c7de715fb9e58849ad1a659d31c73498d3b322f7525b65a171f1291987
+  evidence_ref: docs/contracts/seat-class-policy.md
+  id: brain-assertion-d1b-36-foreman-delegates-implementation
+  kind: brain-assertion
+  prev_hash: 571dcbe907731ce43d27d74c299bfdda5fc79966991646bc80540311c97ae370
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 88
+  statement: Foreman seat-class policy requires implementation work to be routed through
+    launch-pinned worker dispatch instead of inline source mutation.
+  status: superseded
+  superseded_by: brain-assertion-d1b-36-foreman-delegates-implementation-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/seat-class-policy.md
+    type: static
+- claim:
+    details: Foreman seat-class policy requires implementation work to be routed through
+      launch-pinned worker dispatch instead of inline source mutation.
+    evidence_sha256: ba922e8e529d229a7d81a1265b60b88fdd92ce3c8f938a9803b63d53744fc453
+    item: 36
+    object: foreman-delegates-implementation
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/seat_class.py
+    - validators/creator_engine_validator/brain_bootstrap.py
+    subject: doctrine-item
+  content_hash: 1c33a83689553ef79809c42ae2847186da39ecd0012fd1ba720704b0d90d1f0a
+  evidence_ref: docs/contracts/seat-class-policy.md
+  id: brain-assertion-d1b-36-foreman-delegates-implementation-v2
+  kind: brain-assertion
+  prev_hash: e09026c7de715fb9e58849ad1a659d31c73498d3b322f7525b65a171f1291987
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 89
+  statement: Foreman seat-class policy requires implementation work to be routed through
+    launch-pinned worker dispatch instead of inline source mutation.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/seat-class-policy.md
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 978aabb31c3c70557df24b823899bc3da93b8ab74348243005a6e270fda77725
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-d1b-39-full-validator-long-running
+  kind: brain-assertion
+  prev_hash: 1c33a83689553ef79809c42ae2847186da39ecd0012fd1ba720704b0d90d1f0a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 90
+  statement: The full validator includes slow and integration test surfaces; long-running
+    execution is expected and should not be treated as a hang without evidence.
+  status: superseded
+  superseded_by: brain-assertion-d1b-39-full-validator-long-running-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: 01af7c1c9021489bb76282b630e65fea37d504e4014d40e28c00564a3498147d
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: b2c46e23d032b8b37d47a75c70474f2687b8d8505e216f6684e23cbd8900b223
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-d1b-39-full-validator-long-running-v2
+  kind: brain-assertion
+  prev_hash: 978aabb31c3c70557df24b823899bc3da93b8ab74348243005a6e270fda77725
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 91
+  statement: The full validator includes slow and integration test surfaces; long-running
+    execution is expected and should not be treated as a hang without evidence.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
+- claim:
+    details: Leaking checkout import paths into install-bootstrap subprocesses can
+      make console-script checks validate source instead of the installed wheel.
+    item: 40
+    object: pythonpath-install-bootstrap-footgun
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: dd851e48f6663e2f094ddcafea11901252035a7346a0ae1f433b14df26fab193
+  evidence_ref: validators/tests/integration/test_install_bootstrap.py
+  id: brain-assertion-d1b-40-pythonpath-install-bootstrap-footgun
+  kind: brain-assertion
+  prev_hash: b2c46e23d032b8b37d47a75c70474f2687b8d8505e216f6684e23cbd8900b223
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 92
+  statement: Leaking checkout import paths into install-bootstrap subprocesses can
+    make console-script checks validate source instead of the installed wheel.
+  status: superseded
+  superseded_by: brain-assertion-d1b-40-pythonpath-install-bootstrap-footgun-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/integration/test_install_bootstrap.py
+    type: static
+- claim:
+    details: Leaking checkout import paths into install-bootstrap subprocesses can
+      make console-script checks validate source instead of the installed wheel.
+    evidence_sha256: 863d4dd621858f525b6f90983ad4d6e6117db56de412b63be4707c39d4d43c94
+    item: 40
+    object: pythonpath-install-bootstrap-footgun
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: eb230371ebb18e57712c7a5ca6944653ddddbfc861a4971f047f0d845756d817
+  evidence_ref: validators/tests/integration/test_install_bootstrap.py
+  id: brain-assertion-d1b-40-pythonpath-install-bootstrap-footgun-v2
+  kind: brain-assertion
+  prev_hash: dd851e48f6663e2f094ddcafea11901252035a7346a0ae1f433b14df26fab193
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 93
+  statement: Leaking checkout import paths into install-bootstrap subprocesses can
+    make console-script checks validate source instead of the installed wheel.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/integration/test_install_bootstrap.py
+    type: static
+- claim:
+    details: Do not trust a reported digest by transcription; recompute the canonical
+      path-manifest hash from the documented rule.
+    item: 41
+    object: hashes-must-be-recomputed
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 967a6c68b6587f511b7d86cb23da53ae843570c8bac763be985660a90d063985
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-41-hashes-must-be-recomputed
+  kind: brain-assertion
+  prev_hash: eb230371ebb18e57712c7a5ca6944653ddddbfc861a4971f047f0d845756d817
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 94
+  statement: Do not trust a reported digest by transcription; recompute the canonical
+    path-manifest hash from the documented rule.
+  status: superseded
+  superseded_by: brain-assertion-d1b-41-hashes-must-be-recomputed-v2
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: Do not trust a reported digest by transcription; recompute the canonical
+      path-manifest hash from the documented rule.
+    evidence_sha256: 1045ba44de5f8d80775b03bb3e5f4a477933adf76f85aaa9c4d089694da6f44e
+    item: 41
+    object: hashes-must-be-recomputed
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 7e08e77b708948db3d693e0c72ae8fa2d27115dc1be975f1740b634f5df17362
+  evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+  id: brain-assertion-d1b-41-hashes-must-be-recomputed-v2
+  kind: brain-assertion
+  prev_hash: 967a6c68b6587f511b7d86cb23da53ae843570c8bac763be985660a90d063985
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 95
+  statement: Do not trust a reported digest by transcription; recompute the canonical
+    path-manifest hash from the documented rule.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
+    type: static
+- claim:
+    details: Local PR preflight validates committed base..HEAD state and refuses dirty
+      working trees unless explicitly allowed for committed-state inspection.
+    item: 42
+    object: preflight-committed-clean-tree
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: 91b16802f892eb7db95e111e90896f6910aa299257b9482497284dd441eea144
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-42-preflight-committed-clean-tree
+  kind: brain-assertion
+  prev_hash: 7e08e77b708948db3d693e0c72ae8fa2d27115dc1be975f1740b634f5df17362
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 96
+  statement: Local PR preflight validates committed base..HEAD state and refuses dirty
+    working trees unless explicitly allowed for committed-state inspection.
+  status: superseded
+  superseded_by: brain-assertion-d1b-42-preflight-committed-clean-tree-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local PR preflight validates committed base..HEAD state and refuses dirty
+      working trees unless explicitly allowed for committed-state inspection.
+    evidence_sha256: 364b601d5cc4c9c495ab25b10bf03ee19468a8b585fff64c8afa1e4bd05c99ec
+    item: 42
+    object: preflight-committed-clean-tree
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: f9caba8f555f632e979ac14a7f001c13e7865f3ec3495c8a8762565c85c7d117
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-42-preflight-committed-clean-tree-v2
+  kind: brain-assertion
+  prev_hash: 91b16802f892eb7db95e111e90896f6910aa299257b9482497284dd441eea144
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 97
+  statement: Local PR preflight validates committed base..HEAD state and refuses dirty
+    working trees unless explicitly allowed for committed-state inspection.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local preflight removes credential-bearing environment from pytest subprocesses
+      so local runs match CI token hygiene.
+    item: 43
+    object: preflight-scrubs-credential-env
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: ee1dbae91bbac7dbc0ef50471f7c7a3e11dbb56c644d84f45cba741eeeed7c21
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-43-preflight-scrubs-credential-env
+  kind: brain-assertion
+  prev_hash: f9caba8f555f632e979ac14a7f001c13e7865f3ec3495c8a8762565c85c7d117
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 98
+  statement: Local preflight removes credential-bearing environment from pytest subprocesses
+    so local runs match CI token hygiene.
+  status: superseded
+  superseded_by: brain-assertion-d1b-43-preflight-scrubs-credential-env-v2
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
+- claim:
+    details: Local preflight removes credential-bearing environment from pytest subprocesses
+      so local runs match CI token hygiene.
+    evidence_sha256: 364b601d5cc4c9c495ab25b10bf03ee19468a8b585fff64c8afa1e4bd05c99ec
+    item: 43
+    object: preflight-scrubs-credential-env
+    predicate: asserts
+    refs:
+    - docs/contracts/authoring-a-governed-pr.md
+    subject: doctrine-item
+  content_hash: 3026ae8409b8e471df160446c50e697f5395a98617763eba5be577387ae9af05
+  evidence_ref: validators/creator_engine_validator/pr_preflight.py
+  id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v2
+  kind: brain-assertion
+  prev_hash: ee1dbae91bbac7dbc0ef50471f7c7a3e11dbb56c644d84f45cba741eeeed7c21
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 99
+  statement: Local preflight removes credential-bearing environment from pytest subprocesses
+    so local runs match CI token hygiene.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/pr_preflight.py
+    type: static
 schema_version: '1'
