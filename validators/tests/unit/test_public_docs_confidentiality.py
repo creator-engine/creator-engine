@@ -234,6 +234,25 @@ def test_known_pending_allowlist_only_shrinks():
     )
 
 
+def test_allowed_offenses_allowlist_only_shrinks():
+    """Every baseline offense entry must still exist AND still offend."""
+    stale: list[str] = []
+    for rel, label in sorted(guard.ALLOWED_OFFENSES):
+        path = _REPO_ROOT / rel
+        if not path.is_file():
+            stale.append(f"{rel} [{label}] (file no longer exists)")
+            continue
+        actual = {guard._offense_key(hit) for hit in _offenses(path)}
+        if (rel, label) not in actual:
+            stale.append(f"{rel} [{label}] (file no longer has this offense)")
+
+    assert not stale, (
+        "ALLOWED_OFFENSES has stale entries; the allowlist may only shrink. "
+        "Remove these now-clean/absent file/token-class entries:\n  "
+        + "\n  ".join(stale)
+    )
+
+
 def test_public_docs_internal_trees_have_only_known_exceptions():
     """No new docs/operations or docs/delivery files may enter public docs.
 

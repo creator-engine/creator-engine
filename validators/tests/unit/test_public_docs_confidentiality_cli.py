@@ -191,6 +191,38 @@ Routine public changelog prose.
     assert result.ok, [e.format() for e in result.errors]
 
 
+def test_run_fails_on_duplicate_changelog_issue_lines_with_empty_allowlist(
+    tmp_path: Path, monkeypatch
+):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "ALLOWED_OFFENSES", {})
+    ticket_prefix = "ce-" "ops"
+    slug = f"{ticket_prefix}-783-duplicate-issue"
+    issue = f"{ticket_prefix}#783"
+    _write_tracked(
+        repo,
+        f".ce/changelog/{slug}.md",
+        f"""---
+slug: {slug}
+date: 2026-07-02
+kind: fix
+scope: validators
+issue: {issue}
+issue: {issue}
+---
+
+Routine public changelog prose.
+""",
+    )
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    confidential = _confidentiality_errors(result)
+    assert len(confidential) == 2
+    assert all(f"issue: {issue}" in item for item in confidential)
+
+
 def test_run_passes_on_qualified_pr_manifest_header_with_empty_allowlist(
     tmp_path: Path, monkeypatch
 ):
@@ -364,6 +396,55 @@ def test_run_fails_closed_on_unreadable_tracked_file(tmp_path: Path, monkeypatch
 
     assert not result.ok
     assert any("CE-CONFIDENTIALITY-SCAN" in e.code for e in result.errors)
+
+
+def test_run_fails_closed_on_stat_level_error(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    unreadable = _write_tracked(repo, "validators/stat_blocked.py", "clean = True\n").resolve()
+    original_stat = Path.stat
+
+    def fail_for_unreadable(path: Path, *args, **kwargs):
+        if path == unreadable:
+            raise OSError("stat permission denied for test")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", fail_for_unreadable)
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    assert any("CE-CONFIDENTIALITY-SCAN" in e.code for e in result.errors)
+    assert any("stat permission denied for test" in e.format() for e in result.errors)
+
+
+def test_run_fails_closed_when_git_ls_files_fails(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+
+    def fail_git_ls_files(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(
+            128,
+            ["git", "ls-files", "-z"],
+            stderr=b"fatal: unable to enumerate tracked files",
+        )
+
+    monkeypatch.setattr(guard.subprocess, "run", fail_git_ls_files)
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    assert any("CE-CONFIDENTIALITY-SCAN" in e.code for e in result.errors)
+    assert any("could not enumerate tracked files" in e.format() for e in result.errors)
+
+
+def test_run_fails_closed_on_empty_tracked_file_scan(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "_tracked_repo_paths", lambda _root: [])
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    assert any("CE-CONFIDENTIALITY-SCAN" in e.code for e in result.errors)
+    assert any("tracked text scan found no files" in e.format() for e in result.errors)
 
 
 def test_run_fails_closed_on_pattern_failure(tmp_path: Path, monkeypatch):
