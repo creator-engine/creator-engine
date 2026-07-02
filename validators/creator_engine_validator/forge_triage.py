@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import work_claims
+from .forge.hold_labels import AWAITING_OPERATOR_HOLD_LABELS, BLOCKING_LABEL_PREFIXES
 from .work_sizing import MUTATION_CLASSES, WORK_CLASSES, WORK_CLASS_ALIASES, normalize_work_class, size_ceremony
 
 GhRunner = Callable[[Sequence[str], "str | None"], subprocess.CompletedProcess]
@@ -56,47 +57,8 @@ _DEPENDENCY_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-_BLOCKING_LABELS = frozenset(
-    {
-        "blocked",
-        "checkpoint",
-        "checkpoint held",
-        "checkpoint-held",
-        "dependency-blocked",
-        "dependencies-blocked",
-        "do-not-claim",
-        "do-not-pickup",
-        "do not claim",
-        "do not pickup",
-        "held",
-        "held checkpoint",
-        "held-checkpoint",
-        "hold",
-        "on hold",
-        "on-hold",
-        "status:blocked",
-        "status:checkpoint",
-        "status:held",
-        "status:hold",
-        "status:on-hold",
-        "status/checkpoint",
-        "status/held",
-        "status/hold",
-        "status/on-hold",
-        "waiting",
-        "wip",
-    }
-)
-_BLOCKING_LABEL_PREFIXES = (
-    "blocked:",
-    "blocked/",
-    "checkpoint:",
-    "checkpoint/",
-    "held:",
-    "held/",
-    "hold:",
-    "hold/",
-)
+_BLOCKING_LABELS = AWAITING_OPERATOR_HOLD_LABELS
+_BLOCKING_LABEL_PREFIXES = BLOCKING_LABEL_PREFIXES
 _DONE_LABELS = frozenset(
     {
         "closed",

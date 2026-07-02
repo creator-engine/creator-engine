@@ -115,6 +115,36 @@ def test_controller_inbox_classifies_all_buckets_and_uses_merge_queue_entries():
     assert "searchQuery=repo:o/r is:pr is:open" in argv
 
 
+@pytest.mark.parametrize("label", ["held", "on-hold"])
+def test_controller_inbox_classifies_blocking_hold_labels_as_awaiting_operator(label):
+    result = controller_inbox.ControllerInboxResult(
+        scope=controller_inbox.InboxScope("repo", "o/r"),
+        controller_login="ce-dev-2",
+        buckets=controller_inbox.classify_pull_requests(
+            [
+                controller_inbox.InboxPullRequest(
+                    repo="o/r",
+                    number=10,
+                    title=f"{label} PR",
+                    url="https://github.com/o/r/pull/10",
+                    author="author-a",
+                    review_decision="REVIEW_REQUIRED",
+                    merge_state_status="CLEAN",
+                    rollup_state="SUCCESS",
+                    is_draft=False,
+                    labels=(label,),
+                    requested_reviewers=(),
+                    queued=False,
+                    hold_marker=False,
+                )
+            ],
+            controller_login="ce-dev-2",
+        ),
+    )
+
+    assert [pr.number for pr in result.buckets["awaiting_operator"]] == [10]
+
+
 def test_controller_inbox_refuses_unscoped_and_bad_repo():
     with pytest.raises(controller_inbox.ControllerInboxError, match="unscoped"):
         controller_inbox.collect_controller_inbox(gh_runner=FakeGh(_payload()))
