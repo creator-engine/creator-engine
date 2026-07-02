@@ -336,36 +336,26 @@ def _resolve_test_coupling_pr_body(
             print(f"WARNING: could not read --pr-body-file for test-coupling exemption: {exc}", file=out)
             return None
 
+    conventional = _conventional_pr_body_file(config)
+    if conventional is None:
+        return None
+    try:
+        return conventional.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"WARNING: could not read local PR body fallback for test-coupling exemption: {exc}", file=out)
+        return None
+
+
+def _conventional_pr_body_file(config: PreflightConfig) -> Path | None:
     if not config.head_ref:
         return None
 
-    timeout = _network_subprocess_timeout_seconds()
-    argv = ["gh", "pr", "view", config.head_ref, "--json", "body", "--jq", ".body"]
-    try:
-        result = runner(
-            argv,
-            config.repo_root,
-            None,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        print(
-            "WARNING: "
-            + _network_timeout_message(
-                context="timed out reading PR body via gh for test-coupling exemption",
-                argv=argv,
-                timeout=exc.timeout or timeout,
-                checks="network connectivity, GitHub availability, and gh authentication",
-            ),
-            file=out,
-        )
-        return None
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip()
-        suffix = f": {detail}" if detail else ""
-        print(f"WARNING: could not read PR body via gh for test-coupling exemption{suffix}", file=out)
-        return None
-    return result.stdout
+    from .checks.path_manifest_fidelity import MANIFEST_DIR, branch_slug
+
+    candidate = config.repo_root / MANIFEST_DIR / f"{branch_slug(config.head_ref)}.md"
+    if candidate.is_file():
+        return candidate
+    return None
 
 
 def _test_command_argv(command: str) -> list[str]:

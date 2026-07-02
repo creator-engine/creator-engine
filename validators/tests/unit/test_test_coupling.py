@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from creator_engine_validator.checks import registered_checks
+from creator_engine_validator.checks.git_helpers import repo_root_for, run_git
 from creator_engine_validator.checks import test_coupling as chk
 
 
@@ -49,6 +50,15 @@ def _commit_all(repo: Path, message: str = "change") -> None:
 def test_registered_in_check_surface() -> None:
     reg = registered_checks()
     assert chk.CHECK_NAME in reg and reg[chk.CHECK_NAME].frs
+
+
+def test_uses_shared_public_git_helpers(tmp_path: Path) -> None:
+    repo, _base = _init_repo(tmp_path)
+
+    returncode, stdout, stderr = run_git(["rev-parse", "--show-toplevel"], repo)
+
+    assert returncode == 0, stderr
+    assert Path(stdout.strip()) == repo_root_for(repo / "src" / "app.py")
 
 
 def test_code_change_without_test_emits_finding(tmp_path: Path) -> None:

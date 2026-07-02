@@ -10,8 +10,6 @@ input from ``<base>..HEAD``.
 
 from __future__ import annotations
 
-import subprocess
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath, Path
 from typing import Any, Final, Iterable
@@ -21,6 +19,7 @@ from ..reporting import CheckResult, ValidationError, make_error
 from ..schema import validate_with_schema
 from ..work_sizing import WORK_CLASSES, normalize_work_class
 from . import register
+from .git_helpers import repo_root_for, run_git
 
 CHECK_NAME = "work_sizing_floor"
 CONTRACT = "schemas/work-sizing-floor.schema.yaml"
@@ -116,30 +115,6 @@ def parse_numstat(text: str) -> list[ChangeStat]:
             raise ValueError("invalid numstat line")
         stats.append(ChangeStat(path=path, additions=additions, deletions=deletions, binary=binary))
     return stats
-
-
-def _run_git(args: Sequence[str], cwd: Path) -> tuple[int, str, str]:
-    """Run a git command, returning (returncode, stdout, stderr). Never raises."""
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
-        return 1, "", str(exc)
-    return result.returncode, result.stdout, result.stderr
-
-
-def _repo_root_for(path: Path) -> Path:
-    start = path if path.is_dir() else path.parent
-    for candidate in (start, *start.parents):
-        if (candidate / ".git").exists() or (candidate / "validators").is_dir():
-            return candidate
-    return Path.cwd()
 
 
 def _coerce_change_stat(raw: ChangeStat | dict[str, Any]) -> ChangeStat:
@@ -336,10 +311,10 @@ def run_with_base(
 ) -> CheckResult:
     """PR-diff gate for ``git diff --numstat --find-renames <base>..HEAD``."""
     raw_paths = [Path(p) for p in paths] or [Path(".")]
-    repo_root = _repo_root_for(raw_paths[0])
+    repo_root = repo_root_for(raw_paths[0])
     errors: list[ValidationError] = []
 
-    returncode, stdout, _stderr = _run_git(
+    returncode, stdout, _stderr = run_git(
         ["diff", "--numstat", "--find-renames", f"{base}..HEAD"],
         repo_root,
     )
