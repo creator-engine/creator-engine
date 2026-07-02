@@ -561,11 +561,17 @@ Options:
 
 ### `init`
 
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `target` |  | target project directory (default: cwd) |
+
 Options:
 
 | Option | Required | Choices | Description |
 | --- | --- | --- | --- |
-| `--repo-root` | no |  | repo root to initialize (default: cwd) |
+| `--force` | no |  | overwrite CE scaffold files that differ from the embedded templates |
 | `--json` | no |  | emit machine-readable JSON |
 
 ### `lane`

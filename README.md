@@ -93,9 +93,8 @@ CE coordinates agentic development around these invariants:
   security, release, and trust-root changes still require the Operator or another
   ratified human authority.
 
-The highest-authority governance text is
-[`.specify/memory/constitution.md`](./.specify/memory/constitution.md).
-Operational governance is summarized in [`GOVERNANCE.md`](./GOVERNANCE.md).
+The highest-authority governance summary is [`GOVERNANCE.md`](./GOVERNANCE.md),
+with detailed operating contracts under `docs/`.
 
 ## The Runtime Surfaces
 
@@ -114,6 +113,9 @@ platform evolves:
   `ce containment-probe`, `ce reviewer-triage`, `ce claim`, `ce pickup`,
   `ce dispatch`, `ce playbook`, `ce surfaces`, `ce bootstrap`
   (offline provisioning for a source-clone controller/seat venv),
+  `ce init` (offline, idempotent CE-native project scaffolding for
+  `.ce/` Scope templates, per-PR changelog fragments, path-manifest carriers,
+  declared work-class lines, local CE skills, and `ce validate-pr` notes),
   `ce verify-install` (post-install provenance verification for a pinned CE
   release venv), `ce update` (signed in-place CE release updates by default,
   with `ce update --check` as the read-only installed-vs-available data source;
@@ -127,9 +129,9 @@ platform evolves:
   seats' commit-only branches), and `ce onboard` (the first-run one-shot
   orchestrator: it sequences the
   preflight doctor, install detection/acquisition, the `ce verify-install`
-  provenance gate, the managed profile PATH block, `ce init` + `ce brain init`,
-  and exactly one governed first launch — idempotent, resumable, and gracefully
-  degrading; `ce onboard --emit-manifest` emits a machine-readable description of
+  provenance gate, the managed profile PATH block, the local CE state init leg
+  plus `ce brain init`, and exactly one governed first launch — idempotent,
+  resumable, and gracefully degrading; `ce onboard --emit-manifest` emits a machine-readable description of
   each phase's blast-radius and consequence-class so a user's own agent can plan
   and gate the install under the governed-install rail). `ce pickup`
   is a read-only, Search-API-backed autonomous forge
@@ -298,7 +300,7 @@ OpenShell targeted behind the same adapter direction.
 
 - `.ce/` - CE state namespace, per-PR manifests, changelog fragments, and
   research/design records committed when they are durable repo artifacts.
-- `.specify/` and `specs/` - Spec Kit substrate and historical feature specs.
+- `specs/` - historical feature specs retained for provenance.
 - `docs/` - product, architecture, governance, operations, contracts, install,
   and roadmap documentation. Served trust-root files under `docs/` are handled
   by explicit release/install gates only.
