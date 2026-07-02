@@ -1,10 +1,6 @@
 # From Agile/SCRUM to Creator Engine SDLC
 
-> **DRAFT — pending Operator sign-off.**
->
-> This public draft is for review only. Do not link it from the public site
-> navigation until sign-off confirms the terminology, examples, and product
-> positioning.
+> **Draft — content pending final review.**
 
 Agile and SCRUM give teams a familiar language for deciding what to build,
 sequencing the work, and proving that an increment is done. Creator Engine
@@ -14,30 +10,39 @@ explicit ratification**.
 
 If you already think in sprints, backlog items, acceptance criteria, reviews,
 and Definition of Done, this guide maps that muscle memory onto CE's SDLC. The
-short version: CE turns intent into a spec, plan, task set, reviewed change,
-carrier, changelog, and ratified delivery record. CI is part of the proof, but
-CI does not authorize the work by itself.
+short version: CE moves work through the same canonical stages used across the
+guide set: **Frame -> Shape -> Build -> Review -> Ship**. Start at
+[`welcome.md`](./welcome.md) for the onboarding front door, use
+[`understanding-ce.md`](./understanding-ce.md) for the plain-language workflow
+tour, and use [`contributing-to-ce.md`](./contributing-to-ce.md) when you are
+contributing to CE itself. The precise vocabulary canon is
+[`../architecture/stage-vocabulary.md`](../architecture/stage-vocabulary.md).
+CI is part of the proof, but CI does not authorize the work by itself.
 
 ---
 
 ## The Mental Model
 
 SCRUM is usually organized around a team cadence. CE is organized around a
-governed unit of change.
+governed unit of change moving through the canonical stage loop:
+
+**Frame -> Shape -> Build -> Review -> Ship**
 
 In SCRUM, a team takes items from a backlog into a sprint, coordinates daily,
 reviews the increment, and decides whether it satisfies the Definition of Done.
-In CE, a contributor or governed agent moves a scoped change through durable
-artifacts:
+In CE, a contributor or governed agent Frames the problem, Shapes it into a
+ratifiable Scope, Builds inside the authorized envelope, sends the result
+through independent Review, and Ships only when the governed finish is
+authorized.
 
-**spec -> plan -> tasks -> implementation -> independent review -> ratification
--> changelog + carrier -> ship**
-
-The artifacts matter because they survive context loss. A chat transcript can
-help explain a decision, but it is not the source of truth. The spec says what
-is being built, the plan says how, the task list gives execution order, the
-pull request carries the diff, the changelog records the user-facing result,
-and the carrier declares the exact path set the change is allowed to touch.
+The supporting artifacts matter because they survive context loss. A chat
+transcript can help explain a decision, but it is not the source of truth. The
+right artifact set depends on the work size: an `XS` change may only need a
+scope card, `S` work may carry intent, scope, and tasks, `M` work usually has a
+full spec, plan, and task set, and `L` work adds heavier decomposition. Across
+all sizes, the pull request carries the diff, the changelog records the
+user-facing result, and the carrier declares the exact path set the change is
+allowed to touch.
 
 ---
 
@@ -45,52 +50,56 @@ and the carrier declares the exact path set the change is allowed to touch.
 
 | SCRUM concept | CE equivalent | What changes |
 | --- | --- | --- |
-| Sprint | Arc or wave | Work is grouped by outcome and dependency order, not only by calendar time. |
+| Sprint | Batch of scoped work moving through Frame -> Shape -> Build -> Review -> Ship | Work is grouped by outcome and dependency order, not only by calendar time. |
 | Product backlog | Projects board and task queue | Ready work is tracked as ordered issues or tasks, with dependencies and ownership visible. |
-| User story | Scoped task from a spec | The unit of work is tied back to a written spec, plan, and done criteria. |
+| User story | Scope or task shaped from product intent | The unit of work is tied back to the artifact set appropriate for its size and done criteria. |
 | Story points | Work class: `XS`, `S`, `M`, `L` | Size is declared as an execution and review floor, not a velocity accounting unit. |
-| Sprint planning | Spec and plan review | The team shapes intent before implementation and checks that scope, budget, risk, and dependencies are explicit. |
-| Backlog refinement | Spec clarification and task decomposition | Ambiguity is resolved in the artifact, then reflected in plan and tasks. |
-| Daily standup | Async controller and seat flow | Progress is reported through issue comments, PR state, CI, review evidence, and handoff notes rather than synchronous status meetings. |
-| Pull request review | Independent governed review plus ratification | A separate reviewer inspects the artifacts; authorization remains a ratification act, not a rubber stamp from green CI. |
-| Definition of Done | CI gates plus envelope authority | Tests, validation, path scope, review, and ratification must all fit the authorized envelope. |
+| Sprint planning | Shape | The team shapes intent before implementation and checks that scope, budget, risk, and dependencies are explicit. |
+| Backlog refinement | Frame and Shape | Ambiguity is resolved in durable artifacts before Build starts. |
+| Daily standup | Async governed workflow | Progress is reported through issue comments, PR state, CI, review evidence, and handoff notes rather than synchronous status meetings. |
+| Pull request review | Review plus ratification-aware Ship | A separate reviewer inspects the artifacts; authorization remains a ratification act, not a rubber stamp from green CI. |
+| Definition of Done | Review evidence plus Ship authority | Tests, validation, path scope, review, and ratification must all fit the authorized envelope. |
 | Sprint review | Completion evidence | The useful demo artifact is the merged or reviewed change plus its evidence chain. |
 | Retrospective | Changelog and process feedback | Lessons become durable docs, specs, checks, or follow-up tasks. |
 
 ---
 
-## From Sprint to Arc or Wave
+## From Sprint to Scoped Batches
 
-A sprint is a timebox. An arc or wave is an outcome slice.
+A sprint is a timebox. CE batches work by outcome, dependency order, and review
+size.
 
-An arc describes a coherent product or platform objective: for example,
+A scoped batch describes a coherent product or platform objective: for example,
 "make first-run onboarding reliable" or "ship governed PR review for external
-contributors." A wave is a smaller batch inside that arc, usually chosen
-because the tasks share dependencies or can land together cleanly.
+contributors." Smaller batches are usually chosen because the tasks share
+dependencies or can land together cleanly.
 
 The practical difference is that CE does not ask work to wait for the next
 ceremony if the artifacts and gates are ready. A small `XS` docs fix can move
 through quickly. A larger `M` or `L` feature can be split into smaller tasks
-inside the same arc so each PR remains reviewable and governed.
+inside the same objective so each PR remains reviewable and governed.
 
 ---
 
 ## From Backlog to Projects Board
 
 A SCRUM backlog is the ordered list of future work. In CE, the equivalent is
-the Projects board and issue/task queue, backed by specs and plans.
+the Projects board and issue/task queue, backed by durable artifacts.
 
 Good CE backlog items are not just titles. They should point to the artifact
-that explains why the work exists:
+that explains why the work exists. The bundle scales with size rather than
+requiring every unit to carry the same ceremony:
 
-- A spec for the user need and acceptance criteria.
-- A plan for the technical approach and known constraints.
-- Tasks that can be claimed, reviewed, and shipped independently.
+- A scope card for a small, low-risk change.
+- Intent, scope, and tasks for routine single-slice work.
+- A spec, plan, and tasks for larger behavior-bearing work.
+- Tasks or slices that can be claimed, reviewed, and shipped independently.
 - Dependencies that make sequencing clear.
 
 This keeps product intent and implementation work aligned. A task without a
-spec is easy to misunderstand. A spec without tasks is hard to execute. CE
-expects both sides to stay connected.
+clear artifact trail is easy to misunderstand. A larger spec without tasks is
+hard to execute. CE expects both sides to stay connected at the right level of
+ceremony for the work.
 
 ---
 
@@ -125,7 +134,7 @@ CE answers those questions through the work itself:
 - CI and validation show whether the change is mechanically acceptable.
 - Review comments show whether an independent reviewer accepts the artifacts.
 
-That async flow matters because governed work may involve multiple seats:
+That async flow matters because governed work may involve multiple roles:
 one actor shapes or dispatches, another implements, and a distinct reviewer
 checks the result. The process avoids relying on a meeting transcript as the
 record of truth.
@@ -161,7 +170,7 @@ For a CE change to be done, the evidence should show:
 - The spec, plan, and task are aligned.
 - The implementation stays inside the authorized scope.
 - The PR path carrier lists the exact files the change is allowed to touch.
-- The changelog records the user-visible or operator-visible result.
+- The changelog records the user-visible or maintainer-visible result.
 - CI and local validation pass.
 - Independent review has checked the artifact.
 - Required ratification exists for the risk being shipped.
@@ -182,7 +191,7 @@ This turns "stay in scope" from review advice into a concrete check.
 
 The **changelog** is the durable delivery note. It is not a standup update and
 not a commit message replacement. It records what changed in a way future
-operators and contributors can scan without reconstructing the whole PR.
+maintainers and contributors can scan without reconstructing the whole PR.
 
 Together, the carrier and changelog make a PR easier to audit: what was allowed
 to change, what actually changed, and what the result means.
@@ -197,7 +206,7 @@ story to done.
 
 In CE terms, the same day looks like this:
 
-1. Read the spec and plan for the next task in the arc.
+1. Read the relevant scope, spec, plan, or task for the next ready change.
 2. Confirm the task is unblocked and claim it.
 3. Implement only the scoped change.
 4. Update or add tests, docs, changelog, and carrier evidence as appropriate.
@@ -216,11 +225,12 @@ product conversation and removes ambiguity about authority.
 Start by translating your existing nouns rather than replacing everything at
 once:
 
-- Treat epics or initiatives as arcs.
-- Treat sprint-sized batches as waves.
-- Treat backlog items as tasks that must point back to a spec and plan.
+- Treat epics or initiatives as outcome areas.
+- Treat sprint-sized batches as scoped batches.
+- Treat backlog items as tasks that point back to the right scope, spec, or
+  plan artifact for their size.
 - Treat acceptance criteria as done criteria that validators and reviewers can
-check.
+  check.
 - Treat story points as work-class declarations.
 - Treat PR review as evidence, not authorization.
 
@@ -230,12 +240,8 @@ authority explicit enough that governed agents can participate safely.
 
 ---
 
-## Before This Guide Is Linked
+## Review Notes
 
-This draft should stay unlinked until Operator sign-off confirms:
-
-- The public terminology is correct.
-- The SCRUM mapping is accurate enough for new contributors.
-- The examples match the current CE command and artifact model.
-- The rendered HTML sibling and site navigation are added intentionally, if the
-  site publishing flow requires them.
+This draft still needs final content review for terminology, examples, and
+product positioning. The mapping should remain anchored to the CE canon:
+Frame, Shape, Build, Review, and Ship.
