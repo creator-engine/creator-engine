@@ -17,11 +17,13 @@ import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Protocol, TextIO
 
 from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class
 
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
+NETWORK_SUBPROCESS_TIMEOUT_ENV = "CE_NETWORK_SUBPROCESS_TIMEOUT_SECONDS"
+DEFAULT_NETWORK_SUBPROCESS_TIMEOUT_SECONDS = 60.0
 DEFAULT_TEST_COMMAND = (
     f"{shlex.quote(sys.executable)} -m pytest -p no:cacheprovider "
     'validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup'
@@ -63,7 +65,40 @@ class CheckDetail:
     detail: str
 
 
-Runner = Callable[[Sequence[str], Path, Mapping[str, str] | None], CommandResult]
+class Runner(Protocol):
+    def __call__(
+        self,
+        argv: Sequence[str],
+        cwd: Path,
+        env: Mapping[str, str] | None,
+        *,
+        timeout: float | None = None,
+    ) -> CommandResult: ...
+
+
+def _network_subprocess_timeout_seconds() -> float:
+    raw = os.environ.get(NETWORK_SUBPROCESS_TIMEOUT_ENV)
+    if raw is None or raw.strip() == "":
+        return DEFAULT_NETWORK_SUBPROCESS_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError:
+        raise RuntimeError(f"{NETWORK_SUBPROCESS_TIMEOUT_ENV} must be a positive number of seconds") from None
+    if timeout <= 0:
+        raise RuntimeError(f"{NETWORK_SUBPROCESS_TIMEOUT_ENV} must be a positive number of seconds")
+    return timeout
+
+
+def _network_timeout_message(
+    *,
+    context: str,
+    argv: Sequence[str],
+    timeout: float | None,
+    checks: str,
+) -> str:
+    rendered = shlex.join(str(part) for part in argv)
+    suffix = f" after {timeout:g}s" if timeout else ""
+    return f"{context} timed out{suffix}: {rendered}. Check {checks}."
 
 
 def default_runner(
@@ -155,11 +190,19 @@ def _fetch_base(base: str, repo_root: Path, runner: Runner, out: TextIO, err: Te
     if remote_branch is None:
         return
 
-    result = runner(
-        ["git", "fetch", "--no-tags", "--prune", "origin", f"+refs/heads/{remote_branch}:refs/remotes/origin/{remote_branch}"],
-        repo_root,
-        None,
-    )
+    argv = ["git", "fetch", "--no-tags", "--prune", "origin", f"+refs/heads/{remote_branch}:refs/remotes/origin/{remote_branch}"]
+    timeout = _network_subprocess_timeout_seconds()
+    try:
+        result = runner(argv, repo_root, None, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            _network_timeout_message(
+                context=f"git fetch for base branch {remote_branch!r}",
+                argv=argv,
+                timeout=exc.timeout or timeout,
+                checks="network connectivity, GitHub availability, and access to the origin remote",
+            )
+        ) from None
     _print_streams(result, out, err)
     if result.returncode != 0:
         raise RuntimeError(f"failed to fetch base branch {remote_branch!r}")
@@ -296,15 +339,26 @@ def _resolve_test_coupling_pr_body(
     if not config.head_ref:
         return None
 
+    timeout = _network_subprocess_timeout_seconds()
+    argv = ["gh", "pr", "view", config.head_ref, "--json", "body", "--jq", ".body"]
     try:
         result = runner(
-            ["gh", "pr", "view", config.head_ref, "--json", "body", "--jq", ".body"],
+            argv,
             config.repo_root,
             None,
-            timeout=10,
+            timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
-        print("WARNING: timed out reading PR body via gh for test-coupling exemption", file=out)
+    except subprocess.TimeoutExpired as exc:
+        print(
+            "WARNING: "
+            + _network_timeout_message(
+                context="timed out reading PR body via gh for test-coupling exemption",
+                argv=argv,
+                timeout=exc.timeout or timeout,
+                checks="network connectivity, GitHub availability, and gh authentication",
+            ),
+            file=out,
+        )
         return None
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
