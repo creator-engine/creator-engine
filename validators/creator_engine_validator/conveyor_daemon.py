@@ -22,6 +22,7 @@ from .conveyor import (
     land_bundle,
     prepare_harvest,
 )
+from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
 from .checks.path_manifest_fidelity import branch_slug
 
 
@@ -53,10 +54,10 @@ DEFAULT_REMOTE = "origin"
 
 # --- Trust boundary for filesystem paths -----------------------------------
 #
-# The discovery payload is DATA describing *which* branch/issue/PR text to
-# use. It must never hand the daemon execution CONTROL over *where on the
-# filesystem* git operates. Two payload fields are filesystem paths that
-# reach git argv or become a git ``cwd``:
+# Raw discovery mappings are DATA describing only branch/issue/PR text. They
+# must never hand the daemon execution CONTROL over *where on the filesystem*
+# git operates. ConveyorDaemonItem instances may still carry daemon-allocated
+# filesystem paths that reach git argv or become a git ``cwd``:
 #
 #   * ``bundle_path`` is passed as a bare positional to
 #     ``git bundle verify <bundle>`` and ``git fetch <bundle> ...``
@@ -73,15 +74,14 @@ DEFAULT_REMOTE = "origin"
 #     *resolve to* (e.g. ``[remote "origin"] url = ext::sh -c '<cmd>'``),
 #     which is RCE that bypasses the remote/base pin entirely.
 #
-# The fix is confinement, not a per-field allow/deny list: every payload
-# path is resolved (symlinks + ``..`` collapsed) and REJECTED, fail-closed,
-# unless it resolves under a daemon-pinned trusted root. This single
-# invariant blocks both directory-redirection (an absolute path entirely
-# outside the trusted tree) and ``..``-traversal (a path that starts under
-# the root but walks back out). ``bundle_path`` additionally gets the same
-# argv-gadget shape rejection as base/remote/validate_command below, as
-# belt-and-suspenders: a confined *filename* still shouldn't be
-# ``ext::``-shaped.
+# The item-path fix is confinement: every item path is resolved (symlinks +
+# ``..`` collapsed) and REJECTED, fail-closed, unless it resolves under a
+# daemon-pinned trusted root. This single invariant blocks both
+# directory-redirection (an absolute path entirely outside the trusted tree)
+# and ``..``-traversal (a path that starts under the root but walks back out).
+# ``bundle_path`` additionally gets the same argv-gadget shape rejection as
+# base/remote/validate_command below, as belt-and-suspenders: a confined
+# *filename* still shouldn't be ``ext::``-shaped.
 #
 # There is no safe default trusted root (unlike base/remote, "no config
 # supplied" cannot fall back to something world-writable like ``/tmp``), so
@@ -126,57 +126,34 @@ class ConveyorDaemonItem:
     pr_body: str | None = None
     pr_base: str | None = None
     identity: str | None = None
-    payload_requested_validate_command: bool = False
-    payload_requested_base: bool = False
-    payload_requested_remote: bool = False
+    daemon_owned_paths_allocated: bool = True
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ConveyorDaemonItem":
-        # validate_command, base, and remote are intentionally NOT read from
-        # the untrusted discovery payload: each flows straight into a
-        # subprocess/git argv (see conveyor._run_validation and, for
-        # base/remote, conveyor.prepare_harvest's `git rebase <base>` and
-        # ConveyorDaemon._process_armed's `git push <remote> ...`), so a
-        # compromised/malicious seat payload could otherwise smuggle an
-        # argv-injection gadget (e.g. `--exec=<cmd>` as base, `ext::<cmd>` as
-        # remote) into the daemon's execution context. All three are pinned
-        # at the ConveyorDaemon level (constructor, defaulting to
-        # DEFAULT_VALIDATE_COMMAND / DEFAULT_BASE / DEFAULT_REMOTE) instead.
-        # We only note here whether the payload tried to supply one so the
-        # daemon can log-and-skip the attempted override; the field values
-        # below are never derived from the payload.
-        #
-        # worktree_path/bundle_path/repo_path/pr_base ARE genuinely per-item
-        # data (which branch's worktree, which bundle file, which landing
-        # repo, which PR base) that must come from the discovery payload --
-        # unlike base/remote/validate_command there is no single daemon-wide
-        # value to pin them to. They are still untrusted here: the daemon
-        # confines/shape-validates them fail-closed in
-        # ConveyorDaemon._path_confinement_violations before any of them
-        # reach a git/gh subprocess argv or cwd (see the module comment
-        # above DEFAULT_BASE).
+    def from_mapping(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
+    ) -> "ConveyorDaemonItem":
+        # Raw discovery mappings cross the ADR-0004 trust boundary. Validate
+        # the allowlisted data-only shape before reading any field; rejected
+        # control fields such as validate_command/base/remote or local paths
+        # are audited by the shared schema and never reach item construction.
+        parsed = validate_discovery_payload(payload, audit_sink=audit_sink, source="conveyor_daemon")
         return cls(
-            branch=str(payload["branch"]),
-            worktree_path=Path(payload["worktree_path"]),
-            bundle_path=Path(payload["bundle_path"]),
-            repo_path=Path(payload["repo_path"]),
-            issue=str(payload.get("issue", "ce-conveyor")),
-            title=str(payload.get("title", "Conveyor harvest")),
-            kind=str(payload.get("kind", "changed")),
-            scope=str(payload.get("scope", "conveyor harvest")),
-            body=str(payload.get("body", "- Prepared conveyor harvest.")),
-            declared_work_class=str(payload.get("declared_work_class", "story")),
-            carrier_date=_optional_str(payload.get("carrier_date")),
-            rebase=bool(payload.get("rebase", True)),
-            refresh_base=bool(payload.get("refresh_base", True)),
-            allow_dirty_validation=bool(payload.get("allow_dirty_validation", True)),
-            pr_title=_optional_str(payload.get("pr_title")),
-            pr_body=_optional_str(payload.get("pr_body")),
-            pr_base=_optional_str(payload.get("pr_base")),
-            identity=_optional_str(payload.get("identity")),
-            payload_requested_validate_command="validate_command" in payload,
-            payload_requested_base="base" in payload,
-            payload_requested_remote="remote" in payload,
+            branch=parsed.branch_name,
+            worktree_path=Path("."),
+            bundle_path=Path("."),
+            repo_path=Path("."),
+            issue=parsed.issue,
+            title=parsed.pr_title,
+            kind="changed",
+            scope="conveyor harvest",
+            body=parsed.pr_body,
+            declared_work_class="story",
+            pr_title=parsed.pr_title,
+            pr_body=parsed.pr_body,
+            daemon_owned_paths_allocated=False,
         )
 
     @property
@@ -310,7 +287,7 @@ class ConveyorDaemon:
         # discovery payload (see ConveyorDaemonItem.from_mapping and the
         # module docstring comment above DEFAULT_BASE). _process_armed uses
         # self.base/self.remote exclusively; any per-item base/remote in a
-        # discovered payload is ignored (and logged) rather than honored.
+        # discovered payload is rejected by the schema rather than honored.
         # Defense-in-depth: even this trusted config value is rejected here
         # if it is shaped like a git argv-injection gadget, so a
         # misconfigured/compromised launcher can't smuggle one in either.
@@ -320,12 +297,12 @@ class ConveyorDaemon:
         self.remote: str = _reject_git_argv_gadget(
             str(remote) if remote is not None else DEFAULT_REMOTE, label="remote"
         )
-        # repo_root/bundle_root are the trusted confinement anchors for the
-        # untrusted discovery payload's filesystem paths (see the module
-        # comment above DEFAULT_BASE). There is no safe implicit default, so
-        # they are resolved here if supplied and required below when armed;
-        # every payload bundle_path/repo_path/worktree_path must resolve
-        # under one of these before the daemon will touch it.
+        # repo_root/bundle_root are the trusted confinement anchors for item
+        # filesystem paths (see the module comment above DEFAULT_BASE).
+        # There is no safe implicit default, so they are resolved here if
+        # supplied and required below when armed; every item
+        # bundle_path/repo_path/worktree_path must resolve under one of these
+        # before the daemon will touch it.
         self.repo_root: Path | None = Path(repo_root).resolve() if repo_root is not None else None
         self.bundle_root: Path | None = Path(bundle_root).resolve() if bundle_root is not None else None
         self._completed_keys: set[str] = set()
@@ -357,7 +334,27 @@ class ConveyorDaemon:
         """
 
         try:
-            discovered = tuple(_coerce_item(item) for item in self.discovery_runner())
+            discovered_items: list[ConveyorDaemonItem] = []
+            for item in self.discovery_runner():
+                try:
+                    discovered_items.append(
+                        _coerce_item(item, audit_sink=self._audit_discovery_payload_rejection)
+                    )
+                except DiscoveryPayloadRejected:
+                    continue
+                except TypeError as exc:
+                    if not str(exc).startswith("unsupported discovery item type:"):
+                        raise
+                    self._audit_discovery_payload_rejection(
+                        {
+                            "action": "discovery_payload_rejected",
+                            "source": "conveyor_daemon",
+                            "reason": "unsupported_discovery_item_type",
+                            "detail": str(exc),
+                        }
+                    )
+                    continue
+            discovered = tuple(discovered_items)
         except Exception as exc:
             self._log(f"conveyor discovery failed: {exc}")
             return ConveyorDaemonRunResult(
@@ -366,23 +363,6 @@ class ConveyorDaemon:
                 results=(),
                 discovery_error=str(exc),
             )
-
-        for item in discovered:
-            if item.payload_requested_validate_command:
-                self._log(
-                    f"conveyor discovery payload for {item.branch} attempted to override "
-                    "validate_command; ignoring untrusted override, using daemon-pinned command"
-                )
-            if item.payload_requested_base:
-                self._log(
-                    f"conveyor discovery payload for {item.branch} attempted to override "
-                    "base; ignoring untrusted override, using daemon-pinned base"
-                )
-            if item.payload_requested_remote:
-                self._log(
-                    f"conveyor discovery payload for {item.branch} attempted to override "
-                    "remote; ignoring untrusted override, using daemon-pinned remote"
-                )
 
         seen_this_pass: set[str] = set()
         results: list[ConveyorDaemonItemResult] = []
@@ -428,7 +408,13 @@ class ConveyorDaemon:
 
     def _process_armed(self, item: ConveyorDaemonItem) -> ConveyorDaemonItemResult:
         records: list[ConveyorDaemonLedgerRecord] = []
-        # Confine/validate every untrusted-payload filesystem path and the
+        if not item.daemon_owned_paths_allocated:
+            return self._failed(
+                item,
+                ("data-only discovery payload accepted, but daemon-owned path allocation is not wired",),
+                ledger_records=records,
+            )
+        # Confine/validate every item filesystem path and the
         # pr_base shape BEFORE any prepare/land/push/pr-open action runs, so
         # a rejected item never reaches git_runner/gh_runner at all (fail
         # closed, log, skip). This is checked first, ahead of the try/except
@@ -441,7 +427,7 @@ class ConveyorDaemon:
         # bundle_path/repo_path/worktree_path (symlinks + `..` collapsed) to
         # verify they land under the pinned root, then handed those resolved
         # Paths back via `resolved_paths`. From here on we thread THOSE
-        # resolved paths -- not the raw payload values still sitting on
+        # resolved paths -- not the raw path values still sitting on
         # `item` -- through every downstream prepare/land/push/pr-open call.
         # If we kept using the raw, unresolved item fields, an attacker who
         # passes this check with a legitimate path and then swaps that
@@ -546,7 +532,7 @@ class ConveyorDaemon:
     def _path_confinement_violations(
         self, item: ConveyorDaemonItem
     ) -> tuple[tuple[str, ...], dict[str, Path]]:
-        """Fail-closed audit of every untrusted-payload path/branch-shape
+        """Fail-closed audit of every item path/branch-shape
         field that reaches a git/gh argv or becomes a subprocess cwd.
 
         Returns a ``(violations, resolved_paths)`` pair. ``violations`` is
@@ -660,12 +646,19 @@ class ConveyorDaemon:
         if self.log_runner is not None:
             self.log_runner(message)
 
+    def _audit_discovery_payload_rejection(self, record: Mapping[str, Any]) -> None:
+        self._log(f"conveyor discovery payload audit: {json.dumps(dict(record), sort_keys=True)}")
 
-def _coerce_item(item: ConveyorDaemonItem | Mapping[str, Any]) -> ConveyorDaemonItem:
+
+def _coerce_item(
+    item: ConveyorDaemonItem | Mapping[str, Any],
+    *,
+    audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
+) -> ConveyorDaemonItem:
     if isinstance(item, ConveyorDaemonItem):
         return item
     if isinstance(item, Mapping):
-        return ConveyorDaemonItem.from_mapping(item)
+        return ConveyorDaemonItem.from_mapping(item, audit_sink=audit_sink)
     raise TypeError(f"unsupported discovery item type: {type(item).__name__}")
 
 
@@ -718,12 +711,12 @@ def _reject_git_argv_gadget(value: str, *, label: str) -> str:
     * the daemon-pinned ``base``/``remote`` config themselves
       (defense-in-depth for a misconfigured/compromised launcher) on top of
       the primary control, which is that these values are never sourced
-      from the untrusted discovery payload in the first place;
-    * the untrusted payload's ``bundle_path``, as belt-and-suspenders on top
+      from the discovery payload in the first place;
+    * the item ``bundle_path``, as belt-and-suspenders on top
       of ``_confine_path`` confinement -- a confined *filename* still
       shouldn't be ``ext::``-shaped before it reaches
       ``git bundle verify``/``git fetch``;
-    * the untrusted payload's ``pr_base``, which reaches a fixed
+    * the item ``pr_base``, which reaches a fixed
       ``gh pr create --base <value>`` flag-value slot (not RCE from that
       slot, but rejecting the same shapes is cheap defense-in-depth against
       branch misdirection).

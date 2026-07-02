@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -140,6 +141,15 @@ def _item(branch: str = "Feature/One") -> ConveyorDaemonItem:
     )
 
 
+def _data_only_payload() -> dict[str, str]:
+    return {
+        "issue": "388",
+        "branch_name": "feature-one",
+        "pr_title": "Land Feature/One",
+        "pr_body": "- Conveyor item.",
+    }
+
+
 def _harvest_result(
     spec: ConveyorHarvestSpec,
     *,
@@ -274,30 +284,33 @@ def test_armed_push_failure_records_ledger_and_skips_pr_open():
     assert gh.calls == []
 
 
-def test_hostile_payload_validate_command_override_is_ignored():
-    """A malicious/compromised discovery payload must never control the
-    executed validate command: it is pinned at the daemon level and any
-    payload-supplied override is dropped (and logged), not honored."""
-
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("validate_command", ["touch", "/tmp/pwned"], "banned_control_field"),
+        ("base", "--exec=touch /tmp/pwned", "banned_control_field"),
+        ("remote", "ext::sh -c 'touch /tmp/pwned'", "banned_control_field"),
+        ("worktree_path", "/tmp/feature-one", "banned_control_field"),
+        ("bundle_path", "/tmp/feature-one.bundle", "banned_control_field"),
+        ("repo_path", "/tmp/landing", "banned_control_field"),
+        ("pr_base", "release", "banned_control_field"),
+    ],
+)
+def test_discovery_mapping_with_legacy_control_field_is_rejected_and_audited(
+    field: str,
+    value: object,
+    reason: str,
+):
     prepare = FakePrepare()
     land = FakeLand()
     git = FakeGit()
     gh = FakeGh()
     ledger: list[ConveyorDaemonLedgerRecord] = []
     logs: list[str] = []
+    payload = {**_data_only_payload(), field: value}
 
-    hostile_payload = {
-        "branch": "Feature/One",
-        "worktree_path": "/tmp/feature-one",
-        "bundle_path": "/tmp/feature-one.bundle",
-        "repo_path": "/tmp/landing",
-        "title": "Land Feature/One",
-        "body": "- Conveyor item.",
-        "validate_command": ["touch", "/tmp/pwned"],
-    }
-
-    daemon = ConveyorDaemon(
-        discovery_runner=lambda: [hostile_payload],
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -308,35 +321,110 @@ def test_hostile_payload_validate_command_override_is_ignored():
         log_runner=logs.append,
         prepare_runner=prepare,
         land_runner=land,
+    ).run_once()
+
+    assert result.discovery_error is None
+    assert result.discovered_count == 0
+    assert result.results == ()
+    assert any(
+        "conveyor discovery payload audit" in message
+        and f'"field": "{field}"' in message
+        and f'"reason": "{reason}"' in message
+        for message in logs
     )
-    result = daemon.run_once()
-
-    assert result.results[0].status == "pr-opened"
-    assert len(prepare.calls) == 1
-    used_command = prepare.calls[0].validate_command
-    assert used_command == daemon.validate_command
-    assert used_command != ("touch", "/tmp/pwned")
-    assert "touch" not in used_command
-    assert any("attempted to override validate_command" in message for message in logs)
+    assert prepare.calls == []
+    assert land.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+    assert ledger == []
 
 
-def test_daemon_pinned_validate_command_used_regardless_of_payload():
-    """Even a benign-looking payload validate_command is ignored: the daemon's
-    own configured command (constructor-level) is always the one executed."""
+def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item():
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+    rejected_payload = {**_data_only_payload(), "validate_command": ["touch", "/tmp/pwned"]}
 
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [_item(), rejected_payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    ).run_once()
+
+    assert result.discovery_error is None
+    assert result.discovered_count == 1
+    assert [item.status for item in result.results] == ["pr-opened"]
+    assert [spec.branch for spec in prepare.calls] == ["Feature/One"]
+    assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
+    assert git.calls == [(("push", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
+    assert len(gh.calls) == 1
+    assert any(
+        "conveyor discovery payload audit" in message
+        and '"field": "validate_command"' in message
+        and '"reason": "banned_control_field"' in message
+        for message in logs
+    )
+    assert not any("conveyor discovery failed" in message for message in logs)
+
+
+def test_data_only_discovery_mapping_plans_without_payload_paths():
+    logs: list[str] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [_data_only_payload()],
+        log_runner=logs.append,
+    ).run_once()
+
+    assert result.discovery_error is None
+    assert result.discovered_count == 1
+    assert result.results[0].status == "planned"
+    assert result.results[0].branch == "feature-one"
+    assert result.results[0].key == "feature-one"
+    assert not any("payload audit" in message for message in logs)
+
+
+def test_data_only_discovery_mapping_is_not_armed_without_daemon_paths():
+    prepare = FakePrepare()
+    git = FakeGit()
+    gh = FakeGh()
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [_data_only_payload()],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == (
+        "data-only discovery payload accepted, but daemon-owned path allocation is not wired",
+    )
+    assert prepare.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+
+
+def test_daemon_pinned_validate_command_used_for_item_objects():
     prepare = FakePrepare()
     daemon = ConveyorDaemon(
-        discovery_runner=lambda: [
-            {
-                "branch": "Feature/One",
-                "worktree_path": "/tmp/feature-one",
-                "bundle_path": "/tmp/feature-one.bundle",
-                "repo_path": "/tmp/landing",
-                "title": "Land Feature/One",
-                "body": "- Conveyor item.",
-                "validate_command": ["python", "-m", "some.other.module"],
-            }
-        ],
+        discovery_runner=lambda: [_item()],
         armed=True,
         **ARMED_ROOTS,
         git_runner=FakeGit(),
@@ -358,105 +446,7 @@ def test_daemon_pinned_validate_command_used_regardless_of_payload():
     )
 
 
-def test_hostile_payload_base_override_is_ignored():
-    """A malicious/compromised discovery payload must never control `base`:
-    it flows into a bare positional `git rebase <base>` / `git fetch`
-    argv slot, so `--exec=<cmd>` there is RCE. `base` is pinned at the
-    daemon level (mirrors validate_command) and any payload-supplied
-    override is dropped (and logged), not honored."""
-
-    prepare = FakePrepare()
-    land = FakeLand()
-    git = FakeGit()
-    gh = FakeGh()
-    ledger: list[ConveyorDaemonLedgerRecord] = []
-    logs: list[str] = []
-
-    hostile_payload = {
-        "branch": "Feature/One",
-        "worktree_path": "/tmp/feature-one",
-        "bundle_path": "/tmp/feature-one.bundle",
-        "repo_path": "/tmp/landing",
-        "title": "Land Feature/One",
-        "body": "- Conveyor item.",
-        "base": "--exec=touch /tmp/pwned",
-    }
-
-    daemon = ConveyorDaemon(
-        discovery_runner=lambda: [hostile_payload],
-        armed=True,
-        **ARMED_ROOTS,
-        git_runner=git,
-        validate_runner=FakeValidate(),
-        gh_runner=gh,
-        now=FakeClock(),
-        ledger_writer=ledger.append,
-        log_runner=logs.append,
-        prepare_runner=prepare,
-        land_runner=land,
-    )
-    result = daemon.run_once()
-
-    assert result.results[0].status == "pr-opened"
-    used_base = prepare.calls[0].base
-    assert used_base == daemon.base == "origin/main"
-    assert used_base != "--exec=touch /tmp/pwned"
-    assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
-    assert not any("--exec" in str(call) for call in git.calls)
-    assert any("attempted to override base" in message for message in logs)
-
-
-def test_hostile_payload_remote_override_is_ignored():
-    """A malicious/compromised discovery payload must never control
-    `remote`: it flows into the bare `<repository>` positional of
-    `git push <remote> ...`, so an `ext::<cmd>` transport-helper value there
-    is RCE. `remote` is pinned at the daemon level and any payload-supplied
-    override is dropped (and logged), not honored."""
-
-    prepare = FakePrepare()
-    land = FakeLand()
-    git = FakeGit()
-    gh = FakeGh()
-    ledger: list[ConveyorDaemonLedgerRecord] = []
-    logs: list[str] = []
-
-    hostile_payload = {
-        "branch": "Feature/One",
-        "worktree_path": "/tmp/feature-one",
-        "bundle_path": "/tmp/feature-one.bundle",
-        "repo_path": "/tmp/landing",
-        "title": "Land Feature/One",
-        "body": "- Conveyor item.",
-        "remote": "ext::sh -c 'touch /tmp/pwned'",
-    }
-
-    daemon = ConveyorDaemon(
-        discovery_runner=lambda: [hostile_payload],
-        armed=True,
-        **ARMED_ROOTS,
-        git_runner=git,
-        validate_runner=FakeValidate(),
-        gh_runner=gh,
-        now=FakeClock(),
-        ledger_writer=ledger.append,
-        log_runner=logs.append,
-        prepare_runner=prepare,
-        land_runner=land,
-    )
-    result = daemon.run_once()
-
-    assert result.results[0].status == "pr-opened"
-    assert daemon.remote == "origin"
-    assert git.calls == [(("push", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
-    assert not any("ext::" in str(call) for call in git.calls)
-    assert any("attempted to override remote" in message for message in logs)
-
-
-def test_daemon_pinned_base_and_remote_used_regardless_of_payload():
-    """Even benign-looking payload base/remote values are ignored: the
-    daemon's own configured base/remote (constructor-level) is always what
-    gets used for rebase/land/push."""
-
+def test_daemon_pinned_base_and_remote_used_for_item_objects():
     prepare = FakePrepare()
     land = FakeLand()
     git_calls: list[tuple[str, ...]] = []
@@ -465,33 +455,20 @@ def test_daemon_pinned_base_and_remote_used_regardless_of_payload():
         git_calls.append(tuple(args))
         return ConveyorCommandResult(0, "pushed\n", "")
 
-    gh = FakeGh()
-    daemon = ConveyorDaemon(
-        discovery_runner=lambda: [
-            {
-                "branch": "Feature/One",
-                "worktree_path": "/tmp/feature-one",
-                "bundle_path": "/tmp/feature-one.bundle",
-                "repo_path": "/tmp/landing",
-                "title": "Land Feature/One",
-                "body": "- Conveyor item.",
-                "base": "origin/release",
-                "remote": "upstream",
-            }
-        ],
+    ConveyorDaemon(
+        discovery_runner=lambda: [_item()],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git_runner,
         validate_runner=FakeValidate(),
-        gh_runner=gh,
+        gh_runner=FakeGh(),
         now=FakeClock(),
         ledger_writer=lambda record: None,
         prepare_runner=prepare,
         land_runner=land,
         base="origin/main",
         remote="origin",
-    )
-    daemon.run_once()
+    ).run_once()
 
     assert prepare.calls[0].base == "origin/main"
     assert land.calls[0][2] == "origin/main"
@@ -538,9 +515,10 @@ def test_idempotent_re_discovery_skips_completed_item():
     assert len(gh.calls) == 1
 
 
-def test_hostile_payload_bundle_path_transport_gadget_is_rejected_never_reaches_git():
-    """A compromised harvest seat authors the bundle file, so it controls
-    the bundle's FILENAME. Naming it `ext::sh -c '<cmd>'` would pass
+def test_hostile_item_bundle_path_transport_gadget_is_rejected_never_reaches_git():
+    """A compromised harvest seat authors the bundle file, so a trusted
+    in-process item can still carry a hostile bundle FILENAME. Naming it
+    `ext::sh -c '<cmd>'` would pass
     `git bundle verify` (real bundle bytes can live at that literal path)
     and then `git fetch` resolves `ext::` as a transport-helper invocation
     -- RCE. This must be rejected before the item ever reaches git_runner,
@@ -553,17 +531,13 @@ def test_hostile_payload_bundle_path_transport_gadget_is_rejected_never_reaches_
     ledger: list[ConveyorDaemonLedgerRecord] = []
     logs: list[str] = []
 
-    hostile_payload = {
-        "branch": "Feature/One",
-        "worktree_path": "/tmp/feature-one",
-        "bundle_path": "ext::sh -c 'touch /tmp/pwned'",
-        "repo_path": "/tmp/landing",
-        "title": "Land Feature/One",
-        "body": "- Conveyor item.",
-    }
+    hostile_item = dataclasses.replace(
+        _item(),
+        bundle_path=Path("ext::sh -c 'touch /tmp/pwned'"),
+    )
 
     daemon = ConveyorDaemon(
-        discovery_runner=lambda: [hostile_payload],
+        discovery_runner=lambda: [hostile_item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -594,8 +568,8 @@ def test_hostile_payload_bundle_path_transport_gadget_is_rejected_never_reaches_
         ("worktree_path", "/var/tmp/attacker-repo/worktree"),
     ],
 )
-def test_hostile_payload_path_outside_trusted_root_is_rejected(field: str, value: str):
-    """A payload path (bundle_path/repo_path/worktree_path) that resolves
+def test_hostile_item_path_outside_trusted_root_is_rejected(field: str, value: str):
+    """An item path (bundle_path/repo_path/worktree_path) that resolves
     OUTSIDE the daemon's pinned trusted root must be rejected fail-closed
     and the item skipped -- this is what stops an attacker-staged repo
     (with a poisoned `.git/config` remote) from ever becoming the git cwd,
@@ -609,18 +583,10 @@ def test_hostile_payload_path_outside_trusted_root_is_rejected(field: str, value
     ledger: list[ConveyorDaemonLedgerRecord] = []
     logs: list[str] = []
 
-    hostile_payload = {
-        "branch": "Feature/One",
-        "worktree_path": "/tmp/feature-one",
-        "bundle_path": "/tmp/feature-one.bundle",
-        "repo_path": "/tmp/landing",
-        "title": "Land Feature/One",
-        "body": "- Conveyor item.",
-    }
-    hostile_payload[field] = value
+    hostile_item = dataclasses.replace(_item(), **{field: Path(value)})
 
     daemon = ConveyorDaemon(
-        discovery_runner=lambda: [hostile_payload],
+        discovery_runner=lambda: [hostile_item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -643,7 +609,7 @@ def test_hostile_payload_path_outside_trusted_root_is_rejected(field: str, value
     assert ledger == []
 
 
-def test_hostile_payload_dotdot_traversal_path_is_rejected():
+def test_hostile_item_dotdot_traversal_path_is_rejected():
     """A path that starts under the trusted root syntactically but walks
     back out via `..` must resolve to outside the root and be rejected,
     the same as an absolute directory-redirection path."""
@@ -654,17 +620,10 @@ def test_hostile_payload_dotdot_traversal_path_is_rejected():
     gh = FakeGh()
     ledger: list[ConveyorDaemonLedgerRecord] = []
 
-    hostile_payload = {
-        "branch": "Feature/One",
-        "worktree_path": "/tmp/feature-one",
-        "bundle_path": "/tmp/feature-one.bundle",
-        "repo_path": "/tmp/../var/tmp/attacker-repo",
-        "title": "Land Feature/One",
-        "body": "- Conveyor item.",
-    }
+    hostile_item = dataclasses.replace(_item(), repo_path=Path("/tmp/../var/tmp/attacker-repo"))
 
     daemon = ConveyorDaemon(
-        discovery_runner=lambda: [hostile_payload],
+        discovery_runner=lambda: [hostile_item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -684,7 +643,7 @@ def test_hostile_payload_dotdot_traversal_path_is_rejected():
     assert gh.calls == []
 
 
-def test_hostile_payload_pr_base_gadget_is_rejected():
+def test_hostile_item_pr_base_gadget_is_rejected():
     """`pr_base` reaches a fixed `gh pr create --base <value>` flag-value
     slot (not RCE from that slot), but a gadget-shaped value must still be
     rejected fail-closed rather than silently misdirecting the PR."""
@@ -695,18 +654,10 @@ def test_hostile_payload_pr_base_gadget_is_rejected():
     gh = FakeGh()
     ledger: list[ConveyorDaemonLedgerRecord] = []
 
-    hostile_payload = {
-        "branch": "Feature/One",
-        "worktree_path": "/tmp/feature-one",
-        "bundle_path": "/tmp/feature-one.bundle",
-        "repo_path": "/tmp/landing",
-        "title": "Land Feature/One",
-        "body": "- Conveyor item.",
-        "pr_base": "ext::sh -c 'touch /tmp/pwned'",
-    }
+    hostile_item = dataclasses.replace(_item(), pr_base="ext::sh -c 'touch /tmp/pwned'")
 
     daemon = ConveyorDaemon(
-        discovery_runner=lambda: [hostile_payload],
+        discovery_runner=lambda: [hostile_item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -729,7 +680,7 @@ def test_hostile_payload_pr_base_gadget_is_rejected():
 def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
     """Regression test for the TOCTOU (CWE-367) fix.
 
-    `_path_confinement_violations` resolves each payload path (symlinks +
+    `_path_confinement_violations` resolves each item path (symlinks +
     `..` collapsed) and validates the RESULT lands under the trusted root --
     but the earlier buggy version discarded that resolved value and let
     `_process_armed` go on using the raw, unresolved `item.bundle_path` /
