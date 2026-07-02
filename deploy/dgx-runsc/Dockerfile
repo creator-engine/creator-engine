@@ -61,6 +61,7 @@ RUN set -eux; \
       bash \
       ca-certificates \
       git \
+      libsodium23 \
       openssh-client \
       procps \
       python-is-python3 \
