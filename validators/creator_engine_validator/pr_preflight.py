@@ -38,6 +38,11 @@ PYTEST_FAILURE_PATTERN = re.compile(
     r"^(?:FAILED|ERROR)\s+([^\s]+(?:::[^\s]+)*)",
     re.MULTILINE,
 )
+PYTEST_COLLECTED_PATTERN = re.compile(r"\bcollected\s+(\d+)\s+items?\b")
+PYTEST_OUTCOME_PATTERN = re.compile(
+    r"\b(\d+)\s+"
+    r"(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns)\b"
+)
 
 
 @dataclass(frozen=True)
@@ -409,6 +414,34 @@ def _failure_ids(result: CommandResult) -> set[str]:
     return failures
 
 
+def _pytest_executed_test_count(result: CommandResult) -> int:
+    text = result.stdout + "\n" + result.stderr
+    collected = [int(match.group(1)) for match in PYTEST_COLLECTED_PATTERN.finditer(text)]
+    if collected:
+        return max(collected)
+    return sum(int(match.group(1)) for match in PYTEST_OUTCOME_PATTERN.finditer(text))
+
+
+def _validate_pytest_execution(label: str, result: CommandResult, command: str) -> None:
+    executed_count = _pytest_executed_test_count(result)
+    if result.returncode in (0, 1) and executed_count > 0:
+        return
+
+    if result.returncode == 5 or executed_count == 0:
+        reason = "pytest collected zero tests or produced no test-execution summary"
+    else:
+        reason = f"pytest exited with code {result.returncode}, which indicates interruption, internal error, or usage error"
+    output = (result.stdout + "\n" + result.stderr).strip()
+    excerpt = f" Output excerpt: {output[:500]}" if output else ""
+    raise RuntimeError(
+        "baseline-diff test command did not execute tests on "
+        f"{label}: {reason}. "
+        "Set CE_VALIDATOR_PYTHON to the repository virtualenv Python and run "
+        "`$CE_VALIDATOR_PYTHON -m creator_engine_validator.ce_cli validate-pr ...` "
+        f"and fix the test command/dependencies before trusting the diff gate. command={command!r}.{excerpt}"
+    )
+
+
 def _run_baseline_diff_tests(
     config: PreflightConfig,
     comparison_base: str,
@@ -437,6 +470,8 @@ def _run_baseline_diff_tests(
             remove = runner(["git", "worktree", "remove", "--force", str(base_worktree)], config.repo_root, None)
             _print_streams(remove, out, err)
 
+    _validate_pytest_execution("baseline", baseline, config.test_command)
+    _validate_pytest_execution("head", head, config.test_command)
     baseline_failures = _failure_ids(baseline)
     head_failures = _failure_ids(head)
     new_failures = sorted(head_failures - baseline_failures)
