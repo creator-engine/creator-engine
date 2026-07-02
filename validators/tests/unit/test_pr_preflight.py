@@ -23,8 +23,6 @@ class FakeRunner:
         path_manifest_returncode: int = 0,
         path_manifest_stdout: str = "ok\n",
         test_coupling_requires_marker: bool = False,
-        gh_pr_body: str | None = None,
-        gh_pr_body_returncode: int = 1,
         head_test_result: pr_preflight.CommandResult | None = None,
         baseline_test_result: pr_preflight.CommandResult | None = None,
         changed_paths: str = "",
@@ -37,8 +35,6 @@ class FakeRunner:
         self.path_manifest_returncode = path_manifest_returncode
         self.path_manifest_stdout = path_manifest_stdout
         self.test_coupling_requires_marker = test_coupling_requires_marker
-        self.gh_pr_body = gh_pr_body
-        self.gh_pr_body_returncode = gh_pr_body_returncode
         self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.changed_paths = changed_paths
@@ -59,10 +55,6 @@ class FakeRunner:
             return pr_preflight.CommandResult(0, "abc1234\n", "")
         if argv == ["git", "diff", "--name-only", "abc1234..HEAD"]:
             return pr_preflight.CommandResult(0, self.changed_paths, "")
-        if argv[:3] == ["gh", "pr", "view"]:
-            if self.gh_pr_body_returncode != 0:
-                return pr_preflight.CommandResult(self.gh_pr_body_returncode, "", "no pull requests found\n")
-            return pr_preflight.CommandResult(0, self.gh_pr_body or "", "")
         if argv[:4] == ["git", "worktree", "add", "--detach"]:
             return pr_preflight.CommandResult(0, "", "")
         if argv[:4] == ["git", "worktree", "remove", "--force"]:
@@ -144,15 +136,16 @@ def test_fetch_base_timeout_surfaces_actionable_error(tmp_path: Path, monkeypatc
     assert "origin remote" in message
 
 
-def test_pr_body_lookup_passes_network_timeout(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv(pr_preflight.NETWORK_SUBPROCESS_TIMEOUT_ENV, "8")
-    runner = FakeRunner(tmp_path, gh_pr_body_returncode=0, gh_pr_body="body")
+def test_pr_body_lookup_uses_conventional_local_carrier(tmp_path: Path):
+    carrier = tmp_path / ".ce" / "pr-manifests" / "dev4-night-lane0-pr-preflight.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text("local body\n", encoding="utf-8")
+    runner = FakeRunner(tmp_path)
 
     body = pr_preflight._resolve_test_coupling_pr_body(_config(tmp_path), runner, io.StringIO())
 
-    assert body == "body"
-    gh_call = next(call for call in runner.calls if call[0][:3] == ["gh", "pr", "view"])
-    assert gh_call[3] == 8
+    assert body == "local body\n"
+    assert pr_preflight._conventional_pr_body_file(_config(tmp_path)) == carrier
 
 
 def test_local_preflight_calls_do_not_receive_network_timeout(tmp_path: Path):
@@ -510,11 +503,12 @@ def test_pytest_env_scrubs_host_tokens_and_sets_tmpdir(tmp_path: Path, monkeypat
 
 def test_preflight_passes_resolved_pr_body_to_test_coupling_gate(tmp_path: Path, monkeypatch):
     _stub_expensive_preflight_checks(monkeypatch)
+    carrier = tmp_path / ".ce" / "pr-manifests" / "dev4-night-lane0-pr-preflight.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text(f"Documented exemption: {coupling_chk.OPT_OUT_MARKER}\n", encoding="utf-8")
     runner = FakeRunner(
         tmp_path,
         test_coupling_requires_marker=True,
-        gh_pr_body=f"Documented exemption: {coupling_chk.OPT_OUT_MARKER}\n",
-        gh_pr_body_returncode=0,
     )
     out = io.StringIO()
 
@@ -533,7 +527,6 @@ def test_preflight_pr_body_file_marker_exempts_test_coupling_gate(tmp_path: Path
     runner = FakeRunner(
         tmp_path,
         test_coupling_requires_marker=True,
-        gh_pr_body_returncode=1,
     )
     out = io.StringIO()
 
@@ -552,11 +545,12 @@ def test_preflight_pr_body_file_marker_exempts_test_coupling_gate(tmp_path: Path
 
 def test_preflight_without_exemption_marker_still_flags_test_coupling(tmp_path: Path, monkeypatch):
     _stub_expensive_preflight_checks(monkeypatch)
+    carrier = tmp_path / ".ce" / "pr-manifests" / "dev4-night-lane0-pr-preflight.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text("No exemption here.\n", encoding="utf-8")
     runner = FakeRunner(
         tmp_path,
         test_coupling_requires_marker=True,
-        gh_pr_body="No exemption here.\n",
-        gh_pr_body_returncode=0,
     )
     out = io.StringIO()
 
@@ -571,7 +565,6 @@ def test_preflight_keeps_strict_behavior_when_pr_body_unresolvable(tmp_path: Pat
     runner = FakeRunner(
         tmp_path,
         test_coupling_requires_marker=True,
-        gh_pr_body_returncode=1,
     )
     out = io.StringIO()
 
@@ -580,25 +573,21 @@ def test_preflight_keeps_strict_behavior_when_pr_body_unresolvable(tmp_path: Pat
     assert rc == 1
     coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
     assert "--pr-body-file" not in coupling_call
-    assert "could not read PR body via gh" in out.getvalue()
     assert coupling_chk.CODE_MISSING_TEST in out.getvalue()
 
 
-def test_preflight_keeps_strict_behavior_when_pr_body_lookup_times_out(tmp_path: Path, monkeypatch):
+def test_preflight_keeps_strict_behavior_when_local_pr_body_fallback_unreadable(tmp_path: Path, monkeypatch):
     _stub_expensive_preflight_checks(monkeypatch)
+    carrier = tmp_path / ".ce" / "pr-manifests" / "dev4-night-lane0-pr-preflight.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_bytes(b"\xff")
     runner = FakeRunner(tmp_path, test_coupling_requires_marker=True)
-
-    def timeout_runner(argv, cwd, env=None, *, timeout=None):
-        if list(argv)[:3] == ["gh", "pr", "view"]:
-            raise subprocess.TimeoutExpired(argv, timeout)
-        return runner(argv, cwd, env, timeout=timeout)
-
     out = io.StringIO()
 
-    rc = pr_preflight.run_preflight(_config(tmp_path), runner=timeout_runner, out=out, err=io.StringIO())
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
 
     assert rc == 1
     coupling_call = next(call for call in runner.argv_calls() if "verify-test-coupling" in call)
     assert "--pr-body-file" not in coupling_call
-    assert "timed out reading PR body via gh" in out.getvalue()
+    assert "could not read local PR body fallback" in out.getvalue()
     assert coupling_chk.CODE_MISSING_TEST in out.getvalue()

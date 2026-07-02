@@ -14,7 +14,8 @@ from typing import Final
 
 from ..reporting import CheckResult, make_error
 from . import register
-from .work_sizing_floor import ChangeStat, _repo_root_for, _run_git, parse_numstat
+from .git_helpers import repo_root_for, run_git
+from .work_sizing_floor import ChangeStat, parse_numstat
 
 CHECK_NAME = "test_coupling"
 CONTRACT = "ce validate-pr test-coupling gate"
@@ -117,8 +118,8 @@ def run_with_base(
 ) -> CheckResult:
     """PR-diff gate for ``git diff --numstat --find-renames <base>..HEAD``."""
     raw_paths = [Path(p) for p in paths] or [Path(".")]
-    repo_root = _repo_root_for(raw_paths[0])
-    returncode, stdout, _stderr = _run_git(
+    repo_root = repo_root_for(raw_paths[0])
+    returncode, stdout, _stderr = run_git(
         ["diff", "--numstat", "--find-renames", f"{base}..HEAD"],
         repo_root,
     )
