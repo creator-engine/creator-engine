@@ -4,9 +4,8 @@ CE work classes (`XS`, `S`, `M`, `L`) are CE ceremony tiers. The labels are
 diff-size tiers, not Agile or Scrum work item types. They do not assert a
 user-story, feature, epic, sprint, backlog, or parent/child relationship. A tier
 only selects the minimum decomposition depth, artifact bundle, and review
-ceremony expected for governed CE work. During the migration window, validators
-accept legacy aliases (`tiny`, `story`, `feature`, `epic`) and map them to
-`XS`, `S`, `M`, and `L`.
+ceremony expected for governed CE work. Authors declare only the current
+`XS`/`S`/`M`/`L` taxonomy in PR bodies and carrier metadata.
 
 | Tier | Depth | Decomposition ceremony | Artifact set | Ratification gate posture |
 | --- | ---: | --- | --- | --- |
