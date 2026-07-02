@@ -11,3 +11,4 @@ issue: ce-ops#402
 - Makes the validate-pr baseline-diff gate fail closed when pytest is missing, crashes, or collects zero tests.
 - Preserves zero-new-failures behavior for genuine identical pytest failures after tests execute.
 - authoring-doc line deferred -- rides the brain-migration lane
+- Supersedes the three preflight brain assertions so their evidence hashes match the fail-closed preflight runner.

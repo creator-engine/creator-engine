@@ -6,13 +6,15 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=d54d6fd8dfab1e0523105b38f383f0d43c4ba90a1de75539b38322c7d8b96bf7
+AUTHORIZED_PATHS_SHA256=45b75d5656e3354ec8e39d12b730df0cff900a8751469b2c01533b358cc67125
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-402-preflight-failclosed.md
 .ce/pr-manifests/ce-402-preflight-failclosed.md
 validators/creator_engine_validator/pr_preflight.py
+validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_pr_preflight.py
 ```
