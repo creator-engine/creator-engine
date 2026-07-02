@@ -58,16 +58,24 @@ class ConveyorDaemonItem:
     carrier_date: str | None = None
     rebase: bool = True
     refresh_base: bool = True
-    validate_command: tuple[str, ...] = DEFAULT_VALIDATE_COMMAND
     allow_dirty_validation: bool = True
     remote: str = "origin"
     pr_title: str | None = None
     pr_body: str | None = None
     pr_base: str | None = None
     identity: str | None = None
+    payload_requested_validate_command: bool = False
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ConveyorDaemonItem":
+        # validate_command is intentionally NOT read from the untrusted discovery
+        # payload: it flows straight into a subprocess argv (see
+        # conveyor._run_validation), so a compromised/malicious seat payload
+        # could otherwise smuggle an arbitrary command into the daemon's
+        # execution context. The command is pinned at the ConveyorDaemon level
+        # (constructor/CLI, defaulting to DEFAULT_VALIDATE_COMMAND) instead.
+        # We only note here whether the payload tried to supply one so the
+        # daemon can log-and-skip the attempted override.
         return cls(
             branch=str(payload["branch"]),
             worktree_path=Path(payload["worktree_path"]),
@@ -83,20 +91,20 @@ class ConveyorDaemonItem:
             carrier_date=_optional_str(payload.get("carrier_date")),
             rebase=bool(payload.get("rebase", True)),
             refresh_base=bool(payload.get("refresh_base", True)),
-            validate_command=tuple(str(part) for part in payload.get("validate_command", DEFAULT_VALIDATE_COMMAND)),
             allow_dirty_validation=bool(payload.get("allow_dirty_validation", True)),
             remote=str(payload.get("remote", "origin")),
             pr_title=_optional_str(payload.get("pr_title")),
             pr_body=_optional_str(payload.get("pr_body")),
             pr_base=_optional_str(payload.get("pr_base")),
             identity=_optional_str(payload.get("identity")),
+            payload_requested_validate_command="validate_command" in payload,
         )
 
     @property
     def key(self) -> str:
         return self.identity or branch_slug(self.branch)
 
-    def harvest_spec(self, *, carrier_date: str) -> ConveyorHarvestSpec:
+    def harvest_spec(self, *, carrier_date: str, validate_command: tuple[str, ...]) -> ConveyorHarvestSpec:
         return ConveyorHarvestSpec(
             worktree_path=self.worktree_path,
             branch=self.branch,
@@ -110,7 +118,7 @@ class ConveyorDaemonItem:
             carrier_date=carrier_date,
             rebase=self.rebase,
             refresh_base=self.refresh_base,
-            validate_command=self.validate_command,
+            validate_command=validate_command,
             allow_dirty_validation=self.allow_dirty_validation,
         )
 
@@ -195,6 +203,7 @@ class ConveyorDaemon:
         log_runner: LogRunner | None = None,
         prepare_runner: PrepareRunner = prepare_harvest,
         land_runner: LandRunner = land_bundle,
+        validate_command: Sequence[str] | None = None,
     ) -> None:
         self.discovery_runner = discovery_runner
         self.armed = armed
@@ -206,6 +215,11 @@ class ConveyorDaemon:
         self.log_runner = log_runner
         self.prepare_runner = prepare_runner
         self.land_runner = land_runner
+        # validate_command is pinned here, at daemon construction time, and is
+        # never sourced from a discovery payload (see ConveyorDaemonItem.from_mapping).
+        self.validate_command: tuple[str, ...] = tuple(
+            str(part) for part in (validate_command if validate_command is not None else DEFAULT_VALIDATE_COMMAND)
+        )
         self._completed_keys: set[str] = set()
 
         if self.armed:
@@ -240,6 +254,13 @@ class ConveyorDaemon:
                 results=(),
                 discovery_error=str(exc),
             )
+
+        for item in discovered:
+            if item.payload_requested_validate_command:
+                self._log(
+                    f"conveyor discovery payload for {item.branch} attempted to override "
+                    "validate_command; ignoring untrusted override, using daemon-pinned command"
+                )
 
         seen_this_pass: set[str] = set()
         results: list[ConveyorDaemonItemResult] = []
@@ -291,7 +312,7 @@ class ConveyorDaemon:
             assert self.gh_runner is not None
             carrier_date = item.carrier_date or _date_from_timestamp(self._timestamp())
             prepared = self.prepare_runner(
-                item.harvest_spec(carrier_date=carrier_date),
+                item.harvest_spec(carrier_date=carrier_date, validate_command=self.validate_command),
                 git_runner=self.git_runner,
                 validate_runner=self.validate_runner,
             )

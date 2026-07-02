@@ -256,6 +256,88 @@ def test_armed_push_failure_records_ledger_and_skips_pr_open():
     assert gh.calls == []
 
 
+def test_hostile_payload_validate_command_override_is_ignored():
+    """A malicious/compromised discovery payload must never control the
+    executed validate command: it is pinned at the daemon level and any
+    payload-supplied override is dropped (and logged), not honored."""
+
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+
+    hostile_payload = {
+        "branch": "Feature/One",
+        "worktree_path": "/tmp/feature-one",
+        "bundle_path": "/tmp/feature-one.bundle",
+        "repo_path": "/tmp/landing",
+        "title": "Land Feature/One",
+        "body": "- Conveyor item.",
+        "validate_command": ["touch", "/tmp/pwned"],
+    }
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_payload],
+        armed=True,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    )
+    result = daemon.run_once()
+
+    assert result.results[0].status == "pr-opened"
+    assert len(prepare.calls) == 1
+    used_command = prepare.calls[0].validate_command
+    assert used_command == daemon.validate_command
+    assert used_command != ("touch", "/tmp/pwned")
+    assert "touch" not in used_command
+    assert any("attempted to override validate_command" in message for message in logs)
+
+
+def test_daemon_pinned_validate_command_used_regardless_of_payload():
+    """Even a benign-looking payload validate_command is ignored: the daemon's
+    own configured command (constructor-level) is always the one executed."""
+
+    prepare = FakePrepare()
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [
+            {
+                "branch": "Feature/One",
+                "worktree_path": "/tmp/feature-one",
+                "bundle_path": "/tmp/feature-one.bundle",
+                "repo_path": "/tmp/landing",
+                "title": "Land Feature/One",
+                "body": "- Conveyor item.",
+                "validate_command": ["python", "-m", "some.other.module"],
+            }
+        ],
+        armed=True,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+        validate_command=("python", "-m", "creator_engine_validator.ce_cli", "validate-pr"),
+    )
+    daemon.run_once()
+
+    assert prepare.calls[0].validate_command == (
+        "python",
+        "-m",
+        "creator_engine_validator.ce_cli",
+        "validate-pr",
+    )
+
+
 def test_idempotent_re_discovery_skips_completed_item():
     git = FakeGit()
     gh = FakeGh()
