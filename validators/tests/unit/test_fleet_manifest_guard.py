@@ -8,6 +8,8 @@ import yaml
 
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks import fleet_manifest_guard as chk
+from creator_engine_validator.fleet_identity_denylist_codegen import derive_identity_registry_denylist
+from creator_engine_validator.fleet_identity_denylist_snapshot import IDENTITY_REGISTRY_DENYLIST_TOKENS
 from creator_engine_validator.fleet_manifest import iter_fleet_manifest_paths, load_fleet_manifest
 
 
@@ -108,7 +110,7 @@ def test_surfaces_manifest_under_fleet_named_parent_is_not_treated_as_fleet_mani
         ("tailnet range", ("project", "description"), "100.99.88.77"),
         ("contained seat", ("project", "description"), "cedev4"),
         ("internal OpenBao mount", ("secrets", "api"), "openbao://ce-kv/prod/api"),
-        ("internal forge path", ("identity", "app"), "identityref://forge/shared-app"),
+        ("internal forge key pointer", ("secrets", "api"), "openbao://ce-kv/forge/dev-1/private_key"),
         ("overwatch app", ("identity", "app"), "identityref://ce-overwatch/app"),
         ("internal seat cedev1", ("project", "description"), "cedev1vps-cmd"),
         ("internal seat cedev3", ("project", "description"), "cedev3vps-coder"),
@@ -130,6 +132,39 @@ def test_internal_identifier_categories_fail(tmp_path: Path, category: str, path
     result = chk.run([tmp_path])
 
     assert chk.CODE_INTERNAL_IDENTIFIER in _codes(result), [error.format() for error in result.errors]
+
+
+def test_identity_registry_snapshot_covers_recently_missed_identities():
+    assert {"cedev1vps-cmd", "ce-dev-3", "ubuntuaws745-cmyk"}.issubset(
+        IDENTITY_REGISTRY_DENYLIST_TOKENS
+    )
+
+
+def test_identity_registry_derivation_keeps_specific_forge_pointers_not_broad_forge_path():
+    registry = {
+        "accounts": [{"login": "ce-dev-1", "owning_seat": "dev-1", "host": "ce-dev-1"}],
+        "apps": [
+            {
+                "repo_scope": "creator-engine/creator-engine",
+                "pem_custody": "openbao-ref:ce-kv/forge/dev-1#private_key",
+            }
+        ],
+    }
+
+    tokens = set(derive_identity_registry_denylist(registry))
+
+    assert "ce-kv/forge/" in tokens
+    assert "forge/" not in tokens
+
+
+def test_internal_seat_id_match_is_hyphen_bounded(tmp_path: Path):
+    doc = _manifest()
+    doc["project"]["description"] = "lead-dev-1 is an external project role"  # type: ignore[index]
+    _write_manifest(tmp_path, doc)
+
+    result = chk.run([tmp_path])
+
+    assert chk.CODE_INTERNAL_IDENTIFIER not in _codes(result), [error.format() for error in result.errors]
 
 
 def test_inline_secret_in_secrets_field_fails_schema(tmp_path: Path):

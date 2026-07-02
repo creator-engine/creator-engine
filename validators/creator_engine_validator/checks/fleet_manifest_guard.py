@@ -13,39 +13,34 @@ from ..fleet_manifest import (
     iter_fleet_manifest_paths,
     load_fleet_manifest,
 )
+from ..fleet_identity_denylist_snapshot import IDENTITY_REGISTRY_DENYLIST_TOKENS
 from ..reporting import CheckResult, ValidationError, make_error
 from . import register
 
 CHECK_NAME = "fleet_manifest_guard"
 CODE_INTERNAL_IDENTIFIER = "fleet_manifest_internal_identifier"
 
-# Auditable denylist for CE-internal identifiers that must not appear in a
-# per-project deployment manifest. Keep this list value-shaped: it should cover
-# concrete repo, host, seat, infra, and endpoint identifiers, not broad product
-# nouns that external deployments legitimately use.
-INTERNAL_LITERAL_TOKENS = (
+_STATIC_INTERNAL_LITERAL_TOKENS = (
     "creator-engine/creator-engine",
-    "creator-engine/ce-ops",
     "ce-ops#",
-    "dev-1",
-    "dev-2",
-    "dev-3",
-    "dev-4",
     "ce-dgx-codex",
     "ce-vps-codex",
     "DGX",
-    "spark-b824",
     "dgx-spark",
     "Hetzner",
-    "cedev2",
-    "cedev4",
-    "ce-kv/",
-    "forge/",
-    "ce-overwatch",
-    "cedev1",
-    "cedev3",
-    "ubuntuaws745-cmyk",
 )
+
+# Auditable denylist for CE-internal identifiers that must not appear in a
+# per-project deployment manifest. The identity portion is generated from the
+# private ce-ops identity registry as a value-shaped public snapshot.
+INTERNAL_LITERAL_TOKENS = tuple(
+    sorted(
+        {*_STATIC_INTERNAL_LITERAL_TOKENS, *IDENTITY_REGISTRY_DENYLIST_TOKENS},
+        key=str.casefold,
+    )
+)
+
+_BOUNDARY_LITERAL_PATTERN = re.compile(r"dev-[1-4]", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -55,6 +50,10 @@ class InternalPattern:
 
 
 INTERNAL_REGEX_PATTERNS = (
+    InternalPattern(
+        "internal seat id",
+        re.compile(r"(?<![A-Za-z0-9-])dev-[1-4](?![A-Za-z0-9-])", re.IGNORECASE),
+    ),
     InternalPattern("internal tailnet IP range", re.compile(r"(?<![\d.])100\.(?:\d{1,3}\.){2}\d{1,3}(?![\d.])")),
     InternalPattern("internal shared App", re.compile(r"\b(?:internal\s+shared\s+app|ce\s+shared\s+app|shared\s+ce\s+app)\b", re.IGNORECASE)),
     InternalPattern("herdr socket path", re.compile(r"(?:^|[\s:=])(?:/[^\s]*herdr[^\s]*\.sock|herdr[^\s]*\.sock)\b", re.IGNORECASE)),
@@ -85,7 +84,11 @@ def _string_nodes(value: Any, parts: tuple[str, ...] = ()) -> Iterable[tuple[tup
 
 def _internal_identifier_errors(path: Path, data: dict[str, Any]) -> list[ValidationError]:
     errors: list[ValidationError] = []
-    literal_tokens = tuple((token, token.lower()) for token in INTERNAL_LITERAL_TOKENS)
+    literal_tokens = tuple(
+        (token, token.lower())
+        for token in INTERNAL_LITERAL_TOKENS
+        if _BOUNDARY_LITERAL_PATTERN.fullmatch(token) is None
+    )
     seen: set[tuple[str, str]] = set()
     for parts, value in _string_nodes(data):
         lowered = value.lower()
