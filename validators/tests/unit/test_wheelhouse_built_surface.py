@@ -30,7 +30,6 @@ from creator_engine_validator.wheel_bake import build_app_wheel_from_source
 DISTRIBUTION = "creator_engine_validator"
 pytestmark = [
     pytest.mark.wheel_bake_gate,
-    pytest.mark.xdist_group("wheel-build"),
 ]
 
 
@@ -67,6 +66,7 @@ def _entry_points(wheel: Path) -> dict[str, str]:
     return dict(cp["console_scripts"]) if cp.has_section("console_scripts") else {}
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_validator_wheel_matches_current_source(
     validator_wheel: Path, repo_root: Path
 ):
@@ -79,6 +79,7 @@ def test_wheelhouse_validator_wheel_matches_current_source(
     )
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_validator_wheel_exposes_fanin_and_queue(validator_wheel: Path):
     bundled = _bundled_ce_cli(validator_wheel)
     assert 'add_parser(\n        "fanin"' in bundled or 'add_parser("fanin"' in bundled, (
@@ -89,6 +90,7 @@ def test_wheelhouse_validator_wheel_exposes_fanin_and_queue(validator_wheel: Pat
     )
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_validator_wheel_exposes_claim_surface(validator_wheel: Path):
     """ce-ops#38: the built `ce` wheel must register `claim acquire|release|status`."""
     bundled = _bundled_ce_cli(validator_wheel)
@@ -102,6 +104,7 @@ def test_wheelhouse_validator_wheel_exposes_claim_surface(validator_wheel: Path)
         )
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_validator_wheel_does_not_register_dev(validator_wheel: Path):
     bundled = _bundled_ce_cli(validator_wheel)
     assert 'add_parser("dev"' not in bundled and "add_parser('dev'" not in bundled, (
@@ -109,6 +112,7 @@ def test_wheelhouse_validator_wheel_does_not_register_dev(validator_wheel: Path)
     )
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_validator_wheel_keeps_both_console_scripts_without_dev(
     validator_wheel: Path,
 ):
@@ -126,6 +130,7 @@ def test_wheelhouse_validator_wheel_keeps_both_console_scripts_without_dev(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_validator_wheel_exposes_cev3_console_script(validator_wheel: Path):
     scripts = _entry_points(validator_wheel)
     assert scripts.get("cev3") == "creator_engine_validator.v3_cli:main", (
@@ -133,6 +138,7 @@ def test_wheelhouse_validator_wheel_exposes_cev3_console_script(validator_wheel:
     )
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_validator_wheel_bundles_generated_version(
     validator_wheel: Path, repo_root: Path
 ):
@@ -146,6 +152,7 @@ def test_wheelhouse_validator_wheel_bundles_generated_version(
     assert 'BUILD_GIT_SHA = "' in bundled, "bundled _version.py carries no baked BUILD_GIT_SHA"
 
 
+@pytest.mark.xdist_group("wheel-build")
 def test_wheelhouse_bundled_version_surface_matches_source(
     validator_wheel: Path, repo_root: Path
 ):

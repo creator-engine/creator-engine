@@ -14,6 +14,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .hold_labels import AWAITING_OPERATOR_HOLD_LABELS, AWAITING_OPERATOR_LABELS
+
 GhRunner = Callable[[Sequence[str], str | None], subprocess.CompletedProcess]
 
 DEFAULT_CONTROLLER_LOGIN = "ce-dev-2"
@@ -21,7 +23,6 @@ DEFAULT_TOKEN_ENV = "GH_TOKEN"
 DEFAULT_FIRST = 100
 BUCKET_ORDER = ("needs_review", "stranded", "needs_rebase", "awaiting_operator")
 REBASE_MERGE_STATES = {"BEHIND", "DIRTY"}
-AWAITING_OPERATOR_LABELS = {"awaiting-operator", "hold", "awaiting-operator/hold"}
 _HOLD_MARKER_RE = re.compile(r"awaiting[-\s]*operator|⏸", re.IGNORECASE)
 _REDACTED = "<redacted>"
 _GH_TOKEN_RE = re.compile(r"\b(?:gh[opusr]_|github_pat_)[A-Za-z0-9_.\-]+")
@@ -275,7 +276,7 @@ def _needs_rebase(pr: InboxPullRequest) -> bool:
 
 def _awaiting_operator(pr: InboxPullRequest) -> bool:
     labels = {label.lower() for label in pr.labels}
-    return pr.hold_marker or bool(labels & AWAITING_OPERATOR_LABELS)
+    return pr.hold_marker or bool(labels & AWAITING_OPERATOR_HOLD_LABELS)
 
 
 def _parse_prs(parsed: Mapping[str, Any]) -> tuple[InboxPullRequest, ...]:
