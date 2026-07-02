@@ -1,7 +1,5 @@
 # From Agile/SCRUM to Creator Engine SDLC
 
-> **Draft — content pending final review.**
-
 Agile and SCRUM give teams a familiar language for deciding what to build,
 sequencing the work, and proving that an increment is done. Creator Engine
 (CE) keeps those product instincts, but moves the center of gravity from
@@ -239,9 +237,3 @@ thinking like product teams. It asks them to make intent, scope, evidence, and
 authority explicit enough that governed agents can participate safely.
 
 ---
-
-## Review Notes
-
-This draft still needs final content review for terminology, examples, and
-product positioning. The mapping should remain anchored to the CE canon:
-Frame, Shape, Build, Review, and Ship.
