@@ -9,16 +9,24 @@ from creator_engine_validator import ce_cli
 from creator_engine_validator import ce_ops_triage_queue as qt
 
 
-def _issue(number: int, *, labels=None, title: str | None = None, body: str = "") -> dict:
+def _issue(
+    number: int,
+    *,
+    labels=None,
+    title: str | None = None,
+    body: str = "",
+    assignees=None,
+    state: str = "open",
+) -> dict:
     return {
         "number": number,
         "title": title or f"issue {number}",
-        "state": "open",
+        "state": state,
         "body": body,
         "html_url": f"https://github.com/creator-engine/ce-ops/issues/{number}",
         "repository_url": "https://api.github.com/repos/creator-engine/ce-ops",
         "labels": labels or [],
-        "assignees": [],
+        "assignees": assignees or [],
     }
 
 
@@ -207,6 +215,183 @@ def test_readiness_ready_and_blocked():
     assert ready is not None and ready.readiness == "ready" and ready.blockers == ()
     assert blocked is not None and blocked.readiness == "blocked"
     assert blocked.blockers == ("blocked_label",)
+
+
+def test_pickup_filter_ready_unblocked_unassigned_included():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(
+                21,
+                labels=[
+                    {"name": "lane:l2"},
+                    {"name": "mutation:docs"},
+                    {"name": "work:M"},
+                    {"name": "customer-visible"},
+                ],
+            )
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert len(candidates) == 1
+    payload = candidates[0].to_dict()
+    assert payload == {
+        "issue_number": 21,
+        "repo": "creator-engine/ce-ops",
+        "labels": ["customer-visible", "lane:l2", "mutation:docs", "work:M"],
+        "work_class": "M",
+        "mutation_class": "docs",
+        "lane": "L2",
+        "readiness": "ready",
+    }
+
+
+def test_pickup_filter_blocked_assigned_and_in_progress_excluded():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(31, labels=[{"name": "blocked"}]),
+            _issue(32, assignees=[{"login": "ce-dev-2"}]),
+            _issue(33, labels=[{"name": "status:running"}]),
+            _issue(34, labels=[{"name": "lane:l4"}]),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [34]
+
+
+def test_pickup_filter_deterministic_ordering():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(43, labels=[{"name": "lane:l2"}, {"name": "work:XS"}]),
+            _issue(42, labels=[{"name": "lane:l1"}, {"name": "work:M"}]),
+            _issue(41, labels=[{"name": "lane:l1"}, {"name": "work:XS"}]),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [41, 42, 43]
+
+
+def test_pickup_filter_excludes_awaiting_operator_hold_marker():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(61, body="Parked. ⏸ AWAITING-OPERATOR confirm before proceeding."),
+            _issue(62),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [62]
+
+
+def test_pickup_filter_excludes_awaiting_operator_label_no_body_marker():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(69, labels=[{"name": "awaiting-operator"}]),
+            _issue(70),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [70]
+
+
+def test_pickup_filter_excludes_awaiting_operator_hold_label_variant_case_and_whitespace():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(75, labels=[{"name": " Awaiting-Operator/Hold "}]),
+            _issue(76),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [76]
+
+
+def test_pickup_payload_carries_requires_live_recheck_signal():
+    payload = qt.pickup_payload(
+        qt.pickup_candidates_from_issues(
+            [_issue(77)],
+            triaged_at="2026-06-30T00:00:00Z",
+        )
+    )
+
+    assert payload["requires_live_recheck"] is True
+    assert "gh_runner" in payload["requires_live_recheck_note"]
+
+
+def test_pickup_filter_excludes_aggregate_epic_issue():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(63, labels=[{"name": "epic"}]),
+            _issue(64),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [64]
+
+
+def test_pickup_filter_excludes_closed_issue():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(65, state="closed"),
+            _issue(66),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [66]
+
+
+def test_pickup_filter_excludes_done_labeled_issue():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(67, labels=[{"name": "done"}]),
+            _issue(68),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert [candidate.issue_number for candidate in candidates] == [68]
+
+
+def test_pickup_filter_dedupes_by_issue_number_last_write_wins():
+    candidates = qt.pickup_candidates_from_issues(
+        [
+            _issue(71, title="stale", labels=[{"name": "lane:l1"}]),
+            _issue(71, title="fresh", labels=[{"name": "lane:l1"}, {"name": "work:M"}]),
+        ],
+        triaged_at="2026-06-30T00:00:00Z",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].issue_number == 71
+    assert candidates[0].work_class == "M"
+
+
+def test_pickup_filter_emit_mode_dry_run_no_mutation():
+    fake = FakeGhRunner(comments=[_queue_comment([])], issues=[_issue(51)])
+
+    result = qt.scan_and_triage(gh_runner=fake, apply=False, now="2026-06-30T00:00:00Z")
+
+    assert result["applied"] is False
+    assert result["pickup"]["candidate_count"] == 1
+    assert result["pickup"]["advisory"] == qt.NON_AUTHORITY_STATEMENT
+    assert result["pickup"]["candidates"][0]["issue_number"] == 51
+    assert fake.write_calls == []
+    assert fake.label_write_calls == []
+
+
+def test_pickup_filter_empty_set():
+    payload = qt.pickup_payload(
+        qt.pickup_candidates_from_issues([], triaged_at="2026-06-30T00:00:00Z")
+    )
+
+    assert payload["candidate_count"] == 0
+    assert payload["candidates"] == []
+    assert payload["advisory"] == qt.NON_AUTHORITY_STATEMENT
 
 
 def test_plan_triage_entry_is_pure_and_stable():

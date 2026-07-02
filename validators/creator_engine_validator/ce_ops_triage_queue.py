@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import forge_triage
+from .forge.controller_inbox import AWAITING_OPERATOR_LABELS
 
 QUEUE_SENTINEL = "<!-- ce-triage-queue-issue:v1 -->"
 NON_AUTHORITY_STATEMENT = (
@@ -36,6 +37,48 @@ WORK_CLASS_LABELS = frozenset({"wc:XS", "wc:S", "wc:M", "wc:L"})
 READINESS_LABELS = frozenset({"triage:ready", "triage:blocked"})
 MANAGED_LABEL_PREFIXES = ("wc:", "triage:")
 MISSING_LABEL_POLICY = "create_missing"
+PICKUP_IN_PROGRESS_LABELS = frozenset(
+    {
+        "assigned",
+        "claimed",
+        "in progress",
+        "in-progress",
+        "in_progress",
+        "running",
+        "status:assigned",
+        "status:claimed",
+        "status:in progress",
+        "status:in-progress",
+        "status:in_progress",
+        "status:running",
+        "status/assigned",
+        "status/claimed",
+        "status/in progress",
+        "status/in-progress",
+        "status/in_progress",
+        "status/running",
+    }
+)
+PICKUP_IN_PROGRESS_LABEL_PREFIXES = (
+    "assigned:",
+    "assigned/",
+    "claimed:",
+    "claimed/",
+    "in-progress:",
+    "in-progress/",
+    "in_progress:",
+    "in_progress/",
+    "status:assigned:",
+    "status:assigned/",
+    "status:claimed:",
+    "status:claimed/",
+    "status:in-progress:",
+    "status:in-progress/",
+    "status:in_progress:",
+    "status:in_progress/",
+    "status:running:",
+    "status:running/",
+)
 LABEL_SPECS: Mapping[str, Mapping[str, str]] = {
     "wc:XS": {
         "color": "c2e0c6",
@@ -135,6 +178,35 @@ class LabelDelta:
         if self.error is None:
             payload.pop("error")
         return payload
+
+
+@dataclass(frozen=True)
+class PickupCandidate:
+    """One advisory ready-to-dispatch candidate.
+
+    Security note: ``labels`` is untrusted text sourced verbatim from the
+    upstream issue. Consumers must never interpolate it into a shell command,
+    branch name, or filesystem path without independent sanitization.
+    """
+
+    issue_number: int
+    repo: str
+    labels: tuple[str, ...]
+    work_class: str
+    mutation_class: str
+    lane: str
+    readiness: str = "ready"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "issue_number": self.issue_number,
+            "repo": self.repo,
+            "labels": list(self.labels),
+            "work_class": self.work_class,
+            "mutation_class": self.mutation_class,
+            "lane": self.lane,
+            "readiness": self.readiness,
+        }
 
 
 def default_gh_runner(
@@ -308,6 +380,94 @@ def plan_triage_entry(
     )
 
 
+def pickup_candidates_from_issues(
+    raw_issues: Sequence[Any],
+    *,
+    default_repo: str | None = DEFAULT_REPO,
+    triaged_at: str,
+) -> tuple[PickupCandidate, ...]:
+    """Return advisory ready-to-dispatch candidates from raw triage inputs.
+
+    This is a pure projection: it reuses the queue planner for classification
+    and readiness, reads assignee/label/body state from normalized issues, and
+    never performs GitHub I/O or mutations.
+
+    Every candidate is also gated through ``forge_triage._skip_reason`` (with
+    no ``gh_runner``) — the same pickup-safety predicate
+    ``forge_triage.plan_triage`` uses before labeling an issue ready. That
+    excludes the body-text form of the ``⏸ AWAITING-OPERATOR`` hold marker,
+    aggregate/epic/tracker/rollup issues and work-class L, done-labeled
+    issues, and issues whose ``state`` is not ``"open"``, in addition to the
+    existing blocking-label/dependency and assignee/in-progress-label
+    checks. Separately, this function also excludes any issue whose LABELS
+    intersect ``AWAITING_OPERATOR_LABELS`` (``forge.controller_inbox``'s
+    canonical hold-marker label set), so both the label form and the
+    body-text form of the AWAITING-OPERATOR convention are excluded.
+
+    IMPORTANT: because no ``gh_runner`` is supplied here, this does NOT run
+    the live, network-dependent checks that ``_skip_reason`` performs when a
+    ``gh_runner`` is available — in-flight/merged linked-PR status and active
+    work-claim status. A ``readiness: "ready"`` candidate from this function
+    is therefore advisory only; any consumer that actually dispatches a seat
+    onto an issue MUST re-run the full ``forge_triage`` pickup gate (e.g.
+    ``forge_triage.plan_triage``) with a live ``gh_runner`` first. See
+    ``pickup_payload``'s ``requires_live_recheck`` field.
+    """
+    candidates: list[PickupCandidate] = []
+    for raw in raw_issues:
+        issue = forge_triage.normalize_issue(raw, default_repo=default_repo)
+        if issue is None:
+            continue
+        entry = plan_triage_entry(raw, default_repo=default_repo, triaged_at=triaged_at)
+        if entry is None:
+            continue
+        if entry.readiness != "ready" or entry.blockers:
+            continue
+        skip_reason = forge_triage._skip_reason(
+            issue,
+            arc_work_key=None,
+            arc_held_refs={},
+            gh_runner=None,
+        )
+        if skip_reason is not None:
+            continue
+        if _has_awaiting_operator_label(issue.labels):
+            continue
+        if issue.assignees or _has_pickup_in_progress_label(issue.labels):
+            continue
+        candidates.append(
+            PickupCandidate(
+                issue_number=entry.issue_number,
+                repo=entry.repo,
+                labels=tuple(sorted(issue.labels, key=str.lower)),
+                work_class=entry.work_class,
+                mutation_class=entry.mutation_class,
+                lane=entry.lane,
+            )
+        )
+    deduped = _dedupe_pickup_candidates(candidates)
+    return tuple(sorted(deduped, key=_pickup_candidate_sort_key))
+
+
+def pickup_payload(candidates: Sequence[PickupCandidate]) -> dict[str, Any]:
+    return {
+        "kind": "ce-triage-pickup-candidates",
+        "schema_version": SCHEMA_VERSION,
+        "advisory": NON_AUTHORITY_STATEMENT,
+        "requires_live_recheck": True,
+        "requires_live_recheck_note": (
+            "readiness on each candidate here was computed without a live "
+            "gh_runner (no in-flight/merged linked-PR or work-claim check). "
+            "Any consumer that dispatches a seat onto a candidate MUST "
+            "re-run the full forge_triage pickup gate "
+            "(forge_triage.plan_triage / forge_triage._skip_reason) with a "
+            "live gh_runner before dispatch."
+        ),
+        "candidate_count": len(candidates),
+        "candidates": [candidate.to_dict() for candidate in candidates],
+    }
+
+
 def scan_and_triage(
     *,
     repo: str = DEFAULT_REPO,
@@ -339,6 +499,11 @@ def scan_and_triage(
     )
     if issue_warning:
         warnings.append(issue_warning)
+    pickup_candidates = pickup_candidates_from_issues(
+        raw_issues,
+        default_repo=repo,
+        triaged_at=triaged_at,
+    )
 
     planned_entries: list[QueueEntry] = []
     label_plans: list[tuple[QueueEntry, Sequence[str]]] = []
@@ -373,6 +538,7 @@ def scan_and_triage(
         "planned_entry_count": len(planned_entries),
         "queue_entry_count": len(merged),
         "entries": [entry.to_dict() for entry in merged],
+        "pickup": pickup_payload(pickup_candidates),
         "write": write_result,
         "labels": label_result,
         "warnings": warnings,
@@ -541,6 +707,40 @@ def _desired_classification_labels(entry: QueueEntry) -> tuple[str, ...]:
     if readiness_label in READINESS_LABELS:
         labels.append(readiness_label)
     return tuple(sorted(labels))
+
+
+def _has_awaiting_operator_label(labels: Sequence[str]) -> bool:
+    normalized = {forge_triage._label_key(label) for label in labels}
+    return bool(normalized.intersection(AWAITING_OPERATOR_LABELS))
+
+
+def _has_pickup_in_progress_label(labels: Sequence[str]) -> bool:
+    normalized = {forge_triage._label_key(label) for label in labels}
+    return bool(normalized.intersection(PICKUP_IN_PROGRESS_LABELS)) or any(
+        label.startswith(PICKUP_IN_PROGRESS_LABEL_PREFIXES) for label in normalized
+    )
+
+
+def _pickup_candidate_sort_key(candidate: PickupCandidate) -> tuple[Any, ...]:
+    return (
+        _lane_sort_key(candidate.lane),
+        _work_class_sort_key(candidate.work_class),
+        candidate.issue_number,
+        candidate.repo.lower(),
+    )
+
+
+def _lane_sort_key(lane: str) -> tuple[int, Any]:
+    text = str(lane or "").strip().upper()
+    if text.startswith("L") and text[1:].isdigit():
+        return (0, int(text[1:]))
+    return (1, text.lower())
+
+
+def _work_class_sort_key(work_class: str) -> tuple[int, str]:
+    order = {"XS": 0, "S": 1, "M": 2, "L": 3}
+    text = str(work_class or "").strip().upper()
+    return (order.get(text, 99), text)
 
 
 def _is_managed_label(label: str) -> bool:
@@ -723,6 +923,15 @@ def _dedupe_last_write(entries: Sequence[QueueEntry]) -> tuple[QueueEntry, ...]:
     by_number: dict[int, QueueEntry] = {}
     for entry in entries:
         by_number[entry.issue_number] = entry
+    return tuple(by_number[number] for number in sorted(by_number))
+
+
+def _dedupe_pickup_candidates(
+    candidates: Sequence[PickupCandidate],
+) -> tuple[PickupCandidate, ...]:
+    by_number: dict[int, PickupCandidate] = {}
+    for candidate in candidates:
+        by_number[candidate.issue_number] = candidate
     return tuple(by_number[number] for number in sorted(by_number))
 
 
