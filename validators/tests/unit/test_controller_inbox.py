@@ -115,8 +115,18 @@ def test_controller_inbox_classifies_all_buckets_and_uses_merge_queue_entries():
     assert "searchQuery=repo:o/r is:pr is:open" in argv
 
 
-@pytest.mark.parametrize("label", ["held", "on-hold"])
-def test_controller_inbox_classifies_blocking_hold_labels_as_awaiting_operator(label):
+@pytest.mark.parametrize(
+    "label",
+    [
+        "wip",
+        "blocked",
+        "waiting",
+        "status:checkpoint",
+        "HELD",
+        "On-Hold",
+    ],
+)
+def test_controller_inbox_classifies_shared_blocking_union_labels_as_awaiting_operator(label):
     result = controller_inbox.ControllerInboxResult(
         scope=controller_inbox.InboxScope("repo", "o/r"),
         controller_login="ce-dev-2",

@@ -8,5 +8,8 @@ issue: ce-ops#387
 
 **Hold-label symmetry for controller inbox.**
 
-- Reused the shared issue-side blocking hold labels for PR awaiting-operator classification.
-- Covered `held` and `on-hold` PR labels without body markers.
+- Reused the full shared issue-side blocking hold-label union for PR awaiting-operator classification.
+- Covered PR labels without body markers across the union: `wip`, `blocked`, `waiting`,
+  `status:*` variants such as `status:checkpoint`, `do-not-claim`,
+  `dependency-blocked`, existing awaiting-operator labels (`awaiting-operator`,
+  `hold`, `awaiting-operator/hold`), and held/on-hold aliases including case variants.
