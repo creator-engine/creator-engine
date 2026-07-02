@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator import project_init
 
 
@@ -81,3 +83,30 @@ def test_init_project_skips_non_file_collision(tmp_path: Path):
     collision = next(a for a in result.actions if a.path == ".ce/README.md")
     assert collision.status == "skipped"
     assert collision.reason == "path exists and is not a file"
+
+
+def test_init_project_refuses_directory_symlink_escape(tmp_path: Path):
+    root = tmp_path / "project"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / ".ce").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(project_init.ProjectInitRefused):
+        project_init.init_project(root)
+
+    assert list(outside.rglob("*")) == []
+
+
+def test_init_project_refuses_force_leaf_symlink_escape(tmp_path: Path):
+    root = tmp_path / "project"
+    outside_file = tmp_path / "outside-readme.md"
+    original = b"do not clobber\n"
+    root.mkdir()
+    outside_file.write_bytes(original)
+    (root / "README.md").symlink_to(outside_file)
+
+    with pytest.raises(project_init.ProjectInitRefused):
+        project_init.init_project(root, force=True)
+
+    assert outside_file.read_bytes() == original

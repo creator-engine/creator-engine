@@ -330,6 +330,15 @@ def embedded_templates() -> tuple[TemplateFile, ...]:
     )
 
 
+def _resolve_template_path(root: Path, template_path: str) -> Path:
+    path = (root / template_path).resolve()
+    if not path.is_relative_to(root):
+        raise ProjectInitRefused(
+            f"template path escapes target root via symlink or parent traversal: {template_path}"
+        )
+    return path
+
+
 def plan_actions(
     target: Path | str,
     templates: Iterable[TemplateFile] | None = None,
@@ -338,10 +347,10 @@ def plan_actions(
 ) -> tuple[FileAction, ...]:
     """Purely classify the create/skip/overwrite action for each template."""
 
-    root = Path(target)
+    root = Path(target).resolve()
     actions: list[FileAction] = []
     for template in templates or embedded_templates():
-        path = root / template.path
+        path = _resolve_template_path(root, template.path)
         if path.exists() and not path.is_file():
             actions.append(FileAction(template.path, "skipped", "path exists and is not a file"))
             continue
@@ -372,7 +381,7 @@ def init_project(target: Path | str, *, force: bool = False) -> ProjectInitResul
         if action.status == "skipped":
             continue
         template = templates[action.path]
-        path = root / template.path
+        path = _resolve_template_path(root, template.path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(template.content, encoding="utf-8")
 
