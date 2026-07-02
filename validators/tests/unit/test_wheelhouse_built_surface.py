@@ -28,7 +28,10 @@ import pytest
 from creator_engine_validator.wheel_bake import build_app_wheel_from_source
 
 DISTRIBUTION = "creator_engine_validator"
-pytestmark = pytest.mark.wheel_bake_gate
+pytestmark = [
+    pytest.mark.wheel_bake_gate,
+    pytest.mark.xdist_group("wheel-build"),
+]
 
 
 @pytest.fixture()
