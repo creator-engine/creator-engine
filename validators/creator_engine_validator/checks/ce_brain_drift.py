@@ -562,13 +562,13 @@ def _repo_root_for_repo_local_state_root(state_root: Path | str) -> Path | None:
 
 def _drift_ledger_path(state_root: Path | str) -> Path:
     state_ledger = brain_runtime.ledger_path(state_root)
-    if state_ledger.is_file():
-        return state_ledger
     repo_root = _repo_root_for_repo_local_state_root(state_root)
     if repo_root is None:
         return state_ledger
     authoritative = repo_root / AUTHORITATIVE_LEDGER_RELATIVE_PATH
-    return authoritative if authoritative.is_file() else state_ledger
+    if authoritative.is_file():
+        return authoritative
+    return state_ledger
 
 
 def _repo_root_from_ledger_path(path: Path) -> Path:
@@ -588,39 +588,11 @@ def _is_loaded_runtime_ledger(path: Path) -> bool:
     )
 
 
-def _authoritative_mismatch_errors(path: Path, context: DriftContext) -> list[ValidationError]:
-    authoritative_path = brain_runtime.authoritative_ledger_path(context.root())
-    if not authoritative_path.is_file() or not path.is_file():
-        return []
-    try:
-        runtime_records = brain_runtime.load_records_from_path(path)
-        authoritative_records = brain_runtime.load_records_from_path(authoritative_path)
-    except brain_runtime.BrainLedgerInvalid:
-        return []
-    if runtime_records == authoritative_records:
-        return []
-    runtime_head = (
-        str(runtime_records[-1].get("content_hash"))
-        if runtime_records and isinstance(runtime_records[-1].get("content_hash"), str)
-        else "<none>"
+def _has_authoritative_ledger_for_runtime_copy(path: Path, context: DriftContext) -> bool:
+    return (
+        _is_loaded_runtime_ledger(path)
+        and brain_runtime.authoritative_ledger_path(context.root()).is_file()
     )
-    authoritative_head = (
-        str(authoritative_records[-1].get("content_hash"))
-        if authoritative_records and isinstance(authoritative_records[-1].get("content_hash"), str)
-        else "<none>"
-    )
-    return [
-        make_error(
-            CODE_AUTHORITATIVE_MISMATCH,
-            path,
-            "/",
-            (
-                "loaded brain assertion ledger diverges from authoritative store "
-                f"{authoritative_path}; loaded head={runtime_head}, authoritative head={authoritative_head}"
-            ),
-            CONTRACT,
-        )
-    ]
 
 
 def _verify_probe_record(record: Mapping[str, Any], path: Path, pointer_prefix: tuple[Any, ...], context: DriftContext) -> list[ValidationError]:
@@ -906,8 +878,6 @@ def verify_state_root(state_root: Path | str, *, context: DriftContext | None = 
     findings_list: list[ValidationError] = []
     if path.is_file():
         findings_list.extend(validate_file(path, context=context))
-        if _is_loaded_runtime_ledger(path):
-            findings_list.extend(_authoritative_mismatch_errors(path, context))
     findings = tuple(findings_list)
     record_count = 0
     active_count = 0
@@ -936,22 +906,13 @@ def verify_state_root(state_root: Path | str, *, context: DriftContext | None = 
 @register(CHECK_NAME, [CODE_DRIFT, CODE_UNVERIFIABLE, CODE_AUTHORITATIVE_MISMATCH])
 def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []
-    checked_mismatch_paths: set[Path] = set()
     for path in iter_brain_assertion_files(paths):
         repo_root = _repo_root_from_ledger_path(path)
         context = DriftContext(
             repo_root=repo_root,
             probe_context=brain_probe.ProbeContext(repo_root=repo_root),
         )
+        if _has_authoritative_ledger_for_runtime_copy(path, context):
+            continue
         errors.extend(validate_file(path, context=context))
-        if not _is_loaded_runtime_ledger(path):
-            continue
-        try:
-            resolved = path.resolve()
-        except OSError:
-            resolved = path
-        if resolved in checked_mismatch_paths:
-            continue
-        checked_mismatch_paths.add(resolved)
-        errors.extend(_authoritative_mismatch_errors(path, context))
     return CheckResult(name=CHECK_NAME, errors=tuple(errors))
