@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** feature
 
-AUTHORIZED_PATHS_COUNT=12
+AUTHORIZED_PATHS_COUNT=14
 
-AUTHORIZED_PATHS_SHA256=911f8a987ef63705aa39127d225114d992e2c6addd2f16d06d4f1a3802aec6f2
+AUTHORIZED_PATHS_SHA256=f7355f8d6616dc6846c67fd5e4eb82f28cf366fef0425abc741caa75f78aa58a
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-369-denylist-from-ssot.md
 .ce/pr-manifests/ce-369-denylist-from-ssot.md
 .github/workflows/identity-denylist-freshness.yml
@@ -22,5 +23,6 @@ validators/creator_engine_validator/data/identity_denylist.generated.yaml
 validators/creator_engine_validator/identity_denylist.py
 validators/creator_engine_validator/public_docs_confidentiality.py
 validators/pyproject.toml
+validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_identity_denylist_autogen_sync.py
 ```

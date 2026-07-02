@@ -12,3 +12,4 @@ issue: ce-369
 - Added a required-registry generator plus offline autogen sync check; the PR gate verifies artifact structure, hashed-only contents, and guard wiring.
 - Added a scheduled freshness workflow that checks the private identity registry with `secrets.CE_OPS_READ_TOKEN` and fails loudly on drift without auto-push or auto-PR behavior.
 - Seeded this PR with a like-for-like migration of the prior hand-maintained literal list into hashes only. The workflow begins enforcing freshness once the controller provisions `CE_OPS_READ_TOKEN`; controller regeneration against the live registry remains the immediate follow-up because this worker cannot read the private registry.
+- Superseded the d1b-39 brain assertion to re-pin `validators/pyproject.toml` after this branch's package-data change.

@@ -2923,4 +2923,58 @@ records:
   verification_method:
     evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
     type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: 01af7c1c9021489bb76282b630e65fea37d504e4014d40e28c00564a3498147d
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: fc6a27b79889e89b78038a1ebf745bccfaac19447096c4c99404066e82416c3e
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-d1b-39-full-validator-long-running-v2
+  kind: brain-assertion
+  prev_hash: dd041bf8cb1729b264665c1f1e04b6aa8e29a6d7da7ddaf45d78d21f987de577
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 112
+  statement: The full validator includes slow and integration test surfaces; long-running
+    execution is expected and should not be treated as a hang without evidence.
+  status: superseded
+  superseded_by: brain-assertion-d1b-39-full-validator-long-running-v3
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: 6d096f86ea3ef8ed5a695c177a86ac6ff468f5714be2275a0f3b1eed520db986
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 5341c54dc44b1344500561f0a8cbc1a24666ac5ab8a5132cefb57a6861413188
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-d1b-39-full-validator-long-running-v3
+  kind: brain-assertion
+  prev_hash: fc6a27b79889e89b78038a1ebf745bccfaac19447096c4c99404066e82416c3e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 113
+  statement: The full validator includes slow and integration test surfaces; long-running
+    execution is expected and should not be treated as a hang without evidence.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
 schema_version: '1'
