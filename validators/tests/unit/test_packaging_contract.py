@@ -297,6 +297,7 @@ def test_verify_packaging_contract_keeps_first_party_app_wheel_independent(
 
 
 @pytest.mark.wheel_bake_gate
+@pytest.mark.xdist_group("wheel-build")
 def test_verify_wheel_matches_source_is_clean_on_repo(repo_root: Path):
     violations = pkg.verify_wheel_matches_source(repo_root)
     assert violations == []
