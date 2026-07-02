@@ -6,10 +6,29 @@ CI guard uses is exposed as ``scan-public-docs-confidentiality`` and runs in
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from creator_engine_validator import cli
 from creator_engine_validator import public_docs_confidentiality as guard
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _write_tracked(repo: Path, rel: str, text: str) -> Path:
+    target = repo / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    _git(repo, "add", "--", rel)
+    return target
 
 
 def _make_repo(tmp_path: Path) -> Path:
@@ -19,13 +38,14 @@ def _make_repo(tmp_path: Path) -> Path:
     ``unreviewed`` net-new files nor ``stale`` missing exceptions fire), leaving
     the confidentiality pattern scan as the only variable under test.
     """
-    (tmp_path / ".git").mkdir()
+    _git(tmp_path, "init")
     (tmp_path / "docs").mkdir()
     (tmp_path / "README.md").write_text("# Clean product front door.\n", encoding="utf-8")
     for rel in (*guard.KNOWN_OPERATIONS_EXCEPTIONS, *guard.KNOWN_DELIVERY_EXCEPTIONS):
         target = tmp_path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("Internal protocol doc.\n", encoding="utf-8")
+    _git(tmp_path, "add", "--", "README.md", "docs")
     return tmp_path
 
 
@@ -35,7 +55,7 @@ def _confidentiality_errors(result) -> list[str]:
 
 def test_run_passes_on_clean_repo(tmp_path: Path):
     repo = _make_repo(tmp_path)
-    (repo / "docs" / "guide.md").write_text("Public, product-lens prose.\n", encoding="utf-8")
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
 
     result = guard.run([repo])
 
@@ -45,7 +65,7 @@ def test_run_passes_on_clean_repo(tmp_path: Path):
 
 def test_run_fails_on_planted_ce_ops_ref(tmp_path: Path):
     repo = _make_repo(tmp_path)
-    (repo / "docs" / "leak.md").write_text("Tracked in ce-ops#999.\n", encoding="utf-8")
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#999.\n")
 
     result = guard.run([repo])
 
@@ -61,7 +81,7 @@ def test_run_fails_on_planted_ce_ops_ref(tmp_path: Path):
 
 def test_run_fails_on_internal_host_marker(tmp_path: Path):
     repo = _make_repo(tmp_path)
-    (repo / "docs" / "topology.md").write_text("Runs on Hetzner.\n", encoding="utf-8")
+    _write_tracked(repo, "docs/topology.md", "Runs on Hetzner.\n")
 
     result = guard.run([repo])
 
@@ -72,8 +92,11 @@ def test_run_fails_on_internal_host_marker(tmp_path: Path):
 def test_run_fails_on_net_new_internal_tree_file(tmp_path: Path):
     """A net-new docs/operations file (not on the ratchet) is flagged."""
     repo = _make_repo(tmp_path)
-    netnew = repo / "docs" / "operations" / "BRAND_NEW_INTERNAL_PROTOCOL.md"
-    netnew.write_text("Net-new internal protocol.\n", encoding="utf-8")
+    _write_tracked(
+        repo,
+        "docs/operations/BRAND_NEW_INTERNAL_PROTOCOL.md",
+        "Net-new internal protocol.\n",
+    )
 
     result = guard.run([repo])
 
@@ -82,23 +105,286 @@ def test_run_fails_on_net_new_internal_tree_file(tmp_path: Path):
     assert any("BRAND_NEW_INTERNAL_PROTOCOL.md" in e for e in tree_errors)
 
 
-def test_known_pending_file_is_not_flagged(tmp_path: Path):
-    """A repo-relative path on the allowlist is skipped even if it offends."""
-    # Use a real allowlisted path so the rule (single-sourced) recognizes it.
-    allowlisted = next(iter(sorted(guard.KNOWN_PENDING)))
+def test_baseline_allowed_file_and_token_class_is_not_flagged(tmp_path: Path):
+    """A repo-relative file/token-class baseline entry is skipped."""
+    allowlisted = next(
+        rel
+        for rel, label in sorted(guard.ALLOWED_OFFENSES)
+        if label == "confidential ce-ops# ticket reference"
+    )
     repo = _make_repo(tmp_path)
-    target = repo / allowlisted
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("Tracked in ce-ops#999.\n", encoding="utf-8")
+    _write_tracked(repo, allowlisted, "Tracked in ce-ops#999.\n")
 
     result = guard.run([repo])
 
     assert result.ok, [e.format() for e in result.errors]
 
 
+def test_run_passes_on_structural_carrier_metadata_with_empty_allowlist(
+    tmp_path: Path, monkeypatch
+):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "ALLOWED_OFFENSES", {})
+    ticket_prefix = "ce-" "ops"
+    slug = f"{ticket_prefix}-777-routine-carrier"
+    issue = f"{ticket_prefix}#777"
+    _write_tracked(
+        repo,
+        f".ce/changelog/{slug}.md",
+        f"""---
+slug: {slug}
+date: 2026-07-02
+kind: fix
+scope: validators
+issue: {issue}
+---
+
+Routine public changelog prose.
+""",
+    )
+    _write_tracked(
+        repo,
+        f".ce/pr-manifests/{slug}.md",
+        f"""# PR path manifest — {issue} · Routine carrier
+
+This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref {slug}` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
+
+AUTHORIZED_PATHS_COUNT=2
+
+```text
+.ce/changelog/{slug}.md
+.ce/pr-manifests/{slug}.md
+```
+""",
+    )
+
+    result = guard.run([repo])
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_passes_on_qualified_changelog_issue_with_empty_allowlist(
+    tmp_path: Path, monkeypatch
+):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "ALLOWED_OFFENSES", {})
+    ticket_prefix = "ce-" "ops"
+    slug = f"{ticket_prefix}-780-qualified-changelog"
+    issue = f"creator-engine/{ticket_prefix}#780"
+    _write_tracked(
+        repo,
+        f".ce/changelog/{slug}.md",
+        f"""---
+slug: {slug}
+date: 2026-07-02
+kind: fix
+scope: validators
+issue: {issue}
+---
+
+Routine public changelog prose.
+""",
+    )
+
+    result = guard.run([repo])
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_passes_on_qualified_pr_manifest_header_with_empty_allowlist(
+    tmp_path: Path, monkeypatch
+):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "ALLOWED_OFFENSES", {})
+    ticket_prefix = "ce-" "ops"
+    issue = f"creator-engine/{ticket_prefix}#781"
+    _write_tracked(
+        repo,
+        f".ce/pr-manifests/{ticket_prefix}-781-qualified-manifest.md",
+        f"""# PR path manifest — {issue} · Qualified carrier
+
+AUTHORIZED_PATHS_COUNT=1
+
+```text
+.ce/pr-manifests/{ticket_prefix}-781-qualified-manifest.md
+```
+""",
+    )
+
+    result = guard.run([repo])
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_fails_on_qualified_body_ticket_ref_with_empty_allowlist(
+    tmp_path: Path, monkeypatch
+):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "ALLOWED_OFFENSES", {})
+    ticket_prefix = "ce-" "ops"
+    slug = f"{ticket_prefix}-782-qualified-body-leak"
+    issue = f"creator-engine/{ticket_prefix}#782"
+    body_ref = f"creator-engine/{ticket_prefix}#1782"
+    _write_tracked(
+        repo,
+        f".ce/changelog/{slug}.md",
+        f"""---
+slug: {slug}
+date: 2026-07-02
+kind: fix
+scope: validators
+issue: {issue}
+---
+
+Body prose must not mention {body_ref}.
+""",
+    )
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    confidential = _confidentiality_errors(result)
+    assert len(confidential) == 1
+    assert f"Body prose must not mention {body_ref}" in confidential[0]
+
+
+def test_run_fails_on_changelog_body_ticket_ref_with_empty_allowlist(
+    tmp_path: Path, monkeypatch
+):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "ALLOWED_OFFENSES", {})
+    ticket_prefix = "ce-" "ops"
+    slug = f"{ticket_prefix}-778-body-leak"
+    issue = f"{ticket_prefix}#778"
+    body_ref = f"{ticket_prefix}#1778"
+    _write_tracked(
+        repo,
+        f".ce/changelog/{slug}.md",
+        f"""---
+slug: {slug}
+date: 2026-07-02
+kind: fix
+scope: validators
+issue: {issue}
+---
+
+Body prose must not mention {body_ref}.
+""",
+    )
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    confidential = _confidentiality_errors(result)
+    assert len(confidential) == 1
+    assert f"Body prose must not mention {body_ref}" in confidential[0]
+
+
+def test_run_fails_on_pr_manifest_extra_ticket_ref_with_empty_allowlist(
+    tmp_path: Path, monkeypatch
+):
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(guard, "ALLOWED_OFFENSES", {})
+    ticket_prefix = "ce-" "ops"
+    issue = f"{ticket_prefix}#779"
+    body_ref = f"{ticket_prefix}#1779"
+    _write_tracked(
+        repo,
+        f".ce/pr-manifests/{ticket_prefix}-779-extra-ref.md",
+        f"""# PR path manifest — {issue} · Extra ref
+
+Body prose must not mention {body_ref} beyond the header.
+""",
+    )
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    confidential = _confidentiality_errors(result)
+    assert len(confidential) == 1
+    assert f"Body prose must not mention {body_ref}" in confidential[0]
+
+
+def test_run_fails_without_allowlist_on_tracked_source_file(tmp_path: Path):
+    """A fake internal identifier in any tracked source file fails the scan."""
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "validators/fake_module.py", "Tracked in ce-ops#999.\n")
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    confidential = _confidentiality_errors(result)
+    assert len(confidential) == 1
+    assert "validators/fake_module.py" in confidential[0]
+
+
+def test_run_passes_with_narrow_allowlist_on_tracked_source_file(
+    tmp_path: Path, monkeypatch
+):
+    """The allowlist is file + token-class specific: fail without, pass with."""
+    repo = _make_repo(tmp_path)
+    rel = "validators/legacy_fixture.py"
+    _write_tracked(repo, rel, "Tracked in ce-ops#999.\n")
+    monkeypatch.setitem(
+        guard.ALLOWED_OFFENSES,
+        (rel, "confidential ce-ops# ticket reference"),
+        "test-only narrow baseline exception",
+    )
+
+    result = guard.run([repo])
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_ignores_untracked_source_file(tmp_path: Path):
+    """Untracked files are outside the public-repo tracked-text surface."""
+    repo = _make_repo(tmp_path)
+    untracked = repo / "validators" / "scratch.py"
+    untracked.parent.mkdir(parents=True, exist_ok=True)
+    untracked.write_text("Tracked in ce-ops#999.\n", encoding="utf-8")
+
+    result = guard.run([repo])
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_run_fails_closed_on_unreadable_tracked_file(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    unreadable = _write_tracked(repo, "validators/unreadable.py", "clean = True\n").resolve()
+    original_read_bytes = Path.read_bytes
+
+    def fail_for_unreadable(path: Path) -> bytes:
+        if path.resolve() == unreadable:
+            raise OSError("permission denied for test")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_for_unreadable)
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    assert any("CE-CONFIDENTIALITY-SCAN" in e.code for e in result.errors)
+
+
+def test_run_fails_closed_on_pattern_failure(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "validators/clean.py", "clean = True\n")
+
+    class BrokenPattern:
+        def search(self, _line: str):
+            raise RuntimeError("pattern engine failed for test")
+
+    monkeypatch.setattr(guard, "FORBIDDEN_PATTERNS", (("broken pattern", BrokenPattern()),))
+
+    result = guard.run([repo])
+
+    assert not result.ok
+    assert any("CE-CONFIDENTIALITY-SCAN" in e.code for e in result.errors)
+
+
 def test_cli_subcommand_clean_exits_zero(tmp_path: Path, capsys):
     repo = _make_repo(tmp_path)
-    (repo / "docs" / "ok.md").write_text("All clean.\n", encoding="utf-8")
+    _write_tracked(repo, "docs/ok.md", "All clean.\n")
 
     rc = cli.main(["scan-public-docs-confidentiality", str(repo)])
 
@@ -107,7 +393,7 @@ def test_cli_subcommand_clean_exits_zero(tmp_path: Path, capsys):
 
 def test_cli_subcommand_leak_exits_nonzero(tmp_path: Path, capsys):
     repo = _make_repo(tmp_path)
-    (repo / "docs" / "leak.md").write_text("Tracked in ce-ops#1234.\n", encoding="utf-8")
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#1234.\n")
 
     rc = cli.main(["scan-public-docs-confidentiality", str(repo)])
 

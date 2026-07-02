@@ -188,14 +188,14 @@ def test_public_docs_have_no_dangling_internal_doc_links():
     )
 
 
-def test_public_docs_contain_no_confidential_or_internal_references():
-    """No NON-allowlisted public doc may leak a forbidden internal reference."""
+def test_tracked_text_files_contain_no_new_confidential_or_internal_references():
+    """No non-allowlisted tracked text file may leak a forbidden internal reference."""
     offenders = guard.scan_offenses(repo_root=_REPO_ROOT)
 
     assert not offenders, (
-        "Public docs leak confidential ce-ops# or internal host identifiers. "
+        "Tracked text files leak confidential ce-ops# or internal host identifiers. "
         "Remove the reference (product-lens rewrite), or — only for the separate "
-        "redact/relocate program — add the file to KNOWN_PENDING. " + guard.REMINDER
+        "redact/relocate program — add a narrow ALLOWED_OFFENSES entry. " + guard.REMINDER
         + " Offending lines:\n  " + "\n  ".join(offenders)
     )
 
