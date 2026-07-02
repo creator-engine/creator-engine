@@ -26,6 +26,8 @@ DEFAULT_PICKUP_LABEL = "ce-pickup/triage-ready"
 SCHEMA_VERSION = 1
 _TIMELINE_PAGE_SIZE = 100
 _TIMELINE_MAX_PAGES = 20
+DEFAULT_USER_STORY_LABELS = ("user-story",)
+DEFAULT_OPERATOR_AUTHOR_LOGINS = ("Operator",)
 
 _GITHUB_ISSUE_RE = re.compile(
     r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/(?:issues|pull)/(\d+)"
@@ -213,6 +215,33 @@ class PlannedMutation:
 
 
 @dataclass(frozen=True)
+class CommissionedPredicateConfig:
+    """Configurable commissioned-work predicate for unscheduled sweep output."""
+
+    user_story_labels: tuple[str, ...] = DEFAULT_USER_STORY_LABELS
+    operator_author_logins: tuple[str, ...] = DEFAULT_OPERATOR_AUTHOR_LOGINS
+
+
+@dataclass(frozen=True)
+class CommissionedUnscheduledItem:
+    """One commissioned issue that is not referenced by the active arc."""
+
+    issue: IssueCandidate
+    commissioned_by: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "issue": self.issue.to_dict(),
+            "work_key": self.issue.work_key.work_key,
+            "commissioned_by": list(self.commissioned_by),
+            "unmilestoned": True,
+            "referenced_by_active_arc": False,
+            "advisory_only": True,
+            "planned_mutations": [],
+        }
+
+
+@dataclass(frozen=True)
 class TriageAction:
     """One claimable issue plus the belt mutations that make it pick-up ready."""
 
@@ -251,6 +280,8 @@ class TriageResult:
     pickup_query_hint: str
     applied: bool
     items: tuple[TriageAction, ...]
+    commissioned_unscheduled: tuple[CommissionedUnscheduledItem, ...] = ()
+    commissioned_unscheduled_status: str = "verified"
     skipped: tuple[Mapping[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -264,6 +295,11 @@ class TriageResult:
             "applied": self.applied,
             "count": len(self.items),
             "items": [item.to_dict() for item in self.items],
+            "commissioned_unscheduled_status": self.commissioned_unscheduled_status,
+            "commissioned_unscheduled_count": len(self.commissioned_unscheduled),
+            "commissioned_unscheduled": [
+                item.to_dict() for item in self.commissioned_unscheduled
+            ],
             "skipped_count": len(self.skipped),
             "skipped": [dict(item) for item in self.skipped],
         }
@@ -325,6 +361,7 @@ def plan_triage(
     pickup_label: str = DEFAULT_PICKUP_LABEL,
     assign_to: Sequence[str] = (),
     gh_runner: GhRunner | None = None,
+    commissioned_predicate: CommissionedPredicateConfig | Mapping[str, Any] | None = None,
 ) -> TriageResult:
     """Plan deterministic pickup actions for unblocked, unclaimed issues.
 
@@ -342,6 +379,15 @@ def plan_triage(
     arc_work_key = arc_key.work_key
     arc_candidate = _find_arc_candidate(candidates, arc_work_key)
     arc_held_refs = _extract_arc_held_checkpoint_refs(arc_candidate) if arc_candidate else {}
+    commissioned_unscheduled_status = (
+        "verified" if arc_candidate is not None else "arc_missing"
+    )
+    commissioned_unscheduled = _commissioned_unscheduled_items(
+        candidates,
+        arc_work_key=arc_work_key,
+        arc_candidate=arc_candidate,
+        config=_normalize_commissioned_predicate(commissioned_predicate),
+    )
     candidates = _filter_candidates_by_arc_refs(
         candidates,
         arc_work_key,
@@ -400,6 +446,8 @@ def plan_triage(
         pickup_query_hint=pickup_query_hint,
         applied=False,
         items=tuple(items),
+        commissioned_unscheduled=commissioned_unscheduled,
+        commissioned_unscheduled_status=commissioned_unscheduled_status,
         skipped=tuple(skipped),
     )
 
@@ -437,6 +485,8 @@ def apply_triage_result(result: TriageResult, gh_runner: GhRunner) -> TriageResu
         pickup_query_hint=result.pickup_query_hint,
         applied=True,
         items=tuple(applied_items),
+        commissioned_unscheduled=result.commissioned_unscheduled,
+        commissioned_unscheduled_status=result.commissioned_unscheduled_status,
         skipped=result.skipped,
     )
 
@@ -488,6 +538,117 @@ def _filter_candidates_by_arc_refs(
         if referenced_numbers is not None and candidate.number in referenced_numbers:
             filtered.append(candidate)
     return tuple(filtered)
+
+
+def _commissioned_unscheduled_items(
+    candidates: Sequence[IssueCandidate],
+    *,
+    arc_work_key: str | None,
+    arc_candidate: IssueCandidate | None,
+    config: CommissionedPredicateConfig,
+) -> tuple[CommissionedUnscheduledItem, ...]:
+    if arc_work_key is None or arc_candidate is None:
+        return ()
+    refs_by_repo = _extract_arc_issue_refs(arc_candidate)
+    items: list[CommissionedUnscheduledItem] = []
+    for candidate in candidates:
+        if candidate.work_key.work_key == arc_work_key:
+            continue
+        if _issue_ref_contains(refs_by_repo, candidate):
+            continue
+        if candidate.state.strip().lower() != "open":
+            continue
+        if _has_milestone(candidate):
+            continue
+        if _has_done_label(candidate) or _is_aggregate_issue(candidate):
+            continue
+        commissioned_by = _commissioned_by(candidate, config)
+        if not commissioned_by:
+            continue
+        items.append(
+            CommissionedUnscheduledItem(
+                issue=candidate,
+                commissioned_by=commissioned_by,
+            )
+        )
+    return tuple(sorted(items, key=lambda item: (item.issue.repo.lower(), item.issue.number)))
+
+
+def _normalize_commissioned_predicate(
+    raw: CommissionedPredicateConfig | Mapping[str, Any] | None,
+) -> CommissionedPredicateConfig:
+    if raw is None:
+        return CommissionedPredicateConfig()
+    if isinstance(raw, CommissionedPredicateConfig):
+        return raw
+    labels = raw.get("user_story_labels", DEFAULT_USER_STORY_LABELS)
+    authors = raw.get("operator_author_logins", DEFAULT_OPERATOR_AUTHOR_LOGINS)
+    return CommissionedPredicateConfig(
+        user_story_labels=_string_tuple(labels),
+        operator_author_logins=_string_tuple(authors),
+    )
+
+
+def _commissioned_by(
+    candidate: IssueCandidate,
+    config: CommissionedPredicateConfig,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    configured_labels = {_label_key(label) for label in config.user_story_labels}
+    candidate_labels = {_label_key(label) for label in candidate.labels}
+    for label in sorted(candidate_labels.intersection(configured_labels)):
+        reasons.append(f"label:{label}")
+
+    author = _issue_author_login(candidate)
+    configured_authors = {_label_key(login) for login in config.operator_author_logins}
+    if author and _label_key(author) in configured_authors:
+        reasons.append(f"author:{author}")
+    return tuple(_dedupe_strings(reasons))
+
+
+def _issue_author_login(candidate: IssueCandidate) -> str | None:
+    raw = candidate.raw or {}
+    if not isinstance(raw, Mapping):
+        return None
+    for key in ("user", "author", "created_by", "createdBy"):
+        value = raw.get(key)
+        if isinstance(value, Mapping):
+            login = value.get("login") or value.get("name")
+            if isinstance(login, str) and login.strip():
+                return login.strip()
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for key in ("user_login", "author_login", "created_by_login"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _has_milestone(candidate: IssueCandidate) -> bool:
+    raw = candidate.raw or {}
+    if not isinstance(raw, Mapping):
+        return False
+    value = raw.get("milestone")
+    if value is None or value is False:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping):
+        return bool(value)
+    return True
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        values = value
+    else:
+        values = (value,)
+    return tuple(str(item).strip() for item in values if str(item).strip())
 
 
 def _find_arc_candidate(
