@@ -4,12 +4,13 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=3
+AUTHORIZED_PATHS_COUNT=4
 
-AUTHORIZED_PATHS_SHA256=3226f4dba7009e545431f50227f228f67bd7e6c736131e0a9675ec1b3f43f889
+AUTHORIZED_PATHS_SHA256=27a13f04c10a2217a259cadf7966fa314f99e6449705a691b91cb785fadee273
 
 ```text
 .ce/changelog/ce-386-wheelhouse-xdist-group.md
 .ce/pr-manifests/ce-386-wheelhouse-xdist-group.md
+validators/tests/unit/test_packaging_contract.py
 validators/tests/unit/test_wheelhouse_built_surface.py
 ```

@@ -8,4 +8,4 @@ issue: ce-ops#386
 
 **Serialize wheelhouse built-surface tests under xdist.**
 
-- Added the wheel-build xdist group to the built-surface wheelhouse tests so source wheel builds serialize with the existing wheel bake tests.
+- Added the wheel-build xdist group to the built-surface wheelhouse tests and the packaging contract wheel parity test so shared source-tree wheel builds serialize under loadgroup.
