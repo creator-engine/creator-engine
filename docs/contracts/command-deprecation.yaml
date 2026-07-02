@@ -1,0 +1,4 @@
+kind: ce-command-deprecation-manifest
+schema_version: "1"
+surface_budget: 40
+deprecations: []

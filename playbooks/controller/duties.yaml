@@ -1,0 +1,224 @@
+kind: ce-controller-duty-manifest
+schema_version: "1"
+metadata:
+  owner_issue: ce-ops#398
+  status: draft
+  generated_by: manual
+  source_design: embedded_architect_design_in_ce_ops_398_a1a2_brief
+  bootstrap_ssot_status:
+    path: docs/design/controller-bootstrap-ssot.json
+    status: preview-only-not-ratified-for-live-bootstrap-injection
+  gate_authority_mode:
+    status: read-only-shadow
+    until: ce-ops#398-A5-standup-lock-primitive
+    reason: double-hold-risk-on-merge-gate-authority
+  omitted_credentials:
+    - id: ce-root-v1
+      reason: Operator-only signing root; controller standup must not resolve or arm it.
+  harnesses:
+    controller_standup_required: [claude, codex]
+
+duties:
+  - id: pr-board-monitor
+    kind: watcher
+    description: >-
+      Monitor open PR board for review, CI, mergeability, and controller-action
+      state changes.
+    owner_process: controller-session
+    survives_controller_death: false
+    re_arm:
+      procedure_ref: playbooks/controller/briefs/merge-gate.md
+      command: null
+    health_check:
+      kind: manual
+      probe: null
+      description: >-
+        Controller must confirm active polling in the replacement session; no
+        independent tracked process exists to probe this session-level watcher.
+    criticality: high
+
+  - id: seat-stall-watcher
+    kind: watcher
+    description: >-
+      Monitor dispatched seats for liveness, stalls, stop lines, and context
+      pressure.
+    owner_process: controller-session
+    survives_controller_death: false
+    re_arm:
+      procedure_ref: playbooks/controller/briefs/seat-refresh.md
+      command: null
+    health_check:
+      kind: manual
+      probe: null
+      description: >-
+        Controller must re-arm this from the replacement session; contained-seat
+        probes use docker exec against live named containers per
+        playbooks/controller/harness.md.
+    criticality: high
+
+  - id: seat-check-cron
+    kind: cron
+    description: Per-seat context, pane, and stall check.
+    schedule: "0 * * * *"
+    owner_process: host-cron
+    survives_controller_death: true
+    re_arm:
+      procedure_ref: null
+      command: null
+    health_check:
+      kind: TODO_VERIFY
+      probe: TODO_VERIFY
+      description: >-
+        No tracked crontab, timer unit, or script for this host cron exists in
+        this repository; verify the live host inventory before relying on it.
+    criticality: medium
+
+  - id: poll-devs-cron
+    kind: cron
+    description: Collect seat liveness, stop lines, and blockers from dev seats.
+    schedule: "5 * * * *"
+    owner_process: host-cron
+    survives_controller_death: true
+    re_arm:
+      procedure_ref: null
+      command: null
+    health_check:
+      kind: TODO_VERIFY
+      probe: TODO_VERIFY
+      description: >-
+        No tracked crontab, timer unit, or script for this host cron exists in
+        this repository; verify the live host inventory before relying on it.
+    criticality: medium
+
+  - id: conveyor-tend-cron
+    kind: cron
+    description: Move ready harvested work through review, gate, and next-lane flow.
+    schedule: "30 * * * *"
+    owner_process: host-cron
+    survives_controller_death: true
+    re_arm:
+      procedure_ref: null
+      command: null
+    health_check:
+      kind: TODO_VERIFY
+      probe: TODO_VERIFY
+      description: >-
+        No tracked crontab entry for this named host cron exists in this
+        repository. The tracked systemd belt daemon is related conveyor
+        infrastructure, not proof of this cron.
+    criticality: medium
+
+  - id: merge-queue-daemon
+    kind: daemon
+    description: >-
+      Autonomous merge-queue daemon for green, independently reviewed,
+      authorized work. Replacement controllers may observe it but must not arm
+      gate authority until the standup lock primitive exists.
+    owner_process: gate-daemon
+    survives_controller_death: true
+    deployment_refs:
+      - deploy/queue-daemon/ce-queue-daemon.service
+      - deploy/queue-daemon/launch-queue-daemon.sh
+      - deploy/queue-daemon/RELOCATION.md
+      - deploy/systemd/ce-integrator-daemon.service
+      - deploy/systemd/README.md
+    re_arm:
+      procedure_ref: deploy/queue-daemon/RELOCATION.md
+      command: deploy/queue-daemon/launch-queue-daemon.sh --health
+    health_check:
+      kind: command
+      probe: deploy/queue-daemon/launch-queue-daemon.sh --health
+      description: >-
+        Tracked health mode verifies daemon liveness plus GitHub and OpenBao
+        token reachability without printing secret values. Host deployment may
+        also expose ce-integrator-daemon.service or ce-queue-daemon.service.
+    credential_dependency: >-
+      GH_TOKEN plus OpenBao approval-wall secret references from the host-local
+      gate daemon environment file; values must remain outside the repository.
+    authority_mode: read-only-shadow-until-A5-lock
+    criticality: critical
+
+  - id: approval-wall-daemon
+    kind: daemon
+    description: >-
+      OpenBao-backed approval-wall capability used by the merge-queue daemon.
+      In the tracked queue-daemon relocation package, approval-wall secret
+      materialization is launched and health-checked through the queue daemon
+      wrapper.
+    owner_process: gate-daemon
+    survives_controller_death: true
+    deployment_refs:
+      - deploy/queue-daemon/launch-queue-daemon.sh
+      - deploy/queue-daemon/RELOCATION.md
+      - docs/devops/openbao-approval-wall-arming.md
+    re_arm:
+      procedure_ref: docs/devops/openbao-approval-wall-arming.md
+      command: deploy/queue-daemon/launch-queue-daemon.sh --health
+    health_check:
+      kind: command
+      probe: deploy/queue-daemon/launch-queue-daemon.sh --health
+      description: >-
+        This is the verified tracked health surface for the queue daemon's
+        approval-wall dependency. Any separate legacy host launcher remains a
+        host-local fact and must be treated as TODO_VERIFY.
+    credential_dependency: OpenBao approval-wall secret ref and policy sha.
+    authority_mode: read-only-shadow-until-A5-lock
+    criticality: critical
+
+  - id: dispatch
+    kind: procedure
+    description: Create governed-seat brief and verify work claim before start.
+    procedure_ref: playbooks/controller/briefs/dispatch.md
+    workflow_stage_ref: playbooks/controller/workflow.ce.yml#stages.dispatch
+    criticality: high
+
+  - id: harvest
+    kind: procedure
+    description: >-
+      Collect worker output at READY, verify local preflight, stage, regenerate
+      carriers, and route independent review.
+    procedure_ref: playbooks/controller/briefs/harvest.md
+    criticality: high
+
+  - id: merge-gate
+    kind: procedure
+    description: >-
+      Confirm independent review, green checks, and ratification before any
+      merge action.
+    procedure_ref: playbooks/controller/briefs/merge-gate.md
+    workflow_stage_ref: playbooks/controller/workflow.ce.yml#stages.merge-gate
+    authority_mode: read-only-shadow-until-A5-lock-for-replacement-standup
+    criticality: critical
+
+  - id: seat-refresh
+    kind: procedure
+    description: Save resume state, clear context, and resume from precise state.
+    procedure_ref: playbooks/controller/briefs/seat-refresh.md
+    workflow_stage_ref: playbooks/controller/workflow.ce.yml#stages.seat-refresh
+    criticality: medium
+
+  - id: courier-forge-op
+    kind: procedure
+    description: ADR-0007 model-b bridge for contained seats needing a forge op.
+    procedure_ref: playbooks/controller/briefs/courier-forge-op.md
+    workflow_stage_ref: playbooks/controller/workflow.ce.yml#stages.courier-forge-op
+    sunset_condition: ADR-0007 egress gateway / publish broker lands.
+    criticality: medium
+
+  - id: resume-state-checkpointing
+    kind: procedure
+    description: >-
+      Emit .ce/state/research/RESUME_STATE_* checkpoints and pick up the newest
+      by mtime on resume when such state exists.
+    procedure_ref: docs/design/controller-bootstrap-ssot.json#controller_knowledge_overlay.startup_sequence
+    status: codified-in-preview-only-ssot-not-ratified-live-not-runtime-enforced
+    criticality: critical
+
+  - id: queue-stocking
+    kind: procedure
+    description: Controller keeps the work queue populated with ready, unblocked work.
+    procedure_ref: docs/contracts/orchestrator.md#nine-step-lifecycle
+    related_deployment_refs:
+      - deploy/systemd/ce-belt-daemon.service
+      - deploy/systemd/README.md
+    criticality: medium
