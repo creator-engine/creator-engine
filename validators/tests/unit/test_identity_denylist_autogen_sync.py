@@ -186,3 +186,29 @@ def test_hash_or_length_metadata_is_rejected(tmp_path: Path):
 
     with pytest.raises(IdentityDenylistError):
         load_identity_denylist(artifact_path)
+
+
+def test_digest_shaped_token_is_rejected(tmp_path: Path):
+    artifact_path = tmp_path / "identity_denylist.generated.yaml"
+    digest_token = "a" * 64
+    artifact_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "generated_by": "scripts/gen_identity_denylist.py",
+                "source": "identity-registry",
+                "normalization": "casefold",
+                "entries": [
+                    {
+                        "token": digest_token,
+                        "categories": ["account-login"],
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(IdentityDenylistError, match="must not be a digest"):
+        load_identity_denylist(artifact_path)

@@ -144,6 +144,32 @@ def test_absent_runtime_denylist_fails_open_with_advisory(tmp_path: Path, monkey
     assert chk.CODE_IDENTITY_DENYLIST_UNAVAILABLE in _warning_codes(result)
 
 
+def test_corrupt_runtime_denylist_fails_closed_with_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    artifact = tmp_path / "identity_denylist.generated.yaml"
+    artifact.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "generated_by": "scripts/gen_identity_denylist.py",
+                "source": "identity-registry",
+                "normalization": "casefold",
+                "entries": "not-a-list",
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    _use_runtime_denylist(monkeypatch, artifact)
+    doc = _manifest()
+    doc["project"]["repo"] = "creator-engine/creator-engine"  # type: ignore[index]
+    _write_manifest(tmp_path, doc)
+
+    result = chk.run([tmp_path])
+
+    assert not result.ok
+    assert chk.CODE_IDENTITY_DENYLIST_INVALID in _codes(result)
+
+
 def test_fleet_manifest_schema_file_is_not_treated_as_manifest(tmp_path: Path):
     schema_path = tmp_path / "validators" / "creator_engine_validator" / "schemas" / "fleet-manifest.schema.yaml"
     schema_path.parent.mkdir(parents=True)
