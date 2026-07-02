@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -722,6 +724,126 @@ def test_hostile_payload_pr_base_gadget_is_rejected():
     assert prepare.calls == []
     assert git.calls == []
     assert gh.calls == []
+
+
+def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
+    """Regression test for the TOCTOU (CWE-367) fix.
+
+    `_path_confinement_violations` resolves each payload path (symlinks +
+    `..` collapsed) and validates the RESULT lands under the trusted root --
+    but the earlier buggy version discarded that resolved value and let
+    `_process_armed` go on using the raw, unresolved `item.bundle_path` /
+    `item.repo_path` / `item.worktree_path` for every real git/gh call. That
+    is a check-then-use race: an attacker who passes the check with a
+    legitimate-looking path, then swaps that path for a symlink into an
+    attacker-controlled repo before the harvest/validate/land/push/pr-open
+    sequence actually runs, would defeat confinement entirely even though
+    the check itself "passed".
+
+    Here every raw item path IS a symlink that legitimately resolves under
+    the trusted root (so confinement correctly allows it), and this test
+    asserts every downstream call (prepare/land/push/pr-open) receives the
+    RESOLVED realpath -- not the raw symlink Path -- proving the daemon
+    operates on the value validated under root, immune to a later swap of
+    the symlink target.
+    """
+
+    real_repo = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-real-repo-"))
+    real_worktree = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-real-wt-"))
+    real_bundle_dir = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-real-bundle-"))
+    real_bundle = real_bundle_dir / "feature-one.bundle"
+    real_bundle.write_bytes(b"")
+    scratch = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-symlinks-"))
+
+    symlink_repo = scratch / "repo-symlink"
+    symlink_worktree = scratch / "worktree-symlink"
+    symlink_bundle = scratch / "bundle-symlink.bundle"
+    symlink_repo.symlink_to(real_repo)
+    symlink_worktree.symlink_to(real_worktree)
+    symlink_bundle.symlink_to(real_bundle)
+
+    try:
+        prepare = FakePrepare()
+        land = FakeLand()
+        git = FakeGit()
+        gh = FakeGh()
+        ledger: list[ConveyorDaemonLedgerRecord] = []
+
+        item = ConveyorDaemonItem(
+            branch="Feature/One",
+            worktree_path=symlink_worktree,
+            bundle_path=symlink_bundle,
+            repo_path=symlink_repo,
+            title="Land Feature/One",
+            body="- Conveyor item.",
+        )
+
+        result = ConveyorDaemon(
+            discovery_runner=lambda: [item],
+            armed=True,
+            **ARMED_ROOTS,
+            git_runner=git,
+            validate_runner=FakeValidate(),
+            gh_runner=gh,
+            now=FakeClock(),
+            ledger_writer=ledger.append,
+            prepare_runner=prepare,
+            land_runner=land,
+        ).run_once()
+
+        assert result.results[0].status == "pr-opened"
+
+        # The raw symlink paths legitimately clear confinement (they resolve
+        # under /tmp), but every real call below must have been made with
+        # the RESOLVED realpath, never the raw symlink Path.
+        assert prepare.calls[0].worktree_path == real_worktree
+        assert prepare.calls[0].worktree_path != symlink_worktree
+
+        assert land.calls == [(real_bundle, "feature-one", "origin/main", real_repo)]
+        assert land.calls[0][0] != symlink_bundle
+        assert land.calls[0][3] != symlink_repo
+
+        assert git.calls == [(("push", "origin", "feature-one:feature-one"), real_repo)]
+        assert all(cwd != symlink_repo for _, cwd in git.calls)
+
+        assert len(gh.calls) == 1
+        assert gh.calls[0][1] == real_repo
+        assert gh.calls[0][1] != symlink_repo
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(real_repo, ignore_errors=True)
+        shutil.rmtree(real_worktree, ignore_errors=True)
+        shutil.rmtree(real_bundle_dir, ignore_errors=True)
+
+
+def test_path_confinement_violations_returns_resolved_paths_on_success():
+    """`_path_confinement_violations` must hand back the resolved Path for
+    each confined field (not just report pass/fail) -- this is the value
+    `_process_armed` threads through the rest of processing to close the
+    TOCTOU window. This test exercises the helper directly."""
+
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(),
+        land_runner=FakeLand(),
+    )
+
+    item = _item()
+    violations, resolved = daemon._path_confinement_violations(item)
+
+    assert violations == ()
+    assert resolved == {
+        "bundle_path": item.bundle_path.resolve(),
+        "repo_path": item.repo_path.resolve(),
+        "worktree_path": item.worktree_path.resolve(),
+    }
 
 
 def test_daemon_construction_requires_repo_root_and_bundle_root_when_armed():

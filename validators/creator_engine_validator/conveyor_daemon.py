@@ -6,6 +6,7 @@ source-host mutation seams to be injected by the caller.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -86,6 +87,19 @@ DEFAULT_REMOTE = "origin"
 # supplied" cannot fall back to something world-writable like ``/tmp``), so
 # ``repo_root``/``bundle_root`` are REQUIRED constructor arguments when the
 # daemon is armed, exactly like the other armed-mode seams below.
+#
+# Confinement alone is a check-then-use race (CWE-367/TOCTOU) unless the
+# *resolved* path is what actually gets used afterwards: the harvest/
+# validate/land/push/pr-open sequence for one item spans a real subprocess
+# (validate-pr can run up to 600s), during which an attacker who staged a
+# legitimate-looking path could swap it for a symlink into an
+# attacker-controlled repo. ``_process_armed`` therefore captures the
+# resolved ``Path`` that ``_confine_path`` returns for each of
+# bundle_path/repo_path/worktree_path and rebuilds the item
+# (``dataclasses.replace``) around those resolved values *before* any
+# prepare/land/push/pr-open call, so every downstream git/gh cwd or argv
+# uses the realpath validated under root at check-time -- a later swap of
+# the original path has no effect on what the daemon touches.
 
 
 @dataclass(frozen=True)
@@ -420,9 +434,32 @@ class ConveyorDaemon:
         # closed, log, skip). This is checked first, ahead of the try/except
         # below, so a violation is reported as its own precise reason rather
         # than folded into a generic "exception: ..." message.
-        violations = self._path_confinement_violations(item)
+        violations, resolved_paths = self._path_confinement_violations(item)
         if violations:
             return self._failed(item, violations, ledger_records=records)
+        # TOCTOU close: `_path_confinement_violations` already resolved
+        # bundle_path/repo_path/worktree_path (symlinks + `..` collapsed) to
+        # verify they land under the pinned root, then handed those resolved
+        # Paths back via `resolved_paths`. From here on we thread THOSE
+        # resolved paths -- not the raw payload values still sitting on
+        # `item` -- through every downstream prepare/land/push/pr-open call.
+        # If we kept using the raw, unresolved item fields, an attacker who
+        # passes this check with a legitimate path and then swaps that
+        # directory for a symlink to an attacker-controlled repo (e.g. one
+        # whose `.git/config` sets `origin` to an `ext::` transport-helper
+        # gadget) before harvest/validate/land/push actually run would
+        # defeat confinement entirely: the *name* would still resolve under
+        # root at check-time, but every subsequent git/gh subprocess cwd or
+        # argv would silently follow the swapped target instead. Operating
+        # on the already-resolved realpath for the rest of processing means
+        # a later swap of the original path has no effect on what the
+        # daemon actually touches.
+        item = dataclasses.replace(
+            item,
+            bundle_path=resolved_paths["bundle_path"],
+            repo_path=resolved_paths["repo_path"],
+            worktree_path=resolved_paths["worktree_path"],
+        )
         try:
             assert self.git_runner is not None
             assert self.validate_runner is not None
@@ -506,19 +543,31 @@ class ConveyorDaemon:
         except Exception as exc:
             return self._failed(item, (f"exception: {exc}",), ledger_records=records)
 
-    def _path_confinement_violations(self, item: ConveyorDaemonItem) -> tuple[str, ...]:
+    def _path_confinement_violations(
+        self, item: ConveyorDaemonItem
+    ) -> tuple[tuple[str, ...], dict[str, Path]]:
         """Fail-closed audit of every untrusted-payload path/branch-shape
         field that reaches a git/gh argv or becomes a subprocess cwd.
 
-        Returns an empty tuple if the item is safe to process; otherwise a
-        tuple of human-readable violation reasons (one per failed check —
-        an item can fail more than one check at once).
+        Returns a ``(violations, resolved_paths)`` pair. ``violations`` is
+        empty if the item is safe to process; otherwise it is a tuple of
+        human-readable violation reasons (one per failed check — an item can
+        fail more than one check at once). ``resolved_paths`` maps
+        ``"bundle_path"``/``"repo_path"``/``"worktree_path"`` to the
+        already-resolved (symlinks + ``..`` collapsed, verified-under-root)
+        :class:`Path` that ``_confine_path`` returned for that field; it is
+        only complete (all three keys present) when ``violations`` is empty.
+        Callers MUST use these resolved paths -- not the raw ``item``
+        fields -- for every downstream action, so a path swapped out from
+        under the daemon after this check runs cannot change what gets
+        touched (see the TOCTOU note in ``_process_armed``).
         """
 
         assert self.repo_root is not None
         assert self.bundle_root is not None
 
         violations: list[str] = []
+        resolved: dict[str, Path] = {}
 
         # bundle_path reaches a bare positional git argv slot (see the
         # module comment above DEFAULT_BASE), so it gets both the
@@ -535,7 +584,7 @@ class ConveyorDaemon:
             ("worktree_path", item.worktree_path, self.repo_root),
         ):
             try:
-                _confine_path(value, root=root, label=label)
+                resolved[label] = _confine_path(value, root=root, label=label)
             except ValueError as exc:
                 violations.append(str(exc))
 
@@ -551,7 +600,7 @@ class ConveyorDaemon:
             except ValueError as exc:
                 violations.append(str(exc))
 
-        return tuple(violations)
+        return tuple(violations), resolved
 
     def _record_mutation(
         self,
