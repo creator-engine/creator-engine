@@ -1,21 +1,24 @@
 # ADR-0003 — Ratified main-HEAD artifact resolver, builder, verifier, and promote surface
 
-- **Status:** Proposed — awaiting Operator ratification of an **already-live** trust surface (see
-  §0 Current State).
+- **Status:** Accepted — ratified by Operator 2026-07-02 (Option A, retroactive).
 - **Date:** 2026-07-02
 - **Gate:** Main-HEAD artifact trust surface — docs-only ADR/design.
 - **Mutation class:** docs/governance documentation only. This ADR changes no implementation code,
   release artifact, installer script, validator behavior, workflow, or download payload.
-- **Authority basis:** Operator-scoped seed brief for a ratification-gated design. This ADR does not
-  itself grant or withhold implementation authority — the described surface is already implemented and
-  shipping (see §0). It proposes retroactive ratification of that surface, with an explicit alternative
-  framing if the Operator instead wants a code-level ratification gate added (see §0's decision point).
+- **Authority basis:** Operator ratification, 2026-07-02. The Operator accepted Option A (§3)
+  retroactively, as-is, as the trust model for the already-live `ce clean-main-install` /
+  `ce update --track main` main-HEAD install surface (see §0) — no code-level ratification gate is
+  added to those existing commands as a result. A general ratification-gate pattern for future trust
+  surfaces is tracked separately as a follow-up in the internal issue tracker; it does not gate the
+  surface ratified here.
 
-> This ADR **documents and proposes ratification of** the trust surface already implemented by
-> `ce clean-main-install` and `ce update --track main`. It is not yet formally ratified, but it is
-> **already built, merged to `main`, publicly documented, and reachable by any user** — see §0 for the
-> current state and the Operator's ratification framing choice. Nothing in this ADR authorizes new
-> implementation; it is a retroactive-ratification proposal for what already exists.
+> This ADR **documents and ratifies** the trust surface already implemented by
+> `ce clean-main-install` and `ce update --track main`. It is **formally ratified by the Operator on
+> 2026-07-02 — Option A (§3), accepted retroactively as-is** — and it is **already built, merged to
+> `main`, publicly documented, and reachable by any user** — see §0 for the current state that was
+> ratified. Nothing in this ADR authorizes new implementation; it records ratification of what already
+> exists. A general ratification-gate pattern for future trust surfaces is a separate follow-up tracked
+> in the internal issue tracker.
 
 ---
 
@@ -183,11 +186,12 @@ This option has the Operator sign interim main-HEAD artifact certificates outsid
 **Cons:** operationally heavy for fast `main` tracking, risks confusing interim certificates with
 `ce-root-v1` releases, and can become a parallel release process unless tightly governed.
 
-**Recommended default:** Option A. Commit-SHA pinning plus local reproducible build is the interim default
-for `--track main` because it is honest about the unsigned trust boundary and can be made fail-closed with
-the current packaging/install primitives. Option B should be the next ratified hardening layer for remote
-or fleet-wide main-HEAD artifacts. Option C should remain reserved for exceptional Operator-directed
-promotion where a human ratification gesture is intentionally required.
+**Ratified choice:** Option A. The Operator ratified Option A on 2026-07-02 (retroactive, as-is) as the
+trust anchor for `--track main`: commit-SHA pinning plus local reproducible build. It is honest about the
+unsigned trust boundary and can be made fail-closed with the current packaging/install primitives. Option B
+remains a candidate future hardening layer for remote or fleet-wide main-HEAD artifacts; Option C remains
+reserved for exceptional Operator-directed promotion where a human ratification gesture is intentionally
+required. This ratification does not adopt Option B or Option C.
 
 ## 4. Composition with `ce update`
 
@@ -221,6 +225,15 @@ No phase may downgrade a hard mismatch into a warning, and no phase may proceed 
 network-resolved dependencies during install.
 
 ## 6. Operator-Ratified vs Automatic
+
+### Ratified decision (2026-07-02)
+
+The Operator ratified Option A (§3) retroactively, as-is, for the already-live
+`ce clean-main-install` / `ce update --track main` surface: commit-SHA pinning plus local reproducible
+build is the accepted trust model, exactly as already implemented in `main_head_install.py`. No
+code-level ratification gate is added to those existing commands as a result of this ratification. A
+general ratification-gate pattern for future trust surfaces is tracked separately as a follow-up in
+the internal issue tracker — that follow-up does not modify or gate the surface ratified here.
 
 **Must remain Operator-ratified:**
 

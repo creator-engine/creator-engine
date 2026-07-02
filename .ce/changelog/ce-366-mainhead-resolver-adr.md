@@ -6,12 +6,12 @@ scope: docs adr
 issue: ce-366-mainhead-resolver-adr
 ---
 
-**Propose the main-HEAD artifact resolver/builder/verifier trust contract.**
+**Ratify the main-HEAD artifact resolver/builder/verifier trust contract.**
 
-- Add an ADR proposing retroactive ratification of the unsigned `origin/main` artifact resolution, build,
-  verification, and atomic promotion trust surface — disclosing that `ce clean-main-install` and
-  `ce update --track main` already ship live today with no code-level ratification gate.
+- ADR-0003 is Accepted — ratified by the Operator on 2026-07-02: Option A (commit-SHA pinning plus local
+  reproducible build) is the accepted trust model for the already-live `ce clean-main-install` and
+  `ce update --track main` main-HEAD install surface, retroactively as-is, with no code-level
+  ratification gate added to those existing commands.
 - Document how `ce update --track main` composes with, but stays separate from, the signed-release chain.
-- Record commit-SHA pinning plus local reproducible build as the recommended interim trust anchor, and
-  give the Operator an explicit choice between retroactive ratification as-is or adding a follow-up
-  ratification gate.
+- A general ratification-gate pattern for future trust surfaces is tracked separately as a follow-up in
+  the internal issue tracker; it does not gate the surface ratified here.
