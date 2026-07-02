@@ -41,16 +41,17 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    - `.ce/changelog/<branch-slug>.md`
    - `.ce/pr-manifests/<branch-slug>.md`
 
-   The PR manifest must list the closed `origin/main..HEAD` path set, include itself, and include exactly one PR-body line:
+   The PR manifest must list the closed `origin/main..HEAD` path set, include itself, and include exactly one current PR-body work-class line:
 
    ```md
    - **Declared work class:** <XS|S|M|L>
    ```
 
-   These are CE ceremony tiers, not Agile work item types. The declaration
-   states the PR's minimum governance ceremony, not whether the change is a
-   Scrum story, product feature, or roadmap epic. The work-sizing gate derives
-   a minimum tier from the diff and rejects declarations below that floor.
+   Use only `XS`, `S`, `M`, or `L`. These are CE ceremony tiers, not Agile work
+   item types. The declaration states the PR's minimum governance ceremony, not
+   whether the change is a Scrum story, product feature, or roadmap epic. The
+   work-sizing gate derives a minimum tier from the diff and rejects declarations
+   below that floor.
 
 4. Run the local preflight before push:
 
