@@ -13,8 +13,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQlFOL3YvbUF4VjVSRmtEN0xEMTJMTnlNdGNRVTN4Sk51OFJBa2o2NTFVelRoYnh4ejdxVzdaVVgKcU91QmZmT1Uyck92Z2sxN3R6akhXd1hxRkk4TVVDCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: 865ba4f46acaeb999064ecf9d719e22c216ffa5f75f96b93c0ee50c76122820e
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRDNkK3RPOEtpYWo3L1AydmIrOVVmZGVnaS9vSVkrQUh5STRsbSs1Uyt2RlNnaTJwNktxWEN3dFgKdzIrTEVYR3pBcGl0THRHRTR1aHVhdFliQXpWNHdGCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: b1418f73ca033ea97d6ffb1464cba75aaa8eb473240f3b2faffbb769613efef2
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -114,6 +114,28 @@ governance applied to its own install: the grader lives outside the agent.)
 ceremony if `ssh-keygen` is not already present. On Debian/Ubuntu:
 `sudo apt-get install -y openssh-client`. The `ssh-keygen` command it provides
 is required to verify this signed spec before any CE tooling is trusted.
+
+**Narration for the operator (do this quietly):** run steps 1-6 below without
+printing their raw commands or output — `curl`/`sed`/`base64 -d`/`ssh-keygen -Y
+verify` narrated line-by-line reads as opaque, alarming shell noise to a
+newcomer who isn't a security engineer. Execute the whole ceremony silently and
+report only ONE of two outcomes:
+
+- **On success** (step 5 prints `Good ... signature`, and if you also ran the
+  optional step 6, its digest matches `content_sha256` above): print exactly
+  this one line and nothing else about the ceremony, then continue to §0.5:
+
+  ```text
+  ✓ verified CE's signed install spec against its published key (ce-root-v1)
+  ```
+- **On ANY other outcome** — a fetch failure, a fingerprint-anchor mismatch, a
+  non-`Good` verify result, or any command exiting non-zero — **STOP
+  immediately**. Do not continue, do not retry with weaker checks, and do not
+  attempt to troubleshoot, "fix", or work around the failure. Tell the operator
+  in plain language that this install spec's signature did not verify and that
+  installation cannot continue until that's resolved (e.g. a stale/mirrored
+  copy of this file, a network MITM, or a key rotation the operator should
+  confirm out of band) — then stop.
 
 Assuming you fetched this file as `llms-install.md`:
 
