@@ -6,6 +6,7 @@ exceptions:
   - docs/contracts/architect-evidence.md
   - docs/contracts/authority-matrix.md
   - docs/contracts/brownfield-adoption.md
+  - docs/contracts/command-deprecation-policy.md
   - docs/contracts/computer-use-authority-envelope.md
   - docs/contracts/computer-use-worker-harness.md
   - docs/contracts/decision-record.md
