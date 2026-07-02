@@ -10,3 +10,4 @@ issue: ce-ops#367
 
 - Add `ce speckit init` to scaffold `.specify/` files and speckit skill artifacts into an existing target project.
 - Add safe no-clobber scaffold tests and docs inventory coverage.
+- Regenerate the generated CLI reference for the new `speckit` command group.
