@@ -323,7 +323,7 @@ def test_discovery_mapping_with_legacy_control_field_is_rejected_and_audited(
         land_runner=land,
     ).run_once()
 
-    assert result.discovery_error == "discovery payload rejected"
+    assert result.discovery_error is None
     assert result.discovered_count == 0
     assert result.results == ()
     assert any(
@@ -337,6 +337,45 @@ def test_discovery_mapping_with_legacy_control_field_is_rejected_and_audited(
     assert git.calls == []
     assert gh.calls == []
     assert ledger == []
+
+
+def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item():
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+    rejected_payload = {**_data_only_payload(), "validate_command": ["touch", "/tmp/pwned"]}
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [_item(), rejected_payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    ).run_once()
+
+    assert result.discovery_error is None
+    assert result.discovered_count == 1
+    assert [item.status for item in result.results] == ["pr-opened"]
+    assert [spec.branch for spec in prepare.calls] == ["Feature/One"]
+    assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
+    assert git.calls == [(("push", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
+    assert len(gh.calls) == 1
+    assert any(
+        "conveyor discovery payload audit" in message
+        and '"field": "validate_command"' in message
+        and '"reason": "banned_control_field"' in message
+        for message in logs
+    )
+    assert not any("conveyor discovery failed" in message for message in logs)
 
 
 def test_data_only_discovery_mapping_plans_without_payload_paths():

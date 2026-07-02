@@ -22,7 +22,7 @@ from .conveyor import (
     land_bundle,
     prepare_harvest,
 )
-from .pickup_payload_schema import validate_discovery_payload
+from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
 from .checks.path_manifest_fidelity import branch_slug
 
 
@@ -334,10 +334,27 @@ class ConveyorDaemon:
         """
 
         try:
-            discovered = tuple(
-                _coerce_item(item, audit_sink=self._audit_discovery_payload_rejection)
-                for item in self.discovery_runner()
-            )
+            discovered_items: list[ConveyorDaemonItem] = []
+            for item in self.discovery_runner():
+                try:
+                    discovered_items.append(
+                        _coerce_item(item, audit_sink=self._audit_discovery_payload_rejection)
+                    )
+                except DiscoveryPayloadRejected:
+                    continue
+                except TypeError as exc:
+                    if not str(exc).startswith("unsupported discovery item type:"):
+                        raise
+                    self._audit_discovery_payload_rejection(
+                        {
+                            "action": "discovery_payload_rejected",
+                            "source": "conveyor_daemon",
+                            "reason": "unsupported_discovery_item_type",
+                            "detail": str(exc),
+                        }
+                    )
+                    continue
+            discovered = tuple(discovered_items)
         except Exception as exc:
             self._log(f"conveyor discovery failed: {exc}")
             return ConveyorDaemonRunResult(
