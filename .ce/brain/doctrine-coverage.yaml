@@ -1,0 +1,41 @@
+kind: brain-doctrine-coverage-manifest
+schema_version: "1"
+governed_trees:
+  - docs/contracts
+exceptions:
+  - docs/contracts/architect-evidence.md
+  - docs/contracts/authority-matrix.md
+  - docs/contracts/brownfield-adoption.md
+  - docs/contracts/computer-use-authority-envelope.md
+  - docs/contracts/computer-use-worker-harness.md
+  - docs/contracts/decision-record.md
+  - docs/contracts/definition-of-ready.md
+  - docs/contracts/devops-privileged-action-broker.md
+  - docs/contracts/forge-claim.md
+  - docs/contracts/forge-persona-catalog.md
+  - docs/contracts/forge-trigger-taxonomy.md
+  - docs/contracts/github-issue-intake.md
+  - docs/contracts/grading-spine.md
+  - docs/contracts/harness-seat-contract.md
+  - docs/contracts/identity-record.md
+  - docs/contracts/implementer-evidence.md
+  - docs/contracts/installer.md
+  - docs/contracts/mutation-class-taxonomy.md
+  - docs/contracts/openbao-secret-zero-broker.md
+  - docs/contracts/orchestrator.md
+  - docs/contracts/peer-authority.md
+  - docs/contracts/plain-join.md
+  - docs/contracts/plan-wrapper-sidecar.md
+  - docs/contracts/playbook-format.md
+  - docs/contracts/review-evidence.md
+  - docs/contracts/runtime-evidence.md
+  - docs/contracts/runtime-policy.md
+  - docs/contracts/scope.md
+  - docs/contracts/seat-class-policy.md
+  - docs/contracts/spec-wrapper-sidecar.md
+  - docs/contracts/spend-envelope.md
+  - docs/contracts/storage-tier-finding.md
+  - docs/contracts/tasks-wrapper-sidecar.md
+  - docs/contracts/v3-naming-hygiene.md
+  - docs/contracts/work-sizing-tiers.md
+  - docs/contracts/workflow-catalog.md
