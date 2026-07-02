@@ -669,15 +669,14 @@ def test_egress_broker_socket_mount_rejects_empty_explicit_seat_id() -> None:
     assert "CE_VPS_SEAT_ID must be a broker seat id like dev-3" in result.stderr
 
 
-def test_egress_broker_socket_mounts_only_socket_and_value_env() -> None:
+def test_egress_broker_socket_mounts_parent_directory_and_value_env() -> None:
     host_socket = "/run/user/1000/creator-engine/egress-broker/dev-3.sock"
-    container_socket = "/run/ce-egress-broker.sock"
+    container_socket = "/run/ce-egress/dev-3.sock"
     argv = dry_run_argv(
         run_wrapper(
             "tui",
             CE_VPS_SEAT_ID="dev-3",
             CE_VPS_EGRESS_BROKER_SOCKET=host_socket,
-            CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET=container_socket,
             GITHUB_TOKEN="ghp_0123456789abcdef0123456789abcdef0123",
             GH_TOKEN="ghs_0123456789abcdef0123456789abcdef0123",
             OPENBAO_TOKEN="hvs.0123456789abcdef",
@@ -693,7 +692,7 @@ def test_egress_broker_socket_mounts_only_socket_and_value_env() -> None:
     assert f"CE_VPS_EGRESS_BROKER_SOCKET={host_socket}" not in argv
     assert not any("CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET=" in arg for arg in argv)
     assert any(
-        arg == f"type=bind,source={host_socket},target={container_socket}"
+        arg == "type=bind,source=/run/user/1000/creator-engine/egress-broker,target=/run/ce-egress,readonly"
         for arg in argv
     )
     rendered = "\n".join(argv)
@@ -713,6 +712,37 @@ def test_egress_broker_socket_mounts_only_socket_and_value_env() -> None:
         or "CE_EGRESS_BROKER_CONFIG" in arg
         for arg in argv
     )
+
+
+def test_egress_broker_socket_mount_accepts_explicit_matching_container_basename() -> None:
+    host_socket = "/run/user/1000/creator-engine/egress-broker/dev-3.sock"
+    container_socket = "/broker/dev-3.sock"
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            CE_VPS_SEAT_ID="dev-3",
+            CE_VPS_EGRESS_BROKER_SOCKET=host_socket,
+            CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET=container_socket,
+        )
+    )
+
+    assert f"CE_EGRESS_BROKER_SOCKET={container_socket}" in argv
+    assert any(
+        arg == "type=bind,source=/run/user/1000/creator-engine/egress-broker,target=/broker,readonly"
+        for arg in argv
+    )
+
+
+def test_egress_broker_socket_mount_rejects_mismatched_container_basename() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_VPS_SEAT_ID="dev-3",
+        CE_VPS_EGRESS_BROKER_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-3.sock",
+        CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="/broker/not-dev-3.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET basename must match" in result.stderr
 
 
 def test_no_egress_broker_mount_when_socket_unset() -> None:
@@ -739,3 +769,39 @@ def test_egress_broker_socket_absent_fails_closed_before_docker_run_under_nondry
     assert result.returncode == 66
     assert f"egress broker socket not found: {missing_socket}" in result.stderr
     assert "unexpected docker invocation" not in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Egress self-review broker socket mount
+# ---------------------------------------------------------------------------
+
+
+def test_egress_self_review_socket_mounts_parent_directory_and_value_env() -> None:
+    host_socket = "/run/user/1000/creator-engine/egress-broker/dev-3-review.sock"
+    container_socket = "/run/ce-egress/dev-3-review.sock"
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            CE_VPS_SEAT_ID="dev-3",
+            CE_VPS_EGRESS_SELF_REVIEW_SOCKET=host_socket,
+        )
+    )
+
+    assert f"CE_EGRESS_SELF_REVIEW_SOCKET={container_socket}" in argv
+    assert "CE_SEAT_ID=dev-3" in argv
+    assert any(
+        arg == "type=bind,source=/run/user/1000/creator-engine/egress-broker,target=/run/ce-egress,readonly"
+        for arg in argv
+    )
+
+
+def test_egress_self_review_socket_mount_rejects_mismatched_container_basename() -> None:
+    result = run_wrapper(
+        "tui",
+        CE_VPS_SEAT_ID="dev-3",
+        CE_VPS_EGRESS_SELF_REVIEW_SOCKET="/run/user/1000/creator-engine/egress-broker/dev-3-review.sock",
+        CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET="/broker/review.sock",
+    )
+
+    assert result.returncode == 2
+    assert "CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET basename must match" in result.stderr

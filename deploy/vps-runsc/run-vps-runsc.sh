@@ -42,13 +42,17 @@ Environment:
   CE_VPS_UID                   Container uid (default: id -u)
   CE_VPS_GID                   Container gid (default: id -g)
   CE_VPS_SEAT_ID               Host log seat id (default: CE_VPS_CONTAINER_NAME)
-  CE_VPS_EGRESS_BROKER_SOCKET  Host self-push broker Unix socket to bind-mount (default: unset)
-  CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET Container broker socket path
-                                (default: /run/ce-egress-broker.sock)
-  CE_VPS_EGRESS_SELF_REVIEW_SOCKET Host self-review broker Unix socket to bind-mount (default: unset)
+  CE_VPS_EGRESS_BROKER_SOCKET  Host self-push broker Unix socket whose parent directory is bind-mounted
+                                (default: unset)
+  CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET Container broker socket path. When unset and
+                                CE_VPS_EGRESS_BROKER_SOCKET is set, defaults to
+                                /run/ce-egress/<host-socket-basename>.
+  CE_VPS_EGRESS_SELF_REVIEW_SOCKET Host self-review broker Unix socket whose parent directory is
+                                bind-mounted (default: unset)
                                 Requires CE_VPS_SEAT_ID to be set explicitly (same rule as self-push).
   CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET Container self-review socket path
-                                (default: /run/ce-egress-review.sock)
+                                When unset and CE_VPS_EGRESS_SELF_REVIEW_SOCKET is set, defaults to
+                                /run/ce-egress/<host-socket-basename>.
   CE_VPS_SEAT_LOG_DIR          Host log dir mounted at /var/log/ce-seat
                                 (default: ~/.ce/logs/seats/<seat-id>)
   CE_VPS_TTY_FLAGS             Docker TTY flags (default: -it; set to -i for non-TTY callers)
@@ -162,9 +166,9 @@ if [ "${CE_VPS_SEAT_ID+x}" = "x" ]; then
 fi
 CE_VPS_SEAT_ID="${CE_VPS_SEAT_ID:-${CE_VPS_CONTAINER_NAME}}"
 CE_VPS_EGRESS_BROKER_SOCKET="${CE_VPS_EGRESS_BROKER_SOCKET:-}"
-CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET:-/run/ce-egress-broker.sock}"
+CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET:-}"
 CE_VPS_EGRESS_SELF_REVIEW_SOCKET="${CE_VPS_EGRESS_SELF_REVIEW_SOCKET:-}"
-CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET="${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET:-/run/ce-egress-review.sock}"
+CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET="${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET:-}"
 CE_VPS_SEAT_LOG_DIR="${CE_VPS_SEAT_LOG_DIR:-${HOME:-/home/ce}/.ce/logs/seats/${CE_VPS_SEAT_ID}}"
 CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
@@ -233,6 +237,9 @@ if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
       exit 2
       ;;
   esac
+  if [ -z "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}" ]; then
+    CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="/run/ce-egress/$(basename -- "${CE_VPS_EGRESS_BROKER_SOCKET}")"
+  fi
   case "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}" in
     /*)
       ;;
@@ -241,6 +248,10 @@ if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
       exit 2
       ;;
   esac
+  if [ "$(basename -- "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}")" != "$(basename -- "${CE_VPS_EGRESS_BROKER_SOCKET}")" ]; then
+    printf 'CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET basename must match CE_VPS_EGRESS_BROKER_SOCKET basename for stable directory mounts: %s vs %s\n' "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}" "${CE_VPS_EGRESS_BROKER_SOCKET}" >&2
+    exit 2
+  fi
 fi
 if [ -n "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ]; then
   if [ "${CE_VPS_SEAT_ID_EXPLICIT}" != "1" ]; then
@@ -259,6 +270,9 @@ if [ -n "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ]; then
       exit 2
       ;;
   esac
+  if [ -z "${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}" ]; then
+    CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET="/run/ce-egress/$(basename -- "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}")"
+  fi
   case "${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}" in
     /*)
       ;;
@@ -267,6 +281,10 @@ if [ -n "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ]; then
       exit 2
       ;;
   esac
+  if [ "$(basename -- "${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}")" != "$(basename -- "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}")" ]; then
+    printf 'CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET basename must match CE_VPS_EGRESS_SELF_REVIEW_SOCKET basename for stable directory mounts: %s vs %s\n' "${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}" "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" >&2
+    exit 2
+  fi
 fi
 case "${CE_VPS_CONTAINED_CODEX_CONFIG}" in
   /*)
@@ -474,11 +492,11 @@ else
 fi
 egress_broker_mount=""
 if [ -n "${CE_VPS_EGRESS_BROKER_SOCKET}" ]; then
-  egress_broker_mount="type=bind,source=${CE_VPS_EGRESS_BROKER_SOCKET},target=${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}"
+  egress_broker_mount="type=bind,source=$(dirname -- "${CE_VPS_EGRESS_BROKER_SOCKET}"),target=$(dirname -- "${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET}"),readonly"
 fi
 egress_self_review_mount=""
 if [ -n "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}" ]; then
-  egress_self_review_mount="type=bind,source=${CE_VPS_EGRESS_SELF_REVIEW_SOCKET},target=${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}"
+  egress_self_review_mount="type=bind,source=$(dirname -- "${CE_VPS_EGRESS_SELF_REVIEW_SOCKET}"),target=$(dirname -- "${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET}"),readonly"
 fi
 
 # Foreground = ephemeral (--rm). Detached = named-persistent (no --rm, add -d
