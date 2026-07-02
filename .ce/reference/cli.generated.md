@@ -55,7 +55,7 @@ Options:
 
 ### `brain`
 
-local Knowledge-SSOT assertion ledger + recall (assert/check/correct/ingest/recall/verify/probe/bootstrap)
+local Knowledge-SSOT assertion ledger + recall (assert/check/correct/sync/ingest/recall/verify/probe/bootstrap)
 
 ### `brain assert`
 
@@ -186,6 +186,16 @@ Options:
 | `--allow-confidential-egress` | no |  | permit an egress-requiring embedder to embed the query over a confidential corpus |
 | `--hydrate` | no |  | emit a session-hydration payload (additive over the always-load CORE markdown) |
 | `--core-path` | no |  | always-load CORE markdown path reported by --hydrate (never edited) |
+| `--json` | no |  | emit machine-readable JSON |
+
+### `brain sync`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--state-root` | no |  | CE local state root (default: .ce/state) |
+| `--repo-root` | no |  | repo root containing .ce/brain/assertions.yaml (default: derived from --state-root) |
 | `--json` | no |  | emit machine-readable JSON |
 
 ### `brain verify`

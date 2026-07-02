@@ -34,6 +34,7 @@ class CarrierSpec:
     body: str
     date: str
     base: str = "origin/main"
+    declared_work_class: str | None = None
 
     @property
     def slug(self) -> str:
@@ -104,6 +105,8 @@ def render_manifest(
     paths: Sequence[str],
     count: int,
     sha: str,
+    *,
+    declared_work_class: str | None = None,
 ) -> str:
     """Render a verifier-readable per-PR path-manifest carrier."""
 
@@ -114,6 +117,11 @@ def render_manifest(
         raise ValueError(f"declared sha {sha!r} does not match canonical sha {canonical_sha!r}")
 
     body = "\n".join(canonical_paths)
+    work_class_line = (
+        f"\n\n- **Declared work class:** {declared_work_class}"
+        if declared_work_class is not None
+        else ""
+    )
     text = (
         f"# PR path manifest — {issue} · {title}\n\n"
         f"This per-PR carrier (`{MANIFEST_DIR}/<branch-slug>.md`) lists the closed "
@@ -121,7 +129,7 @@ def render_manifest(
         f"`verify-path-manifest --base <sha> --manifest-dir {MANIFEST_DIR} --head-ref {slug}` "
         "and requires this PR's `base..HEAD` diff to equal exactly the authorized "
         "path-set below; this carrier lists itself.\n\n"
-        'Canonicalization: `sha256("\\n".join(sorted(unique_paths)) + "\\n")`.\n\n'
+        f'Canonicalization: `sha256("\\n".join(sorted(unique_paths)) + "\\n")`.{work_class_line}\n\n'
         f"AUTHORIZED_PATHS_COUNT={count}\n\n"
         f"AUTHORIZED_PATHS_SHA256={sha}\n\n"
         "```text\n"
@@ -201,7 +209,15 @@ def write_carriers(
     )
     paths, count, sha256 = _normalise_paths([*diff_paths, f".ce/changelog/{slug}.md"])
     manifest_path.write_text(
-        render_manifest(slug, spec.issue, spec.title, paths, count, sha256),
+        render_manifest(
+            slug,
+            spec.issue,
+            spec.title,
+            paths,
+            count,
+            sha256,
+            declared_work_class=spec.declared_work_class,
+        ),
         encoding="utf-8",
     )
 

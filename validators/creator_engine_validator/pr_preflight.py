@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
+from . import brain_runtime
 from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class
 
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
@@ -261,6 +262,38 @@ def _extract_declared_work_classes(text: str) -> list[str]:
 def _changed_paths(repo_root: Path, base: str, runner: Runner) -> list[str]:
     stdout = _git_capture_optional(["diff", "--name-only", f"{base}..HEAD"], repo_root, runner)
     return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+
+def _is_canonical_brain_source(path: str) -> bool:
+    return path == ".ce/brain" or path.startswith(".ce/brain/")
+
+
+def _brain_drift_remediation_note() -> str:
+    return (
+        "If this is ignored instance-local .ce/state/brain drift, run `ce brain sync` "
+        "to reconcile from tracked .ce/brain sources; CI is unaffected by ignored "
+        "instance-local runtime state. PR changes to tracked .ce/brain sources are still gated."
+    )
+
+
+def _reconcile_local_brain_state_if_safe(
+    config: PreflightConfig,
+    comparison_base: str,
+    runner: Runner,
+) -> str:
+    changed = _changed_paths(config.repo_root, comparison_base, runner)
+    if any(_is_canonical_brain_source(path) for path in changed):
+        return "tracked .ce/brain source changed in PR; skipped instance-local sync so the drift gate verifies PR changes"
+
+    result = brain_runtime.sync_authoritative_ledger(
+        state_root=config.repo_root / ".ce" / "state",
+        repo_root=config.repo_root,
+    )
+    if not result.authoritative_exists:
+        return "no tracked canonical .ce/brain/assertions.yaml found; nothing to reconcile"
+    if result.updated:
+        return "reconciled ignored instance-local .ce/state/brain from tracked .ce/brain via `ce brain sync`; CI is unaffected"
+    return "ignored instance-local .ce/state/brain already matches tracked .ce/brain; `ce brain sync` is idempotent; CI is unaffected"
 
 
 def _resolve_declared_work_class(
@@ -603,6 +636,31 @@ def run_preflight(
             )
         return "passed"
 
+    def brain_drift_gate() -> str:
+        reconcile_detail = _reconcile_local_brain_state_if_safe(config, comparison_base["value"], runner)
+        try:
+            _run_checked(
+                "Creator Engine validator - brain drift check",
+                [
+                    py,
+                    "-m",
+                    "creator_engine_validator.ce_cli",
+                    "brain",
+                    "verify",
+                    "--drift",
+                    "--state-root",
+                    ".ce/state",
+                ],
+                config.repo_root,
+                runner=runner,
+                env=py_env,
+                out=out,
+                err=err,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"{exc}. {_brain_drift_remediation_note()}") from exc
+        return f"passed; {reconcile_detail}"
+
     checks.append(
         _run_check(
             "clean worktree",
@@ -830,27 +888,7 @@ def run_preflight(
     checks.append(
         _run_check(
             "Creator Engine validator - brain drift check",
-            lambda: (
-                _run_checked(
-                    "Creator Engine validator - brain drift check",
-                    [
-                        py,
-                        "-m",
-                        "creator_engine_validator.ce_cli",
-                        "brain",
-                        "verify",
-                        "--drift",
-                        "--state-root",
-                        ".ce/state",
-                    ],
-                    config.repo_root,
-                    runner=runner,
-                    env=py_env,
-                    out=out,
-                    err=err,
-                ),
-                "passed",
-            )[1],
+            brain_drift_gate,
             out,
             err,
         )

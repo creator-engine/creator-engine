@@ -74,6 +74,17 @@ def _write_authoritative_validate_workflow_ledger(repo: Path) -> Path:
     return path
 
 
+def _write_brain_assertion(state_root: Path, *, assertion_id: str, value: str) -> Path:
+    result = rt.assert_claim(
+        assertion_id=assertion_id,
+        claim={"subject": "brain", "predicate": "sync-state", "object": value},
+        scope="integration",
+        evidence_ref="manual-sync-test",
+        state_root=state_root,
+    )
+    return result.ledger_path
+
+
 def test_ce_brain_assert_check_correct_verify_roundtrip(tmp_path: Path, capsys):
     state_root = tmp_path / ".ce" / "state"
 
@@ -259,6 +270,37 @@ def test_ce_brain_verify_drift_missing_ledger_is_zero_active_assertions(tmp_path
     assert payload["drift"]["findings"] == []
 
 
+def test_ce_brain_sync_idempotently_reconciles_instance_local_state(tmp_path: Path, capsys):
+    state_root = tmp_path / ".ce" / "state"
+    authoritative = _write_brain_assertion(
+        tmp_path / ".ce",
+        assertion_id="brain-assertion-sync-auth01",
+        value="canonical",
+    )
+    local = _write_brain_assertion(
+        state_root,
+        assertion_id="brain-assertion-sync-local1",
+        value="stale-local",
+    )
+    assert local.read_text(encoding="utf-8") != authoritative.read_text(encoding="utf-8")
+
+    rc = ce_cli.main(["brain", "sync", "--state-root", str(state_root)])
+
+    assert rc == 0
+    first = capsys.readouterr().out
+    assert "ce brain sync: reconciled" in first
+    assert "source:" in first
+    assert "target:" in first
+    assert local.read_text(encoding="utf-8") == authoritative.read_text(encoding="utf-8")
+
+    rc = ce_cli.main(["brain", "sync", "--state-root", str(state_root)])
+
+    assert rc == 0
+    second = capsys.readouterr().out
+    assert "ce brain sync: already in sync" in second
+    assert local.read_text(encoding="utf-8") == authoritative.read_text(encoding="utf-8")
+
+
 def test_ce_brain_verify_drift_passes_matching_artifact_hash(tmp_path: Path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     state_root = tmp_path / ".ce" / "state"
@@ -324,6 +366,40 @@ def test_ce_brain_verify_drift_returns_nonzero_on_artifact_drift(tmp_path: Path,
     assert payload["drift"]["ok"] is False
     assert [finding["code"] for finding in payload["drift"]["findings"]] == [ce_brain_drift.CODE_DRIFT]
     assert any("brain-assertion-cli-0006" in error for error in payload["errors"])
+
+
+def test_ce_brain_verify_drift_non_json_failure_message_is_actionable(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    state_root = tmp_path / ".ce" / "state"
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("observed\n", encoding="utf-8")
+
+    assert ce_cli.main(
+        [
+            "brain",
+            "assert",
+            "--state-root",
+            str(state_root),
+            "--id",
+            "brain-assertion-cli-0007",
+            "--scope",
+            "integration",
+            "--claim-json",
+            _artifact_hash_claim("a" * 64),
+            "--evidence-ref",
+            "evidence.txt",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    rc = ce_cli.main(["brain", "verify", "--drift", "--state-root", str(state_root)])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "ce brain verify --drift: FAIL" in captured.out
+    assert "run `ce brain sync`" in captured.err
+    assert "instance-local .ce/state/brain drift" in captured.err
+    assert "CI is unaffected by ignored instance-local runtime state" in captured.err
 
 
 def test_ce_brain_verify_drift_falls_back_to_authoritative_ledger_and_fails_on_semantic_drift(

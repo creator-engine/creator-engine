@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import brain_runtime as rt
 from creator_engine_validator import pr_preflight
 from creator_engine_validator.checks import test_coupling as coupling_chk
 
@@ -26,6 +27,7 @@ class FakeRunner:
         head_test_result: pr_preflight.CommandResult | None = None,
         baseline_test_result: pr_preflight.CommandResult | None = None,
         changed_paths: str = "",
+        brain_drift_result: pr_preflight.CommandResult | None = None,
     ):
         self.repo_root = repo_root
         self.dirty = dirty
@@ -38,6 +40,7 @@ class FakeRunner:
         self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.changed_paths = changed_paths
+        self.brain_drift_result = brain_drift_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.calls: list[tuple[list[str], Path, dict[str, str] | None, float | None]] = []
 
     def __call__(self, argv, cwd, env=None, *, timeout=None):
@@ -83,6 +86,13 @@ class FakeRunner:
             )
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "verify-path-manifest" in argv:
             return pr_preflight.CommandResult(self.path_manifest_returncode, self.path_manifest_stdout, "")
+        if argv[:3] == [sys.executable, "-m", "creator_engine_validator.ce_cli"] and argv[3:7] == [
+            "brain",
+            "verify",
+            "--drift",
+            "--state-root",
+        ]:
+            return self.brain_drift_result
         return pr_preflight.CommandResult(0, "ok\n", "")
 
     def argv_calls(self) -> list[list[str]]:
@@ -106,6 +116,28 @@ def _stub_expensive_preflight_checks(monkeypatch) -> None:
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
     monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
     monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+
+
+def _ledger_text(value: str) -> str:
+    captured: list[str] = []
+    rt.assert_claim(
+        assertion_id=f"brain-assertion-preflight-{value}",
+        claim={"subject": "brain", "predicate": "state", "object": value},
+        scope="unit",
+        evidence_ref="manual-preflight-test",
+        records=[],
+        write=lambda _path, text: captured.append(text),
+    )
+    return captured[-1]
+
+
+def _write_brain_ledgers(repo_root: Path, *, canonical: str, local: str) -> None:
+    canonical_path = repo_root / ".ce" / "brain" / "assertions.yaml"
+    local_path = repo_root / ".ce" / "state" / "brain" / "assertions.yaml"
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_path.write_text(_ledger_text(canonical), encoding="utf-8")
+    local_path.write_text(_ledger_text(local), encoding="utf-8")
 
 
 def test_fetch_base_passes_network_timeout(tmp_path: Path, monkeypatch):
@@ -259,6 +291,65 @@ def test_preflight_runs_fleet_manifest_guard(tmp_path: Path, monkeypatch):
 
     assert rc == 0
     assert guarded == [tmp_path]
+
+
+def test_preflight_auto_reconciles_instance_local_brain_state_when_canonical_unchanged(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    _write_brain_ledgers(tmp_path, canonical="canonical", local="stale-local")
+    runner = FakeRunner(tmp_path, changed_paths="validators/creator_engine_validator/pr_preflight.py\n")
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    assert (tmp_path / ".ce" / "state" / "brain" / "assertions.yaml").read_text(encoding="utf-8") == (
+        tmp_path / ".ce" / "brain" / "assertions.yaml"
+    ).read_text(encoding="utf-8")
+    output = out.getvalue()
+    assert "reconciled ignored instance-local .ce/state/brain from tracked .ce/brain" in output
+    assert "`ce brain sync`" in output
+    assert "CI is unaffected" in output
+    assert [
+        sys.executable,
+        "-m",
+        "creator_engine_validator.ce_cli",
+        "brain",
+        "verify",
+        "--drift",
+        "--state-root",
+        ".ce/state",
+    ] in runner.argv_calls()
+
+
+def test_preflight_does_not_reconcile_when_canonical_brain_source_changed_and_gate_still_fails(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    _write_brain_ledgers(tmp_path, canonical="canonical", local="stale-local")
+    stale_local = (tmp_path / ".ce" / "state" / "brain" / "assertions.yaml").read_text(encoding="utf-8")
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths=".ce/brain/assertions.yaml\n",
+        brain_drift_result=pr_preflight.CommandResult(
+            1,
+            "ce brain verify --drift: FAIL (1 record(s))\n",
+            "  ERROR: planted canonical drift\n",
+        ),
+    )
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=err)
+
+    assert rc == 1
+    assert (tmp_path / ".ce" / "state" / "brain" / "assertions.yaml").read_text(encoding="utf-8") == stale_local
+    output = out.getvalue()
+    assert "Creator Engine validator - brain drift check failed with exit code 1" in output
+    assert "If this is ignored instance-local .ce/state/brain drift, run `ce brain sync`" in output
+    assert "CI is unaffected by ignored instance-local runtime state" in output
+    assert "PR changes to tracked .ce/brain sources are still gated" in output
 
 
 def test_preflight_blocks_install_spec_signature_guard_failure(tmp_path: Path, monkeypatch):
