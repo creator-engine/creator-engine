@@ -13,7 +13,6 @@ exceptions:
   - docs/contracts/definition-of-ready.md
   - docs/contracts/devops-privileged-action-broker.md
   - docs/contracts/forge-claim.md
-  - docs/contracts/forge-persona-catalog.md
   - docs/contracts/forge-trigger-taxonomy.md
   - docs/contracts/github-issue-intake.md
   - docs/contracts/grading-spine.md
@@ -32,7 +31,6 @@ exceptions:
   - docs/contracts/runtime-evidence.md
   - docs/contracts/runtime-policy.md
   - docs/contracts/scope.md
-  - docs/contracts/seat-class-policy.md
   - docs/contracts/spec-wrapper-sidecar.md
   - docs/contracts/spend-envelope.md
   - docs/contracts/storage-tier-finding.md
