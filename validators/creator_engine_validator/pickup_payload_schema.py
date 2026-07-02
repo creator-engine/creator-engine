@@ -41,6 +41,7 @@ BANNED_DISCOVERY_CONTROL_FIELDS = frozenset(
         "hooks_path",
         "publish",
         "publish_policy",
+        "pr_base",
         "remote",
         "remotes",
         "repo",

@@ -2,11 +2,12 @@
 slug: ce-388-payload-data-only
 date: 2026-07-02
 kind: fixed
-scope: validators/conveyor-pickup
+scope: validators/conveyor-daemon
 issue: ce-ops#388
 ---
 
-**Enforce ADR-0004 data-only discovery payload schema.**
+**Wire ADR-0004 payload schema into conveyor daemon discovery.**
 
-- Added an allowlist schema for conveyor discovery payloads that accepts only issue, branch_name, pr_title, and pr_body.
-- Rejected unknown and authority-bearing control fields with value-free audit records.
+- Wired ConveyorDaemonItem.from_mapping() through the ADR-0004 data-only schema before raw discovery field access.
+- Legacy command, base, remote, and path-bearing discovery mappings now reject with value-free audit records.
+- Added daemon and schema regressions for missing, typed, non-mapping, and legacy-control payload failures.

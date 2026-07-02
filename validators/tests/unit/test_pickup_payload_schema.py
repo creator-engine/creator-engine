@@ -44,6 +44,7 @@ def test_unknown_field_fails_closed_and_emits_audit_record():
         "repo_path",
         "worktree_path",
         "bundle_path",
+        "pr_base",
     ],
 )
 def test_banned_control_fields_are_rejected_and_audited(field: str):
@@ -73,6 +74,44 @@ def test_oversized_field_is_rejected_and_audited():
     assert audit[0]["reason"] == "field_oversized"
     assert audit[0]["field"] == "pr_title"
     assert audit[0]["detail"] == f"max_length={MAX_DISCOVERY_PAYLOAD_FIELD_LENGTHS['pr_title']}"
+
+
+def test_missing_required_field_is_rejected_and_audited():
+    audit: list[dict] = []
+    payload = _valid_payload()
+    del payload["issue"]
+
+    with pytest.raises(DiscoveryPayloadRejected) as raised:
+        validate_discovery_payload(payload, audit_sink=lambda record: audit.append(dict(record)))
+
+    assert audit == list(raised.value.audit_records)
+    assert audit[0]["reason"] == "missing_required_field"
+    assert audit[0]["field"] == "issue"
+
+
+def test_non_string_field_is_rejected_and_audited():
+    audit: list[dict] = []
+    payload = {**_valid_payload(), "pr_body": 123}
+
+    with pytest.raises(DiscoveryPayloadRejected) as raised:
+        validate_discovery_payload(payload, audit_sink=lambda record: audit.append(dict(record)))
+
+    assert audit == list(raised.value.audit_records)
+    assert audit[0]["reason"] == "schema_mismatch"
+    assert audit[0]["field"] == "pr_body"
+    assert audit[0]["detail"] == "field_not_string"
+
+
+def test_non_mapping_payload_is_rejected_and_audited():
+    audit: list[dict] = []
+
+    with pytest.raises(DiscoveryPayloadRejected) as raised:
+        validate_discovery_payload(None, audit_sink=lambda record: audit.append(dict(record)))  # type: ignore[arg-type]
+
+    assert audit == list(raised.value.audit_records)
+    assert audit[0]["reason"] == "schema_mismatch"
+    assert audit[0]["detail"] == "payload_not_mapping"
+    assert "field" not in audit[0]
 
 
 def test_well_formed_four_field_payload_is_accepted():
