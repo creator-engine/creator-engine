@@ -980,6 +980,20 @@ Options:
 | `--codeowners-text` | no |  | inline CODEOWNERS text for tests/offline probes |
 | `--required-team` | no |  |  |
 
+### `speckit`
+
+spec-kit scaffold commands
+
+### `speckit init`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--target` | no |  | target project directory (default: cwd) |
+| `--force` | no |  | overwrite existing scaffold files instead of skipping them |
+| `--json` | no |  |  |
+
 ### `surfaces`
 
 inspect rented surface metadata
