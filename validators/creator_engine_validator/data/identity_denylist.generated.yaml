@@ -1,0 +1,100 @@
+version: 1
+generated_by: scripts/gen_identity_denylist.py
+source: seeded-from-current-internal-literals
+normalization: casefold
+token_lengths:
+- 3
+- 5
+- 6
+- 7
+- 9
+- 10
+- 12
+- 17
+- 21
+- 29
+entries:
+- sha256: 761fca33267f8a3eb82e6059e5e5324bf255cec68bc1fe2d92775ac334f1a338
+  length: 3
+  categories:
+  - legacy-internal-literal
+- sha256: 0388fb626ca89a127847443989334b8c29e17567bc03a7a2ed13effca701a4a1
+  length: 5
+  categories:
+  - legacy-internal-literal
+- sha256: 187132e36bb1a427eff3a9ecda4286def61350d1f2f59ba52ade08148ee0473b
+  length: 5
+  categories:
+  - legacy-internal-literal
+- sha256: ab6d169a59c9437d7c28350b0bee04d7c94863cacd7638659ad2c36d8541b3c2
+  length: 5
+  categories:
+  - legacy-internal-literal
+- sha256: e1a882c1e76950d39fa0dadcadb4d359317b4ca8484adf84c84bb4e188b12036
+  length: 5
+  categories:
+  - legacy-internal-literal
+- sha256: 5f479d0938b810d0e52f179e37c7ed56ddce0625e200d2629491180a02640c6b
+  length: 6
+  categories:
+  - legacy-internal-literal
+- sha256: 6ae951e5f281945f044dbd936c26427d8cf5d02669530e5286e795ba8b774a7b
+  length: 6
+  categories:
+  - legacy-internal-literal
+- sha256: 7ceaac36f7210d2dc2e99962836170afa4439e5a0fc8d7971c98bb379aafc657
+  length: 6
+  categories:
+  - legacy-internal-literal
+- sha256: ca65d471c81dd0497cd81d0e1028b9a98deead16218133312d66e38df1213844
+  length: 6
+  categories:
+  - legacy-internal-literal
+- sha256: e8b71ce08ab3a1d8cc6eff9a48dfbd62e62009f793ed6b502b0b693becb7b7a2
+  length: 6
+  categories:
+  - legacy-internal-literal
+- sha256: ff51f281f1f509dcb73e5412594edcba3a83519eadf250ad42f791b39677d1be
+  length: 6
+  categories:
+  - legacy-internal-literal
+- sha256: 294aa8d75483b8331e3ba6a7f24aea15202747f36de65197e7bc6194880b2558
+  length: 7
+  categories:
+  - legacy-internal-literal
+- sha256: b6aa30bb6f587d88b1ff8bc7066b5796b2107d905343dfbed279d186e3810987
+  length: 7
+  categories:
+  - legacy-internal-literal
+- sha256: f4a4997bb7ada1dab38ea2d411dcd95a61eb7107364dc4fcd96b58d482ea05ad
+  length: 9
+  categories:
+  - legacy-internal-literal
+- sha256: 112f01c639f38651dc9c8237d879d007f648c7410013b523a380b6d67911d81f
+  length: 10
+  categories:
+  - legacy-internal-literal
+- sha256: 0847dbc9bb3fd3e10e23b32cd5e58d0b02aac458d005703bb7d66cd65fc9b5fb
+  length: 12
+  categories:
+  - legacy-internal-literal
+- sha256: 660489042c09e87bf4e7d42068ec39ba7c68f303172410878eed5914f51a641c
+  length: 12
+  categories:
+  - legacy-internal-literal
+- sha256: db86af9cf7d87e14fa0f252c834177c0974a7fb19913bcb5b93fee681efe75b6
+  length: 12
+  categories:
+  - legacy-internal-literal
+- sha256: 60c4d214a6e400edd3fdd338d4611a50bd42f9004e46bf2ca601c852239aceeb
+  length: 17
+  categories:
+  - legacy-internal-literal
+- sha256: 85faec99de36413794ea41aa0aaba7aca77f1c73efbbfeb0b32a686387fd4760
+  length: 21
+  categories:
+  - legacy-internal-literal
+- sha256: 0aa0989cf2be176ad7b40fdac81e8914431692a470cce08a794e4eb182059170
+  length: 29
+  categories:
+  - legacy-internal-literal

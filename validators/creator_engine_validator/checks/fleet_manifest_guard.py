@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -13,39 +14,12 @@ from ..fleet_manifest import (
     iter_fleet_manifest_paths,
     load_fleet_manifest,
 )
+from ..identity_denylist import IdentityDenylist, find_identity_matches, load_identity_denylist
 from ..reporting import CheckResult, ValidationError, make_error
 from . import register
 
 CHECK_NAME = "fleet_manifest_guard"
 CODE_INTERNAL_IDENTIFIER = "fleet_manifest_internal_identifier"
-
-# Auditable denylist for CE-internal identifiers that must not appear in a
-# per-project deployment manifest. Keep this list value-shaped: it should cover
-# concrete repo, host, seat, infra, and endpoint identifiers, not broad product
-# nouns that external deployments legitimately use.
-INTERNAL_LITERAL_TOKENS = (
-    "creator-engine/creator-engine",
-    "creator-engine/ce-ops",
-    "ce-ops#",
-    "dev-1",
-    "dev-2",
-    "dev-3",
-    "dev-4",
-    "ce-dgx-codex",
-    "ce-vps-codex",
-    "DGX",
-    "spark-b824",
-    "dgx-spark",
-    "Hetzner",
-    "cedev2",
-    "cedev4",
-    "ce-kv/",
-    "forge/",
-    "ce-overwatch",
-    "cedev1",
-    "cedev3",
-    "ubuntuaws745-cmyk",
-)
 
 
 @dataclass(frozen=True)
@@ -83,28 +57,32 @@ def _string_nodes(value: Any, parts: tuple[str, ...] = ()) -> Iterable[tuple[tup
         yield (parts, value)
 
 
+@lru_cache(maxsize=1)
+def _runtime_identity_denylist() -> IdentityDenylist:
+    return load_identity_denylist()
+
+
 def _internal_identifier_errors(path: Path, data: dict[str, Any]) -> list[ValidationError]:
     errors: list[ValidationError] = []
-    literal_tokens = tuple((token, token.lower()) for token in INTERNAL_LITERAL_TOKENS)
+    denylist = _runtime_identity_denylist()
     seen: set[tuple[str, str]] = set()
     for parts, value in _string_nodes(data):
-        lowered = value.lower()
         pointer = _json_pointer(parts)
-        for token, lowered_token in literal_tokens:
-            if lowered_token in lowered:
-                key = (pointer, token)
-                if key in seen:
-                    continue
-                seen.add(key)
-                errors.append(
-                    make_error(
-                        CODE_INTERNAL_IDENTIFIER,
-                        path,
-                        pointer,
-                        f"fleet manifest contains CE-internal identifier {token!r}",
-                        CONTRACT,
-                    )
+        for match in find_identity_matches(value, denylist):
+            key = (pointer, match.sha256)
+            if key in seen:
+                continue
+            seen.add(key)
+            categories = ", ".join(match.categories)
+            errors.append(
+                make_error(
+                    CODE_INTERNAL_IDENTIFIER,
+                    path,
+                    pointer,
+                    f"fleet manifest contains CE-internal identifier from hashed denylist category {categories}",
+                    CONTRACT,
                 )
+            )
         for internal in INTERNAL_REGEX_PATTERNS:
             if internal.pattern.search(value):
                 key = (pointer, internal.label)
