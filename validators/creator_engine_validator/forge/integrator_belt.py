@@ -28,6 +28,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+from ..pickup_payload_schema import (
+    AuditSink as ConveyorDiscoveryAuditSink,
+    ConveyorDiscoveryPayload,
+    validate_discovery_payload,
+)
 from ._redact import redact_gh_stderr
 from .approval_capability import (
     APPROVAL_WALL_ARMED,
@@ -523,6 +528,16 @@ def git_env_with_token(token: str) -> dict[str, str]:
 def _log(log_sink: LogSink | None, action: str, **payload: Any) -> None:
     if log_sink is not None:
         log_sink({"action": action, **payload})
+
+
+def parse_conveyor_discovery_payload(
+    payload: Mapping[str, Any],
+    *,
+    audit_sink: ConveyorDiscoveryAuditSink | None = None,
+) -> ConveyorDiscoveryPayload:
+    """Validate an ADR-0004 conveyor discovery payload before daemon dispatch."""
+
+    return validate_discovery_payload(payload, audit_sink=audit_sink, source="integrator_belt")
 
 
 def run_poll_loop(
