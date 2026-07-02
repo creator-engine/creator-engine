@@ -276,7 +276,9 @@ def test_commissioned_unscheduled_requires_arc_body_context():
         issues={"items": [_issue(20, labels=[{"name": "user-story"}])]},
     )
 
-    assert result.commissioned_unscheduled == ()
+    payload = result.to_dict()
+    assert payload["commissioned_unscheduled_status"] == "arc_missing"
+    assert payload["commissioned_unscheduled_count"] == 0
 
 
 def test_apply_triage_preserves_commissioned_unscheduled_without_mutation():

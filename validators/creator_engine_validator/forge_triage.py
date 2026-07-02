@@ -281,6 +281,7 @@ class TriageResult:
     applied: bool
     items: tuple[TriageAction, ...]
     commissioned_unscheduled: tuple[CommissionedUnscheduledItem, ...] = ()
+    commissioned_unscheduled_status: str = "verified"
     skipped: tuple[Mapping[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -294,6 +295,7 @@ class TriageResult:
             "applied": self.applied,
             "count": len(self.items),
             "items": [item.to_dict() for item in self.items],
+            "commissioned_unscheduled_status": self.commissioned_unscheduled_status,
             "commissioned_unscheduled_count": len(self.commissioned_unscheduled),
             "commissioned_unscheduled": [
                 item.to_dict() for item in self.commissioned_unscheduled
@@ -377,6 +379,9 @@ def plan_triage(
     arc_work_key = arc_key.work_key
     arc_candidate = _find_arc_candidate(candidates, arc_work_key)
     arc_held_refs = _extract_arc_held_checkpoint_refs(arc_candidate) if arc_candidate else {}
+    commissioned_unscheduled_status = (
+        "verified" if arc_candidate is not None else "arc_missing"
+    )
     commissioned_unscheduled = _commissioned_unscheduled_items(
         candidates,
         arc_work_key=arc_work_key,
@@ -442,6 +447,7 @@ def plan_triage(
         applied=False,
         items=tuple(items),
         commissioned_unscheduled=commissioned_unscheduled,
+        commissioned_unscheduled_status=commissioned_unscheduled_status,
         skipped=tuple(skipped),
     )
 
@@ -480,6 +486,7 @@ def apply_triage_result(result: TriageResult, gh_runner: GhRunner) -> TriageResu
         applied=True,
         items=tuple(applied_items),
         commissioned_unscheduled=result.commissioned_unscheduled,
+        commissioned_unscheduled_status=result.commissioned_unscheduled_status,
         skipped=result.skipped,
     )
 
