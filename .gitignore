@@ -51,3 +51,6 @@ __pycache__/
 # instance-zone lines only.
 /ce-worktrees/
 /ce-review-venues/
+
+# ce-369: generated from private ce-ops identity registry where available.
+/validators/creator_engine_validator/data/identity_denylist.generated.yaml

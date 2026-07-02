@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -13,39 +14,20 @@ from ..fleet_manifest import (
     iter_fleet_manifest_paths,
     load_fleet_manifest,
 )
+from ..identity_denylist import (
+    IdentityDenylist,
+    IdentityDenylistError,
+    IdentityDenylistUnavailable,
+    find_identity_matches,
+    load_identity_denylist,
+)
 from ..reporting import CheckResult, ValidationError, make_error
 from . import register
 
 CHECK_NAME = "fleet_manifest_guard"
 CODE_INTERNAL_IDENTIFIER = "fleet_manifest_internal_identifier"
-
-# Auditable denylist for CE-internal identifiers that must not appear in a
-# per-project deployment manifest. Keep this list value-shaped: it should cover
-# concrete repo, host, seat, infra, and endpoint identifiers, not broad product
-# nouns that external deployments legitimately use.
-INTERNAL_LITERAL_TOKENS = (
-    "creator-engine/creator-engine",
-    "creator-engine/ce-ops",
-    "ce-ops#",
-    "dev-1",
-    "dev-2",
-    "dev-3",
-    "dev-4",
-    "ce-dgx-codex",
-    "ce-vps-codex",
-    "DGX",
-    "spark-b824",
-    "dgx-spark",
-    "Hetzner",
-    "cedev2",
-    "cedev4",
-    "ce-kv/",
-    "forge/",
-    "ce-overwatch",
-    "cedev1",
-    "cedev3",
-    "ubuntuaws745-cmyk",
-)
+CODE_IDENTITY_DENYLIST_UNAVAILABLE = "fleet_manifest_identity_denylist_unavailable"
+CODE_IDENTITY_DENYLIST_INVALID = "fleet_manifest_identity_denylist_invalid"
 
 
 @dataclass(frozen=True)
@@ -83,25 +65,31 @@ def _string_nodes(value: Any, parts: tuple[str, ...] = ()) -> Iterable[tuple[tup
         yield (parts, value)
 
 
-def _internal_identifier_errors(path: Path, data: dict[str, Any]) -> list[ValidationError]:
+@lru_cache(maxsize=1)
+def _runtime_identity_denylist() -> IdentityDenylist | None:
+    return load_identity_denylist(required=False)
+
+
+def _internal_identifier_errors(
+    path: Path, data: dict[str, Any], denylist: IdentityDenylist | None
+) -> list[ValidationError]:
     errors: list[ValidationError] = []
-    literal_tokens = tuple((token, token.lower()) for token in INTERNAL_LITERAL_TOKENS)
     seen: set[tuple[str, str]] = set()
     for parts, value in _string_nodes(data):
-        lowered = value.lower()
         pointer = _json_pointer(parts)
-        for token, lowered_token in literal_tokens:
-            if lowered_token in lowered:
-                key = (pointer, token)
+        if denylist is not None:
+            for match in find_identity_matches(value, denylist):
+                key = (pointer, ",".join(match.categories))
                 if key in seen:
                     continue
                 seen.add(key)
+                categories = ", ".join(match.categories)
                 errors.append(
                     make_error(
                         CODE_INTERNAL_IDENTIFIER,
                         path,
                         pointer,
-                        f"fleet manifest contains CE-internal identifier {token!r}",
+                        f"fleet manifest contains CE-internal identifier from runtime denylist category {categories}",
                         CONTRACT,
                     )
                 )
@@ -123,14 +111,65 @@ def _internal_identifier_errors(path: Path, data: dict[str, Any]) -> list[Valida
     return errors
 
 
-@register(CHECK_NAME, ["fleet-manifest-schema", CODE_INTERNAL_IDENTIFIER])
+@register(
+    CHECK_NAME,
+    [
+        "fleet-manifest-schema",
+        CODE_INTERNAL_IDENTIFIER,
+        CODE_IDENTITY_DENYLIST_UNAVAILABLE,
+        CODE_IDENTITY_DENYLIST_INVALID,
+    ],
+)
 def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []
-    for path in iter_fleet_manifest_paths(paths):
+    warnings: list[ValidationError] = []
+    manifest_paths = iter_fleet_manifest_paths(paths)
+    if not manifest_paths:
+        return CheckResult(name=CHECK_NAME)
+
+    try:
+        denylist = _runtime_identity_denylist()
+    except IdentityDenylistUnavailable as exc:
+        denylist = None
+        warnings.append(
+            make_error(
+                CODE_IDENTITY_DENYLIST_UNAVAILABLE,
+                Path("validators/creator_engine_validator/data/identity_denylist.generated.yaml"),
+                "",
+                f"{exc}; CE-internal identity token scan skipped. Generate it from ce-ops with scripts/gen_identity_denylist.py --write when registry access is available.",
+                CONTRACT,
+            )
+        )
+    except IdentityDenylistError as exc:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(
+                make_error(
+                    CODE_IDENTITY_DENYLIST_INVALID,
+                    Path("validators/creator_engine_validator/data/identity_denylist.generated.yaml"),
+                    "",
+                    f"runtime identity denylist artifact is invalid: {exc}",
+                    CONTRACT,
+                ),
+            ),
+        )
+
+    if denylist is None and not warnings:
+        warnings.append(
+            make_error(
+                CODE_IDENTITY_DENYLIST_UNAVAILABLE,
+                Path("validators/creator_engine_validator/data/identity_denylist.generated.yaml"),
+                "",
+                "runtime identity denylist artifact is absent; CE-internal identity token scan skipped. Generate it from ce-ops with scripts/gen_identity_denylist.py --write when registry access is available.",
+                CONTRACT,
+            )
+        )
+
+    for path in manifest_paths:
         try:
             manifest = load_fleet_manifest(path)
         except FleetManifestValidationError as exc:
             errors.extend(exc.errors)
             continue
-        errors.extend(_internal_identifier_errors(manifest.path, manifest.data))
-    return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+        errors.extend(_internal_identifier_errors(manifest.path, manifest.data, denylist))
+    return CheckResult(name=CHECK_NAME, errors=tuple(errors), warnings=tuple(warnings))
