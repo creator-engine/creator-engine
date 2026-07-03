@@ -25,6 +25,12 @@ from .conveyor import (
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
 from .checks.path_manifest_fidelity import branch_slug
+from .forge.daemon_allocation import (
+    DaemonAllocationError,
+    DaemonPathAllocation,
+    DaemonPathAllocator,
+    DaemonPathReceipt,
+)
 
 
 DiscoveryRunner = Callable[[], Iterable["ConveyorDaemonItem | Mapping[str, Any]"]]
@@ -108,9 +114,9 @@ class ConveyorDaemonItem:
     """One discovered completed branch ready for conveyor processing."""
 
     branch: str
-    worktree_path: Path
-    bundle_path: Path
-    repo_path: Path
+    worktree_path: Path | None = None
+    bundle_path: Path | None = None
+    repo_path: Path | None = None
     base: str = "origin/main"
     issue: str = "ce-conveyor"
     title: str = "Conveyor harvest"
@@ -127,7 +133,7 @@ class ConveyorDaemonItem:
     pr_body: str | None = None
     pr_base: str | None = None
     identity: str | None = None
-    daemon_owned_paths_allocated: bool = True
+    allocation_receipt: DaemonPathReceipt | None = None
 
     @classmethod
     def from_mapping(
@@ -143,9 +149,6 @@ class ConveyorDaemonItem:
         parsed = validate_discovery_payload(payload, audit_sink=audit_sink, source="conveyor_daemon")
         return cls(
             branch=parsed.branch_name,
-            worktree_path=Path("."),
-            bundle_path=Path("."),
-            repo_path=Path("."),
             issue=parsed.issue,
             title=parsed.pr_title,
             kind="changed",
@@ -154,7 +157,6 @@ class ConveyorDaemonItem:
             declared_work_class="story",
             pr_title=parsed.pr_title,
             pr_body=parsed.pr_body,
-            daemon_owned_paths_allocated=False,
         )
 
     @property
@@ -164,6 +166,8 @@ class ConveyorDaemonItem:
     def harvest_spec(
         self, *, carrier_date: str, validate_command: tuple[str, ...], base: str
     ) -> ConveyorHarvestSpec:
+        if self.worktree_path is None:
+            raise ValueError("worktree_path is required after daemon allocation")
         return ConveyorHarvestSpec(
             worktree_path=self.worktree_path,
             branch=self.branch,
@@ -267,6 +271,7 @@ class ConveyorDaemon:
         remote: str | None = None,
         repo_root: Path | str | None = None,
         bundle_root: Path | str | None = None,
+        path_allocator: DaemonPathAllocator | None = None,
     ) -> None:
         self.discovery_runner = discovery_runner
         self.armed = armed
@@ -278,6 +283,7 @@ class ConveyorDaemon:
         self.log_runner = log_runner
         self.prepare_runner = prepare_runner
         self.land_runner = land_runner
+        self.path_allocator = path_allocator
         # validate_command is pinned here, at daemon construction time, and is
         # never sourced from a discovery payload (see ConveyorDaemonItem.from_mapping).
         self.validate_command: tuple[str, ...] = tuple(
@@ -304,8 +310,17 @@ class ConveyorDaemon:
         # supplied and required below when armed; every item
         # bundle_path/repo_path/worktree_path must resolve under one of these
         # before the daemon will touch it.
-        self.repo_root: Path | None = Path(repo_root).resolve() if repo_root is not None else None
-        self.bundle_root: Path | None = Path(bundle_root).resolve() if bundle_root is not None else None
+        self.repo_root: Path | None = (
+            Path(repo_root).resolve()
+            if repo_root is not None
+            else (path_allocator.roots.repo_root if path_allocator is not None else None)
+        )
+        self.worktree_root: Path | None = path_allocator.roots.worktree_root if path_allocator is not None else self.repo_root
+        self.bundle_root: Path | None = (
+            Path(bundle_root).resolve()
+            if bundle_root is not None
+            else (path_allocator.roots.bundle_root if path_allocator is not None else None)
+        )
         self._completed_keys: set[str] = set()
 
         if self.armed:
@@ -320,6 +335,8 @@ class ConveyorDaemon:
                 missing.append("now")
             if self.ledger_writer is None:
                 missing.append("ledger_writer")
+            if self.path_allocator is None:
+                missing.append("path_allocator")
             if self.repo_root is None:
                 missing.append("repo_root")
             if self.bundle_root is None:
@@ -409,45 +426,39 @@ class ConveyorDaemon:
 
     def _process_armed(self, item: ConveyorDaemonItem) -> ConveyorDaemonItemResult:
         records: list[ConveyorDaemonLedgerRecord] = []
-        if not item.daemon_owned_paths_allocated:
-            return self._failed(
-                item,
-                ("data-only discovery payload accepted, but daemon-owned path allocation is not wired",),
-                ledger_records=records,
-            )
-        # Confine/validate every item filesystem path and the
-        # pr_base shape BEFORE any prepare/land/push/pr-open action runs, so
-        # a rejected item never reaches git_runner/gh_runner at all (fail
-        # closed, log, skip). This is checked first, ahead of the try/except
-        # below, so a violation is reported as its own precise reason rather
-        # than folded into a generic "exception: ..." message.
-        violations, resolved_paths = self._path_confinement_violations(item)
-        if violations:
-            return self._failed(item, violations, ledger_records=records)
-        # TOCTOU close: `_path_confinement_violations` already resolved
-        # bundle_path/repo_path/worktree_path (symlinks + `..` collapsed) to
-        # verify they land under the pinned root, then handed those resolved
-        # Paths back via `resolved_paths`. From here on we thread THOSE
-        # resolved paths -- not the raw path values still sitting on
-        # `item` -- through every downstream prepare/land/push/pr-open call.
-        # If we kept using the raw, unresolved item fields, an attacker who
-        # passes this check with a legitimate path and then swaps that
-        # directory for a symlink to an attacker-controlled repo (e.g. one
-        # whose `.git/config` sets `origin` to an `ext::` transport-helper
-        # gadget) before harvest/validate/land/push actually run would
-        # defeat confinement entirely: the *name* would still resolve under
-        # root at check-time, but every subsequent git/gh subprocess cwd or
-        # argv would silently follow the swapped target instead. Operating
-        # on the already-resolved realpath for the rest of processing means
-        # a later swap of the original path has no effect on what the
-        # daemon actually touches.
-        item = dataclasses.replace(
-            item,
-            bundle_path=resolved_paths["bundle_path"],
-            repo_path=resolved_paths["repo_path"],
-            worktree_path=resolved_paths["worktree_path"],
-        )
+        assert self.path_allocator is not None
+        allocation: DaemonPathAllocation | None = None
+        receipt: DaemonPathReceipt | None = None
+        mode_check: Mapping[str, Any] | None = None
+        audit_item = item
         try:
+            materialized = self._materialize_allocation(item)
+            if isinstance(materialized, ConveyorDaemonItemResult):
+                return materialized
+            item, allocation, receipt = materialized
+            audit_item = item
+
+            mode_check = self._allocation_mode_check(allocation)
+
+            # Confine/validate every daemon-issued filesystem path and the
+            # pr_base shape BEFORE any prepare/land/push/pr-open action runs,
+            # so a rejected item never reaches git_runner/gh_runner at all
+            # (fail closed, log, skip).
+            violations, resolved_paths = self._path_confinement_violations(item)
+            if violations:
+                return self._failed(item, violations, ledger_records=records)
+            # TOCTOU close: `_path_confinement_violations` already resolved
+            # bundle_path/repo_path/worktree_path (symlinks + `..` collapsed)
+            # to verify they land under the pinned root, then handed those
+            # resolved Paths back via `resolved_paths`. From here on we thread
+            # THOSE resolved paths through every downstream call.
+            item = dataclasses.replace(
+                item,
+                bundle_path=resolved_paths["bundle_path"],
+                repo_path=resolved_paths["repo_path"],
+                worktree_path=resolved_paths["worktree_path"],
+            )
+            audit_item = item
             assert self.git_runner is not None
             assert self.validate_runner is not None
             assert self.gh_runner is not None
@@ -541,6 +552,168 @@ class ConveyorDaemon:
             )
         except Exception as exc:
             return self._failed(item, (f"exception: {exc}",), ledger_records=records)
+        finally:
+            if allocation is not None and receipt is not None:
+                cleanup_result = self._cleanup_allocation(receipt)
+                self._audit_allocation(
+                    item=audit_item,
+                    allocation=allocation,
+                    mode_check=mode_check,
+                    cleanup_result=cleanup_result,
+                )
+
+    def _materialize_allocation(
+        self, item: ConveyorDaemonItem
+    ) -> tuple[ConveyorDaemonItem, DaemonPathAllocation, DaemonPathReceipt] | ConveyorDaemonItemResult:
+        assert self.path_allocator is not None
+
+        executable_paths = {
+            "bundle_path": item.bundle_path,
+            "repo_path": item.repo_path,
+            "worktree_path": item.worktree_path,
+        }
+        present_paths = {name: path for name, path in executable_paths.items() if path is not None}
+        if present_paths:
+            if item.allocation_receipt is None:
+                return self._failed(
+                    item,
+                    ("executable item paths require a valid daemon allocation receipt",),
+                )
+            missing_paths = tuple(name for name, path in executable_paths.items() if path is None)
+            if missing_paths:
+                return self._failed(
+                    item,
+                    (f"allocation receipt supplied, but executable item paths are incomplete: {', '.join(missing_paths)}",),
+                )
+            try:
+                allocation = self.path_allocator.verify_receipt(item.allocation_receipt)
+            except DaemonAllocationError as exc:
+                return self._failed(item, (f"daemon allocation receipt rejected: {exc}",))
+
+            # Direct item paths must be confined and match the allocation
+            # bound to the receipt. The receipt allocation remains the source
+            # of truth for downstream paths.
+            violations, resolved_paths = self._path_confinement_violations(item)
+            if violations:
+                return self._failed(item, violations)
+            mismatches = self._allocation_path_mismatches(allocation, resolved_paths)
+            if mismatches:
+                return self._failed(item, mismatches)
+            receipt = item.allocation_receipt
+        else:
+            if item.allocation_receipt is not None:
+                return self._failed(
+                    item,
+                    ("allocation receipt supplied without executable item paths",),
+                )
+            try:
+                allocation, receipt = self.path_allocator.allocate_conveyor_paths(
+                    repo=item.key,
+                    branch_name=item.branch,
+                )
+            except DaemonAllocationError as exc:
+                return self._failed(item, (f"daemon path allocation failed: {exc}",))
+
+        paths = self._conveyor_paths_from_allocation(allocation)
+        if len(paths) == 3 and all(isinstance(path, Path) for path in paths):
+            return dataclasses.replace(
+                item,
+                bundle_path=paths[0],
+                repo_path=paths[1],
+                worktree_path=paths[2],
+                allocation_receipt=receipt,
+            ), allocation, receipt
+        return self._failed(item, paths)
+
+    def _conveyor_paths_from_allocation(
+        self, allocation: DaemonPathAllocation
+    ) -> tuple[Path, Path, Path] | tuple[str, ...]:
+        missing = tuple(
+            field_name
+            for field_name in ("bundle_path", "repo_path", "worktree_path")
+            if getattr(allocation, field_name) is None
+        )
+        if missing:
+            return (f"daemon allocation is missing conveyor paths: {', '.join(missing)}",)
+        assert allocation.bundle_path is not None
+        assert allocation.repo_path is not None
+        assert allocation.worktree_path is not None
+        return allocation.bundle_path, allocation.repo_path, allocation.worktree_path
+
+    def _allocation_path_mismatches(
+        self,
+        allocation: DaemonPathAllocation,
+        resolved_paths: Mapping[str, Path],
+    ) -> tuple[str, ...]:
+        mismatches: list[str] = []
+        for field_name, expected_path in (
+            ("bundle_path", allocation.bundle_path),
+            ("repo_path", allocation.repo_path),
+            ("worktree_path", allocation.worktree_path),
+        ):
+            if expected_path is None:
+                mismatches.append(f"daemon allocation is missing {field_name}")
+                continue
+            if resolved_paths.get(field_name) != Path(expected_path).resolve():
+                mismatches.append(f"{field_name} does not match daemon allocation receipt")
+        return tuple(mismatches)
+
+    def _allocation_mode_check(self, allocation: DaemonPathAllocation) -> dict[str, Any]:
+        assert self.path_allocator is not None
+        checks: dict[str, Any] = {}
+        all_ok = True
+        for field_name, kind, path in allocation.iter_paths():
+            confined = self.path_allocator.roots.confine_path(path, kind)
+            exists = confined.exists()
+            is_dir = confined.is_dir()
+            mode = confined.stat().st_mode & 0o777 if exists else None
+            mode_ok = bool(exists and is_dir and mode == 0o700)
+            all_ok = all_ok and mode_ok
+            checks[field_name] = {
+                "exists": exists,
+                "is_dir": is_dir,
+                "mode": oct(mode) if mode is not None else None,
+                "mode_ok": mode_ok,
+            }
+        return {"ok": all_ok, "paths": checks}
+
+    def _cleanup_allocation(self, receipt: DaemonPathReceipt) -> Mapping[str, Any]:
+        assert self.path_allocator is not None
+        try:
+            cleaned = self.path_allocator.cleanup(receipt)
+        except DaemonAllocationError as exc:
+            return {"status": "failed", "cleaned": False, "error": str(exc)}
+        return {"status": "success", "cleaned": cleaned}
+
+    def _audit_allocation(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        allocation: DaemonPathAllocation,
+        mode_check: Mapping[str, Any] | None,
+        cleanup_result: Mapping[str, Any],
+    ) -> None:
+        assert self.path_allocator is not None
+        roots = self.path_allocator.roots
+        paths: list[dict[str, str]] = []
+        for field_name, kind, path in allocation.iter_paths():
+            confined = roots.confine_path(path, kind)
+            paths.append(
+                {
+                    "field": field_name,
+                    "root_kind": kind,
+                    "relative_path": str(confined.relative_to(roots.root_for(kind))),
+                }
+            )
+        record = {
+            "action": "conveyor_allocation_audit",
+            "allocation_id": allocation.allocation_id,
+            "item_key": item.key,
+            "paths": paths,
+            "mode_check": dict(mode_check or {}),
+            "cleanup": dict(cleanup_result),
+        }
+        self._log(f"conveyor allocation audit: {json.dumps(record, sort_keys=True)}")
 
     def _path_confinement_violations(
         self, item: ConveyorDaemonItem
@@ -572,16 +745,22 @@ class ConveyorDaemon:
         # module comment above DEFAULT_BASE), so it gets both the
         # argv-gadget shape rejection (mirrors base/remote/validate_command)
         # AND path confinement.
-        try:
-            _reject_git_argv_gadget(str(item.bundle_path), label="bundle_path")
-        except ValueError as exc:
-            violations.append(str(exc))
+        if item.bundle_path is None:
+            violations.append("bundle_path is required after daemon allocation")
+        else:
+            try:
+                _reject_git_argv_gadget(str(item.bundle_path), label="bundle_path")
+            except ValueError as exc:
+                violations.append(str(exc))
 
         for label, value, root in (
             ("bundle_path", item.bundle_path, self.bundle_root),
             ("repo_path", item.repo_path, self.repo_root),
-            ("worktree_path", item.worktree_path, self.repo_root),
+            ("worktree_path", item.worktree_path, self.worktree_root),
         ):
+            if value is None:
+                violations.append(f"{label} is required after daemon allocation")
+                continue
             try:
                 resolved[label] = _confine_path(value, root=root, label=label)
             except ValueError as exc:
