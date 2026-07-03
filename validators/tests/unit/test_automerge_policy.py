@@ -14,10 +14,14 @@ from creator_engine_validator.forge.automerge_actuate_cli import actuate_decisio
 from creator_engine_validator.forge.automerge_policy import (
     AUTOMERGE_DECISION_AUTO,
     AUTOMERGE_DECISION_GESTURE,
+    AUTOMERGE_TIER_CARRIER_CHANGELOG,
+    AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
     AutoMergeClassPolicy,
     AutoMergePolicyState,
     AutoMergePolicyStateError,
+    AutoMergeTierPolicy,
     automerge_policy_state_path,
+    carrier_changelog_tier_matches,
     decide_automerge,
     emit_automerge_dry_run_decision,
     load_automerge_policy_state,
@@ -58,13 +62,23 @@ LIVE_GREEN_CHECKS = {
 }
 
 
-def state_with_flags(*enabled: str, run_mode: str = "ceo", kill_switch: bool = False) -> AutoMergePolicyState:
+def state_with_flags(
+    *enabled: str,
+    run_mode: str = "ceo",
+    kill_switch: bool = False,
+    enabled_tiers: tuple[str, ...] = (),
+) -> AutoMergePolicyState:
     return AutoMergePolicyState(
         run_mode=run_mode,
         kill_switch=kill_switch,
         classes={
             class_name: AutoMergeClassPolicy(auto_merge=class_name in enabled)
             for class_name in ALL_CLASSES
+        },
+        tiers={
+            AUTOMERGE_TIER_CARRIER_CHANGELOG: AutoMergeTierPolicy(
+                auto_merge=AUTOMERGE_TIER_CARRIER_CHANGELOG in enabled_tiers
+            )
         },
         enabling_decision_ref="ce-ops#291-test-enable",
     )
@@ -115,6 +129,7 @@ def test_variable_materialization_defaults_to_dormant_dev(tmp_path: Path) -> Non
     assert loaded.kill_switch is False
     assert loaded.enabling_decision_ref is None
     assert all(not policy.auto_merge for policy in loaded.classes.values())
+    assert loaded.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
 
 
 @pytest.mark.parametrize("run_mode", ["", "CEO", "ceo ", "dev", "prod", "true"])
@@ -153,6 +168,37 @@ def test_variable_materialization_ceo_arms_docs_only(tmp_path: Path) -> None:
         for class_name, policy in state.classes.items()
         if class_name != "docs"
     )
+    assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
+
+
+def test_variable_materialization_arms_carrier_changelog_tier_only_when_enabled(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(
+        path,
+        run_mode_variable="ceo",
+        enabling_ref_variable="ce-ops#412-enable",
+        tier_carrier_changelog_variable="true",
+    )
+
+    assert state.class_flag("docs") is True
+    assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is True
+
+
+def test_variable_materialization_tier_flag_is_subordinate_to_run_mode(tmp_path: Path) -> None:
+    path = tmp_path / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(
+        path,
+        run_mode_variable="dev",
+        enabling_ref_variable="ce-ops#412-enable",
+        tier_carrier_changelog_variable="true",
+    )
+
+    assert state.class_flag("docs") is False
+    assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
 
 
 def test_variable_materialization_strangeloop_arms_docs_only(tmp_path: Path) -> None:
@@ -203,6 +249,28 @@ def test_policy_state_path_uses_configured_default() -> None:
     assert str(automerge_policy_state_path()).endswith(".ce/state/automerge/policy.json")
 
 
+def test_carrier_changelog_tier_predicate_accepts_only_carrier_and_changelog_paths() -> None:
+    assert carrier_changelog_tier_matches(
+        [
+            ".ce/changelog/ce-412-automerge-tier-a.md",
+            ".ce/pr-manifests/ce-412-automerge-tier-a.md",
+        ]
+    )
+
+
+def test_carrier_changelog_tier_predicate_rejects_negative_path() -> None:
+    assert not carrier_changelog_tier_matches(["README.md"])
+
+
+def test_carrier_changelog_tier_predicate_rejects_mixed_path_set() -> None:
+    assert not carrier_changelog_tier_matches(
+        [
+            ".ce/changelog/ce-412-automerge-tier-a.md",
+            "docs/usage.md",
+        ]
+    )
+
+
 def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
     decision = decide_automerge(
         numstat=numstat_for(["README.md"]),
@@ -226,6 +294,85 @@ def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
     assert decision.to_payload()["author_login"] == "author-dev"
     assert decision.to_payload()["approver_login"] == "reviewer-dev"
     assert len(decision.policy_sha) == 64
+
+
+def test_carrier_changelog_tier_flag_off_blocks_tier_default() -> None:
+    paths = [
+        ".ce/changelog/ce-412-automerge-tier-a.md",
+        ".ce/pr-manifests/ce-412-automerge-tier-a.md",
+    ]
+
+    decision = decide_automerge(
+        numstat=numstat_for(paths),
+        paths=paths,
+        declared_work_class="tiny",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-412-automerge-tier-a",
+        base="main",
+        **canary_identity(),
+    )
+
+    payload = decision.to_payload()
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert decision.tier == AUTOMERGE_TIER_CARRIER_CHANGELOG
+    assert decision.tier_flag is False
+    assert "tier_carrier_changelog_false" in decision.rationale
+    assert payload["reviewer_venue"] == "reviewer-dev"
+
+
+def test_carrier_changelog_tier_auto_payload_includes_audit_fields() -> None:
+    paths = [
+        ".ce/changelog/ce-412-automerge-tier-a.md",
+        ".ce/pr-manifests/ce-412-automerge-tier-a.md",
+    ]
+
+    decision = decide_automerge(
+        numstat=numstat_for(paths),
+        paths=paths,
+        declared_work_class="S",
+        policy_state=state_with_flags(
+            "docs",
+            enabled_tiers=(AUTOMERGE_TIER_CARRIER_CHANGELOG,),
+        ),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-412-automerge-tier-a",
+        base="main",
+        **canary_identity(),
+    )
+
+    payload = decision.to_payload()
+    assert decision.decision == AUTOMERGE_DECISION_AUTO
+    assert payload["tier"] == AUTOMERGE_TIER_CARRIER_CHANGELOG
+    assert payload["tier_flag"] is True
+    assert payload["path_envelope"] == AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE
+    assert payload["changed_paths"] == paths
+    assert payload["reviewer_venue"] == "reviewer-dev"
+
+
+def test_mixed_carrier_changelog_path_set_falls_through_to_existing_docs_behavior() -> None:
+    paths = [
+        ".ce/changelog/ce-412-automerge-tier-a.md",
+        "README.md",
+    ]
+
+    decision = decide_automerge(
+        numstat=numstat_for(paths),
+        paths=paths,
+        declared_work_class="tiny",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-412-automerge-tier-a",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_AUTO
+    assert decision.tier is None
+    assert decision.tier_flag is None
 
 
 def test_decide_returns_auto_with_live_pr_data_when_policy_is_armed() -> None:
@@ -851,11 +998,13 @@ def _assert_materialize_step_before(steps: list[dict], *, later_step: str) -> No
         "CE_AUTOMERGE_RUN_MODE": "${{ vars.CE_AUTOMERGE_RUN_MODE || '' }}",
         "CE_AUTOMERGE_ENABLING_REF": "${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}",
         "CE_AUTOMERGE_KILL_SWITCH": "${{ vars.CE_AUTOMERGE_KILL_SWITCH || '' }}",
+        "CE_AUTOMERGE_TIER_CARRIER_CHANGELOG": "${{ vars.CE_AUTOMERGE_TIER_CARRIER_CHANGELOG || '' }}",
     }
     run = step["run"]
     assert "materialize_automerge_policy_state_from_variables" in run
     assert 'Path(".ce/state/automerge/policy.json")' in run
     assert "kill_switch_variable" in run
+    assert "tier_carrier_changelog_variable" in run
 
 
 def test_pull_request_paths_use_pr_file_list_not_stale_base_diff(tmp_path: Path) -> None:

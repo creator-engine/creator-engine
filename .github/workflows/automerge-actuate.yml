@@ -46,6 +46,7 @@ jobs:
           CE_AUTOMERGE_RUN_MODE: ${{ vars.CE_AUTOMERGE_RUN_MODE || '' }}
           CE_AUTOMERGE_ENABLING_REF: ${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}
           CE_AUTOMERGE_KILL_SWITCH: ${{ vars.CE_AUTOMERGE_KILL_SWITCH || '' }}
+          CE_AUTOMERGE_TIER_CARRIER_CHANGELOG: ${{ vars.CE_AUTOMERGE_TIER_CARRIER_CHANGELOG || '' }}
         run: |
           set -euo pipefail
 
@@ -62,6 +63,7 @@ jobs:
               run_mode_variable=os.environ.get("CE_AUTOMERGE_RUN_MODE"),
               enabling_ref_variable=os.environ.get("CE_AUTOMERGE_ENABLING_REF"),
               kill_switch_variable=os.environ.get("CE_AUTOMERGE_KILL_SWITCH"),
+              tier_carrier_changelog_variable=os.environ.get("CE_AUTOMERGE_TIER_CARRIER_CHANGELOG"),
           )
           PY
 

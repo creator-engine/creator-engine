@@ -13,6 +13,8 @@ from ..work_sizing import normalize_work_class
 from .automerge_policy import (
     AUTOMERGE_ARMING_RUN_MODES,
     AUTOMERGE_CANARY_WORK_CLASSES,
+    AUTOMERGE_TIER_CARRIER_CHANGELOG,
+    carrier_changelog_tier_matches,
     AutoMergePolicyStateError,
     automerge_policy_state_path,
     load_automerge_policy_state,
@@ -83,6 +85,10 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
     if _normalized_work_class(payload.get("class")) not in AUTOMERGE_CANARY_WORK_CLASSES:
         return _refuse("work_class_outside_canary", payload)
 
+    tier = _tier_reverification(payload)
+    if isinstance(tier, ActuationResult):
+        return tier
+
     enabling_ref = payload.get("enabling_decision_ref")
     if not isinstance(enabling_ref, str) or not enabling_ref.strip():
         return _refuse("enabling_decision_ref_missing", payload)
@@ -105,6 +111,12 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
         return _dormant("live_run_mode_not_armed", payload, live_run_mode=live_policy.run_mode)
     if live_policy.kill_switch:
         return _refuse("live_kill_switch_active", payload, live_run_mode=live_policy.run_mode)
+    if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG and not live_policy.tier_flag(tier):
+        return _refuse(
+            "live_tier_flag_not_true",
+            payload,
+            live_run_mode=live_policy.run_mode,
+        )
 
     independent = _live_author_approver_independent(change, gh_runner)
     if isinstance(independent, ActuationResult):
@@ -315,6 +327,27 @@ def _live_required_checks_green(
     return all(_status_is_green(statuses.get(name)) for name in required_checks)
 
 
+def _tier_reverification(payload: Mapping[str, Any]) -> str | None | ActuationResult:
+    raw_tier = payload.get("tier")
+    if raw_tier in (None, ""):
+        return None
+    if raw_tier != AUTOMERGE_TIER_CARRIER_CHANGELOG:
+        return _refuse("tier_unknown", payload)
+    if payload.get("tier_flag") is not True:
+        return _refuse("tier_flag_not_true", payload)
+    raw_paths = payload.get("changed_paths")
+    if raw_paths is None and isinstance(payload.get("change"), Mapping):
+        raw_paths = payload["change"].get("changed_paths")
+    if isinstance(raw_paths, (str, bytes)) or not isinstance(raw_paths, Sequence):
+        return _refuse("tier_changed_paths_invalid", payload)
+    paths = tuple(str(path).strip() for path in raw_paths if str(path).strip())
+    if len(paths) != len(raw_paths):
+        return _refuse("tier_changed_paths_invalid", payload)
+    if not carrier_changelog_tier_matches(paths):
+        return _refuse("tier_carrier_changelog_path_predicate_failed", payload)
+    return AUTOMERGE_TIER_CARRIER_CHANGELOG
+
+
 def _status_is_green(status: Any) -> bool:
     return str(status).lower() in _GREEN
 
@@ -427,6 +460,9 @@ def _audit_record(
             "run_mode": payload.get("run_mode"),
             "kill_switch": payload.get("kill_switch"),
             "class_flag": payload.get("class_flag"),
+            "tier": payload.get("tier"),
+            "tier_flag": payload.get("tier_flag"),
+            "path_envelope": payload.get("path_envelope"),
             "work_class": payload.get("class"),
             "mutation_class": payload.get("mutation_class"),
             "repo": change.get("repo"),
@@ -436,6 +472,10 @@ def _audit_record(
             "base": change.get("base"),
             "author_login": change.get("author_login", payload.get("author_login")),
             "approver_login": change.get("approver_login", payload.get("approver_login")),
+            "reviewer_venue": change.get(
+                "reviewer_venue",
+                payload.get("reviewer_venue", payload.get("approver_login")),
+            ),
             "single_pr": True,
             "enabling_decision_ref_present": bool(
                 isinstance(payload.get("enabling_decision_ref"), str)

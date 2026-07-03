@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import ce_cli
+from creator_engine_validator.forge.automerge_policy import (
+    AUTOMERGE_TIER_CARRIER_CHANGELOG,
+    AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
+)
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
 
@@ -86,7 +90,12 @@ def _decision(**overrides):
         "kill_switch": False,
         "class_flag": True,
         "enabling_decision_ref": "ce-ops#313-enable",
+        "tier": None,
+        "tier_flag": None,
+        "path_envelope": None,
+        "changed_paths": ["README.md"],
         "reviewDecision": "APPROVED",
+        "reviewer_venue": "reviewer-dev",
         "checks_green": True,
         "pr_number": 313,
         "head_sha": _HEAD,
@@ -119,6 +128,7 @@ def _write_live_policy(
     *,
     run_mode: str = "ceo",
     kill_switch: bool = False,
+    carrier_changelog_tier: bool = False,
 ) -> Path:
     monkeypatch.chdir(tmp_path)
     path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
@@ -127,6 +137,11 @@ def _write_live_policy(
         "run_mode": run_mode,
         "kill_switch": kill_switch,
         "classes": {},
+        "tiers": {
+            AUTOMERGE_TIER_CARRIER_CHANGELOG: {
+                "auto_merge": carrier_changelog_tier,
+            }
+        },
         "enabling_decision_ref": "ce-ops#313-enable",
     }
     path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -248,6 +263,7 @@ def test_actuates_only_when_all_green(tmp_path: Path, monkeypatch: pytest.Monkey
     assert result.audit_record["single_pr"] is True
     assert result.audit_record["author_login"] == "author-dev"
     assert result.audit_record["approver_login"] == "reviewer-dev"
+    assert result.audit_record["reviewer_venue"] == "reviewer-dev"
 
 
 @pytest.mark.parametrize("work_class", ["XS", "S", "tiny", "story"])
@@ -284,6 +300,97 @@ def test_actuate_cli_appends_audit_log(tmp_path: Path, monkeypatch: pytest.Monke
     assert records[0]["status"] == "Actuated"
     assert records[0]["acted"] is True
     assert records[0]["single_pr"] is True
+    assert records[0]["reviewer_venue"] == "reviewer-dev"
+
+
+def test_actuates_carrier_changelog_tier_with_audit_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, carrier_changelog_tier=True)
+    gh = FakeActuatorGh()
+    paths = [
+        ".ce/changelog/ce-412-automerge-tier-a.md",
+        ".ce/pr-manifests/ce-412-automerge-tier-a.md",
+    ]
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_CARRIER_CHANGELOG,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
+                changed_paths=paths,
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.actuated is True
+    assert result.audit_record["tier"] == AUTOMERGE_TIER_CARRIER_CHANGELOG
+    assert result.audit_record["tier_flag"] is True
+    assert (
+        result.audit_record["path_envelope"]
+        == AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE
+    )
+    assert result.audit_record["reviewer_venue"] == "reviewer-dev"
+
+
+def test_refuses_carrier_changelog_tier_when_live_tier_flag_is_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, carrier_changelog_tier=False)
+    gh = FakeActuatorGh()
+    paths = [
+        ".ce/changelog/ce-412-automerge-tier-a.md",
+        ".ce/pr-manifests/ce-412-automerge-tier-a.md",
+    ]
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_CARRIER_CHANGELOG,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
+                changed_paths=paths,
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.refused is True
+    assert result.reason == "live_tier_flag_not_true"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_carrier_changelog_tier_when_path_predicate_fails(
+    tmp_path: Path,
+) -> None:
+    gh = FakeActuatorGh()
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_CARRIER_CHANGELOG,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
+                changed_paths=[
+                    ".ce/changelog/ce-412-automerge-tier-a.md",
+                    "README.md",
+                ],
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.refused is True
+    assert result.reason == "tier_carrier_changelog_path_predicate_failed"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
 
 
 def test_actuates_with_decision_top_level_change_ref(
