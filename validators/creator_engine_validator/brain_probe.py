@@ -6,6 +6,7 @@ answers and they never convert an unknown capability into a guessed verdict.
 
 from __future__ import annotations
 
+import ast
 import getpass
 import importlib
 import json
@@ -196,6 +197,153 @@ def _codex_pretooluse_hook(context: ProbeContext) -> ProbeResult:
     )
 
 
+def _python_module_tree(context: ProbeContext, path: Path, probe_name: str) -> tuple[ast.Module | None, ProbeResult | None]:
+    try:
+        text = context.read_text(path)
+        return ast.parse(text), None
+    except Exception as exc:
+        return None, _unknown(probe_name, reason="probe_error", error=exc)
+
+
+def _function_def(tree: ast.Module, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    return None
+
+
+def _assigned_value(tree: ast.Module, name: str) -> ast.AST | None:
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            if any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+                return node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name:
+            return node.value
+    return None
+
+
+def _string_constants(node: ast.AST | None) -> list[str]:
+    if node is None:
+        return []
+    return [child.value for child in ast.walk(node) if isinstance(child, ast.Constant) and isinstance(child.value, str)]
+
+
+def _calls_name(node: ast.AST | None, name: str) -> bool:
+    if node is None:
+        return False
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id == name:
+            return True
+    return False
+
+
+def _is_attr(node: ast.AST, base: str, attr: str) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == attr and isinstance(node.value, ast.Name) and node.value.id == base
+
+
+def _pr_preflight_ci_parity(context: ProbeContext) -> ProbeResult:
+    name = "pr_preflight_ci_parity"
+    path = context.root() / "validators" / "creator_engine_validator" / "pr_preflight.py"
+    tree, error = _python_module_tree(context, path, name)
+    if error is not None or tree is None:
+        return error or _unknown(name, reason="probe_error")
+    default_command = _assigned_value(tree, "DEFAULT_TEST_COMMAND")
+    default_markers = _string_constants(default_command)
+    run_preflight = _function_def(tree, "run_preflight")
+    invokes_baseline_diff = _calls_name(run_preflight, "_run_baseline_diff_tests")
+    targets_validator_tree = any("validators/tests/" in marker for marker in default_markers)
+    excludes_wheel_bake_gate = any("not wheel_bake_gate" in marker for marker in default_markers)
+    present = targets_validator_tree and excludes_wheel_bake_gate and invokes_baseline_diff
+    return _result(
+        name,
+        "present" if present else "absent",
+        {
+            "preflight": str(path),
+            "default_command_targets_validator_tree": targets_validator_tree,
+            "default_command_excludes_wheel_bake_gate": excludes_wheel_bake_gate,
+            "run_preflight_invokes_baseline_diff_tests": invokes_baseline_diff,
+        },
+    )
+
+
+def _pr_preflight_clean_tree_guard(context: ProbeContext) -> ProbeResult:
+    name = "pr_preflight_clean_tree_guard"
+    path = context.root() / "validators" / "creator_engine_validator" / "pr_preflight.py"
+    tree, error = _python_module_tree(context, path, name)
+    if error is not None or tree is None:
+        return error or _unknown(name, reason="probe_error")
+    fn = _function_def(tree, "_assert_clean_tree")
+    checks_git_status = False
+    allows_explicit_dirty_override = False
+    raises_on_dirty_tree = False
+    if fn is not None:
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_git_capture":
+                args = node.args
+                if args and any(value == "status" for value in _string_constants(args[0])):
+                    checks_git_status = True
+            if isinstance(node, ast.If) and _is_attr(node.test, "config", "allow_dirty"):
+                allows_explicit_dirty_override = True
+            if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+                func = node.exc.func
+                if isinstance(func, ast.Name) and func.id == "RuntimeError":
+                    raises_on_dirty_tree = True
+    present = checks_git_status and allows_explicit_dirty_override and raises_on_dirty_tree
+    return _result(
+        name,
+        "present" if present else "absent",
+        {
+            "preflight": str(path),
+            "function": "_assert_clean_tree",
+            "checks_git_status": checks_git_status,
+            "allows_explicit_dirty_override": allows_explicit_dirty_override,
+            "raises_on_dirty_tree": raises_on_dirty_tree,
+        },
+    )
+
+
+def _pr_preflight_scrubs_credential_env(context: ProbeContext) -> ProbeResult:
+    name = "pr_preflight_scrubs_credential_env"
+    path = context.root() / "validators" / "creator_engine_validator" / "pr_preflight.py"
+    tree, error = _python_module_tree(context, path, name)
+    if error is not None or tree is None:
+        return error or _unknown(name, reason="probe_error")
+    token_vars = set(_string_constants(_assigned_value(tree, "TOKEN_ENV_VARS")))
+    fn = _function_def(tree, "_python_env")
+    scrub_loop_present = False
+    if fn is not None:
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.If) or not isinstance(node.test, ast.Name) or node.test.id != "pytest":
+                continue
+            for child in ast.walk(node):
+                if not isinstance(child, ast.For):
+                    continue
+                if not isinstance(child.target, ast.Name) or child.target.id != "key":
+                    continue
+                if not isinstance(child.iter, ast.Name) or child.iter.id != "TOKEN_ENV_VARS":
+                    continue
+                scrub_loop_present = any(
+                    isinstance(call, ast.Call)
+                    and _is_attr(call.func, "env", "pop")
+                    and call.args
+                    and isinstance(call.args[0], ast.Name)
+                    and call.args[0].id == "key"
+                    for call in ast.walk(child)
+                )
+    required_tokens = {"GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT"}
+    present = required_tokens.issubset(token_vars) and scrub_loop_present
+    return _result(
+        name,
+        "present" if present else "absent",
+        {
+            "preflight": str(path),
+            "function": "_python_env",
+            "required_token_env_vars_present": sorted(required_tokens.intersection(token_vars)),
+            "scrubs_tokens_for_pytest": scrub_loop_present,
+        },
+    )
+
+
 def _codex_fan_out_surfaces(context: ProbeContext) -> ProbeResult:
     root = context.root()
     required = [
@@ -382,6 +530,9 @@ PROBES: dict[str, ProbeFn] = {
     "gh_authenticated": _gh_authenticated,
     "harness_fan_out": _harness_fan_out,
     "merge_group_trigger": _merge_group_trigger,
+    "pr_preflight_ci_parity": _pr_preflight_ci_parity,
+    "pr_preflight_clean_tree_guard": _pr_preflight_clean_tree_guard,
+    "pr_preflight_scrubs_credential_env": _pr_preflight_scrubs_credential_env,
     SELF_IDENTITY_PROBE: _self_identity,
     "wheelhouse_matches_source": _wheelhouse_matches_source,
     "worker_spawn_runtime_support": _worker_spawn_runtime_support,
