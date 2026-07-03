@@ -318,6 +318,115 @@ jobs:
 
           echo "decision-file=${decision_file}" >> "${GITHUB_OUTPUT}"
 
+      - name: Assemble press-merge evidence bundle
+        id: press_merge_evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ steps.inputs.outputs.pr-number }}
+          HEAD_SHA: ${{ steps.inputs.outputs.head-sha }}
+          PATHS_FILE: ${{ steps.inputs.outputs.paths-file }}
+          CHECKS_JSON_FILE: ${{ steps.live.outputs.checks-json-file || '' }}
+          DECISION_FILE: ${{ steps.decide.outputs.decision-file }}
+        run: |
+          set -euo pipefail
+
+          work_dir="${RUNNER_TEMP}/ce-press-merge-evidence"
+          mkdir -p "${work_dir}"
+          pr_json="${work_dir}/pr.json"
+          checks_json="${CHECKS_JSON_FILE}"
+          if [[ -z "${checks_json}" ]]; then
+            checks_json="${work_dir}/checks.json"
+            printf '{"checks":[]}\n' > "${checks_json}"
+          fi
+
+          current_head_sha="${HEAD_SHA}"
+          if [[ "${EVENT_NAME}" == "pull_request" && -n "${PR_NUMBER}" ]]; then
+            if gh pr view "${PR_NUMBER}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json number,url,title,baseRefName,headRefName,headRefOid,isDraft,reviewDecision,latestReviews \
+              > "${pr_json}"; then
+              current_head_sha="$(python - "${pr_json}" "${HEAD_SHA}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          fallback = sys.argv[2]
+          try:
+              payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          except (OSError, json.JSONDecodeError):
+              payload = {}
+          print(payload.get("headRefOid") or fallback)
+          PY
+          )"
+            else
+              printf '{}\n' > "${pr_json}"
+            fi
+          else
+            printf '{}\n' > "${pr_json}"
+          fi
+
+          safe_head="$(printf '%s' "${HEAD_SHA}" | tr -c 'A-Za-z0-9._-' '-')"
+          subject="${PR_NUMBER:-merge-group}"
+          artifact_name="ce-press-merge-evidence-bundle-${subject}-${safe_head}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          bundle_file="${work_dir}/${artifact_name}.json"
+
+          python -m creator_engine_validator.ce_cli press-merge-evidence \
+            --decision-file "${DECISION_FILE}" \
+            --paths-file "${PATHS_FILE}" \
+            --checks-json-file "${checks_json}" \
+            --pr-json-file "${pr_json}" \
+            --current-head-sha "${current_head_sha}" \
+            --repo-root . \
+            --assembler-workflow "${GITHUB_WORKFLOW}" \
+            --assembler-run-id "${GITHUB_RUN_ID}" \
+            --assembler-run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --read-repo-sha "${GITHUB_SHA}" \
+            --decision-artifact-name "ce-automerge-decision-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            > "${bundle_file}"
+
+          bundle_sha="$(sha256sum "${bundle_file}" | awk '{print $1}')"
+          {
+            echo "bundle-file=${bundle_file}"
+            echo "artifact-name=${artifact_name}"
+            echo "bundle-sha256=${bundle_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+          python - "${bundle_file}" "${bundle_sha}" "${GITHUB_STEP_SUMMARY}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          bundle_path = Path(sys.argv[1])
+          bundle_sha = sys.argv[2]
+          summary_path = Path(sys.argv[3])
+          payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+          summary = payload.get("summary", {})
+
+          lines = [
+              "",
+              "# CE press-merge evidence bundle",
+              "",
+              f"- Bundle JSON: `{bundle_path.as_posix()}`",
+              f"- SHA256: `{bundle_sha}`",
+              "",
+              "## Bundle summary",
+              "```json",
+              json.dumps(summary, indent=2, sort_keys=True),
+              "```",
+          ]
+          with summary_path.open("a", encoding="utf-8") as handle:
+              handle.write("\n".join(lines))
+              handle.write("\n")
+          PY
+
+      - name: Upload press-merge evidence bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.press_merge_evidence.outputs.artifact-name }}
+          path: ${{ steps.press_merge_evidence.outputs.bundle-file }}
+          if-no-files-found: error
+
       - name: Write decision summary
         env:
           DECISION_FILE: ${{ steps.decide.outputs.decision-file }}
