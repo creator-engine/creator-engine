@@ -47,6 +47,7 @@ jobs:
           CE_AUTOMERGE_ENABLING_REF: ${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}
           CE_AUTOMERGE_KILL_SWITCH: ${{ vars.CE_AUTOMERGE_KILL_SWITCH || '' }}
           CE_AUTOMERGE_TIER_CARRIER_CHANGELOG: ${{ vars.CE_AUTOMERGE_TIER_CARRIER_CHANGELOG || '' }}
+          CE_AUTOMERGE_TIER_BRAIN_SUPERSEDE: ${{ vars.CE_AUTOMERGE_TIER_BRAIN_SUPERSEDE || '' }}
         run: |
           set -euo pipefail
 
@@ -64,6 +65,7 @@ jobs:
               enabling_ref_variable=os.environ.get("CE_AUTOMERGE_ENABLING_REF"),
               kill_switch_variable=os.environ.get("CE_AUTOMERGE_KILL_SWITCH"),
               tier_carrier_changelog_variable=os.environ.get("CE_AUTOMERGE_TIER_CARRIER_CHANGELOG"),
+              tier_brain_supersede_variable=os.environ.get("CE_AUTOMERGE_TIER_BRAIN_SUPERSEDE"),
           )
           PY
 

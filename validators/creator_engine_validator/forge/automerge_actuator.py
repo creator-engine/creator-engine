@@ -13,7 +13,9 @@ from ..work_sizing import normalize_work_class
 from .automerge_policy import (
     AUTOMERGE_ARMING_RUN_MODES,
     AUTOMERGE_CANARY_WORK_CLASSES,
+    AUTOMERGE_TIER_BRAIN_SUPERSEDE,
     AUTOMERGE_TIER_CARRIER_CHANGELOG,
+    brain_supersede_tier_evidence,
     carrier_changelog_tier_matches,
     AutoMergePolicyStateError,
     automerge_policy_state_path,
@@ -111,7 +113,7 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
         return _dormant("live_run_mode_not_armed", payload, live_run_mode=live_policy.run_mode)
     if live_policy.kill_switch:
         return _refuse("live_kill_switch_active", payload, live_run_mode=live_policy.run_mode)
-    if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG and not live_policy.tier_flag(tier):
+    if tier in {AUTOMERGE_TIER_CARRIER_CHANGELOG, AUTOMERGE_TIER_BRAIN_SUPERSEDE} and not live_policy.tier_flag(tier):
         return _refuse(
             "live_tier_flag_not_true",
             payload,
@@ -331,7 +333,7 @@ def _tier_reverification(payload: Mapping[str, Any]) -> str | None | ActuationRe
     raw_tier = payload.get("tier")
     if raw_tier in (None, ""):
         return None
-    if raw_tier != AUTOMERGE_TIER_CARRIER_CHANGELOG:
+    if raw_tier not in {AUTOMERGE_TIER_CARRIER_CHANGELOG, AUTOMERGE_TIER_BRAIN_SUPERSEDE}:
         return _refuse("tier_unknown", payload)
     if payload.get("tier_flag") is not True:
         return _refuse("tier_flag_not_true", payload)
@@ -343,9 +345,32 @@ def _tier_reverification(payload: Mapping[str, Any]) -> str | None | ActuationRe
     paths = tuple(str(path).strip() for path in raw_paths if str(path).strip())
     if len(paths) != len(raw_paths):
         return _refuse("tier_changed_paths_invalid", payload)
-    if not carrier_changelog_tier_matches(paths):
+    if raw_tier == AUTOMERGE_TIER_CARRIER_CHANGELOG and not carrier_changelog_tier_matches(paths):
         return _refuse("tier_carrier_changelog_path_predicate_failed", payload)
-    return AUTOMERGE_TIER_CARRIER_CHANGELOG
+    if raw_tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
+        raw_inputs = payload.get("ledger_inputs")
+        if not isinstance(raw_inputs, Mapping):
+            return _refuse("tier_brain_supersede_ledger_inputs_missing", payload)
+        old_records = raw_inputs.get("old_records")
+        new_records = raw_inputs.get("new_records")
+        if (
+            isinstance(old_records, (str, bytes))
+            or not isinstance(old_records, Sequence)
+            or isinstance(new_records, (str, bytes))
+            or not isinstance(new_records, Sequence)
+        ):
+            return _refuse("tier_brain_supersede_ledger_inputs_invalid", payload)
+        evidence, reason = brain_supersede_tier_evidence(
+            paths,
+            declared_work_class=str(payload.get("class") or ""),
+            old_records=old_records,
+            new_records=new_records,
+        )
+        if reason is not None or evidence is None:
+            return _refuse(reason or "tier_brain_supersede_predicate_failed", payload)
+        if evidence != payload.get("ledger_evidence"):
+            return _refuse("tier_brain_supersede_evidence_mismatch", payload)
+    return str(raw_tier)
 
 
 def _status_is_green(status: Any) -> bool:
@@ -483,6 +508,19 @@ def _audit_record(
             ),
         }
     )
+    raw_ledger_evidence = payload.get("ledger_evidence")
+    if isinstance(raw_ledger_evidence, Mapping):
+        ledger_evidence = {
+            "old_record_count": raw_ledger_evidence.get("old_record_count"),
+            "new_record_count": raw_ledger_evidence.get("new_record_count"),
+            "old_active_count": raw_ledger_evidence.get("old_active_count"),
+            "new_active_count": raw_ledger_evidence.get("new_active_count"),
+            "old_head_content_hash": raw_ledger_evidence.get("old_head_content_hash"),
+            "new_head_content_hash": raw_ledger_evidence.get("new_head_content_hash"),
+            "superseded_assertion_ids": raw_ledger_evidence.get("superseded_assertion_ids"),
+        }
+        record.update(ledger_evidence)
+        record["ledger_evidence"] = ledger_evidence
     return record
 
 

@@ -4,16 +4,20 @@ import json
 import os
 import socket
 import subprocess
+import copy
 from pathlib import Path
 
 import pytest
 import yaml
 
 from creator_engine_validator.checks.work_sizing_floor import ChangeStat
+from creator_engine_validator import brain_runtime
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.automerge_policy import (
     AUTOMERGE_DECISION_AUTO,
     AUTOMERGE_DECISION_GESTURE,
+    AUTOMERGE_TIER_BRAIN_SUPERSEDE,
+    AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE,
     AUTOMERGE_TIER_CARRIER_CHANGELOG,
     AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
     AutoMergeClassPolicy,
@@ -21,6 +25,8 @@ from creator_engine_validator.forge.automerge_policy import (
     AutoMergePolicyStateError,
     AutoMergeTierPolicy,
     automerge_policy_state_path,
+    brain_supersede_tier_evidence,
+    brain_supersede_path_envelope_matches,
     carrier_changelog_tier_matches,
     decide_automerge,
     emit_automerge_dry_run_decision,
@@ -78,7 +84,10 @@ def state_with_flags(
         tiers={
             AUTOMERGE_TIER_CARRIER_CHANGELOG: AutoMergeTierPolicy(
                 auto_merge=AUTOMERGE_TIER_CARRIER_CHANGELOG in enabled_tiers
-            )
+            ),
+            AUTOMERGE_TIER_BRAIN_SUPERSEDE: AutoMergeTierPolicy(
+                auto_merge=AUTOMERGE_TIER_BRAIN_SUPERSEDE in enabled_tiers
+            ),
         },
         enabling_decision_ref="ce-ops#291-test-enable",
     )
@@ -93,6 +102,63 @@ def numstat_for(paths: list[str], additions: int = 1, deletions: int = 0) -> lis
         ChangeStat(path=path, additions=additions, deletions=deletions, binary=False)
         for path in paths
     ]
+
+
+BRAIN_SUPERSEDE_PATHS = [
+    ".ce/brain/assertions.yaml",
+    ".ce/changelog/ce-413-automerge-tier-b.md",
+    ".ce/pr-manifests/ce-413-automerge-tier-b.md",
+]
+
+
+def brain_supersede_fixture() -> tuple[str, str, list[dict], list[dict]]:
+    initial = brain_runtime.assert_claim(
+        claim={
+            "subject": "doctrine-item",
+            "predicate": "asserts",
+            "object": "merge-queue-conflict-gate",
+            "item": 10,
+            "verdict": "present",
+        },
+        scope="doctrine/day1",
+        evidence_ref="probe:integrator_belt_merge_queue_conflict_gate",
+        assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v5",
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    old_text = initial.ledger_text
+    old_records = brain_runtime.load_ledger_text(old_text)
+    corrected = brain_runtime.correct_claim(
+        assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v5",
+        claim={
+            "subject": "doctrine-item",
+            "predicate": "asserts",
+            "object": "merge-queue-conflict-gate",
+            "item": 10,
+            "verdict": "present",
+            "details": "Merge-queue automation owns sequencing and escalates conflict repair.",
+        },
+        scope="doctrine/day1",
+        evidence_ref="probe:integrator_belt_merge_queue_conflict_gate",
+        new_assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v6",
+        records=old_records,
+        write=lambda _path, _text: None,
+    )
+    new_text = corrected.ledger_text
+    new_records = brain_runtime.load_ledger_text(new_text)
+    return old_text, new_text, old_records, new_records
+
+
+def rehash_records(records: list[dict], *, start: int = 0) -> list[dict]:
+    updated = copy.deepcopy(records)
+    for idx in range(start, len(updated)):
+        updated[idx]["prev_hash"] = (
+            brain_runtime.GENESIS_PREV_HASH
+            if idx == 0
+            else updated[idx - 1]["content_hash"]
+        )
+        updated[idx]["content_hash"] = brain_runtime.canonical_content_hash(updated[idx])
+    return updated
 
 
 def test_default_state_is_secret_free_armed_off() -> None:
@@ -130,6 +196,7 @@ def test_variable_materialization_defaults_to_dormant_dev(tmp_path: Path) -> Non
     assert loaded.enabling_decision_ref is None
     assert all(not policy.auto_merge for policy in loaded.classes.values())
     assert loaded.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
+    assert loaded.tier_flag(AUTOMERGE_TIER_BRAIN_SUPERSEDE) is False
 
 
 @pytest.mark.parametrize("run_mode", ["", "CEO", "ceo ", "dev", "prod", "true"])
@@ -185,6 +252,24 @@ def test_variable_materialization_arms_carrier_changelog_tier_only_when_enabled(
 
     assert state.class_flag("docs") is True
     assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is True
+    assert state.tier_flag(AUTOMERGE_TIER_BRAIN_SUPERSEDE) is False
+
+
+def test_variable_materialization_arms_brain_supersede_tier_only_when_enabled(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "policy.json"
+
+    state = materialize_automerge_policy_state_from_variables(
+        path,
+        run_mode_variable="ceo",
+        enabling_ref_variable="ce-ops#413-enable",
+        tier_brain_supersede_variable="true",
+    )
+
+    assert state.class_flag("docs") is True
+    assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
+    assert state.tier_flag(AUTOMERGE_TIER_BRAIN_SUPERSEDE) is True
 
 
 def test_variable_materialization_tier_flag_is_subordinate_to_run_mode(tmp_path: Path) -> None:
@@ -195,10 +280,12 @@ def test_variable_materialization_tier_flag_is_subordinate_to_run_mode(tmp_path:
         run_mode_variable="dev",
         enabling_ref_variable="ce-ops#412-enable",
         tier_carrier_changelog_variable="true",
+        tier_brain_supersede_variable="true",
     )
 
     assert state.class_flag("docs") is False
     assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
+    assert state.tier_flag(AUTOMERGE_TIER_BRAIN_SUPERSEDE) is False
 
 
 def test_variable_materialization_strangeloop_arms_docs_only(tmp_path: Path) -> None:
@@ -269,6 +356,162 @@ def test_carrier_changelog_tier_predicate_rejects_mixed_path_set() -> None:
             "docs/usage.md",
         ]
     )
+
+
+def test_brain_supersede_tier_predicate_accepts_real_supersede_fixture() -> None:
+    old_text, new_text, _old_records, _new_records = brain_supersede_fixture()
+
+    decision = decide_automerge(
+        numstat=numstat_for(BRAIN_SUPERSEDE_PATHS, additions=2, deletions=0),
+        paths=BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="XS",
+        policy_state=state_with_flags(
+            "docs",
+            enabled_tiers=(AUTOMERGE_TIER_BRAIN_SUPERSEDE,),
+        ),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-413-automerge-tier-b",
+        base="main",
+        brain_ledger_base_text=old_text,
+        brain_ledger_head_text=new_text,
+        **canary_identity(),
+    )
+
+    payload = decision.to_payload()
+    assert decision.decision == AUTOMERGE_DECISION_AUTO
+    assert payload["tier"] == AUTOMERGE_TIER_BRAIN_SUPERSEDE
+    assert payload["tier_flag"] is True
+    assert payload["path_envelope"] == AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE
+    assert payload["ledger_evidence"]["old_record_count"] == 1
+    assert payload["ledger_evidence"]["new_record_count"] == 3
+    assert payload["ledger_evidence"]["old_active_count"] == 1
+    assert payload["ledger_evidence"]["new_active_count"] == 1
+    assert payload["ledger_evidence"]["superseded_assertion_ids"] == [
+        "brain-assertion-d1b-10-merge-queue-conflict-gate-v5"
+    ]
+    assert payload["ledger_evidence"]["old_head_content_hash"]
+    assert payload["ledger_evidence"]["new_head_content_hash"]
+    assert payload["reviewer_venue"] == "reviewer-dev"
+
+
+def test_brain_supersede_tier_flag_off_blocks_default() -> None:
+    old_text, new_text, _old_records, _new_records = brain_supersede_fixture()
+
+    decision = decide_automerge(
+        numstat=numstat_for(BRAIN_SUPERSEDE_PATHS, additions=2, deletions=0),
+        paths=BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="XS",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        brain_ledger_base_text=old_text,
+        brain_ledger_head_text=new_text,
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert decision.tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE
+    assert "tier_brain_supersede_false" in decision.rationale
+
+
+def test_brain_supersede_tier_rejects_existing_record_mutation() -> None:
+    _old_text, _new_text, old_records, new_records = brain_supersede_fixture()
+    mutated = copy.deepcopy(new_records)
+    mutated[0]["statement"] = "mutated prior record"
+    mutated = rehash_records(mutated, start=0)
+
+    evidence, reason = brain_supersede_tier_evidence(
+        BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="XS",
+        old_records=old_records,
+        new_records=mutated,
+    )
+
+    assert evidence is None
+    assert reason == "tier_brain_supersede_existing_record_mutation"
+
+
+def test_brain_supersede_tier_rejects_two_chains_in_one_pr() -> None:
+    _old_text, new_text, old_records, new_records = brain_supersede_fixture()
+    second = brain_runtime.correct_claim(
+        assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v6",
+        claim={
+            "subject": "doctrine-item",
+            "predicate": "asserts",
+            "object": "merge-queue-conflict-gate",
+            "item": 10,
+            "verdict": "present",
+            "details": "second supersede",
+        },
+        scope="doctrine/day1",
+        evidence_ref="probe:integrator_belt_merge_queue_conflict_gate",
+        new_assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v7",
+        records=brain_runtime.load_ledger_text(new_text),
+        write=lambda _path, _text: None,
+    )
+
+    evidence, reason = brain_supersede_tier_evidence(
+        BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="XS",
+        old_records=old_records,
+        new_records=brain_runtime.load_ledger_text(second.ledger_text),
+    )
+
+    assert evidence is None
+    assert reason == "tier_brain_supersede_not_single_chain"
+
+
+def test_brain_supersede_tier_rejects_extra_path() -> None:
+    assert not brain_supersede_path_envelope_matches([*BRAIN_SUPERSEDE_PATHS, "README.md"])
+
+
+def test_brain_supersede_tier_rejects_active_count_mismatch() -> None:
+    _old_text, _new_text, old_records, new_records = brain_supersede_fixture()
+    mutated = copy.deepcopy(new_records)
+    mutated[-1]["status"] = "superseded"
+    mutated[-1]["superseded_by"] = "brain-assertion-d1b-10-merge-queue-conflict-gate-v8"
+    mutated[-1]["content_hash"] = brain_runtime.canonical_content_hash(mutated[-1])
+
+    evidence, reason = brain_supersede_tier_evidence(
+        BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="XS",
+        old_records=old_records,
+        new_records=mutated,
+    )
+
+    assert evidence is None
+    assert reason == "tier_brain_supersede_new_ledger_invalid"
+
+
+def test_brain_supersede_tier_rejects_forbidden_fields() -> None:
+    _old_text, _new_text, old_records, new_records = brain_supersede_fixture()
+    mutated = copy.deepcopy(new_records)
+    mutated[-1]["claim"]["token"] = "forbidden"
+    mutated = rehash_records(mutated, start=len(old_records))
+
+    evidence, reason = brain_supersede_tier_evidence(
+        BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="XS",
+        old_records=old_records,
+        new_records=mutated,
+    )
+
+    assert evidence is None
+    assert reason == "tier_brain_supersede_new_ledger_invalid"
+
+
+def test_brain_supersede_tier_rejects_wrong_work_class() -> None:
+    _old_text, _new_text, old_records, new_records = brain_supersede_fixture()
+
+    evidence, reason = brain_supersede_tier_evidence(
+        BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="S",
+        old_records=old_records,
+        new_records=new_records,
+    )
+
+    assert evidence is None
+    assert reason == "tier_brain_supersede_work_class_not_xs"
 
 
 def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
@@ -999,12 +1242,14 @@ def _assert_materialize_step_before(steps: list[dict], *, later_step: str) -> No
         "CE_AUTOMERGE_ENABLING_REF": "${{ vars.CE_AUTOMERGE_ENABLING_REF || '' }}",
         "CE_AUTOMERGE_KILL_SWITCH": "${{ vars.CE_AUTOMERGE_KILL_SWITCH || '' }}",
         "CE_AUTOMERGE_TIER_CARRIER_CHANGELOG": "${{ vars.CE_AUTOMERGE_TIER_CARRIER_CHANGELOG || '' }}",
+        "CE_AUTOMERGE_TIER_BRAIN_SUPERSEDE": "${{ vars.CE_AUTOMERGE_TIER_BRAIN_SUPERSEDE || '' }}",
     }
     run = step["run"]
     assert "materialize_automerge_policy_state_from_variables" in run
     assert 'Path(".ce/state/automerge/policy.json")' in run
     assert "kill_switch_variable" in run
     assert "tier_carrier_changelog_variable" in run
+    assert "tier_brain_supersede_variable" in run
 
 
 def test_pull_request_paths_use_pr_file_list_not_stale_base_diff(tmp_path: Path) -> None:

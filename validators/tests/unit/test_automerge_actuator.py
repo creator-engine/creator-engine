@@ -6,10 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import brain_runtime
 from creator_engine_validator import ce_cli
 from creator_engine_validator.forge.automerge_policy import (
+    AUTOMERGE_TIER_BRAIN_SUPERSEDE,
+    AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE,
     AUTOMERGE_TIER_CARRIER_CHANGELOG,
     AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
+    brain_supersede_tier_evidence,
 )
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
@@ -17,6 +21,11 @@ from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
 _REPO = "creator-engine/creator-engine"
 _HEAD = "d" * 40
 _POLICY_SHA = "a" * 64
+BRAIN_SUPERSEDE_PATHS = [
+    ".ce/brain/assertions.yaml",
+    ".ce/changelog/ce-413-automerge-tier-b.md",
+    ".ce/pr-manifests/ce-413-automerge-tier-b.md",
+]
 
 
 class FakeActuatorGh:
@@ -116,6 +125,60 @@ def _decision(**overrides):
     return payload
 
 
+def _brain_supersede_payload() -> dict:
+    initial = brain_runtime.assert_claim(
+        claim={
+            "subject": "doctrine-item",
+            "predicate": "asserts",
+            "object": "merge-queue-conflict-gate",
+            "item": 10,
+            "verdict": "present",
+        },
+        scope="doctrine/day1",
+        evidence_ref="probe:integrator_belt_merge_queue_conflict_gate",
+        assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v5",
+        records=[],
+        write=lambda _path, _text: None,
+    )
+    old_records = brain_runtime.load_ledger_text(initial.ledger_text)
+    corrected = brain_runtime.correct_claim(
+        assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v5",
+        claim={
+            "subject": "doctrine-item",
+            "predicate": "asserts",
+            "object": "merge-queue-conflict-gate",
+            "item": 10,
+            "verdict": "present",
+            "details": "Merge-queue automation owns sequencing and escalates conflict repair.",
+        },
+        scope="doctrine/day1",
+        evidence_ref="probe:integrator_belt_merge_queue_conflict_gate",
+        new_assertion_id="brain-assertion-d1b-10-merge-queue-conflict-gate-v6",
+        records=old_records,
+        write=lambda _path, _text: None,
+    )
+    new_records = brain_runtime.load_ledger_text(corrected.ledger_text)
+    evidence, reason = brain_supersede_tier_evidence(
+        BRAIN_SUPERSEDE_PATHS,
+        declared_work_class="XS",
+        old_records=old_records,
+        new_records=new_records,
+    )
+    assert reason is None
+    assert evidence is not None
+    payload = _decision(
+        mutation_class="redaction",
+        tier=AUTOMERGE_TIER_BRAIN_SUPERSEDE,
+        tier_flag=True,
+        path_envelope=AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE,
+        changed_paths=BRAIN_SUPERSEDE_PATHS,
+        ledger_evidence=evidence,
+        ledger_inputs={"old_records": old_records, "new_records": new_records},
+    )
+    payload["change"]["changed_paths"] = BRAIN_SUPERSEDE_PATHS
+    return payload
+
+
 def _write(tmp_path: Path, payload) -> Path:
     path = tmp_path / "decision.json"
     path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -129,6 +192,7 @@ def _write_live_policy(
     run_mode: str = "ceo",
     kill_switch: bool = False,
     carrier_changelog_tier: bool = False,
+    brain_supersede_tier: bool = False,
 ) -> Path:
     monkeypatch.chdir(tmp_path)
     path = tmp_path / ".ce" / "state" / "automerge" / "policy.json"
@@ -140,6 +204,9 @@ def _write_live_policy(
         "tiers": {
             AUTOMERGE_TIER_CARRIER_CHANGELOG: {
                 "auto_merge": carrier_changelog_tier,
+            },
+            AUTOMERGE_TIER_BRAIN_SUPERSEDE: {
+                "auto_merge": brain_supersede_tier,
             }
         },
         "enabling_decision_ref": "ce-ops#313-enable",
@@ -389,6 +456,73 @@ def test_refuses_carrier_changelog_tier_when_path_predicate_fails(
 
     assert result.refused is True
     assert result.reason == "tier_carrier_changelog_path_predicate_failed"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_actuates_brain_supersede_tier_with_audit_ledger_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, brain_supersede_tier=True)
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(_write(tmp_path, _brain_supersede_payload()), gh_runner=gh)
+
+    assert result.actuated is True
+    assert result.audit_record["tier"] == AUTOMERGE_TIER_BRAIN_SUPERSEDE
+    assert result.audit_record["tier_flag"] is True
+    assert result.audit_record["path_envelope"] == AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE
+    assert result.audit_record["old_record_count"] == 1
+    assert result.audit_record["new_record_count"] == 3
+    assert result.audit_record["old_active_count"] == 1
+    assert result.audit_record["new_active_count"] == 1
+    assert result.audit_record["old_head_content_hash"]
+    assert result.audit_record["new_head_content_hash"]
+    assert result.audit_record["superseded_assertion_ids"] == [
+        "brain-assertion-d1b-10-merge-queue-conflict-gate-v5"
+    ]
+    assert result.audit_record["reviewer_venue"] == "reviewer-dev"
+    assert len(gh.mutation_calls()) == 1
+
+
+def test_refuses_brain_supersede_tier_when_live_tier_flag_is_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, brain_supersede_tier=False)
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(_write(tmp_path, _brain_supersede_payload()), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "live_tier_flag_not_true"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_brain_supersede_tier_without_ledger_inputs(tmp_path: Path) -> None:
+    payload = _brain_supersede_payload()
+    del payload["ledger_inputs"]
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "tier_brain_supersede_ledger_inputs_missing"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_brain_supersede_tier_when_audit_evidence_drifts(tmp_path: Path) -> None:
+    payload = _brain_supersede_payload()
+    payload["ledger_evidence"]["new_record_count"] = 4
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "tier_brain_supersede_evidence_mismatch"
     assert result.acted is False
     assert gh.mutation_calls() == []
 
