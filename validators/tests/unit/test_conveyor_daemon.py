@@ -37,9 +37,11 @@ class FakeGit:
     def __init__(self, push_returncode: int = 0):
         self.push_returncode = push_returncode
         self.calls: list[tuple[tuple[str, ...], Path]] = []
+        self.envs: list[Mapping[str, str]] = []
 
-    def __call__(self, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
+    def __call__(self, args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
         self.calls.append((tuple(args), cwd))
+        self.envs.append(dict(env))
         if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
             if self.push_returncode:
                 return ConveyorCommandResult(self.push_returncode, "", "push denied\n")
@@ -253,6 +255,13 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert prepare.calls[0].worktree_path == item.worktree_path
     assert land.calls == [(item.bundle_path, "feature-one", "origin/main", item.repo_path)]
     assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), item.repo_path)]
+    assert git.envs == [
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "PATH": "/usr/bin:/bin",
+        }
+    ]
     assert gh.calls == [
         (
             (
@@ -572,7 +581,7 @@ def test_daemon_pinned_base_and_remote_used_for_item_objects():
     land = FakeLand()
     git_calls: list[tuple[str, ...]] = []
 
-    def git_runner(args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
+    def git_runner(args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
         git_calls.append(tuple(args))
         return ConveyorCommandResult(0, "pushed\n", "")
 

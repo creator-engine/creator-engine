@@ -6,13 +6,13 @@ push, open PRs, approve, invoke docker, or run any daemon/autonomy loop.
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from enum import Enum
 from pathlib import Path
 
 from .carrier_gen import CarrierSpec, WrittenCarriers, write_carriers
@@ -41,8 +41,27 @@ class ConveyorCommandResult:
     stderr: str = ""
 
 
-GitRunner = Callable[[Sequence[str], Path], ConveyorCommandResult | tuple[int, str, str]]
+class ConveyorGitPhase(str, Enum):
+    """Minimal conveyor-local git authority phases.
+
+    TODO(ce-410): replace this local seam with authority_contexts.py
+    TransportCredentialContext/LocalGitContext once that module lands.
+    """
+
+    LOCAL = "local-git"
+    TRANSPORT = "transport-authority"
+
+
+GitRunner = Callable[[Sequence[str], Path, Mapping[str, str]], ConveyorCommandResult | tuple[int, str, str]]
 ValidateRunner = Callable[[Sequence[str], Path, Mapping[str, str] | None], ConveyorCommandResult | tuple[int, str, str]]
+
+
+_MINIMAL_GIT_PATH = "/usr/bin:/bin"
+_BASE_GIT_ENV = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "PATH": _MINIMAL_GIT_PATH,
+}
 
 
 @dataclass(frozen=True)
@@ -144,10 +163,12 @@ def prepare_harvest(
 
     runner = git_runner or _default_git_runner
     validator = validate_runner or _default_validate_runner
+    local_git_env = git_env_for_phase(ConveyorGitPhase.LOCAL)
+    transport_git_env = git_env_for_phase(ConveyorGitPhase.TRANSPORT)
 
     removed.extend(_remove_validator_artifacts(root))
 
-    current = _git(runner, ["branch", "--show-current"], root)
+    current = _git(runner, ["branch", "--show-current"], root, env=local_git_env)
     if current.returncode != 0:
         reasons.append(_command_reason("git branch --show-current", current))
     else:
@@ -157,7 +178,7 @@ def prepare_harvest(
         elif current_branch == slug:
             pass
         elif current_branch == spec.branch:
-            renamed = _git(runner, ["branch", "-m", slug], root)
+            renamed = _git(runner, ["branch", "-m", slug], root, env=local_git_env)
             if renamed.returncode != 0:
                 reasons.append(_command_reason(f"git branch -m {slug}", renamed))
         else:
@@ -166,23 +187,27 @@ def prepare_harvest(
             )
 
     if not reasons and spec.refresh_base:
-        fetched = _fetch_base(runner, root, spec.base)
+        fetched = _fetch_base(runner, root, spec.base, env=transport_git_env)
         if fetched is not None and fetched.returncode != 0:
             reasons.append(_command_reason(f"git {' '.join(_fetch_args(spec.base))}", fetched))
 
     if not reasons:
         if spec.rebase:
-            rebased = _git(runner, ["rebase", spec.base], root)
+            rebased = _git(runner, ["rebase", spec.base], root, env=local_git_env)
             if rebased.returncode != 0:
                 reasons.append(_command_reason(f"git rebase {spec.base}", rebased))
         else:
-            verified = _git(runner, ["merge-base", "--is-ancestor", spec.base, "HEAD"], root)
+            verified = _git(runner, ["merge-base", "--is-ancestor", spec.base, "HEAD"], root, env=local_git_env)
             if verified.returncode != 0:
                 reasons.append(f"base {spec.base!r} is not an ancestor of HEAD")
 
     if not reasons:
         try:
-            written = write_carriers(root, _carrier_spec(spec), git_runner=_carrier_git_runner(runner))
+            written = write_carriers(
+                root,
+                _carrier_spec(spec),
+                git_runner=_carrier_git_runner(runner, env=local_git_env),
+            )
             _write_declared_work_class(written.manifest_path, spec.declared_work_class)
         except Exception as exc:  # write_carriers converts git failures to RuntimeError.
             reasons.append(f"carrier regeneration failed: {exc}")
@@ -224,6 +249,8 @@ def land_bundle(
     bundle = Path(bundle_path)
     slug = branch_slug(branch_name)
     runner = git_runner or _default_git_runner
+    local_git_env = git_env_for_phase(ConveyorGitPhase.LOCAL)
+    transport_git_env = git_env_for_phase(ConveyorGitPhase.TRANSPORT)
     reasons: list[ConveyorLandingReason] = []
     verify = ConveyorCommandResult(0, "", "")
 
@@ -243,7 +270,7 @@ def land_bundle(
             ),
         )
 
-    verify = _git(runner, ["bundle", "verify", str(bundle)], root)
+    verify = _git(runner, ["bundle", "verify", str(bundle)], root, env=local_git_env)
     if verify.returncode != 0:
         reasons.append(
             ConveyorLandingReason(
@@ -262,7 +289,7 @@ def land_bundle(
             verify=verify,
         )
 
-    fetched_branch = _git(runner, ["fetch", str(bundle), f"{branch_name}:{branch_name}"], root)
+    fetched_branch = _git(runner, ["fetch", str(bundle), f"{branch_name}:{branch_name}"], root, env=local_git_env)
     if fetched_branch.returncode != 0:
         reasons.append(
             ConveyorLandingReason(
@@ -273,7 +300,7 @@ def land_bundle(
         )
 
     if not reasons:
-        fetched_base = _fetch_base(runner, root, base_ref)
+        fetched_base = _fetch_base(runner, root, base_ref, env=transport_git_env)
         if fetched_base is not None and fetched_base.returncode != 0:
             reasons.append(
                 ConveyorLandingReason(
@@ -284,7 +311,7 @@ def land_bundle(
             )
 
     if not reasons:
-        switched = _git(runner, ["switch", branch_name], root)
+        switched = _git(runner, ["switch", branch_name], root, env=local_git_env)
         if switched.returncode != 0:
             reasons.append(
                 ConveyorLandingReason(
@@ -295,7 +322,7 @@ def land_bundle(
             )
 
     if not reasons:
-        rebased = _git(runner, ["rebase", base_ref], root)
+        rebased = _git(runner, ["rebase", base_ref], root, env=local_git_env)
         if rebased.returncode != 0:
             reasons.append(
                 ConveyorLandingReason(
@@ -309,7 +336,7 @@ def land_bundle(
     ahead: int | None = None
     behind: int | None = None
     if not reasons:
-        head = _git(runner, ["rev-parse", "HEAD"], root)
+        head = _git(runner, ["rev-parse", "HEAD"], root, env=local_git_env)
         if head.returncode != 0:
             reasons.append(
                 ConveyorLandingReason(
@@ -322,7 +349,7 @@ def land_bundle(
             head_sha = head.stdout.strip()
 
     if not reasons:
-        counts = _git(runner, ["rev-list", "--left-right", "--count", f"{base_ref}...HEAD"], root)
+        counts = _git(runner, ["rev-list", "--left-right", "--count", f"{base_ref}...HEAD"], root, env=local_git_env)
         if counts.returncode != 0:
             reasons.append(
                 ConveyorLandingReason(
@@ -433,11 +460,17 @@ def _run_validation(
     return _coerce_result(runner(command, root, env))
 
 
-def _fetch_base(runner: GitRunner, root: Path, base: str) -> ConveyorCommandResult | None:
+def _fetch_base(
+    runner: GitRunner,
+    root: Path,
+    base: str,
+    *,
+    env: Mapping[str, str],
+) -> ConveyorCommandResult | None:
     args = _fetch_args(base)
     if not args:
         return None
-    return _git(runner, args, root)
+    return _git(runner, args, root, env=env)
 
 
 def _fetch_args(base: str) -> list[str]:
@@ -448,16 +481,26 @@ def _fetch_args(base: str) -> list[str]:
     return []
 
 
-def _carrier_git_runner(runner: GitRunner) -> Callable[[Sequence[str], Path], tuple[int, str, str]]:
+def _carrier_git_runner(
+    runner: GitRunner,
+    *,
+    env: Mapping[str, str],
+) -> Callable[[Sequence[str], Path], tuple[int, str, str]]:
     def run(args: Sequence[str], cwd: Path) -> tuple[int, str, str]:
-        result = _git(runner, args, cwd)
+        result = _git(runner, args, cwd, env=env)
         return result.returncode, result.stdout, result.stderr
 
     return run
 
 
-def _git(runner: GitRunner, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
-    return _coerce_result(runner(args, cwd))
+def _git(
+    runner: GitRunner,
+    args: Sequence[str],
+    cwd: Path,
+    *,
+    env: Mapping[str, str],
+) -> ConveyorCommandResult:
+    return _coerce_result(runner(args, cwd, env))
 
 
 def _coerce_result(result: ConveyorCommandResult | tuple[int, str, str]) -> ConveyorCommandResult:
@@ -466,11 +509,18 @@ def _coerce_result(result: ConveyorCommandResult | tuple[int, str, str]) -> Conv
     return ConveyorCommandResult(result[0], result[1], result[2])
 
 
-def _default_git_runner(args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
+def git_env_for_phase(phase: ConveyorGitPhase) -> dict[str, str]:
+    if phase in (ConveyorGitPhase.LOCAL, ConveyorGitPhase.TRANSPORT):
+        return dict(_BASE_GIT_ENV)
+    raise ValueError(f"unsupported conveyor git phase: {phase}")
+
+
+def _default_git_runner(args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
     try:
         completed = subprocess.run(
             ["git", *args],
             cwd=cwd,
+            env=dict(env),
             capture_output=True,
             text=True,
             timeout=120,
@@ -486,12 +536,11 @@ def _default_validate_runner(
     cwd: Path,
     env: Mapping[str, str] | None,
 ) -> ConveyorCommandResult:
-    merged_env = None if env is None else {**os.environ, **dict(env)}
     try:
         completed = subprocess.run(
             list(args),
             cwd=cwd,
-            env=merged_env,
+            env={} if env is None else dict(env),
             capture_output=True,
             text=True,
             timeout=600,
@@ -565,11 +614,14 @@ def _result(
 
 
 __all__ = [
+    "ConveyorGitPhase",
     "ConveyorBundleLandingResult",
     "ConveyorCommandResult",
     "ConveyorHarvestResult",
     "ConveyorHarvestSpec",
     "ConveyorLandingReason",
+    "GitRunner",
     "land_bundle",
+    "git_env_for_phase",
     "prepare_harvest",
 ]
