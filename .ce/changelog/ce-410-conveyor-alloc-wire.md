@@ -6,12 +6,9 @@ scope: conveyor daemon allocation provenance
 issue: ce-ops#410
 ---
 
-Wires armed conveyor execution to daemon-issued path allocation receipts.
+**slice 2: conveyor daemon allocation receipts (armed-path provenance).**
 
-- Removed the default-true item path provenance bit and made raw discovery
-  mappings data-only, with no executable paths or receipt.
-- Armed conveyor runs now require an injected `DaemonPathAllocator`, allocate
-  paths for data-only items before prepare/land/push/PR, and reject direct item
-  paths without a receipt valid for the current allocator instance.
-- Added secret-free allocation audit logging with allocation id, item key,
-  root-relative paths, mode-check results, and cleanup status.
+- Replaced the default-true `daemon_owned_paths_allocated` bit with `DaemonPathAllocator` receipts; raw discovery mappings via `from_mapping` stay data-only.
+- Armed conveyor construction now refuses without an injected allocator; armed runs allocate receipted paths for data-only items before prepare/land/push/PR and reject direct item paths lacking a valid receipt for the current allocator instance.
+- Retained confinement checks as defense-in-depth alongside allocator receipts.
+- Added secret-free allocation audit logging (allocation id, item key, root-relative paths, mode-check results, cleanup status).
