@@ -4726,12 +4726,15 @@ def _cmd_queue_poll(args: argparse.Namespace) -> int:
         runtime_roots = integrator_belt.DaemonRuntimeRoots.from_root(runtime_root)
         token = integrator_belt.token_from_env(args.token_env)
         logger = integrator_belt.JsonLineLogger(sys.stderr)
-        gh_runner = integrator_belt.gh_runner_with_token(token)
+        transport_context = integrator_belt.TransportCredentialContext.from_token(token)
+        local_git_context = integrator_belt.LocalGitContext.from_sandbox(runtime_roots.runtime_root / "local-git")
+        gh_runner = integrator_belt.gh_runner_from_transport_context(transport_context)
         adapter = integrator_belt.LiveGitHubRepairAdapter(
             runtime_roots=runtime_roots,
             publish_action=args.action,
             gh_runner=gh_runner,
-            git_env=integrator_belt.git_env_with_token(token),
+            transport_context=transport_context,
+            local_git_context=local_git_context,
             log_sink=logger,
         )
         result = integrator_belt.run_poll_loop(

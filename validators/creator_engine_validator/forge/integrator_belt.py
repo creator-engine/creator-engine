@@ -42,6 +42,12 @@ from .approval_capability import (
     MARKER_PREFIX,
     extract_approval_capability_marker,
 )
+from .authority_contexts import (
+    LocalGitContext,
+    TransportCredentialContext,
+    gh_runner_from_transport_context,
+    git_env_from_transport_context,
+)
 from .auto_merge import enable_auto_merge
 from .change import ChangeRef
 from .daemon_allocation import (
@@ -508,26 +514,17 @@ def _default_git_spawn(
 
 
 def gh_runner_with_token(token: str, runner: GhRunner | None = None) -> GhRunner:
-    base = runner or _default_gh_runner
+    """Deprecated compatibility shim; prefer ``TransportCredentialContext``."""
 
-    def run(argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:
-        old = os.environ.get("GH_TOKEN")
-        os.environ["GH_TOKEN"] = token
-        try:
-            return base(argv, input_text)
-        finally:
-            if old is None:
-                os.environ.pop("GH_TOKEN", None)
-            else:
-                os.environ["GH_TOKEN"] = old
-
-    return run
+    context = TransportCredentialContext.from_token(token)
+    return gh_runner_from_transport_context(context, runner)
 
 
 def git_env_with_token(token: str) -> dict[str, str]:
-    env = dict(os.environ)
-    env["GH_TOKEN"] = token
-    return env
+    """Deprecated compatibility shim; prefer ``TransportCredentialContext.env``."""
+
+    context = TransportCredentialContext.from_token(token)
+    return dict(git_env_from_transport_context(context))
 
 
 def _log(log_sink: LogSink | None, action: str, **payload: Any) -> None:
@@ -2046,11 +2043,17 @@ class LiveGitHubRepairAdapter:
         publish_action: str = "enqueue",
         gh_runner: GhRunner | None = None,
         git_spawn: GitSpawn | None = None,
+        transport_context: TransportCredentialContext | None = None,
+        local_git_context: LocalGitContext | None = None,
         git_env: Mapping[str, str] | None = None,
         log_sink: LogSink | None = None,
     ) -> None:
         if publish_action not in {"enqueue", "land", "merge"}:
             raise IntegratorBeltError(f"unknown publish action {publish_action!r}")
+        if transport_context is not None and not isinstance(transport_context, TransportCredentialContext):
+            raise TypeError("LiveGitHubRepairAdapter requires TransportCredentialContext")
+        if local_git_context is not None and not isinstance(local_git_context, LocalGitContext):
+            raise TypeError("LiveGitHubRepairAdapter requires LocalGitContext")
         if allocator is not None and runtime_roots is not None:
             raise IntegratorBeltError("provide either allocator or runtime_roots, not both")
         if allocator is None:
@@ -2061,7 +2064,14 @@ class LiveGitHubRepairAdapter:
         self.publish_action = publish_action
         self.gh_runner = gh_runner or _default_gh_runner
         self.git_spawn = git_spawn or _default_git_spawn
-        self.git_env = dict(git_env or os.environ)
+        self.transport_context = transport_context
+        self.local_git_context = local_git_context
+        if git_env is not None:
+            self.git_env = dict(git_env)
+        elif transport_context is not None:
+            self.git_env = dict(git_env_from_transport_context(transport_context))
+        else:
+            self.git_env = dict(os.environ)
         self.log_sink = log_sink
         self._workspace: Path | None = None
         self._workspace_allocation: DaemonPathAllocation | None = None
@@ -2331,14 +2341,17 @@ def make_live_action_runner(
     if action not in {"enqueue", "land", "merge"}:
         raise IntegratorBeltError(f"unknown live action {action!r}")
 
-    effective_gh_runner = gh_runner_with_token(token, gh_runner)
+    transport_context = TransportCredentialContext.from_token(token)
+    local_git_context = _local_git_context_for_runtime(allocator=allocator, runtime_roots=runtime_roots)
+    effective_gh_runner = gh_runner_from_transport_context(transport_context, gh_runner)
     adapter = repair_adapter or LiveGitHubRepairAdapter(
         allocator=allocator,
         runtime_roots=runtime_roots,
         publish_action=action,
         gh_runner=effective_gh_runner,
         git_spawn=git_spawn,
-        git_env=git_env_with_token(token),
+        transport_context=transport_context,
+        local_git_context=local_git_context,
         log_sink=log_sink,
     )
 
@@ -2373,6 +2386,19 @@ def make_live_action_runner(
         return LiveActionResult(accepted, action, reason, evidence)
 
     return run
+
+
+def _local_git_context_for_runtime(
+    *,
+    allocator: DaemonPathAllocator | None,
+    runtime_roots: DaemonRuntimeRoots | None,
+) -> LocalGitContext | None:
+    roots = runtime_roots
+    if roots is None and allocator is not None:
+        roots = allocator.roots
+    if roots is None:
+        return None
+    return LocalGitContext.from_sandbox(roots.runtime_root / "local-git")
 
 
 def _gh_graphql(runner: GhRunner, query: str, variables: dict[str, object], *, purpose: str) -> dict:
