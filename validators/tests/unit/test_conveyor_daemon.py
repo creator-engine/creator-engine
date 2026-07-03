@@ -20,20 +20,17 @@ from creator_engine_validator.conveyor_daemon import (
     ConveyorDaemonItem,
     ConveyorDaemonLedgerRecord,
 )
+from creator_engine_validator.forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
 
 
 HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 
-# Trusted confinement roots for armed-daemon tests. All fake item paths below
-# (worktree_path/repo_path under /tmp/..., bundle_path under
-# /tmp/....bundle) are constructed to resolve under these roots so the new
-# path-confinement gate (ConveyorDaemon._path_confinement_violations) does
-# not reject otherwise-legitimate test fixtures. Hostile-payload tests below
-# deliberately point OUTSIDE these roots (or use gadget-shaped filenames) to
-# exercise the rejection path.
-TRUSTED_REPO_ROOT = Path("/tmp")
-TRUSTED_BUNDLE_ROOT = Path("/tmp")
-ARMED_ROOTS = {"repo_root": TRUSTED_REPO_ROOT, "bundle_root": TRUSTED_BUNDLE_ROOT}
+TEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-daemon-alloc-test-"))
+TEST_ALLOCATOR = DaemonPathAllocator(
+    DaemonRuntimeRoots.from_root(TEST_RUNTIME_ROOT, create=True),
+    secret=b"conveyor-daemon-unit-test-secret",
+)
+ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR}
 
 
 class FakeGit:
@@ -132,15 +129,52 @@ class FakeClock:
         return f"2026-07-01T00:00:0{self.count}Z"
 
 
+class CountingAllocator:
+    def __init__(self):
+        runtime_root = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-counting-alloc-"))
+        self.inner = DaemonPathAllocator(
+            DaemonRuntimeRoots.from_root(runtime_root, create=True),
+            secret=b"conveyor-daemon-counting-secret",
+        )
+        self.allocate_calls: list[dict[str, object]] = []
+        self.allocations = []
+
+    @property
+    def roots(self):
+        return self.inner.roots
+
+    def allocate_conveyor_paths(self, **kwargs):
+        self.allocate_calls.append(dict(kwargs))
+        allocation, receipt = self.inner.allocate_conveyor_paths(**kwargs)
+        self.allocations.append(allocation)
+        return allocation, receipt
+
+    def verify_receipt(self, receipt):
+        return self.inner.verify_receipt(receipt)
+
+    def cleanup(self, receipt):
+        return self.inner.cleanup(receipt)
+
+
 def _item(branch: str = "Feature/One") -> ConveyorDaemonItem:
+    allocation, receipt = TEST_ALLOCATOR.allocate_conveyor_paths(
+        repo=branch.lower().replace("/", "-"),
+        branch_name=branch,
+    )
     return ConveyorDaemonItem(
         branch=branch,
-        worktree_path=Path(f"/tmp/{branch.lower().replace('/', '-')}"),
-        bundle_path=Path(f"/tmp/{branch.lower().replace('/', '-')}.bundle"),
-        repo_path=Path("/tmp/landing"),
+        worktree_path=allocation.worktree_path,
+        bundle_path=allocation.bundle_path,
+        repo_path=allocation.repo_path,
         title=f"Land {branch}",
         body="- Conveyor item.",
+        allocation_receipt=receipt,
     )
+
+
+def _item_without_receipt(branch: str = "Feature/One") -> ConveyorDaemonItem:
+    item = _item(branch)
+    return dataclasses.replace(item, allocation_receipt=None)
 
 
 def _data_only_payload() -> dict[str, str]:
@@ -197,9 +231,11 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     git = FakeGit()
     gh = FakeGh()
     ledger: list[ConveyorDaemonLedgerRecord] = []
+    logs: list[str] = []
+    item = _item()
 
     result = ConveyorDaemon(
-        discovery_runner=lambda: [_item()],
+        discovery_runner=lambda: [item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -207,14 +243,16 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
         gh_runner=gh,
         now=FakeClock(),
         ledger_writer=ledger.append,
+        log_runner=logs.append,
         prepare_runner=prepare,
         land_runner=land,
     ).run_once()
 
     assert result.results[0].status == "pr-opened"
     assert prepare.calls[0].carrier_date == "2026-07-01"
-    assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
-    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
+    assert prepare.calls[0].worktree_path == item.worktree_path
+    assert land.calls == [(item.bundle_path, "feature-one", "origin/main", item.repo_path)]
+    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), item.repo_path)]
     assert gh.calls == [
         (
             (
@@ -229,12 +267,23 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
                 "--body",
                 "- Conveyor item.",
             ),
-            Path("/tmp/landing"),
+            item.repo_path,
         )
     ]
     assert [record.action for record in ledger] == ["push", "pr-open"]
     assert [record.sha for record in ledger] == [HEAD_SHA, HEAD_SHA]
     assert [record.timestamp for record in ledger] == ["2026-07-01T00:00:02Z", "2026-07-01T00:00:03Z"]
+    assert any(
+        "conveyor allocation audit" in message
+        and '"allocation_id"' in message
+        and '"item_key": "feature-one"' in message
+        and '"root_kind"' in message
+        and '"mode_check"' in message
+        and '"cleanup": {"cleaned": true, "status": "success"}' in message
+        and '"nonce"' not in message
+        and '"signature"' not in message
+        for message in logs
+    )
 
 
 def test_per_item_failure_isolated_and_loop_continues():
@@ -242,9 +291,11 @@ def test_per_item_failure_isolated_and_loop_continues():
     git = FakeGit()
     gh = FakeGh()
     ledger: list[ConveyorDaemonLedgerRecord] = []
+    failed_item = _item("Feature/One")
+    good_item = _item("Feature/Two")
 
     result = ConveyorDaemon(
-        discovery_runner=lambda: [_item("Feature/One"), _item("Feature/Two")],
+        discovery_runner=lambda: [failed_item, good_item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -258,7 +309,7 @@ def test_per_item_failure_isolated_and_loop_continues():
 
     assert [item.status for item in result.results] == ["failed", "pr-opened"]
     assert result.results[0].reasons == ("prepare failed",)
-    assert git.calls == [(("push", "--", "origin", "feature-two:feature-two"), Path("/tmp/landing"))]
+    assert git.calls == [(("push", "--", "origin", "feature-two:feature-two"), good_item.repo_path)]
     assert len(gh.calls) == 1
     assert [record.branch for record in ledger] == ["feature-two", "feature-two"]
 
@@ -349,9 +400,10 @@ def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item()
     ledger: list[ConveyorDaemonLedgerRecord] = []
     logs: list[str] = []
     rejected_payload = {**_data_only_payload(), "validate_command": ["touch", "/tmp/pwned"]}
+    valid_item = _item()
 
     result = ConveyorDaemon(
-        discovery_runner=lambda: [_item(), rejected_payload],
+        discovery_runner=lambda: [valid_item, rejected_payload],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -368,8 +420,8 @@ def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item()
     assert result.discovered_count == 1
     assert [item.status for item in result.results] == ["pr-opened"]
     assert [spec.branch for spec in prepare.calls] == ["Feature/One"]
-    assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
-    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
+    assert land.calls == [(valid_item.bundle_path, "feature-one", "origin/main", valid_item.repo_path)]
+    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), valid_item.repo_path)]
     assert len(gh.calls) == 1
     assert any(
         "conveyor discovery payload audit" in message
@@ -396,13 +448,82 @@ def test_data_only_discovery_mapping_plans_without_payload_paths():
     assert not any("payload audit" in message for message in logs)
 
 
-def test_data_only_discovery_mapping_is_not_armed_without_daemon_paths():
+def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
     prepare = FakePrepare()
+    git = FakeGit()
+    gh = FakeGh()
+    allocator = CountingAllocator()
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [_data_only_payload()],
+        armed=True,
+        path_allocator=allocator,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    assert allocator.allocate_calls == [{"repo": "feature-one", "branch_name": "feature-one"}]
+    assert len(allocator.allocations) == 1
+    allocation = allocator.allocations[0]
+    assert prepare.calls[0].worktree_path == allocation.worktree_path
+    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), allocation.repo_path)]
+    assert len(gh.calls) == 1
+
+
+def test_direct_item_with_paths_and_no_receipt_fails_before_prepare_land_git_or_gh():
+    prepare = FakePrepare()
+    land = FakeLand()
     git = FakeGit()
     gh = FakeGh()
 
     result = ConveyorDaemon(
-        discovery_runner=lambda: [_data_only_payload()],
+        discovery_runner=lambda: [_item_without_receipt()],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=land,
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("executable item paths require a valid daemon allocation receipt",)
+    assert prepare.calls == []
+    assert land.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+
+
+def test_forged_receipt_from_another_allocator_instance_is_refused_before_prepare():
+    prepare = FakePrepare()
+    git = FakeGit()
+    gh = FakeGh()
+    foreign_allocator = CountingAllocator()
+    foreign_allocation, foreign_receipt = foreign_allocator.allocate_conveyor_paths(
+        repo="feature-one",
+        branch_name="Feature/One",
+    )
+    item = ConveyorDaemonItem(
+        branch="Feature/One",
+        worktree_path=foreign_allocation.worktree_path,
+        bundle_path=foreign_allocation.bundle_path,
+        repo_path=foreign_allocation.repo_path,
+        title="Land Feature/One",
+        body="- Conveyor item.",
+        allocation_receipt=foreign_receipt,
+    )
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -415,9 +536,7 @@ def test_data_only_discovery_mapping_is_not_armed_without_daemon_paths():
     ).run_once()
 
     assert result.results[0].status == "failed"
-    assert result.results[0].reasons == (
-        "data-only discovery payload accepted, but daemon-owned path allocation is not wired",
-    )
+    assert result.results[0].reasons == ("daemon allocation receipt rejected: receipt was not issued by this allocator",)
     assert prepare.calls == []
     assert git.calls == []
     assert gh.calls == []
@@ -810,16 +929,22 @@ def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
     the symlink target.
     """
 
-    real_repo = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-real-repo-"))
-    real_worktree = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-real-wt-"))
-    real_bundle_dir = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-real-bundle-"))
+    real_repo = Path(tempfile.mkdtemp(dir=TEST_ALLOCATOR.roots.repo_root, prefix="conveyor-toctou-real-repo-"))
+    real_worktree = Path(tempfile.mkdtemp(dir=TEST_ALLOCATOR.roots.worktree_root, prefix="conveyor-toctou-real-wt-"))
+    real_bundle_dir = Path(tempfile.mkdtemp(dir=TEST_ALLOCATOR.roots.bundle_root, prefix="conveyor-toctou-real-bundle-"))
     real_bundle = real_bundle_dir / "feature-one.bundle"
     real_bundle.write_bytes(b"")
-    scratch = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-toctou-symlinks-"))
+    item = _item()
 
-    symlink_repo = scratch / "repo-symlink"
-    symlink_worktree = scratch / "worktree-symlink"
-    symlink_bundle = scratch / "bundle-symlink.bundle"
+    assert item.repo_path is not None
+    assert item.worktree_path is not None
+    assert item.bundle_path is not None
+    symlink_repo = item.repo_path
+    symlink_worktree = item.worktree_path
+    symlink_bundle = item.bundle_path
+    symlink_repo.rmdir()
+    symlink_worktree.rmdir()
+    symlink_bundle.rmdir()
     symlink_repo.symlink_to(real_repo)
     symlink_worktree.symlink_to(real_worktree)
     symlink_bundle.symlink_to(real_bundle)
@@ -830,15 +955,6 @@ def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
         git = FakeGit()
         gh = FakeGh()
         ledger: list[ConveyorDaemonLedgerRecord] = []
-
-        item = ConveyorDaemonItem(
-            branch="Feature/One",
-            worktree_path=symlink_worktree,
-            bundle_path=symlink_bundle,
-            repo_path=symlink_repo,
-            title="Land Feature/One",
-            body="- Conveyor item.",
-        )
 
         result = ConveyorDaemon(
             discovery_runner=lambda: [item],
@@ -872,7 +988,9 @@ def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
         assert gh.calls[0][1] == real_repo
         assert gh.calls[0][1] != symlink_repo
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        for symlink in (symlink_repo, symlink_worktree, symlink_bundle):
+            if symlink.is_symlink():
+                symlink.unlink()
         shutil.rmtree(real_repo, ignore_errors=True)
         shutil.rmtree(real_worktree, ignore_errors=True)
         shutil.rmtree(real_bundle_dir, ignore_errors=True)
