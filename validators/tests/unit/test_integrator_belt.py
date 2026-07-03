@@ -82,6 +82,36 @@ def _event(**overrides) -> RepairNeededEvent:
     return RepairNeededEvent(**data)
 
 
+def _runtime_roots(tmp_path: Path) -> belt.DaemonRuntimeRoots:
+    return belt.DaemonRuntimeRoots.from_root(tmp_path / "runtime", create=True)
+
+
+def _identity(**overrides) -> belt.PullRequestIdentity:
+    data = {
+        "repo": REPO,
+        "pr_number": PR,
+        "base_ref": "main",
+        "base_sha": BASE,
+        "head_ref": BRANCH,
+        "head_sha": HEAD,
+        "head_repo": REPO,
+    }
+    data.update(overrides)
+    return belt.PullRequestIdentity(**data)
+
+
+class RecordingGitSpawn:
+    def __init__(self, *, fail_on: str | None = None) -> None:
+        self.fail_on = fail_on
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, input_text, env):
+        self.calls.append(list(argv))
+        if self.fail_on and self.fail_on in " ".join(str(part) for part in argv):
+            return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="forced failure")
+        return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
+
+
 def _append_conflict() -> str:
     return f"""existing
 {_OURS}
@@ -234,13 +264,20 @@ class _CliResult:
         }
 
 
-def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, capsys):
+def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, tmp_path: Path, capsys):
     captured = {}
+    adapter_kwargs = {}
+    roots = _runtime_roots(tmp_path)
 
     monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
     monkeypatch.setattr(v3_cli.integrator_belt, "gh_runner_with_token", lambda token: object())
     monkeypatch.setattr(v3_cli.integrator_belt, "git_env_with_token", lambda token: {})
-    monkeypatch.setattr(v3_cli.integrator_belt, "LiveGitHubRepairAdapter", lambda **kwargs: object())
+
+    def fake_adapter(**kwargs):
+        adapter_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "LiveGitHubRepairAdapter", fake_adapter)
 
     def fake_loop(**kwargs):
         captured.update(kwargs)
@@ -251,6 +288,7 @@ def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, capsys):
     ret = v3_cli.main([
         "queue-poll",
         "--repo", REPO,
+        "--runtime-root", str(roots.runtime_root),
         "--iterations", "1",
         "--interval-seconds", "0",
         "--json",
@@ -260,7 +298,108 @@ def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, capsys):
     assert captured["token"] == "ghp_fake"
     assert captured["repo"] == REPO
     assert captured["iterations"] == 1
+    assert adapter_kwargs["runtime_roots"] == roots
+    assert "work_root" not in adapter_kwargs
     assert '"event_count": 0' in capsys.readouterr().out
+
+
+def test_ce_queue_poll_cli_refuses_deprecated_work_root(tmp_path: Path, capsys):
+    roots = _runtime_roots(tmp_path)
+
+    ret = v3_cli.main([
+        "queue-poll",
+        "--repo", REPO,
+        "--runtime-root", str(roots.runtime_root),
+        "--work-root", str(tmp_path / "old-work"),
+    ])
+
+    assert ret == 1
+    err = capsys.readouterr().err
+    assert "--work-root is refused" in err
+    assert "--runtime-root" in err
+
+
+def test_ce_queue_poll_cli_refuses_unsafe_runtime_roots(tmp_path: Path, capsys):
+    bad_relative = "relative-runtime"
+    insecure = tmp_path / "insecure-runtime"
+    belt.DaemonRuntimeRoots.from_root(insecure, create=True)
+    insecure.chmod(0o777)
+    target = _runtime_roots(tmp_path / "target")
+    link = tmp_path / "runtime-link"
+    link.symlink_to(target.runtime_root)
+
+    for raw_root in (bad_relative, str(insecure), str(link)):
+        ret = v3_cli.main([
+            "queue-poll",
+            "--repo", REPO,
+            "--runtime-root", raw_root,
+        ])
+        assert ret == 1
+
+    err = capsys.readouterr().err
+    assert "queue-poll refused" in err
+
+
+def test_live_adapter_allocates_random_receipted_workspaces(tmp_path: Path):
+    allocator = belt.DaemonPathAllocator(_runtime_roots(tmp_path))
+    logs: list[dict] = []
+    spawn = RecordingGitSpawn()
+    adapter = belt.LiveGitHubRepairAdapter(
+        allocator=allocator,
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(list(argv), 0, stdout="{}", stderr=""),
+        git_spawn=spawn,
+        git_env={},
+        log_sink=lambda payload: logs.append(dict(payload)),
+    )
+
+    first = adapter._prepare_workspace(_identity())
+    first_allocation = adapter._workspace_allocation
+    first_receipt = adapter._workspace_receipt
+    assert first_allocation is not None
+    assert first_receipt is not None
+    assert allocator.verify_receipt(first_receipt, first_allocation) == first_allocation
+
+    second = adapter._prepare_workspace(_identity())
+
+    assert first != second
+    assert first.is_dir()
+    assert second.is_dir()
+    assert first.is_relative_to(allocator.roots.workspace_root)
+    assert second.is_relative_to(allocator.roots.workspace_root)
+    allocated = [entry for entry in logs if entry["action"] == "repair_workspace_allocated"]
+    assert len(allocated) == 2
+    assert allocated[0]["allocation_id"] != allocated[1]["allocation_id"]
+    assert allocated[0]["root_kind"] == "workspace"
+    assert set(allocated[0]["relative_paths"]) == {"workspace_path"}
+    assert "signature" not in json.dumps(allocated)
+    assert not any("rmtree" in " ".join(call) for call in spawn.calls)
+
+
+def test_live_adapter_cleans_failed_prepare_by_receipt(tmp_path: Path):
+    allocator = belt.DaemonPathAllocator(_runtime_roots(tmp_path))
+    logs: list[dict] = []
+    adapter = belt.LiveGitHubRepairAdapter(
+        allocator=allocator,
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(list(argv), 0, stdout="{}", stderr=""),
+        git_spawn=RecordingGitSpawn(fail_on=" init"),
+        git_env={},
+        log_sink=lambda payload: logs.append(dict(payload)),
+    )
+
+    raised = None
+    try:
+        adapter._prepare_workspace(_identity())
+    except belt.ForgeConfigError as exc:
+        raised = exc
+
+    assert raised is not None
+    allocated = [entry for entry in logs if entry["action"] == "repair_workspace_allocated"]
+    cleaned = [entry for entry in logs if entry["action"] == "repair_workspace_cleanup"]
+    assert len(allocated) == 1
+    assert len(cleaned) == 1
+    assert cleaned[0]["allocation_id"] == allocated[0]["allocation_id"]
+    assert cleaned[0]["cleanup_removed"] is True
+    assert not any(allocator.roots.workspace_root.iterdir())
 
 
 def _check(

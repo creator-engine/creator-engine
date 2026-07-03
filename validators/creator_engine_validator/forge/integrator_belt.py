@@ -16,7 +16,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -45,6 +44,13 @@ from .approval_capability import (
 )
 from .auto_merge import enable_auto_merge
 from .change import ChangeRef
+from .daemon_allocation import (
+    DaemonAllocationError,
+    DaemonPathAllocation,
+    DaemonPathAllocator,
+    DaemonPathReceipt,
+    DaemonRuntimeRoots,
+)
 from .eviction_detection import RepairNeededEvent, RepairPollResult, Transport
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
 from .integrator_executor import ExecutorPublishResult, ExecutorRefs
@@ -66,7 +72,6 @@ GitSpawn = Callable[[Sequence[str], str | None, Mapping[str, str] | None], subpr
 LogSink = Callable[[Mapping[str, Any]], None]
 
 DEFAULT_TOKEN_ENV = "GH_TOKEN"
-DEFAULT_WORK_ROOT = ".ce/integrator-belt"
 DEFAULT_INTERVAL_SECONDS = 60.0
 DEFAULT_DAEMON_SEARCH_LIMIT = 50
 DEFAULT_GOVERNANCE_CHECK = "Validate governance artifacts"
@@ -2036,7 +2041,8 @@ class LiveGitHubRepairAdapter:
     def __init__(
         self,
         *,
-        work_root: Path | str = DEFAULT_WORK_ROOT,
+        allocator: DaemonPathAllocator | None = None,
+        runtime_roots: DaemonRuntimeRoots | None = None,
         publish_action: str = "enqueue",
         gh_runner: GhRunner | None = None,
         git_spawn: GitSpawn | None = None,
@@ -2045,13 +2051,21 @@ class LiveGitHubRepairAdapter:
     ) -> None:
         if publish_action not in {"enqueue", "land", "merge"}:
             raise IntegratorBeltError(f"unknown publish action {publish_action!r}")
-        self.work_root = Path(work_root)
+        if allocator is not None and runtime_roots is not None:
+            raise IntegratorBeltError("provide either allocator or runtime_roots, not both")
+        if allocator is None:
+            if runtime_roots is None:
+                raise IntegratorBeltError("daemon runtime roots are required for integrator workspace allocation")
+            allocator = DaemonPathAllocator(runtime_roots)
+        self.allocator = allocator
         self.publish_action = publish_action
         self.gh_runner = gh_runner or _default_gh_runner
         self.git_spawn = git_spawn or _default_git_spawn
         self.git_env = dict(git_env or os.environ)
         self.log_sink = log_sink
         self._workspace: Path | None = None
+        self._workspace_allocation: DaemonPathAllocation | None = None
+        self._workspace_receipt: DaemonPathReceipt | None = None
         self._identity: PullRequestIdentity | None = None
 
     def repair_work_item(self, event: RepairNeededEvent) -> RepairWorkItem:
@@ -2140,6 +2154,7 @@ class LiveGitHubRepairAdapter:
             evidence.append(f"publish_action={self.publish_action}")
             requeued = bool(queued.enabled)
         _log(self.log_sink, "repair_published", repo=repo, pr_number=pr_number, evidence=evidence)
+        self._cleanup_workspace(repo=repo, pr_number=pr_number, reason="published")
         return ExecutorPublishResult(pushed=True, requeued=requeued, evidence=tuple(evidence))
 
     def _read_identity(self, repo: str, pr_number: int) -> PullRequestIdentity:
@@ -2169,33 +2184,78 @@ class LiveGitHubRepairAdapter:
         )
 
     def _prepare_workspace(self, identity: PullRequestIdentity) -> Path:
-        root = self.work_root / _repo_slug(identity.repo) / f"pr-{identity.pr_number}-{identity.head_sha[:12]}"
-        if root.exists():
-            shutil.rmtree(root)
-        root.parent.mkdir(parents=True, exist_ok=True)
-        root.mkdir()
-        self._git(root, ["init"], purpose="initialize repair workspace")
-        self._git(root, ["config", "user.name", "CE Integrator"], purpose="configure git author name")
-        self._git(root, ["config", "user.email", "integrator@creator-engine.invalid"], purpose="configure git author email")
-        self._git(root, ["config", "credential.helper", ""], purpose="clear inherited git credential helper")
-        self._git(
-            root,
-            ["config", "--add", "credential.helper", "!gh auth git-credential"],
-            purpose="configure gh token credential helper",
+        allocation, receipt = self.allocator.allocate_integrator_workspace(
+            repo=identity.repo,
+            pr_number=identity.pr_number,
+            head_sha=identity.head_sha,
         )
-        self._git(root, ["remote", "add", "origin", f"https://github.com/{identity.repo}.git"], purpose="add origin")
-        self._git(
-            root,
-            ["fetch", "--no-tags", "origin", f"refs/heads/{identity.base_ref}:refs/remotes/origin/{identity.base_ref}"],
-            purpose="fetch base branch",
+        root = allocation.workspace_path
+        if root is None:
+            raise IntegratorBeltError("allocator did not issue an integrator workspace path")
+        self._workspace_allocation = allocation
+        self._workspace_receipt = receipt
+        audit = allocation.to_audit_record(self.allocator.roots)
+        _log(
+            self.log_sink,
+            "repair_workspace_allocated",
+            repo=identity.repo,
+            pr_number=identity.pr_number,
+            head_sha=identity.head_sha,
+            allocation_id=allocation.allocation_id,
+            root_kind="workspace",
+            relative_paths=audit["paths"],
+            root_provenance=audit["root_provenance"],
         )
-        self._git(
-            root,
-            ["fetch", "--no-tags", "origin", f"pull/{identity.pr_number}/head:pr-{identity.pr_number}"],
-            purpose="fetch PR head",
+        try:
+            self._git(root, ["init"], purpose="initialize repair workspace")
+            self._git(root, ["config", "user.name", "CE Integrator"], purpose="configure git author name")
+            self._git(root, ["config", "user.email", "integrator@creator-engine.invalid"], purpose="configure git author email")
+            self._git(root, ["config", "credential.helper", ""], purpose="clear inherited git credential helper")
+            self._git(
+                root,
+                ["config", "--add", "credential.helper", "!gh auth git-credential"],
+                purpose="configure gh token credential helper",
+            )
+            self._git(root, ["remote", "add", "origin", f"https://github.com/{identity.repo}.git"], purpose="add origin")
+            self._git(
+                root,
+                ["fetch", "--no-tags", "origin", f"refs/heads/{identity.base_ref}:refs/remotes/origin/{identity.base_ref}"],
+                purpose="fetch base branch",
+            )
+            self._git(
+                root,
+                ["fetch", "--no-tags", "origin", f"pull/{identity.pr_number}/head:pr-{identity.pr_number}"],
+                purpose="fetch PR head",
+            )
+            self._git(root, ["checkout", f"pr-{identity.pr_number}"], purpose="checkout PR head")
+            return root
+        except Exception:
+            self._cleanup_workspace(repo=identity.repo, pr_number=identity.pr_number, reason="prepare_failed")
+            raise
+
+    def _cleanup_workspace(self, *, repo: str, pr_number: int, reason: str) -> bool:
+        allocation = self._workspace_allocation
+        receipt = self._workspace_receipt
+        if allocation is None or receipt is None:
+            return False
+        audit = allocation.to_audit_record(self.allocator.roots)
+        removed = self.allocator.cleanup(receipt)
+        _log(
+            self.log_sink,
+            "repair_workspace_cleanup",
+            repo=repo,
+            pr_number=pr_number,
+            allocation_id=allocation.allocation_id,
+            root_kind="workspace",
+            relative_paths=audit["paths"],
+            cleanup_removed=removed,
+            cleanup_reason=reason,
         )
-        self._git(root, ["checkout", f"pr-{identity.pr_number}"], purpose="checkout PR head")
-        return root
+        if self._workspace is not None and self._workspace == allocation.workspace_path:
+            self._workspace = None
+        self._workspace_allocation = None
+        self._workspace_receipt = None
+        return removed
 
     def _attempt_base_merge(self, identity: PullRequestIdentity, workspace: Path) -> tuple[ConflictSnapshot, ...]:
         proc = self._git(
@@ -2255,7 +2315,8 @@ def make_live_action_runner(
     token: str,
     repo: str | None = None,
     org: str | None = None,
-    work_root: Path | str = DEFAULT_WORK_ROOT,
+    allocator: DaemonPathAllocator | None = None,
+    runtime_roots: DaemonRuntimeRoots | None = None,
     transport: Transport | None = None,
     gh_runner: GhRunner | None = None,
     git_spawn: GitSpawn | None = None,
@@ -2272,7 +2333,8 @@ def make_live_action_runner(
 
     effective_gh_runner = gh_runner_with_token(token, gh_runner)
     adapter = repair_adapter or LiveGitHubRepairAdapter(
-        work_root=work_root,
+        allocator=allocator,
+        runtime_roots=runtime_roots,
         publish_action=action,
         gh_runner=effective_gh_runner,
         git_spawn=git_spawn,
