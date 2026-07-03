@@ -4486,7 +4486,16 @@ def _build_parser() -> argparse.ArgumentParser:
     qp_scope.add_argument("--repo", default=None, help="owner/name repository scope")
     qp_scope.add_argument("--org", default=None, help="org/user search scope")
     p_queue_poll.add_argument("--token-env", default=integrator_belt.DEFAULT_TOKEN_ENV, help="env var containing the GitHub token")
-    p_queue_poll.add_argument("--work-root", default=integrator_belt.DEFAULT_WORK_ROOT, help="Integrator scratch work root")
+    p_queue_poll.add_argument(
+        "--runtime-root",
+        required=True,
+        help="absolute daemon-private runtime root for randomized integrator workspace allocation",
+    )
+    p_queue_poll.add_argument(
+        "--work-root",
+        default=None,
+        help="deprecated and refused; use --runtime-root",
+    )
     p_queue_poll.add_argument("--iterations", type=int, default=1, help="bounded poll iterations")
     p_queue_poll.add_argument("--interval-seconds", type=float, default=integrator_belt.DEFAULT_INTERVAL_SECONDS, help="sleep between iterations")
     p_queue_poll.add_argument("--action", choices=("enqueue", "land", "merge"), default="enqueue", help="publish action after a deterministic repair")
@@ -4709,11 +4718,17 @@ def _cmd_queue_poll(args: argparse.Namespace) -> int:
     Belt-native (pure v3 forge); live actions stay behind the injectable adapter and
     the merge gate, fail-closed."""
     try:
+        if args.work_root is not None:
+            raise integrator_belt.IntegratorBeltError("--work-root is refused; use --runtime-root")
+        runtime_root = Path(args.runtime_root)
+        if any(part.is_symlink() for part in (runtime_root, *runtime_root.parents)):
+            raise integrator_belt.IntegratorBeltError("--runtime-root must not traverse a symlink")
+        runtime_roots = integrator_belt.DaemonRuntimeRoots.from_root(runtime_root)
         token = integrator_belt.token_from_env(args.token_env)
         logger = integrator_belt.JsonLineLogger(sys.stderr)
         gh_runner = integrator_belt.gh_runner_with_token(token)
         adapter = integrator_belt.LiveGitHubRepairAdapter(
-            work_root=args.work_root,
+            runtime_roots=runtime_roots,
             publish_action=args.action,
             gh_runner=gh_runner,
             git_env=integrator_belt.git_env_with_token(token),
@@ -4729,7 +4744,7 @@ def _cmd_queue_poll(args: argparse.Namespace) -> int:
             gh_runner=gh_runner,
             log_sink=logger,
         )
-    except integrator_belt.IntegratorBeltError as exc:
+    except (integrator_belt.IntegratorBeltError, integrator_belt.DaemonAllocationError) as exc:
         print(f"ERROR: {CE_CMD} queue-poll refused: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:  # pragma: no cover - defensive fail-closed
