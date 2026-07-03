@@ -4,11 +4,14 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=2
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=c1203942b232df0de754afb88bd1bcf3e326b981829db86868b83c8b6a80e68d
+AUTHORIZED_PATHS_SHA256=3323e66ef72129c5bf5ffd9e027d605b6fc66dfca391efc9710e96a6a3c1a6c3
 
 ```text
 .ce/changelog/ce-pilot-docs-daytoday.md
 .ce/pr-manifests/ce-pilot-docs-daytoday.md
+docs/guide/solo-ceo-onboarding.md
+docs/guide/solo-dev-onboarding.md
+docs/index.html
 ```
