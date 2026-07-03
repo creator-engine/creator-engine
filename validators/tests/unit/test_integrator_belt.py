@@ -270,8 +270,6 @@ def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, tmp_path: Path, caps
     roots = _runtime_roots(tmp_path)
 
     monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
-    monkeypatch.setattr(v3_cli.integrator_belt, "gh_runner_with_token", lambda token: object())
-    monkeypatch.setattr(v3_cli.integrator_belt, "git_env_with_token", lambda token: {})
 
     def fake_adapter(**kwargs):
         adapter_kwargs.update(kwargs)
@@ -299,8 +297,36 @@ def test_ce_queue_poll_cli_is_bounded_and_json(monkeypatch, tmp_path: Path, caps
     assert captured["repo"] == REPO
     assert captured["iterations"] == 1
     assert adapter_kwargs["runtime_roots"] == roots
+    assert isinstance(adapter_kwargs["transport_context"], belt.TransportCredentialContext)
+    assert isinstance(adapter_kwargs["local_git_context"], belt.LocalGitContext)
+    assert adapter_kwargs["transport_context"].env["GH_TOKEN"] == "ghp_fake"
     assert "work_root" not in adapter_kwargs
     assert '"event_count": 0' in capsys.readouterr().out
+
+
+def test_make_live_action_runner_builds_typed_authority_contexts(monkeypatch, tmp_path: Path):
+    captured = {}
+    roots = _runtime_roots(tmp_path)
+
+    def fake_adapter(**kwargs):
+        captured.update(kwargs)
+        return FakeBeltAdapter(())
+
+    monkeypatch.setattr(belt, "LiveGitHubRepairAdapter", fake_adapter)
+
+    belt.make_live_action_runner(
+        action="enqueue",
+        token="ghp_fake",
+        repo=REPO,
+        runtime_roots=roots,
+        poller=_poller,
+    )
+
+    assert isinstance(captured["transport_context"], belt.TransportCredentialContext)
+    assert isinstance(captured["local_git_context"], belt.LocalGitContext)
+    assert captured["transport_context"].env["GH_TOKEN"] == "ghp_fake"
+    assert "GH_TOKEN" not in captured["local_git_context"].env
+    assert "git_env" not in captured
 
 
 def test_ce_queue_poll_cli_refuses_deprecated_work_root(tmp_path: Path, capsys):
