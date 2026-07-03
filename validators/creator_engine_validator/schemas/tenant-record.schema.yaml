@@ -1,0 +1,228 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/tenant-record.schema.yaml"
+title: "Creator Engine Tenant Record"
+description: |
+  Machine-readable record for one client tenant. The record binds tenant
+  identity, custody lane, credential references, issue venue, fleet allocation,
+  and governance posture without carrying raw credential material.
+type: object
+additionalProperties: false
+required:
+  - kind
+  - tenant_id
+  - display_name
+  - status
+  - deployment_model
+  - created_at
+  - identity
+  - credential
+  - confidentiality
+  - issue_venue
+  - fleet_allocation
+  - governance
+properties:
+  kind:
+    type: string
+    const: tenant-record
+    description: Discriminator constant for tenant records.
+  tenant_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{1,63}$"
+    description: Stable tenant slug.
+  display_name:
+    type: string
+    minLength: 1
+    description: Human-readable tenant name.
+  status:
+    type: string
+    enum: [active, onboarding, suspended, offboarded]
+  deployment_model:
+    type: string
+    enum: [A, B, C]
+  created_at:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    description: Tenant record creation date in YYYY-MM-DD form.
+  identity:
+    type: object
+    additionalProperties: false
+    required: [apps]
+    properties:
+      apps:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/$defs/tenant_app"
+  credential:
+    type: object
+    additionalProperties: false
+    required: [openbao_mount, policy_ref]
+    properties:
+      openbao_mount:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{1,63}$"
+        description: Dedicated OpenBao mount name for this tenant.
+      policy_ref:
+        type: string
+        minLength: 1
+        description: Governance policy reference for tenant credential access.
+  confidentiality:
+    type: object
+    additionalProperties: false
+    required: [denylist_ref, cross_tenant_isolation]
+    properties:
+      denylist_ref:
+        type: string
+        minLength: 1
+        description: Repo-relative confidentiality denylist reference.
+      cross_tenant_isolation:
+        type: string
+        const: enforced
+  issue_venue:
+    type: object
+    additionalProperties: false
+    required: [kind, repo]
+    properties:
+      kind:
+        type: string
+        enum: [client-repo, ce-ops]
+      repo:
+        type: string
+        pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+  fleet_allocation:
+    type: object
+    additionalProperties: false
+    required: [seats, reviewer_identity, merging_bot]
+    properties:
+      seats:
+        type: array
+        items:
+          type: string
+          minLength: 1
+      reviewer_identity:
+        type: string
+        minLength: 1
+      merging_bot:
+        type: string
+        minLength: 1
+  governance:
+    type: object
+    additionalProperties: false
+    required: [repo, protections, autonomy_tiers, ratified_by, ratification_ref]
+    properties:
+      repo:
+        type: string
+        pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+      protections:
+        type: string
+        enum: [reference, strengthened, client-managed]
+        description: Branch-protection posture; reference is the CE floor.
+      autonomy_tiers:
+        type: object
+        additionalProperties: false
+        required: [docs_class_automerge, tier_a, tier_b]
+        properties:
+          docs_class_automerge:
+            type: boolean
+          tier_a:
+            type: boolean
+          tier_b:
+            type: boolean
+      ratified_by:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: Opaque digest standing in for the ratifying human.
+      ratification_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: SHA256 of the ratified tenant-record governance prompt.
+$defs:
+  tenant_app:
+    type: object
+    additionalProperties: false
+    required:
+      - app_name
+      - role
+      - custody_lane
+      - app_id_ref
+      - client_id_ref
+      - private_key_ref
+    properties:
+      app_name:
+        type: string
+        minLength: 1
+      role:
+        type: string
+        pattern: "^[a-z][a-z0-9_-]{1,63}$"
+      custody_lane:
+        type: string
+        enum: [own, shared]
+      app_id_ref:
+        $ref: "#/$defs/secret_ref"
+      client_id_ref:
+        $ref: "#/$defs/secret_ref"
+      private_key_ref:
+        $ref: "#/$defs/secret_ref"
+      installation_id:
+        type: integer
+        minimum: 1
+  secret_ref:
+    description: |
+      A secret BY REFERENCE, never by value. String refs preserve the
+      install-answers SecretRef URI discipline and add the tenant OpenBao
+      pointer form; object refs preserve the policy-bound SecretRef shape.
+    oneOf:
+      - type: string
+        pattern: "^(env|file|prompt|keychain)://\\S+$"
+        description: |
+          A secret BY REFERENCE, never by value: `env://VAR` ·
+          `file:///abs/path` (tmpfs for PEMs) · `prompt://label` (ask at the
+          moment of use, even in file mode) · `keychain://label` (deferred
+          backend). Refs are inert strings — the file stays committable and the
+          answers-file sha256 is evidence-hashable. Refs resolve at apply time
+          only, in memory; evidence records the REF, never the value.
+      - type: string
+        pattern: "^openbao://\\S+$"
+        description: OpenBao secret pointer URI.
+      - $ref: "#/$defs/policy_secret_ref"
+  policy_secret_ref:
+    type: object
+    additionalProperties: false
+    required:
+      - backend
+      - mount
+      - path
+      - field
+      - version
+      - purpose
+      - owner_ref
+      - policy_sha
+    properties:
+      backend:
+        type: string
+        minLength: 1
+      mount:
+        type: string
+        minLength: 1
+      path:
+        type: string
+        minLength: 1
+        not:
+          pattern: "^(env|file|prompt)://"
+      field:
+        type: string
+        minLength: 1
+      version:
+        anyOf:
+          - type: integer
+            minimum: 1
+          - type: "null"
+      purpose:
+        type: string
+        minLength: 1
+      owner_ref:
+        type: string
+        minLength: 1
+      policy_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"

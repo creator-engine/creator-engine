@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 73
+Schema files: 74
 
 ## Index
 
@@ -78,6 +78,7 @@ Schema files: 73
 | `schemas/storage-tier-finding.schema.yaml` | Creator Engine storage-tier advisory finding | `object` |
 | `schemas/tasks-wrapper-sidecar.schema.yaml` | Creator Engine Tasks Wrapper Sidecar | `object` |
 | `schemas/tasks.schema.yaml` | Creator Engine Ratified Tasks Handoff | `object` |
+| `schemas/tenant-record.schema.yaml` | Creator Engine Tenant Record | `object` |
 | `schemas/work-sizing-floor.schema.yaml` | Creator Engine Work-Sizing Floor Record | `object` |
 | `schemas/work-sizing.schema.yaml` | Creator Engine Work-Sizing Record | `object` |
 | `schemas/worker-container-policy.schema.yaml` | Creator Engine Worker-Container Policy Record | `object` |
@@ -2461,6 +2462,45 @@ Definitions:
 | `allowed_scope_path` | anyOf | no |  | Exact repo-relative path, or a limited glob anchored under a named directory. Recursive `**`, root-level bare globs, and unanchored globs are refused. Examples: `docs/x.md` and `src/foo/*.py` pass; `**` and `*.py` fail. |
 | `repo_path_or_glob` | string | no | minLength `1` | Repo-relative path or limited glob; absolute paths are refused. |
 | `hex64` | string | no | pattern `^[0-9a-f]{64}$` |  |
+
+### `schemas/tenant-record.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Tenant Record |
+| `$id` | `https://creator-engine.local/schemas/tenant-record.schema.yaml` |
+| Root type | `object` |
+
+Machine-readable record for one client tenant. The record binds tenant identity, custody lane, credential references, issue venue, fleet allocation, and governance posture without carrying raw credential material.
+
+Required fields:
+
+`kind`, `tenant_id`, `display_name`, `status`, `deployment_model`, `created_at`, `identity`, `credential`, `confidentiality`, `issue_venue`, `fleet_allocation`, `governance`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | string | yes | const `tenant-record` | Discriminator constant for tenant records. |
+| `tenant_id` | string | yes | pattern `^[a-z][a-z0-9-]{1,63}$` | Stable tenant slug. |
+| `display_name` | string | yes | minLength `1` | Human-readable tenant name. |
+| `status` | string | yes | enum `active`, `onboarding`, `suspended`, `offboarded` |  |
+| `deployment_model` | string | yes | enum `A`, `B`, `C` |  |
+| `created_at` | string | yes | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}$` | Tenant record creation date in YYYY-MM-DD form. |
+| `identity` | object | yes | additionalProperties `false` |  |
+| `credential` | object | yes | additionalProperties `false` |  |
+| `confidentiality` | object | yes | additionalProperties `false` |  |
+| `issue_venue` | object | yes | additionalProperties `false` |  |
+| `fleet_allocation` | object | yes | additionalProperties `false` |  |
+| `governance` | object | yes | additionalProperties `false` |  |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `tenant_app` | object | no | additionalProperties `false` |  |
+| `secret_ref` | oneOf | no |  | A secret BY REFERENCE, never by value. String refs preserve the install-answers SecretRef URI discipline and add the tenant OpenBao pointer form; object refs preserve the policy-bound SecretRef shape. |
+| `policy_secret_ref` | object | no | additionalProperties `false` |  |
 
 ### `schemas/work-sizing-floor.schema.yaml`
 

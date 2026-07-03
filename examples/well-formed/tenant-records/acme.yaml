@@ -1,0 +1,37 @@
+kind: tenant-record
+tenant_id: acme
+display_name: Acme Example
+status: onboarding
+deployment_model: B
+created_at: "2026-07-03"
+identity:
+  apps:
+    - app_name: acme-example-forge-app
+      role: forge_operator
+      custody_lane: own
+      app_id_ref: openbao://tenant-acme/apps/forge/app-id
+      client_id_ref: openbao://tenant-acme/apps/forge/client-id
+      private_key_ref: openbao://tenant-acme/apps/forge/private-key
+      installation_id: 424242
+credential:
+  openbao_mount: tenant-acme
+  policy_ref: policies/tenants/acme/forge-access
+confidentiality:
+  denylist_ref: governance/tenants/acme/denylist.yaml
+  cross_tenant_isolation: enforced
+issue_venue:
+  kind: client-repo
+  repo: acme-example/product-workbench
+fleet_allocation:
+  seats: []
+  reviewer_identity: acme-reviewer
+  merging_bot: acme-merge-bot
+governance:
+  repo: acme-example/product-workbench
+  protections: reference
+  autonomy_tiers:
+    docs_class_automerge: false
+    tier_a: false
+    tier_b: false
+  ratified_by: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ratification_ref: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
