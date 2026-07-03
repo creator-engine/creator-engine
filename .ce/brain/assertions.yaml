@@ -3292,4 +3292,157 @@ records:
     evidence_ref: probe:pr_preflight_scrubs_credential_env
     probe: pr_preflight_scrubs_credential_env
     type: probe
+- claim:
+    details: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+      merge state or conflict repair failures escalate instead of silently landing.
+    evidence_sha256: b1ba5413d9fee2459c63e8d47463127e39a35875975cc338bd52ada9d73230de
+    item: 10
+    object: merge-queue-conflict-gate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 19f50f78eeb4c1498e92e9ffe544f181ec24a5b430498d9237aa371640d41fce
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-10-merge-queue-conflict-gate-v4
+  kind: brain-assertion
+  prev_hash: 74572a8d92e92eb0f8e9c0390e7a8ffce23438fc763cb708bbcbf0ee3ecc5869
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 126
+  statement: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+    merge state or conflict repair failures escalate instead of silently landing.
+  status: superseded
+  superseded_by: brain-assertion-d1b-10-merge-queue-conflict-gate-v5
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+      merge state or conflict repair failures escalate instead of silently landing.
+    item: 10
+    object: merge-queue-conflict-gate
+    predicate: asserts
+    subject: doctrine-item
+    verdict: present
+  content_hash: e4f766f2d38b76c8587d798cf68c928895153ed48136080f48b160cfb298eacb
+  evidence_ref: probe:integrator_belt_merge_queue_conflict_gate
+  id: brain-assertion-d1b-10-merge-queue-conflict-gate-v5
+  kind: brain-assertion
+  prev_hash: 19f50f78eeb4c1498e92e9ffe544f181ec24a5b430498d9237aa371640d41fce
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 127
+  statement: Merge-queue automation owns sequencing and merge mechanics, while non-clean
+    merge state or conflict repair failures escalate instead of silently landing.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: probe:integrator_belt_merge_queue_conflict_gate
+    probe: integrator_belt_merge_queue_conflict_gate
+    type: probe
+- claim:
+    details: A non-draft PR with current-head approval and green merge state is eligible
+      for autonomous queue or merge action; draft status is the hold mechanism.
+    evidence_sha256: b1ba5413d9fee2459c63e8d47463127e39a35875975cc338bd52ada9d73230de
+    item: 11
+    object: approval-green-triggers-queue
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 4192a2d69f5b4b417fa49eebd93d2a3cabb22c45d8321a99703c876442a42116
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-11-approval-green-triggers-queue-v4
+  kind: brain-assertion
+  prev_hash: e4f766f2d38b76c8587d798cf68c928895153ed48136080f48b160cfb298eacb
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 128
+  statement: A non-draft PR with current-head approval and green merge state is eligible
+    for autonomous queue or merge action; draft status is the hold mechanism.
+  status: superseded
+  superseded_by: brain-assertion-d1b-11-approval-green-triggers-queue-v5
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: A non-draft PR with current-head approval and green merge state is eligible
+      for autonomous queue or merge action; draft status is the hold mechanism.
+    item: 11
+    object: approval-green-triggers-queue
+    predicate: asserts
+    subject: doctrine-item
+    verdict: present
+  content_hash: 316eb9095a1952828d4620a14b0e9c463ce1c4c3319f781eacecd21ea34f14d2
+  evidence_ref: probe:integrator_belt_approval_green_triggers_queue
+  id: brain-assertion-d1b-11-approval-green-triggers-queue-v5
+  kind: brain-assertion
+  prev_hash: 4192a2d69f5b4b417fa49eebd93d2a3cabb22c45d8321a99703c876442a42116
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 129
+  statement: A non-draft PR with current-head approval and green merge state is eligible
+    for autonomous queue or merge action; draft status is the hold mechanism.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: probe:integrator_belt_approval_green_triggers_queue
+    probe: integrator_belt_approval_green_triggers_queue
+    type: probe
+- claim:
+    details: Merge readiness requires an APPROVED review decision tied to the current
+      head; stale or dismissed review states are not sufficient.
+    evidence_sha256: b1ba5413d9fee2459c63e8d47463127e39a35875975cc338bd52ada9d73230de
+    item: 12
+    object: approval-current-head-required
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 241bfad4b5594b85946d941eb292a9670c4351746c7bed602469457647e4fc84
+  evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+  id: brain-assertion-d1b-12-approval-current-head-required-v4
+  kind: brain-assertion
+  prev_hash: 316eb9095a1952828d4620a14b0e9c463ce1c4c3319f781eacecd21ea34f14d2
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 130
+  statement: Merge readiness requires an APPROVED review decision tied to the current
+    head; stale or dismissed review states are not sufficient.
+  status: superseded
+  superseded_by: brain-assertion-d1b-12-approval-current-head-required-v5
+  type: convention
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
+    type: static
+- claim:
+    details: Merge readiness requires an APPROVED review decision tied to the current
+      head; stale or dismissed review states are not sufficient.
+    item: 12
+    object: approval-current-head-required
+    predicate: asserts
+    subject: doctrine-item
+    verdict: present
+  content_hash: 3a07c2940ca1028ef9729f8897ba7b2d7acb9bbdac9c0b92b994eccc0b8840a9
+  evidence_ref: probe:integrator_belt_approval_current_head_required
+  id: brain-assertion-d1b-12-approval-current-head-required-v5
+  kind: brain-assertion
+  prev_hash: 241bfad4b5594b85946d941eb292a9670c4351746c7bed602469457647e4fc84
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 131
+  statement: Merge readiness requires an APPROVED review decision tied to the current
+    head; stale or dismissed review states are not sufficient.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: probe:integrator_belt_approval_current_head_required
+    probe: integrator_belt_approval_current_head_required
+    type: probe
 schema_version: '1'
