@@ -36,6 +36,16 @@ AUTOMERGE_ARMING_RUN_MODES: Final[frozenset[str]] = frozenset(
 AUTOMERGE_CANARY_WORK_CLASSES: Final[frozenset[str]] = frozenset(
     {normalize_work_class("tiny"), normalize_work_class("story")}
 )
+AUTOMERGE_TIER_CARRIER_CHANGELOG: Final[str] = "carrier_changelog_mechanical"
+AUTOMERGE_TIER_CARRIER_CHANGELOG_ENV: Final[str] = "CE_AUTOMERGE_TIER_CARRIER_CHANGELOG"
+AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE: Final[str] = (
+    ".ce/changelog,.ce/pr-manifests"
+)
+_CARRIER_CHANGELOG_PREFIXES: Final[tuple[str, str]] = (
+    ".ce/changelog/",
+    ".ce/pr-manifests/",
+)
+_AUTOMERGE_TIERS: Final[frozenset[str]] = frozenset({AUTOMERGE_TIER_CARRIER_CHANGELOG})
 
 
 class AutoMergePolicyStateError(Exception):
@@ -60,6 +70,23 @@ class AutoMergeClassPolicy:
 
 
 @dataclass(frozen=True)
+class AutoMergeTierPolicy:
+    """Per-tier automerge flag."""
+
+    auto_merge: bool = False
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> "AutoMergeTierPolicy":
+        auto_merge = payload.get("auto_merge", False)
+        if not isinstance(auto_merge, bool):
+            raise AutoMergePolicyStateError("tier auto_merge must be a boolean")
+        return cls(auto_merge=auto_merge)
+
+    def to_payload(self) -> dict[str, bool]:
+        return {"auto_merge": self.auto_merge}
+
+
+@dataclass(frozen=True)
 class AutoMergePolicyState:
     """Secret-free durable policy state, mirroring ``ApprovalWallState``."""
 
@@ -69,6 +96,12 @@ class AutoMergePolicyState:
         default_factory=lambda: {
             class_name: AutoMergeClassPolicy(auto_merge=False)
             for class_name in MUTATION_CLASSES
+        }
+    )
+    tiers: Mapping[str, AutoMergeTierPolicy] = field(
+        default_factory=lambda: {
+            tier_name: AutoMergeTierPolicy(auto_merge=False)
+            for tier_name in _AUTOMERGE_TIERS
         }
     )
     enabling_decision_ref: str | None = None
@@ -106,10 +139,26 @@ class AutoMergePolicyState:
                 raise AutoMergePolicyStateError("class policy must be an object")
             classes[str(class_name)] = AutoMergeClassPolicy.from_payload(raw_policy)
 
+        raw_tiers = payload.get("tiers", {})
+        if not isinstance(raw_tiers, Mapping):
+            raise AutoMergePolicyStateError("tiers must be an object")
+
+        tiers = {
+            tier_name: AutoMergeTierPolicy(auto_merge=False)
+            for tier_name in _AUTOMERGE_TIERS
+        }
+        for tier_name, raw_policy in raw_tiers.items():
+            if tier_name not in _AUTOMERGE_TIERS:
+                raise AutoMergePolicyStateError("tiers contains unknown automerge tier")
+            if not isinstance(raw_policy, Mapping):
+                raise AutoMergePolicyStateError("tier policy must be an object")
+            tiers[str(tier_name)] = AutoMergeTierPolicy.from_payload(raw_policy)
+
         return cls(
             run_mode=run_mode,
             kill_switch=kill_switch,
             classes=classes,
+            tiers=tiers,
             enabling_decision_ref=enabling_decision_ref,
         )
 
@@ -121,11 +170,19 @@ class AutoMergePolicyState:
                 class_name: policy.to_payload()
                 for class_name, policy in self.classes.items()
             },
+            "tiers": {
+                tier_name: policy.to_payload()
+                for tier_name, policy in self.tiers.items()
+            },
             "enabling_decision_ref": self.enabling_decision_ref,
         }
 
     def class_flag(self, mutation_class: str) -> bool:
         policy = self.classes.get(mutation_class)
+        return bool(policy.auto_merge) if policy is not None else False
+
+    def tier_flag(self, tier: str) -> bool:
+        policy = self.tiers.get(tier)
         return bool(policy.auto_merge) if policy is not None else False
 
 
@@ -146,7 +203,12 @@ class AutoMergeDecision:
     kill_switch: bool
     class_flag: bool
     enabling_decision_ref: str | None = None
+    tier: str | None = None
+    tier_flag: bool | None = None
+    path_envelope: str | None = None
+    changed_paths: tuple[str, ...] = ()
     review_decision: str | None = None
+    reviewer_venue: str | None = None
     checks_green: bool = False
     pr_number: int | None = None
     head_sha: str | None = None
@@ -184,7 +246,12 @@ class AutoMergeDecision:
             "kill_switch": self.kill_switch,
             "class_flag": self.class_flag,
             "enabling_decision_ref": self.enabling_decision_ref,
+            "tier": self.tier,
+            "tier_flag": self.tier_flag,
+            "path_envelope": self.path_envelope,
+            "changed_paths": list(self.changed_paths),
             "reviewDecision": self.review_decision,
+            "reviewer_venue": self.reviewer_venue,
             "checks_green": self.checks_green,
             "pr_number": self.pr_number,
             "head_sha": self.head_sha,
@@ -277,6 +344,7 @@ def update_automerge_policy_kill_switch(
         run_mode=current.run_mode,
         kill_switch=active,
         classes=current.classes,
+        tiers=current.tiers,
         enabling_decision_ref=current.enabling_decision_ref,
     )
     save_automerge_policy_state(path, updated)
@@ -289,6 +357,7 @@ def materialize_automerge_policy_state_from_variables(
     run_mode_variable: str | None = None,
     enabling_ref_variable: str | None = None,
     kill_switch_variable: str | None = None,
+    tier_carrier_changelog_variable: str | None = None,
 ) -> AutoMergePolicyState:
     """Write fail-safe automerge policy state from repository variable values.
 
@@ -305,6 +374,9 @@ def materialize_automerge_policy_state_from_variables(
         else AUTOMERGE_RUN_MODE_DEV
     )
     docs_auto_merge = run_mode in AUTOMERGE_ARMING_RUN_MODES
+    carrier_changelog_auto_merge = (
+        docs_auto_merge and _truthy_variable(tier_carrier_changelog_variable)
+    )
     enabling_ref = _non_empty_string_or_none(enabling_ref_variable)
     kill_switch = _truthy_variable(kill_switch_variable)
     state = AutoMergePolicyState(
@@ -315,6 +387,11 @@ def materialize_automerge_policy_state_from_variables(
                 auto_merge=class_name == "docs" and docs_auto_merge
             )
             for class_name in MUTATION_CLASSES
+        },
+        tiers={
+            AUTOMERGE_TIER_CARRIER_CHANGELOG: AutoMergeTierPolicy(
+                auto_merge=carrier_changelog_auto_merge
+            )
         },
         enabling_decision_ref=enabling_ref,
     )
@@ -371,6 +448,12 @@ def decide_automerge(
         declared_work_class = str(declared_work_class)
 
     mutation_class = mutation_class_for_paths(resolved_paths, resolved_policy)
+    tier = _tier_for_paths(resolved_paths, mutation_class)
+    tier_flag = (
+        resolved_state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG)
+        if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG
+        else None
+    )
     size_projection = _classify_size_fail_closed(resolved_numstat)
     size_band = str(size_projection["size_band"])
     minimum_work_class = str(size_projection["minimum_work_class"])
@@ -436,6 +519,8 @@ def decide_automerge(
         auto_blockers.append("class_auto_merge_false")
     if class_flag and not resolved_state.enabling_decision_ref:
         auto_blockers.append("enabling_decision_ref_missing")
+    if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG and not tier_flag:
+        auto_blockers.append("tier_carrier_changelog_false")
     if not _distinct_author_approver(author_login, approver_login):
         auto_blockers.append("author_approver_not_distinct")
 
@@ -461,6 +546,9 @@ def decide_automerge(
             base,
             author_login,
             approver_login,
+            resolved_paths,
+            tier,
+            tier_flag,
         )
 
     if mutation_class not in AUTO_CLASSES:
@@ -485,6 +573,9 @@ def decide_automerge(
             base,
             author_login,
             approver_login,
+            resolved_paths,
+            tier,
+            tier_flag,
         )
 
     rationale.append("all_auto_guards_passed")
@@ -508,6 +599,9 @@ def decide_automerge(
         base,
         author_login,
         approver_login,
+        resolved_paths,
+        tier,
+        tier_flag,
     )
 
 
@@ -582,6 +676,9 @@ def _decision(
     base: str | None,
     author_login: str | None,
     approver_login: str | None,
+    changed_paths: Sequence[str],
+    tier: str | None,
+    tier_flag: bool | None,
 ) -> AutoMergeDecision:
     return AutoMergeDecision(
         decision=decision,
@@ -597,7 +694,16 @@ def _decision(
         kill_switch=state.kill_switch,
         class_flag=state.class_flag(mutation_class),
         enabling_decision_ref=state.enabling_decision_ref,
+        tier=tier,
+        tier_flag=tier_flag,
+        path_envelope=(
+            AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE
+            if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG
+            else None
+        ),
+        changed_paths=tuple(str(path) for path in changed_paths),
         review_decision=review_decision,
+        reviewer_venue=_non_empty_string_or_none(approver_login),
         checks_green=checks_green,
         pr_number=pr_number,
         head_sha=head_sha,
@@ -697,6 +803,19 @@ def _truthy_variable(value: str | None) -> bool:
     if not isinstance(value, str):
         return False
     return value.strip().lower() in {"1", "true", "yes", "on", "kill", "halt"}
+
+
+def carrier_changelog_tier_matches(paths: Sequence[str]) -> bool:
+    resolved_paths = tuple(str(path).strip() for path in paths if str(path).strip())
+    return bool(resolved_paths) and all(
+        path.startswith(_CARRIER_CHANGELOG_PREFIXES) for path in resolved_paths
+    )
+
+
+def _tier_for_paths(paths: Sequence[str], mutation_class: str) -> str | None:
+    if mutation_class == "docs" and carrier_changelog_tier_matches(paths):
+        return AUTOMERGE_TIER_CARRIER_CHANGELOG
+    return None
 
 
 def _distinct_author_approver(author_login: str | None, approver_login: str | None) -> bool:
