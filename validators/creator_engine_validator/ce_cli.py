@@ -4209,6 +4209,61 @@ def _automerge_status(args) -> int:
     return 0
 
 
+def _press_merge_evidence(args) -> int:
+    """ce press-merge-evidence — canonical renderer; no PR or repo mutation."""
+
+    from .forge.press_merge_evidence import (
+        assemble_press_merge_evidence_from_files,
+        canonical_json_bytes,
+    )
+
+    try:
+        bundle = assemble_press_merge_evidence_from_files(
+            decision_file=args.decision_file,
+            paths_file=args.paths_file,
+            checks_json_file=getattr(args, "checks_json_file", None),
+            pr_json_file=getattr(args, "pr_json_file", None),
+            approval_witnesses_json_file=getattr(args, "approval_witnesses_json_file", None),
+            current_head_sha_observed=getattr(args, "current_head_sha", None),
+            repo_root=getattr(args, "repo_root", "."),
+            minted_at_utc=getattr(args, "minted_at_utc", None),
+            assembler_workflow=getattr(args, "assembler_workflow", None),
+            assembler_run_id=getattr(args, "assembler_run_id", None),
+            assembler_run_attempt=getattr(args, "assembler_run_attempt", None),
+            read_repo_sha=getattr(args, "read_repo_sha", None),
+            decision_artifact_name=getattr(args, "decision_artifact_name", None),
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: ce press-merge-evidence: {exc}", file=sys.stderr)
+        return 1
+
+    sys.stdout.buffer.write(canonical_json_bytes(bundle))
+    return 0
+
+
+def _press_merge_evidence_from_argv(argv: Sequence[str]) -> int:
+    """Hidden renderer entry: available to workflow, absent from public parser inventory."""
+
+    parser = argparse.ArgumentParser(
+        prog="ce press-merge-evidence",
+        description="Render a canonical read-only press-merge evidence bundle.",
+    )
+    parser.add_argument("--decision-file", required=True)
+    parser.add_argument("--paths-file", required=True)
+    parser.add_argument("--checks-json-file", default=None)
+    parser.add_argument("--pr-json-file", default=None)
+    parser.add_argument("--approval-witnesses-json-file", default=None)
+    parser.add_argument("--current-head-sha", default=None)
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--minted-at-utc", default=None)
+    parser.add_argument("--assembler-workflow", default=None)
+    parser.add_argument("--assembler-run-id", default=None)
+    parser.add_argument("--assembler-run-attempt", default=None)
+    parser.add_argument("--read-repo-sha", default=None)
+    parser.add_argument("--decision-artifact-name", default=None)
+    return _press_merge_evidence(parser.parse_args(argv))
+
+
 def _automerge_kill_switch(args) -> int:
     """ce automerge-kill-switch — read or toggle durable live-policy state."""
 
@@ -4843,6 +4898,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv = sys.argv[1:]
     if argv and argv[0] == "conveyor":
         return _conveyor_bridge(argv[1:])
+    if argv and argv[0] == "press-merge-evidence":
+        return _press_merge_evidence_from_argv(argv[1:])
     parser = _build_parser()
     args = parser.parse_args(argv)
     _maybe_print_startup_update_notice(args)
