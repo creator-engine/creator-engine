@@ -43,11 +43,11 @@ class FakeGit:
 
     def __call__(self, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
         self.calls.append((tuple(args), cwd))
-        if tuple(args) == ("push", "origin", "feature-one:feature-one"):
+        if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
             if self.push_returncode:
                 return ConveyorCommandResult(self.push_returncode, "", "push denied\n")
             return ConveyorCommandResult(0, "pushed\n", "")
-        if tuple(args) == ("push", "origin", "feature-two:feature-two"):
+        if tuple(args) == ("push", "--", "origin", "feature-two:feature-two"):
             return ConveyorCommandResult(0, "pushed\n", "")
         return ConveyorCommandResult(1, "", f"unexpected git call: {args}")
 
@@ -95,7 +95,8 @@ class FakePrepare:
 
 
 class FakeLand:
-    def __init__(self):
+    def __init__(self, branch_override: str | None = None):
+        self.branch_override = branch_override
         self.calls: list[tuple[Path, str, str, Path]] = []
 
     def __call__(
@@ -108,12 +109,13 @@ class FakeLand:
         git_runner,
     ) -> ConveyorBundleLandingResult:
         self.calls.append((bundle_path, branch_name, base_ref, repo_path))
+        landed_branch = self.branch_override or branch_name
         return ConveyorBundleLandingResult(
             ready=True,
             reasons=(),
             bundle_path=bundle_path,
-            branch=branch_name,
-            branch_slug=branch_name,
+            branch=landed_branch,
+            branch_slug=landed_branch,
             base_ref=base_ref,
             head_sha=HEAD_SHA,
             ahead=1,
@@ -212,7 +214,7 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert result.results[0].status == "pr-opened"
     assert prepare.calls[0].carrier_date == "2026-07-01"
     assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
-    assert git.calls == [(("push", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
+    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
     assert gh.calls == [
         (
             (
@@ -256,7 +258,7 @@ def test_per_item_failure_isolated_and_loop_continues():
 
     assert [item.status for item in result.results] == ["failed", "pr-opened"]
     assert result.results[0].reasons == ("prepare failed",)
-    assert git.calls == [(("push", "origin", "feature-two:feature-two"), Path("/tmp/landing"))]
+    assert git.calls == [(("push", "--", "origin", "feature-two:feature-two"), Path("/tmp/landing"))]
     assert len(gh.calls) == 1
     assert [record.branch for record in ledger] == ["feature-two", "feature-two"]
 
@@ -367,7 +369,7 @@ def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item()
     assert [item.status for item in result.results] == ["pr-opened"]
     assert [spec.branch for spec in prepare.calls] == ["Feature/One"]
     assert land.calls == [(Path("/tmp/feature-one.bundle"), "feature-one", "origin/main", Path("/tmp/landing"))]
-    assert git.calls == [(("push", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
+    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), Path("/tmp/landing"))]
     assert len(gh.calls) == 1
     assert any(
         "conveyor discovery payload audit" in message
@@ -472,7 +474,34 @@ def test_daemon_pinned_base_and_remote_used_for_item_objects():
 
     assert prepare.calls[0].base == "origin/main"
     assert land.calls[0][2] == "origin/main"
-    assert ("push", "origin", "feature-one:feature-one") in git_calls
+    assert ("push", "--", "origin", "feature-one:feature-one") in git_calls
+
+
+def test_gh_pr_title_and_body_leading_dashes_remain_flag_values():
+    gh = FakeGh()
+    item = dataclasses.replace(
+        _item(),
+        pr_title="--not-a-gh-flag",
+        pr_body="--still-free-text",
+    )
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(),
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    pr_args = gh.calls[0][0]
+    assert pr_args[pr_args.index("--title") + 1] == "--not-a-gh-flag"
+    assert pr_args[pr_args.index("--body") + 1] == "--still-free-text"
 
 
 def test_daemon_construction_rejects_dangerous_base():
@@ -489,6 +518,88 @@ def test_daemon_construction_rejects_dangerous_remote():
 
     with pytest.raises(ValueError):
         ConveyorDaemon(discovery_runner=lambda: [], remote="ext::sh -c 'touch /tmp/pwned'")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"base": "--main"},
+        {"remote": "--origin"},
+        {"base": "origin/feature branch"},
+        {"remote": "origin:evil"},
+    ],
+)
+def test_daemon_construction_rejects_ref_shape_violations(kwargs: dict[str, str]):
+    with pytest.raises(ValueError):
+        ConveyorDaemon(discovery_runner=lambda: [], **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("branch", "--feature", "must not start with '-'"),
+        ("branch", "feature topic", "disallowed in git refs"),
+        ("branch", "feature..topic", "must not contain '..'"),
+        ("branch", "feature.lock", "must not end with '.lock'"),
+        ("pr_base", "--release", "must not start with '-'"),
+        ("pr_base", "release topic", "disallowed in git refs"),
+    ],
+)
+def test_hostile_item_ref_shape_is_rejected_before_git_or_gh(field: str, value: str, reason: str):
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+
+    hostile_item = dataclasses.replace(_item(), **{field: value})
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [hostile_item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=land,
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert any(field in rejected and reason in rejected for rejected in result.results[0].reasons)
+    assert prepare.calls == []
+    assert land.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+
+
+def test_landed_branch_shape_is_rejected_before_push_or_pr_open():
+    prepare = FakePrepare()
+    land = FakeLand(branch_override="feature topic")
+    git = FakeGit()
+    gh = FakeGh()
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [_item()],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=land,
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].landing_result is not None
+    assert any("landed.branch" in reason and "disallowed in git refs" in reason for reason in result.results[0].reasons)
+    assert len(prepare.calls) == 1
+    assert len(land.calls) == 1
+    assert git.calls == []
+    assert gh.calls == []
 
 
 def test_idempotent_re_discovery_skips_completed_item():
@@ -754,7 +865,7 @@ def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
         assert land.calls[0][0] != symlink_bundle
         assert land.calls[0][3] != symlink_repo
 
-        assert git.calls == [(("push", "origin", "feature-one:feature-one"), real_repo)]
+        assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), real_repo)]
         assert all(cwd != symlink_repo for _, cwd in git.calls)
 
         assert len(gh.calls) == 1

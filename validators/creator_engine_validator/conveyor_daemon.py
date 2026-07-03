@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -291,10 +292,10 @@ class ConveyorDaemon:
         # Defense-in-depth: even this trusted config value is rejected here
         # if it is shaped like a git argv-injection gadget, so a
         # misconfigured/compromised launcher can't smuggle one in either.
-        self.base: str = _reject_git_argv_gadget(
+        self.base: str = _reject_git_ref_shape(
             str(base) if base is not None else DEFAULT_BASE, label="base"
         )
-        self.remote: str = _reject_git_argv_gadget(
+        self.remote: str = _reject_git_ref_shape(
             str(remote) if remote is not None else DEFAULT_REMOTE, label="remote"
         )
         # repo_root/bundle_root are the trusted confinement anchors for item
@@ -474,8 +475,20 @@ class ConveyorDaemon:
                 reasons = tuple(f"{reason.code}: {reason.message}" for reason in landed.reasons)
                 return self._failed(item, reasons, prepare_result=prepared, landing_result=landed, ledger_records=records)
 
+            try:
+                _reject_git_ref_shape(landed.branch, label="landed.branch")
+            except ValueError as exc:
+                return self._failed(
+                    item,
+                    (str(exc),),
+                    prepare_result=prepared,
+                    landing_result=landed,
+                    ledger_records=records,
+                )
+
+            push_args = _git_push_args(self.remote, landed.branch)
             push_result = _coerce_result(
-                self.git_runner(["push", self.remote, f"{landed.branch}:{landed.branch}"], item.repo_path)
+                self.git_runner(push_args, item.repo_path)
             )
             records.append(
                 self._record_mutation(
@@ -483,7 +496,7 @@ class ConveyorDaemon:
                     path=f"{self.remote}/{landed.branch}",
                     sha=landed.head_sha or "",
                     branch=landed.branch,
-                    command=("git", "push", self.remote, f"{landed.branch}:{landed.branch}"),
+                    command=("git", *push_args),
                     result=push_result,
                 )
             )
@@ -574,6 +587,11 @@ class ConveyorDaemon:
             except ValueError as exc:
                 violations.append(str(exc))
 
+        try:
+            _reject_git_ref_shape(item.branch, label="branch")
+        except ValueError as exc:
+            violations.append(str(exc))
+
         # pr_base is not a filesystem path, but it flows into a fixed
         # flag-value slot (`gh pr create --base <pr_base>`); it is not RCE
         # (the value can never be reinterpreted as another flag or as a
@@ -582,7 +600,7 @@ class ConveyorDaemon:
         # dangerous shapes defense-in-depth.
         if item.pr_base is not None:
             try:
-                _reject_git_argv_gadget(item.pr_base, label="pr_base")
+                _reject_git_ref_shape(item.pr_base, label="pr_base")
             except ValueError as exc:
                 violations.append(str(exc))
 
@@ -694,12 +712,47 @@ def _pr_create_args(
     )
 
 
+def _git_push_args(remote: str, branch: str) -> list[str]:
+    return ["push", "--", remote, f"{branch}:{branch}"]
+
+
 def _pr_base(base: str, item: ConveyorDaemonItem) -> str:
     if item.pr_base:
         return item.pr_base
     if "/" in base:
         return base.rsplit("/", 1)[1]
     return base
+
+
+_GIT_REF_FORBIDDEN = re.compile(r"[\000-\037\177 ~^:?*\[\\]")
+
+
+def _reject_git_ref_shape(value: str, *, label: str) -> str:
+    """Fail closed for ref-like values that reach git/gh argv.
+
+    This intentionally mirrors the practical shape constraints from
+    ``git check-ref-format`` without shelling out during daemon audits.
+    """
+
+    value = _reject_git_argv_gadget(value, label=label)
+    if _GIT_REF_FORBIDDEN.search(value):
+        raise ValueError(f"{label} contains a character disallowed in git refs: {value!r}")
+    if ".." in value:
+        raise ValueError(f"{label} must not contain '..' (git ref traversal shape): {value!r}")
+    if "@{" in value or value == "@":
+        raise ValueError(f"{label} must not contain git ref reflog syntax: {value!r}")
+    if value.startswith("/") or value.endswith("/") or "//" in value:
+        raise ValueError(f"{label} must not have leading, trailing, or repeated '/': {value!r}")
+    if value.endswith("."):
+        raise ValueError(f"{label} must not end with '.': {value!r}")
+    for component in value.split("/"):
+        if not component:
+            raise ValueError(f"{label} must not contain an empty ref component: {value!r}")
+        if component.startswith("."):
+            raise ValueError(f"{label} ref components must not start with '.': {value!r}")
+        if component.endswith(".lock"):
+            raise ValueError(f"{label} ref components must not end with '.lock': {value!r}")
+    return value
 
 
 def _reject_git_argv_gadget(value: str, *, label: str) -> str:
