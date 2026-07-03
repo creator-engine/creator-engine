@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import shutil
+import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -564,12 +565,12 @@ def test_daemon_pinned_validate_command_used_for_item_objects():
         ledger_writer=lambda record: None,
         prepare_runner=prepare,
         land_runner=FakeLand(),
-        validate_command=("python", "-m", "creator_engine_validator.ce_cli", "validate-pr"),
+        validate_command=(sys.executable, "-m", "creator_engine_validator.ce_cli", "validate-pr"),
     )
     daemon.run_once()
 
     assert prepare.calls[0].validate_command == (
-        "python",
+        sys.executable,
         "-m",
         "creator_engine_validator.ce_cli",
         "validate-pr",

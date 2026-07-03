@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -21,7 +22,7 @@ from .checks.path_manifest_fidelity import branch_slug
 
 OLD_WORK_CLASSES = frozenset({"tiny", "story", "feature", "epic"})
 DEFAULT_VALIDATE_COMMAND = (
-    "python",
+    sys.executable,
     "-m",
     "creator_engine_validator.ce_cli",
     "validate-pr",
@@ -456,7 +457,7 @@ def _run_validation(
     ]
     if spec.allow_dirty_validation:
         command.append("--allow-dirty")
-    env = {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp"}
+    env = {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp", "PATH": _MINIMAL_GIT_PATH}
     return _coerce_result(runner(command, root, env))
 
 

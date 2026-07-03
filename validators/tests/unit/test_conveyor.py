@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -154,7 +155,7 @@ def test_prepare_harvest_renames_branch_cleans_artifacts_writes_carriers_and_val
     assert validate.calls == [
         (
             (
-                "python",
+                sys.executable,
                 "-m",
                 "creator_engine_validator.ce_cli",
                 "validate-pr",
@@ -169,7 +170,7 @@ def test_prepare_harvest_renames_branch_cleans_artifacts_writes_carriers_and_val
                 "--allow-dirty",
             ),
             root,
-            {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp"},
+            {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"},
         )
     ]
     assert not (root / "validators" / "build").exists()
@@ -352,7 +353,7 @@ def test_default_git_runner_uses_explicit_scrubbed_env(monkeypatch: pytest.Monke
 
 def test_default_validate_runner_uses_only_passed_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     captured: dict[str, Mapping[str, str]] = {}
-    allowed_env = {"PYTHONPATH": str(tmp_path / "validators"), "TMPDIR": "/var/tmp"}
+    allowed_env = {"PYTHONPATH": str(tmp_path / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"}
 
     monkeypatch.setenv("GH_TOKEN", "ambient-secret")
 
@@ -362,7 +363,27 @@ def test_default_validate_runner_uses_only_passed_env(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("creator_engine_validator.conveyor.subprocess.run", fake_run)
 
-    result = _default_validate_runner(["python", "-m", "validator"], tmp_path, allowed_env)
+    result = _default_validate_runner([sys.executable, "-m", "validator"], tmp_path, allowed_env)
 
     assert result.returncode == 0
     assert captured["env"] == allowed_env
+
+
+def test_default_validate_runner_resolves_current_interpreter_with_scrubbed_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    monkeypatch.setenv("GH_TOKEN", "ambient-secret")
+
+    result = _default_validate_runner(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.environ.get('GH_TOKEN', '')); print(os.environ['PATH'])",
+        ],
+        tmp_path,
+        {"PYTHONPATH": str(tmp_path / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"},
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["", "/usr/bin:/bin"]
