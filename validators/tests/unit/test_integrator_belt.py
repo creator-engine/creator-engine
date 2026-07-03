@@ -104,9 +104,11 @@ class RecordingGitSpawn:
     def __init__(self, *, fail_on: str | None = None) -> None:
         self.fail_on = fail_on
         self.calls: list[list[str]] = []
+        self.envs: list[dict[str, str]] = []
 
     def __call__(self, argv, input_text, env):
         self.calls.append(list(argv))
+        self.envs.append(dict(env or {}))
         if self.fail_on and self.fail_on in " ".join(str(part) for part in argv):
             return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="forced failure")
         return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
@@ -426,6 +428,68 @@ def test_live_adapter_cleans_failed_prepare_by_receipt(tmp_path: Path):
     assert cleaned[0]["allocation_id"] == allocated[0]["allocation_id"]
     assert cleaned[0]["cleanup_removed"] is True
     assert not any(allocator.roots.workspace_root.iterdir())
+
+
+def _credential_env_keys(env: dict[str, str]) -> set[str]:
+    keys: set[str] = set()
+    for key, value in env.items():
+        upper_key = key.upper()
+        if upper_key in {"GIT_ASKPASS", "GIT_CREDENTIAL_HELPER", "GIT_SSH", "GIT_SSH_COMMAND", "SSH_AUTH_SOCK"}:
+            keys.add(key)
+        if upper_key.startswith(("GH_", "GITHUB_", "SSH_")):
+            keys.add(key)
+        if upper_key.startswith("GIT_CONFIG_KEY_") and value.strip().lower() == "credential.helper":
+            keys.add(key)
+        if upper_key.startswith("GIT_CONFIG_VALUE_") and "credential.helper" in value.lower():
+            keys.add(key)
+    return keys
+
+
+def test_live_adapter_splits_git_env_by_transport_phase(tmp_path: Path):
+    allocator = belt.DaemonPathAllocator(_runtime_roots(tmp_path))
+    transport_context = belt.TransportCredentialContext.from_token(
+        "ghp_fake",
+        ambient_env={"PATH": "/usr/bin", "SSH_AUTH_SOCK": "/tmp/agent.sock"},
+    )
+    local_git_context = belt.LocalGitContext.from_sandbox(
+        allocator.roots.runtime_root / "local-git",
+        ambient_env={
+            "PATH": "/usr/bin",
+            "GH_TOKEN": "ghp_forbidden",
+            "GITHUB_TOKEN": "github_forbidden",
+            "SSH_AUTH_SOCK": "/tmp/agent.sock",
+        },
+    )
+    spawn = RecordingGitSpawn()
+    adapter = belt.LiveGitHubRepairAdapter(
+        allocator=allocator,
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(list(argv), 0, stdout="{}", stderr=""),
+        git_spawn=spawn,
+        transport_context=transport_context,
+        local_git_context=local_git_context,
+    )
+
+    root = adapter._prepare_workspace(_identity())
+    adapter._git(root, ["status", "--short"], purpose="inspect local status")
+    adapter._git(root, ["ls-remote", "origin"], purpose="inspect transport remote")
+
+    assert spawn.calls
+    transport_verbs = {"fetch", "push", "ls-remote"}
+    transport_seen: list[str] = []
+    local_seen: list[str] = []
+    for argv, env in zip(spawn.calls, spawn.envs, strict=True):
+        verb = argv[3]
+        if verb in transport_verbs:
+            transport_seen.append(verb)
+            assert env["GH_TOKEN"] == "ghp_fake"
+        else:
+            local_seen.append(verb)
+            assert _credential_env_keys(env) == set()
+            assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+            assert env["GIT_CONFIG_VALUE_0"] == "/dev/null"
+
+    assert transport_seen == ["fetch", "fetch", "ls-remote"]
+    assert {"init", "config", "remote", "checkout", "status"}.issubset(set(local_seen))
 
 
 def _check(

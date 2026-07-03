@@ -46,6 +46,7 @@ from .authority_contexts import (
     LocalGitContext,
     TransportCredentialContext,
     gh_runner_from_transport_context,
+    git_env_from_local_context,
     git_env_from_transport_context,
 )
 from .auto_merge import enable_auto_merge
@@ -2065,13 +2066,17 @@ class LiveGitHubRepairAdapter:
         self.gh_runner = gh_runner or _default_gh_runner
         self.git_spawn = git_spawn or _default_git_spawn
         self.transport_context = transport_context
+        if local_git_context is None:
+            local_git_context = LocalGitContext.from_sandbox(allocator.roots.runtime_root / "local-git")
         self.local_git_context = local_git_context
         if git_env is not None:
-            self.git_env = dict(git_env)
+            self.transport_git_env = dict(git_env)
         elif transport_context is not None:
-            self.git_env = dict(git_env_from_transport_context(transport_context))
+            self.transport_git_env = dict(git_env_from_transport_context(transport_context))
         else:
-            self.git_env = dict(os.environ)
+            self.transport_git_env = dict(os.environ)
+        self.local_git_env = dict(git_env_from_local_context(local_git_context))
+        self.git_env = self.transport_git_env
         self.log_sink = log_sink
         self._workspace: Path | None = None
         self._workspace_allocation: DaemonPathAllocation | None = None
@@ -2311,12 +2316,17 @@ class LiveGitHubRepairAdapter:
     ) -> subprocess.CompletedProcess:
         argv = ["git", "-C", str(cwd), *args]
         _log(self.log_sink, "git", purpose=purpose, argv=_redacted_argv(argv))
-        proc = self.git_spawn(argv, None, self.git_env)
+        proc = self.git_spawn(argv, None, self._git_env_for_args(args))
         if proc.returncode != 0 and not allow_nonzero:
             raise ForgeConfigError(
                 f"git failed while trying to {purpose}: {redact_gh_stderr(proc.stderr or '') or 'unknown error'}"
             )
         return proc
+
+    def _git_env_for_args(self, args: Sequence[str]) -> Mapping[str, str]:
+        if args and args[0] in {"fetch", "push", "ls-remote"}:
+            return self.transport_git_env
+        return self.local_git_env
 
 
 def make_live_action_runner(
