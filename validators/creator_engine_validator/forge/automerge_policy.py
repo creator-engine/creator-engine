@@ -8,11 +8,14 @@ GitHub mutations.
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+from .. import brain_runtime
+from ..checks import ce_brain_drift
 from ..checks.work_sizing_floor import ChangeStat, classify_change_size
 from ..work_sizing import MUTATION_CLASSES, normalize_work_class, size_ceremony
 from .mutation_classifier import (
@@ -41,11 +44,20 @@ AUTOMERGE_TIER_CARRIER_CHANGELOG_ENV: Final[str] = "CE_AUTOMERGE_TIER_CARRIER_CH
 AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE: Final[str] = (
     ".ce/changelog,.ce/pr-manifests"
 )
+AUTOMERGE_TIER_BRAIN_SUPERSEDE: Final[str] = "brain_ledger_supersede"
+AUTOMERGE_TIER_BRAIN_SUPERSEDE_ENV: Final[str] = "CE_AUTOMERGE_TIER_BRAIN_SUPERSEDE"
+AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE: Final[str] = (
+    ".ce/brain/assertions.yaml,.ce/changelog,.ce/pr-manifests"
+)
 _CARRIER_CHANGELOG_PREFIXES: Final[tuple[str, str]] = (
     ".ce/changelog/",
     ".ce/pr-manifests/",
 )
-_AUTOMERGE_TIERS: Final[frozenset[str]] = frozenset({AUTOMERGE_TIER_CARRIER_CHANGELOG})
+_BRAIN_LEDGER_PATH: Final[str] = ".ce/brain/assertions.yaml"
+_AUTOMERGE_TIERS: Final[frozenset[str]] = frozenset(
+    {AUTOMERGE_TIER_CARRIER_CHANGELOG, AUTOMERGE_TIER_BRAIN_SUPERSEDE}
+)
+_CHAIN_FIELDS: Final[frozenset[str]] = frozenset({"sequence", "prev_hash", "content_hash"})
 
 
 class AutoMergePolicyStateError(Exception):
@@ -218,6 +230,8 @@ class AutoMergeDecision:
     required_checks: tuple[str, ...] = ()
     author_login: str | None = None
     approver_login: str | None = None
+    ledger_evidence: Mapping[str, Any] | None = None
+    ledger_inputs: Mapping[str, Any] | None = None
 
     @property
     def is_auto(self) -> bool:
@@ -261,6 +275,8 @@ class AutoMergeDecision:
             "required_checks": list(self.required_checks),
             "author_login": self.author_login,
             "approver_login": self.approver_login,
+            "ledger_evidence": _jsonable(self.ledger_evidence),
+            "ledger_inputs": _jsonable(self.ledger_inputs),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -358,6 +374,7 @@ def materialize_automerge_policy_state_from_variables(
     enabling_ref_variable: str | None = None,
     kill_switch_variable: str | None = None,
     tier_carrier_changelog_variable: str | None = None,
+    tier_brain_supersede_variable: str | None = None,
 ) -> AutoMergePolicyState:
     """Write fail-safe automerge policy state from repository variable values.
 
@@ -377,6 +394,9 @@ def materialize_automerge_policy_state_from_variables(
     carrier_changelog_auto_merge = (
         docs_auto_merge and _truthy_variable(tier_carrier_changelog_variable)
     )
+    brain_supersede_auto_merge = (
+        docs_auto_merge and _truthy_variable(tier_brain_supersede_variable)
+    )
     enabling_ref = _non_empty_string_or_none(enabling_ref_variable)
     kill_switch = _truthy_variable(kill_switch_variable)
     state = AutoMergePolicyState(
@@ -391,7 +411,10 @@ def materialize_automerge_policy_state_from_variables(
         tiers={
             AUTOMERGE_TIER_CARRIER_CHANGELOG: AutoMergeTierPolicy(
                 auto_merge=carrier_changelog_auto_merge
-            )
+            ),
+            AUTOMERGE_TIER_BRAIN_SUPERSEDE: AutoMergeTierPolicy(
+                auto_merge=brain_supersede_auto_merge
+            ),
         },
         enabling_decision_ref=enabling_ref,
     )
@@ -418,6 +441,9 @@ def decide_automerge(
     run_mode: str | None = None,
     author_login: str | None = None,
     approver_login: str | None = None,
+    brain_ledger_base_text: str | None = None,
+    brain_ledger_head_text: str | None = None,
+    repo_root: str | Path = ".",
 ) -> AutoMergeDecision:
     """Return an ``AUTO`` or ``GESTURE`` decision without side effects."""
 
@@ -428,6 +454,7 @@ def decide_automerge(
             run_mode=str(run_mode),
             kill_switch=resolved_state.kill_switch,
             classes=resolved_state.classes,
+            tiers=resolved_state.tiers,
             enabling_decision_ref=resolved_state.enabling_decision_ref,
         )
     resolved_paths = tuple(paths if paths is not None else (changed_paths or ()))
@@ -449,18 +476,39 @@ def decide_automerge(
 
     mutation_class = mutation_class_for_paths(resolved_paths, resolved_policy)
     tier = _tier_for_paths(resolved_paths, mutation_class)
-    tier_flag = (
-        resolved_state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG)
-        if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG
-        else None
-    )
+    tier_flag = resolved_state.tier_flag(tier) if tier is not None else None
+    ledger_evidence: Mapping[str, Any] | None = None
+    ledger_inputs: Mapping[str, Any] | None = None
+    brain_predicate_reason: str | None = None
+    if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
+        ledger_pair = _resolve_brain_ledger_pair(
+            repo_root=repo_root,
+            base=base,
+            head_sha=head_sha,
+            base_text=brain_ledger_base_text,
+            head_text=brain_ledger_head_text,
+        )
+        if ledger_pair is None:
+            brain_predicate_reason = "tier_brain_supersede_ledger_inputs_missing"
+        else:
+            old_records, new_records = ledger_pair
+            ledger_inputs = {"old_records": old_records, "new_records": new_records}
+            ledger_evidence, brain_predicate_reason = brain_supersede_tier_evidence(
+                resolved_paths,
+                declared_work_class=declared_work_class,
+                old_records=old_records,
+                new_records=new_records,
+            )
     size_projection = _classify_size_fail_closed(resolved_numstat)
     size_band = str(size_projection["size_band"])
     minimum_work_class = str(size_projection["minimum_work_class"])
     gates: tuple[str, ...] = ()
 
+    ceremony_mutation_class = (
+        "docs" if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE and ledger_evidence else mutation_class
+    )
     try:
-        ceremony = size_ceremony(declared_work_class, mutation_class)
+        ceremony = size_ceremony(declared_work_class, ceremony_mutation_class)
         gates = tuple(str(gate) for gate in ceremony["ratification_gates"])
     except (KeyError, ValueError):
         rationale.append("size_ceremony refused the declared class or mutation class")
@@ -484,11 +532,20 @@ def decide_automerge(
             base,
             author_login,
             approver_login,
+            resolved_paths,
+            tier,
+            tier_flag,
+            ledger_evidence,
+            ledger_inputs,
         )
 
     checks_green = _checks_all_green(checks, required_checks=resolved_policy.required_checks)
     gates_auto_only = gates == ("auto_back_gate",)
-    class_flag = resolved_state.class_flag(mutation_class)
+    class_flag = (
+        resolved_state.class_flag("docs")
+        if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE
+        else resolved_state.class_flag(mutation_class)
+    )
 
     rationale.append(f"mutation_class={mutation_class}")
     rationale.append(f"size_band={size_band}")
@@ -507,7 +564,7 @@ def decide_automerge(
         auto_blockers.append("size_band_split_required")
     if declared_work_class not in AUTOMERGE_CANARY_WORK_CLASSES:
         auto_blockers.append("work_class_outside_canary")
-    if mutation_class in GESTURE_CLASSES:
+    if mutation_class in GESTURE_CLASSES and tier != AUTOMERGE_TIER_BRAIN_SUPERSEDE:
         auto_blockers.append("gesture_class")
     if resolved_state.kill_switch:
         auto_blockers.append("kill_switch")
@@ -521,6 +578,11 @@ def decide_automerge(
         auto_blockers.append("enabling_decision_ref_missing")
     if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG and not tier_flag:
         auto_blockers.append("tier_carrier_changelog_false")
+    if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
+        if not tier_flag:
+            auto_blockers.append("tier_brain_supersede_false")
+        if brain_predicate_reason is not None:
+            auto_blockers.append(brain_predicate_reason)
     if not _distinct_author_approver(author_login, approver_login):
         auto_blockers.append("author_approver_not_distinct")
 
@@ -549,9 +611,11 @@ def decide_automerge(
             resolved_paths,
             tier,
             tier_flag,
+            ledger_evidence,
+            ledger_inputs,
         )
 
-    if mutation_class not in AUTO_CLASSES:
+    if mutation_class not in AUTO_CLASSES and tier != AUTOMERGE_TIER_BRAIN_SUPERSEDE:
         rationale.append("not_in_auto_classes")
         return _decision(
             AUTOMERGE_DECISION_GESTURE,
@@ -576,6 +640,8 @@ def decide_automerge(
             resolved_paths,
             tier,
             tier_flag,
+            ledger_evidence,
+            ledger_inputs,
         )
 
     rationale.append("all_auto_guards_passed")
@@ -602,6 +668,8 @@ def decide_automerge(
         resolved_paths,
         tier,
         tier_flag,
+        ledger_evidence,
+        ledger_inputs,
     )
 
 
@@ -622,6 +690,9 @@ def emit_automerge_dry_run_decision(
     run_mode: str | None = None,
     author_login: str | None = None,
     approver_login: str | None = None,
+    brain_ledger_base_text: str | None = None,
+    brain_ledger_head_text: str | None = None,
+    repo_root: str | Path = ".",
 ) -> AutoMergeDecision:
     """Write a dry-run decision JSON record and return the decision."""
 
@@ -642,6 +713,9 @@ def emit_automerge_dry_run_decision(
         run_mode=run_mode,
         author_login=author_login,
         approver_login=approver_login,
+        brain_ledger_base_text=brain_ledger_base_text,
+        brain_ledger_head_text=brain_ledger_head_text,
+        repo_root=repo_root,
     )
     decisions_dir = Path(output_dir) if output_dir is not None else Path(resolved_policy.decisions_dir)
     decisions_dir.mkdir(parents=True, exist_ok=True)
@@ -679,6 +753,8 @@ def _decision(
     changed_paths: Sequence[str],
     tier: str | None,
     tier_flag: bool | None,
+    ledger_evidence: Mapping[str, Any] | None = None,
+    ledger_inputs: Mapping[str, Any] | None = None,
 ) -> AutoMergeDecision:
     return AutoMergeDecision(
         decision=decision,
@@ -692,13 +768,19 @@ def _decision(
         checks_snapshot=checks_snapshot,
         run_mode=state.run_mode,
         kill_switch=state.kill_switch,
-        class_flag=state.class_flag(mutation_class),
+        class_flag=(
+            state.class_flag("docs")
+            if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE
+            else state.class_flag(mutation_class)
+        ),
         enabling_decision_ref=state.enabling_decision_ref,
         tier=tier,
         tier_flag=tier_flag,
         path_envelope=(
             AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE
             if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG
+            else AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE
+            if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE
             else None
         ),
         changed_paths=tuple(str(path) for path in changed_paths),
@@ -713,6 +795,8 @@ def _decision(
         required_checks=tuple(policy.required_checks),
         author_login=_non_empty_string_or_none(author_login),
         approver_login=_non_empty_string_or_none(approver_login),
+        ledger_evidence=ledger_evidence,
+        ledger_inputs=ledger_inputs,
     )
 
 
@@ -812,10 +896,178 @@ def carrier_changelog_tier_matches(paths: Sequence[str]) -> bool:
     )
 
 
+def brain_supersede_path_envelope_matches(paths: Sequence[str]) -> bool:
+    resolved_paths = tuple(str(path).strip() for path in paths if str(path).strip())
+    if len(resolved_paths) != len(paths) or len(set(resolved_paths)) != 3:
+        return False
+    changelogs = [path for path in resolved_paths if _single_child_md(path, ".ce/changelog")]
+    manifests = [path for path in resolved_paths if _single_child_md(path, ".ce/pr-manifests")]
+    return (
+        _BRAIN_LEDGER_PATH in resolved_paths
+        and len(changelogs) == 1
+        and len(manifests) == 1
+        and Path(changelogs[0]).name == Path(manifests[0]).name
+    )
+
+
+def brain_supersede_tier_evidence(
+    paths: Sequence[str],
+    *,
+    declared_work_class: str,
+    old_records: Sequence[Mapping[str, Any]],
+    new_records: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any] | None, str | None]:
+    if not brain_supersede_path_envelope_matches(paths):
+        return None, "tier_brain_supersede_path_predicate_failed"
+    if declared_work_class != "XS":
+        return None, "tier_brain_supersede_work_class_not_xs"
+
+    try:
+        old = [dict(record) for record in old_records]
+        new = [dict(record) for record in new_records]
+    except (TypeError, ValueError):
+        return None, "tier_brain_supersede_ledger_inputs_invalid"
+
+    if brain_runtime.validate_records(old, "<automerge-tier-b-old>"):
+        return None, "tier_brain_supersede_old_ledger_invalid"
+    if brain_runtime.validate_records(new, "<automerge-tier-b-new>"):
+        return None, "tier_brain_supersede_new_ledger_invalid"
+    if len(new) <= len(old):
+        return None, "tier_brain_supersede_not_append_only"
+    if new[: len(old)] != old:
+        return None, "tier_brain_supersede_existing_record_mutation"
+
+    appended = new[len(old) :]
+    if len(appended) != 2:
+        return None, "tier_brain_supersede_not_single_chain"
+
+    tombstone, active = appended
+    tombstone_id = tombstone.get("id")
+    active_id = active.get("id")
+    old_latest = _latest_by_id(old)
+    old_target = old_latest.get(str(tombstone_id))
+    if old_target is None or old_target.get("status") != "active":
+        return None, "tier_brain_supersede_target_not_active"
+    if tombstone.get("status") != "superseded" or tombstone.get("superseded_by") != active_id:
+        return None, "tier_brain_supersede_tombstone_invalid"
+    if active.get("status") != "active" or active.get("superseded_by") is not None:
+        return None, "tier_brain_supersede_active_record_invalid"
+    if not isinstance(active_id, str) or active_id == tombstone_id:
+        return None, "tier_brain_supersede_active_record_invalid"
+    if _without_chain_and_supersede_fields(tombstone) != _without_chain_and_supersede_fields(old_target):
+        return None, "tier_brain_supersede_prior_record_mutation"
+
+    if tombstone.get("sequence") != len(old) or active.get("sequence") != len(old) + 1:
+        return None, "tier_brain_supersede_sequence_not_contiguous"
+    expected_prev = old[-1].get("content_hash") if old else brain_runtime.GENESIS_PREV_HASH
+    if tombstone.get("prev_hash") != expected_prev:
+        return None, "tier_brain_supersede_prev_hash_invalid"
+    if active.get("prev_hash") != tombstone.get("content_hash"):
+        return None, "tier_brain_supersede_prev_hash_invalid"
+
+    old_active_count = _active_count(old)
+    new_active_count = _active_count(new)
+    appended_active_count = sum(1 for record in appended if record.get("status") == "active")
+    expected_active_count = old_active_count - 1 + appended_active_count
+    if new_active_count != expected_active_count:
+        return None, "tier_brain_supersede_active_count_mismatch"
+
+    return (
+        {
+            "old_record_count": len(old),
+            "new_record_count": len(new),
+            "old_active_count": old_active_count,
+            "new_active_count": new_active_count,
+            "old_head_content_hash": old[-1].get("content_hash") if old else None,
+            "new_head_content_hash": new[-1].get("content_hash") if new else None,
+            "superseded_assertion_ids": [str(tombstone_id)],
+        },
+        None,
+    )
+
+
 def _tier_for_paths(paths: Sequence[str], mutation_class: str) -> str | None:
+    if brain_supersede_path_envelope_matches(paths):
+        return AUTOMERGE_TIER_BRAIN_SUPERSEDE
     if mutation_class == "docs" and carrier_changelog_tier_matches(paths):
         return AUTOMERGE_TIER_CARRIER_CHANGELOG
     return None
+
+
+def _single_child_md(path: str, parent: str) -> bool:
+    prefix = f"{parent}/"
+    return path.startswith(prefix) and "/" not in path[len(prefix) :] and path.endswith(".md")
+
+
+def _resolve_brain_ledger_pair(
+    *,
+    repo_root: str | Path,
+    base: str | None,
+    head_sha: str | None,
+    base_text: str | None,
+    head_text: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    try:
+        old_text = base_text if base_text is not None else _git_show_ledger(repo_root, base)
+        new_text = head_text if head_text is not None else _head_ledger_text(repo_root, head_sha)
+        if old_text is None or new_text is None:
+            return None
+        return (
+            brain_runtime.load_ledger_text(old_text),
+            brain_runtime.load_ledger_text(new_text),
+        )
+    except (brain_runtime.BrainLedgerInvalid, OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def _head_ledger_text(repo_root: str | Path, head_sha: str | None) -> str | None:
+    if isinstance(head_sha, str) and head_sha.strip():
+        text = _git_show_ledger(repo_root, head_sha.strip())
+        if text is not None:
+            return text
+    path = Path(repo_root) / _BRAIN_LEDGER_PATH
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _git_show_ledger(repo_root: str | Path, ref: str | None) -> str | None:
+    if not isinstance(ref, str) or not ref.strip():
+        return None
+    candidates = [ref.strip()]
+    if "/" not in ref and not ref.startswith("origin/"):
+        candidates.insert(0, f"origin/{ref}")
+    for candidate in candidates:
+        proc = subprocess.run(
+            ["git", "show", f"{candidate}:{_BRAIN_LEDGER_PATH}"],
+            cwd=Path(repo_root),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+    return None
+
+
+def _latest_by_id(records: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
+    latest: dict[str, Mapping[str, Any]] = {}
+    for record in records:
+        rid = record.get("id")
+        if isinstance(rid, str):
+            latest[rid] = record
+    return latest
+
+
+def _active_count(records: Sequence[Mapping[str, Any]]) -> int:
+    return len(ce_brain_drift._active_record_indexes(list(records)))
+
+
+def _without_chain_and_supersede_fields(record: Mapping[str, Any]) -> dict[str, Any]:
+    ignored = {*_CHAIN_FIELDS, "status", "superseded_by"}
+    return {str(key): value for key, value in record.items() if key not in ignored}
 
 
 def _distinct_author_approver(author_login: str | None, approver_login: str | None) -> bool:
