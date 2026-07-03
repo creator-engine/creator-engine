@@ -344,6 +344,198 @@ def _pr_preflight_scrubs_credential_env(context: ProbeContext) -> ProbeResult:
     )
 
 
+def _integrator_belt_tree(context: ProbeContext, name: str) -> tuple[Path, ast.Module | None, ProbeResult | None]:
+    path = context.root() / "validators" / "creator_engine_validator" / "forge" / "integrator_belt.py"
+    tree, error = _python_module_tree(context, path, name)
+    return path, tree, error
+
+
+def _return_constant(node: ast.stmt, value: str) -> bool:
+    if not isinstance(node, ast.Return):
+        return False
+    returned = node.value
+    if isinstance(returned, ast.Call) and isinstance(returned.func, ast.Name):
+        return bool(
+            returned.args
+            and isinstance(returned.args[0], ast.Constant)
+            and returned.args[0].value == value
+        )
+    if isinstance(returned, ast.Tuple):
+        first = returned.elts[0] if returned.elts else None
+        return isinstance(first, ast.Constant) and first.value == value
+    return isinstance(returned, ast.Constant) and returned.value == value
+
+
+def _if_returns_constant(fn: ast.AST | None, value: str) -> bool:
+    if fn is None:
+        return False
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.If):
+            continue
+        branches = [*node.body, *node.orelse]
+        if any(_return_constant(branch, value) for branch in branches):
+            return True
+    return False
+
+
+def _compare_attr_to_constant(test: ast.AST, base: str, attr: str, op_type: type[ast.cmpop], value: str) -> bool:
+    if not isinstance(test, ast.Compare) or len(test.ops) != 1 or len(test.comparators) != 1:
+        return False
+    return (
+        _is_attr(test.left, base, attr)
+        and isinstance(test.ops[0], op_type)
+        and isinstance(test.comparators[0], ast.Constant)
+        and test.comparators[0].value == value
+    )
+
+
+def _has_if_attr_truthy_return(fn: ast.AST | None, base: str, attr: str, value: str) -> bool:
+    if fn is None:
+        return False
+    for node in ast.walk(fn):
+        if isinstance(node, ast.If) and _is_attr(node.test, base, attr):
+            if any(_return_constant(branch, value) for branch in node.body):
+                return True
+    return False
+
+
+def _has_if_compare_return(
+    fn: ast.AST | None,
+    *,
+    base: str,
+    attr: str,
+    op_type: type[ast.cmpop],
+    compared_to: str,
+    returns: str,
+) -> bool:
+    if fn is None:
+        return False
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.If):
+            continue
+        if _compare_attr_to_constant(node.test, base, attr, op_type, compared_to):
+            if any(_return_constant(branch, returns) for branch in node.body):
+                return True
+    return False
+
+
+def _has_current_head_guard(fn: ast.AST | None) -> bool:
+    if fn is None:
+        return False
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if not isinstance(test, ast.Compare) or len(test.ops) != 1 or len(test.comparators) != 1:
+            continue
+        left = test.left
+        comparator = test.comparators[0]
+        left_is_head_lower = (
+            isinstance(left, ast.Call)
+            and isinstance(left.func, ast.Attribute)
+            and left.func.attr == "lower"
+            and _is_attr(left.func.value, "pr", "head_sha")
+        )
+        comparator_is_approvals = _is_attr(comparator, "pr", "approving_review_commits")
+        if (
+            left_is_head_lower
+            and isinstance(test.ops[0], ast.NotIn)
+            and comparator_is_approvals
+            and any(_return_constant(branch, "approval_not_current_head") for branch in node.body)
+        ):
+            return True
+    return False
+
+
+def _integrator_belt_merge_queue_conflict_gate(context: ProbeContext) -> ProbeResult:
+    name = "integrator_belt_merge_queue_conflict_gate"
+    path, tree, error = _integrator_belt_tree(context, name)
+    if error is not None or tree is None:
+        return error or _unknown(name, reason="probe_error")
+    enqueue_fn = _function_def(tree, "_enqueue_merge_queue")
+    stranded_gate = _function_def(tree, "_stranded_gate_refusal")
+    queue_tokens = set(_string_constants(enqueue_fn))
+    merge_queue_command = {"gh", "pr", "merge", "--auto", "--match-head-commit"}.issubset(queue_tokens)
+    conflict_state_gate = _has_if_compare_return(
+        stranded_gate,
+        base="pr",
+        attr="merge_state_status",
+        op_type=ast.NotEq,
+        compared_to="CLEAN",
+        returns="merge_state_not_clean",
+    )
+    present = merge_queue_command and conflict_state_gate
+    return _result(
+        name,
+        "present" if present else "absent",
+        {
+            "integrator_belt": str(path),
+            "function": "_enqueue_merge_queue",
+            "merge_queue_command_uses_auto_match_head": merge_queue_command,
+            "control_flow_function": "_stranded_gate_refusal",
+            "non_clean_merge_state_is_refused": conflict_state_gate,
+        },
+    )
+
+
+def _integrator_belt_approval_green_triggers_queue(context: ProbeContext) -> ProbeResult:
+    name = "integrator_belt_approval_green_triggers_queue"
+    path, tree, error = _integrator_belt_tree(context, name)
+    if error is not None or tree is None:
+        return error or _unknown(name, reason="probe_error")
+    gate = _function_def(tree, "_daemon_gate_evaluation")
+    non_wall_gate = _function_def(tree, "_daemon_non_wall_gate")
+    enqueue_fn = _function_def(tree, "_enqueue_merge_queue")
+    draft_hold = _has_if_attr_truthy_return(gate, "pr", "is_draft", "draft_pr")
+    approval_required = _has_if_compare_return(
+        gate,
+        base="pr",
+        attr="review_decision",
+        op_type=ast.NotEq,
+        compared_to="APPROVED",
+        returns="review_not_approved",
+    )
+    green_state_gate = _if_returns_constant(non_wall_gate, "rollup_not_success")
+    queue_tokens = set(_string_constants(enqueue_fn))
+    queue_action = {"--auto", "--match-head-commit"}.issubset(queue_tokens)
+    present = draft_hold and approval_required and green_state_gate and queue_action
+    return _result(
+        name,
+        "present" if present else "absent",
+        {
+            "integrator_belt": str(path),
+            "function": "_daemon_gate_evaluation",
+            "draft_pr_is_hold": draft_hold,
+            "approved_review_decision_required": approval_required,
+            "control_flow_function": "_daemon_non_wall_gate",
+            "green_rollup_or_clean_merge_state_required": green_state_gate,
+            "queue_function": "_enqueue_merge_queue",
+            "queue_action_uses_auto_match_head": queue_action,
+        },
+    )
+
+
+def _integrator_belt_approval_current_head_required(context: ProbeContext) -> ProbeResult:
+    name = "integrator_belt_approval_current_head_required"
+    path, tree, error = _integrator_belt_tree(context, name)
+    if error is not None or tree is None:
+        return error or _unknown(name, reason="probe_error")
+    gate = _function_def(tree, "_daemon_gate_evaluation")
+    current_head_guard = _has_current_head_guard(gate)
+    current_witness_guard = _if_returns_constant(gate, "approval_reviewer_unconfirmed")
+    present = current_head_guard and current_witness_guard
+    return _result(
+        name,
+        "present" if present else "absent",
+        {
+            "integrator_belt": str(path),
+            "function": "_daemon_gate_evaluation",
+            "approval_head_mismatch_refused": current_head_guard,
+            "current_approval_witness_required": current_witness_guard,
+        },
+    )
+
+
 def _codex_fan_out_surfaces(context: ProbeContext) -> ProbeResult:
     root = context.root()
     required = [
@@ -529,6 +721,9 @@ PROBES: dict[str, ProbeFn] = {
     "codex_pretooluse_hook": _codex_pretooluse_hook,
     "gh_authenticated": _gh_authenticated,
     "harness_fan_out": _harness_fan_out,
+    "integrator_belt_approval_current_head_required": _integrator_belt_approval_current_head_required,
+    "integrator_belt_approval_green_triggers_queue": _integrator_belt_approval_green_triggers_queue,
+    "integrator_belt_merge_queue_conflict_gate": _integrator_belt_merge_queue_conflict_gate,
     "merge_group_trigger": _merge_group_trigger,
     "pr_preflight_ci_parity": _pr_preflight_ci_parity,
     "pr_preflight_clean_tree_guard": _pr_preflight_clean_tree_guard,
