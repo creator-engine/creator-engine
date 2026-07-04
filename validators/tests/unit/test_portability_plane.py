@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 from creator_engine_validator.checks import portability_plane as guard
@@ -63,15 +64,11 @@ def test_guard_catches_forbidden_patterns_in_control_plane_module(tmp_path: Path
 import systemd
 import sdnotify
 import socket
-import subprocess
 from pathlib import Path
 
 sock = socket.socket(socket.AF_UNIX)
 run_dir = "/run/creator-engine"
 shm_dir = Path("/dev/shm/creator-engine")
-cmd = ["systemctl status ce"]
-subprocess.run("sudo systemctl restart ce-broker", shell=True)
-subprocess.run(["/usr/bin/systemctl", "restart", "ce-broker"])
 ''',
     )
 
@@ -83,9 +80,87 @@ subprocess.run(["/usr/bin/systemctl", "restart", "ce-broker"])
     assert "literal /run path" in rendered
     assert "literal /dev/shm path" in rendered
     assert "socket.AF_UNIX usage" in rendered
-    assert "runtime-only subprocess command" in rendered
     assert "Docstring may mention systemd" not in rendered
     assert "Comments may mention systemctl" not in rendered
+
+
+def _assert_runtime_command_is_flagged(tmp_path: Path, source: str) -> str:
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "validators/creator_engine_validator/control.py", source)
+
+    result = guard.run([repo])
+
+    rendered = _error_text(result)
+    assert not result.ok
+    assert "control.py" in rendered
+    assert "runtime-only subprocess command" in rendered
+    return rendered
+
+
+def test_runtime_only_subprocess_shell_string_form_is_flagged(tmp_path: Path):
+    _assert_runtime_command_is_flagged(
+        tmp_path,
+        '''import subprocess
+
+subprocess.run("sudo systemctl restart ce-broker", shell=True)
+''',
+    )
+
+
+def test_runtime_only_subprocess_argv_list_form_is_flagged(tmp_path: Path):
+    _assert_runtime_command_is_flagged(
+        tmp_path,
+        '''import subprocess
+
+subprocess.run(["/usr/bin/systemctl", "restart", "ce-broker"])
+''',
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            '''import subprocess
+
+subprocess.run("sudo setfacl -m u:ce:r /tmp/ce.sock", shell=True)
+''',
+            id="setfacl-sudo-shell",
+        ),
+        pytest.param(
+            '''import subprocess
+
+subprocess.run(["/usr/bin/setfacl", "-m", "u:ce:r", "/tmp/ce.sock"])
+''',
+            id="setfacl-absolute-argv",
+        ),
+        pytest.param(
+            '''import subprocess
+
+subprocess.run("sudo journalctl -u ce-broker", shell=True)
+''',
+            id="journalctl-sudo-shell",
+        ),
+        pytest.param(
+            '''import subprocess
+
+subprocess.run(["/bin/journalctl", "-u", "ce-broker"])
+''',
+            id="journalctl-absolute-argv",
+        ),
+    ],
+)
+def test_runtime_only_subprocess_other_command_forms_are_flagged(tmp_path: Path, source: str):
+    _assert_runtime_command_is_flagged(tmp_path, source)
+
+
+def test_plain_prose_starting_with_runtime_command_fails_closed(tmp_path: Path):
+    # Prose that shlex-parses as a runtime command stays fail-closed; use a
+    # runtime-plane manifest path or dated baseline exemption for intentional cases.
+    _assert_runtime_command_is_flagged(
+        tmp_path,
+        'HELP = "journalctl output can help operators inspect runtime seats"\n',
+    )
 
 
 def test_missing_manifest_fails_closed(tmp_path: Path):
