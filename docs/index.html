@@ -580,9 +580,9 @@
           <div class="h"><span class="ce">&#9670; CE Completion Report</span><span>external grade</span></div>
           <div class="b">
             <div class="fld"><b>Outcome</b><span>PR opened &rarr; #42</span></div>
-            <div class="fld"><b>Verdict</b><span class="ok">Done-when 4/4 met &middot; tests green &middot; in scope &#10003; &middot; 18% of Budget S</span></div>
+            <div class="fld"><b>Verdict</b><span class="ok">Done-when 4/4 met &middot; tests green &middot; in scope &#10003; &middot; 18% of $25</span></div>
             <div class="fld"><b>Next</b><span>Review PR #42. A deploy would require a higher Change-type and explicit ratification.</span></div>
-            <div class="fld"><b>Inspect</b><span><code>ce fanin inspect</code> &middot; <code>ce ledger verify</code> &middot; <code>ce check</code></span></div>
+            <div class="fld"><b>Inspect</b><span><code>ce fanin inspect --packet PATH</code> &middot; <code>ce ledger verify --side-effect-ledger-root PATH</code> &middot; <code>ce check</code></span></div>
           </div>
         </div>
       </div>
@@ -665,7 +665,7 @@
       <div class="sec-head">
         <span class="sec-eyebrow">Docs</span>
         <h2>Current docs for installing, piloting, and trusting CE.</h2>
-        <p>Start with the signed bootstrap, then read the user guide, pilot path, contributor rules, security model, and v3.5 roadmap.</p>
+        <p>Start with the signed bootstrap, then read the walkthrough, user guide, pilot path, contributor rules, and security model.</p>
       </div>
       <div class="docs-grid">
         <a class="doc-card" href="what-is-creator-engine.html">
@@ -686,6 +686,12 @@
           <p>A plain-language guide to the five stages, Scope cards, budgets, change types, and the outside-the-agent grader.</p>
           <span class="go">Open page -&gt;</span>
         </a>
+        <a class="doc-card" href="guide/complete-walkthrough.html">
+          <span class="tag">Walkthrough</span>
+          <h3>Complete Walkthrough</h3>
+          <p>The full install-to-ship journey: Frame, Shape, Build, Review, and Ship one realistic Scope with CE.</p>
+          <span class="go">Open page -&gt;</span>
+        </a>
         <a class="doc-card" href="guide/pilot-runbook.html">
           <span class="tag">Pilot</span>
           <h3>Pilot runbook</h3>
@@ -701,7 +707,7 @@
         <a class="doc-card" href="guide/solo-dev-onboarding.html">
           <span class="tag">Guide</span>
           <h3>Solo + Dev onboarding</h3>
-          <p>For developers in Dev mode: drive the pipeline yourself with <code>cev3</code> commands — scope, ratify, drive, review, and gate the merge.</p>
+          <p>For developers in Dev mode: drive the pipeline yourself with <code>ce</code> commands — scope, ratify, drive, review, and gate the merge.</p>
           <span class="go">Open page -&gt;</span>
         </a>
         <a class="doc-card" href="guide/solo-ceo-onboarding.html">

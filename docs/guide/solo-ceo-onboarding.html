@@ -136,17 +136,17 @@
 <thead><tr><th>Stage</th><th>Solo + Dev (you type commands)</th><th>Solo + CEO (agent drives; you ratify)</th></tr></thead>
 <tbody>
 <tr><td><strong>Frame</strong></td><td>You describe the problem to the agent</td><td>Same — you describe the problem conversationally</td></tr>
-<tr><td><strong>Shape</strong></td><td>You drive the Scope/Shape loop with <code>ce scope</code> and <code>ce shape</code> — see <a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a></td><td>The agent drives the Scope/Shape loop; it assembles the Scope and presents it to you for review</td></tr>
+<tr><td><strong>Shape</strong></td><td>You drive the Scope/Shape loop with <code>ce scope &lt;id&gt; --goal ... --change-type ...</code> and <code>ce shape &lt;id&gt;</code> — see <a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a></td><td>The agent drives the Scope/Shape loop; it assembles the Scope and presents it to you for review</td></tr>
 <tr><td><strong>Build</strong></td><td>You trigger the build after ratifying</td><td>Same — the build runs after you ratify; you don&#x27;t need to start it</td></tr>
 <tr><td><strong>Review</strong></td><td>You dispatch a reviewer, then read the PR artifacts</td><td>Same — you read the PR artifacts and judge them against the Done-when you confirmed</td></tr>
-<tr><td><strong>Ship</strong></td><td>You run <code>ce merge --apply</code></td><td>Same — <code>ce merge --apply</code> is the human-gated finish</td></tr>
+<tr><td><strong>Ship</strong></td><td>You run <code>ce merge &lt;id&gt; --run &lt;run-id&gt; --apply</code></td><td>Same — <code>ce merge &lt;id&gt; --run &lt;run-id&gt; --apply</code> is the human-gated finish</td></tr>
 </tbody></table>
 <p>The key difference is <strong>Shape</strong>: in CEO mode you never run the Scope/Shape loop by hand. The agent does that work on your behalf and surfaces the result — a drafted Scope with its Goal, Done-when, Budget, and Change-type filled in — for your review before anything is ratified.</p>
 <hr>
 <h2 id="phase-0-what-you-need-before-you-start">Phase 0 — What you need before you start</h2>
 <p>You need a CE install and a governed session. If you have not done either, follow the install steps in <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a> first. Once installed, <code>ce launch</code> is your daily entry point.</p>
 <h3 id="the-one-concept-to-anchor-on">The one concept to anchor on</h3>
-<p>In CEO mode the agent is your executor, not your co-typist. Instead of running <code>ce scope</code> and <code>ce shape</code> yourself, you tell it <em>what you want to build</em>, in plain language. It translates that intent into the governed pipeline, then brings you the artifact to ratify. You are the CEO of the work: you set direction, you approve gates, you own the outcome. The agent handles the mechanics.</p>
+<p>In CEO mode the agent is your executor, not your co-typist. Instead of running <code>ce scope &lt;id&gt; --goal ... --change-type ...</code> and <code>ce shape &lt;id&gt;</code> yourself, you tell it <em>what you want to build</em>, in plain language. It translates that intent into the governed pipeline, then brings you the artifact to ratify. You are the CEO of the work: you set direction, you approve gates, you own the outcome. The agent handles the mechanics.</p>
 <hr>
 <h2 id="phase-1-launch-your-governed-session">Phase 1 — Launch your governed session</h2>
 <pre><code class="language-bash">ce launch</code></pre>
@@ -176,7 +176,7 @@
 <p><strong>Read the Scope carefully.</strong> The Done-when criteria are the most important part: they are what the external grader will check against at Review time, not a transcript of what the agent says. Make sure they reflect what you would actually accept as done. If anything is wrong, tell the agent and it will revise the Scope.</p>
 <p>When the Scope looks right and reads <strong>Ready</strong>, ratify it:</p>
 <pre><code class="language-bash">ce ratify &lt;scope-id&gt; --approver-ref &lt;opaque-64-hex-digest&gt;</code></pre>
-<p>Generate a fresh approver ref with <code>openssl rand -hex 32</code> and pass that value. The <code>--approver-ref</code> is a value-free fingerprint: it records that a human ratified this Scope without encoding who or any credential.</p>
+<p>The literal above is valid 64-hex syntax for the example. In a real run, generate a fresh approver ref with <code>openssl rand -hex 32</code> and pass that value. The <code>--approver-ref</code> is a value-free fingerprint: it records that a human ratified this Scope without encoding who or any credential.</p>
 <p><strong>Ratification is your explicit &quot;yes — build this.&quot;</strong> Nothing builds until a Ready Scope is ratified. The agent cannot ratify on its own behalf.</p>
 <blockquote>
 <p>You can inspect any Scope before ratifying with <code>ce show &lt;scope-id&gt;</code>, and</p>
@@ -204,12 +204,12 @@
 <h2 id="phase-6-the-completion-report-evidence-not-memory">Phase 6 — The Completion Report (evidence, not memory)</h2>
 <p>After the merge:</p>
 <pre><code class="language-bash">ce report &lt;scope-id&gt; --run-id &lt;run-id&gt;</code></pre>
-<p>This renders the <strong>CE Completion Report</strong> — a compact record of what was delivered, how it scored against your Done-when criteria, that tests were green, that the change stayed in scope, and what fraction of the Budget it used. The report looks like:</p>
+<p>This renders the <strong>CE Completion Report</strong> — a compact record of what was delivered, how it scored against your Done-when criteria, that tests were green, that the change stayed in scope, and what fraction of the Budget it used. The following is illustrative output:</p>
 <pre><code class="language-text">┌─ CE COMPLETION REPORT · run &lt;run-id&gt; · Scope &lt;scope-id&gt; ──────
 │ Outcome   PR opened → #N (merged)
 │ Verdict   Done-when 3/3 met · tests green · in scope · 14% of Budget
 │ Next      → (done)
-│ Inspect   gh pr view N  |  ce show &lt;scope-id&gt;  |  ce artifacts &lt;run-id&gt;
+│ Inspect   gh pr view N  |  ce show &lt;scope-id&gt;  |  ce artifacts &lt;scope-id&gt; --run-id &lt;run-id&gt;
 └──────────────────────────────────────────────────────────────</code></pre>
 <p>This is your &quot;sprint review&quot; artifact. The evidence is durable — it persists under <code>.ce/state</code> and is replayable from a git clone. The next piece of work starts from artifacts, not from memory.</p>
 <hr>
@@ -240,10 +240,10 @@
 <thead><tr><th>You always decide</th><th>The agent handles</th></tr></thead>
 <tbody>
 <tr><td>The <strong>Budget</strong> on every Scope</td><td>Goal, Done-when, plan, tasks, code, and test execution</td></tr>
-<tr><td><strong>Ratifying</strong> the Scope (<code>ce ratify</code>)</td><td>Running the build inside the ratified envelope</td></tr>
+<tr><td><strong>Ratifying</strong> the Scope (<code>ce ratify &lt;id&gt; --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</code>)</td><td>Running the build inside the ratified envelope</td></tr>
 <tr><td>Making a change <strong>riskier</strong></td><td>Making a change safer within its envelope</td></tr>
 <tr><td><strong>Judging the artifacts</strong> at Review</td><td>Producing the artifacts and the Completion Report</td></tr>
-<tr><td>The <strong>gated merge</strong> (<code>ce merge --apply</code>)</td><td>Opening the PR and reading the merge gate</td></tr>
+<tr><td>The <strong>gated merge</strong> (<code>ce merge &lt;id&gt; --run &lt;run-id&gt; --apply</code>)</td><td>Opening the PR and reading the merge gate</td></tr>
 <tr><td>Authorizing <strong>privileged surfaces</strong></td><td>Refusing privileged actions and surfacing the reason</td></tr>
 </tbody></table>
 <p>In CEO mode the agent handles significantly more of the mechanical work — it drives the Scope/Shape/build loop, drafts the plan, and manages the build and review pipeline. But the boundary is the same: you ratify, you judge artifacts, and you hold the privileged floor. The agent executes; you govern.</p>
@@ -255,7 +255,7 @@
 <tr><td>The front door and big picture</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>welcome.md</code></a></td></tr>
 <tr><td>The plain-language vocabulary tour</td><td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td></tr>
 <tr><td>The Solo + Dev hands-on path</td><td><a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a></td></tr>
-<tr><td>The Solo + Dev legacy step-by-step (speckit)</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/getting-started-step-by-step.md"><code>getting-started-step-by-step.md</code></a></td></tr>
+<tr><td>The complete start-to-ship walkthrough</td><td><a href="complete-walkthrough.html"><code>complete-walkthrough.md</code></a></td></tr>
 <tr><td>A worked SCRUM-to-CE mapping</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td></tr>
 <tr><td>The full install-to-ship pilot runbook</td><td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td></tr>
 <tr><td>Contribute to CE itself</td><td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td></tr>

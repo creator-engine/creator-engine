@@ -104,7 +104,8 @@ you can re-run it.
 > kernel one-shot that gets you to a working governed session on your machine.
 > Standing up a **fully governed seat on a GitHub repo** — with the GitHub App
 > connection and branch-protection floor — is a separate, deliberately
-> human-approved flow (`cev3 onboard --plan` then `--apply`), covered in the
+> human-approved flow (`ce install --spec <verified-spec> --answers ce-install.answers.yaml --plan`
+> then `ce install --spec <verified-spec> --answers ce-install.answers.yaml --apply`), covered in the
 > [Quickstart](./zero-to-governed-seat-quickstart.md) and the
 > [Pilot Runbook](./pilot-runbook.md). Keep them distinct: the quick rail gets
 > you using CE; the governed-seat rail connects CE to a repo it can ship to.
@@ -201,7 +202,7 @@ Start there once these four steps make sense.
 
 | You want to… | Read |
 | --- | --- |
-| **Follow a hands-on walkthrough start to finish (recommended first)** | [**`getting-started-step-by-step.md`**](./getting-started-step-by-step.md) |
+| **Follow a hands-on walkthrough start to finish (recommended first)** | [**`complete-walkthrough.md`**](./complete-walkthrough.md) |
 | Understand the workflow and its words | [`understanding-ce.md`](./understanding-ce.md) |
 | Map your Agile/SCRUM habits onto CE's SDLC | [`agile-to-ce-sdlc.md`](./agile-to-ce-sdlc.md) |
 | Get to a governed seat fast | [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md) |
