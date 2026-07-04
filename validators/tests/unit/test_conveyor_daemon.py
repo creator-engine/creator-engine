@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ from creator_engine_validator.conveyor_daemon import (
     ConveyorDaemonItem,
     ConveyorDaemonLedgerRecord,
     ConveyorValidationLedgerBinding,
+    _PUBLISH_TRANSPORT_CONFIG_PATTERN,
 )
 from creator_engine_validator.forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
 from creator_engine_validator.validation_sandbox_receipt import ValidationSandboxReceiptIssuer
@@ -73,9 +75,28 @@ ARMED_ROOTS = {
 
 
 class FakeGit:
-    def __init__(self, push_returncode: int = 0, landed_tree_sha: str = HEAD_SHA):
+    def __init__(
+        self,
+        push_returncode: int = 0,
+        landed_tree_sha: str = HEAD_SHA,
+        *,
+        landed_tree_shas: Sequence[str] | None = None,
+        landed_commit_sha: str = HEAD_SHA,
+        rev_list_stdout: str = "0\t1\n",
+        diff_stdout: str | None = None,
+        config_returncode: int = 1,
+        config_stdout: str = "",
+        config_stderr: str = "",
+    ):
         self.push_returncode = push_returncode
         self.landed_tree_sha = landed_tree_sha
+        self.landed_tree_shas = list(landed_tree_shas or [])
+        self.landed_commit_sha = landed_commit_sha
+        self.rev_list_stdout = rev_list_stdout
+        self.diff_stdout = diff_stdout
+        self.config_returncode = config_returncode
+        self.config_stdout = config_stdout
+        self.config_stderr = config_stderr
         self.calls: list[tuple[tuple[str, ...], Path]] = []
         self.envs: list[Mapping[str, str]] = []
 
@@ -85,7 +106,23 @@ class FakeGit:
         if tuple(args) == ("rev-parse", "HEAD^{tree}"):
             return ConveyorCommandResult(0, f"{self.landed_tree_sha}\n", "")
         if len(args) == 2 and args[0] == "rev-parse" and str(args[1]).endswith("^{tree}"):
+            if self.landed_tree_shas:
+                return ConveyorCommandResult(0, f"{self.landed_tree_shas.pop(0)}\n", "")
             return ConveyorCommandResult(0, f"{self.landed_tree_sha}\n", "")
+        if len(args) == 2 and args[0] == "rev-parse" and str(args[1]).endswith("^{commit}"):
+            return ConveyorCommandResult(0, f"{self.landed_commit_sha}\n", "")
+        if len(args) == 4 and tuple(args[:3]) == ("rev-list", "--left-right", "--count"):
+            return ConveyorCommandResult(0, self.rev_list_stdout, "")
+        if len(args) == 4 and tuple(args[:3]) == ("diff", "--name-status", "--find-renames"):
+            branch = str(args[3]).rsplit("..", 1)[-1]
+            return ConveyorCommandResult(0, self.diff_stdout or _default_diff_name_status(branch), "")
+        if tuple(args) == (
+            "config",
+            "--local",
+            "--get-regexp",
+            _PUBLISH_TRANSPORT_CONFIG_PATTERN,
+        ):
+            return ConveyorCommandResult(self.config_returncode, self.config_stdout, self.config_stderr)
         if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
             if self.push_returncode:
                 return ConveyorCommandResult(self.push_returncode, "", "push denied\n")
@@ -107,6 +144,25 @@ class RealLocalGit:
         self.envs.append(dict(env))
         if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
             return ConveyorCommandResult(0, "pushed\n", "")
+        if (
+            len(args) == 2
+            and args[0] == "rev-parse"
+            and str(args[1]).endswith("^{commit}")
+            and not (cwd / ".git").exists()
+        ):
+            return ConveyorCommandResult(0, f"{HEAD_SHA}\n", "")
+        if len(args) == 4 and tuple(args[:3]) == ("rev-list", "--left-right", "--count"):
+            return ConveyorCommandResult(0, "0\t1\n", "")
+        if len(args) == 4 and tuple(args[:3]) == ("diff", "--name-status", "--find-renames"):
+            branch = str(args[3]).rsplit("..", 1)[-1]
+            return ConveyorCommandResult(0, _default_diff_name_status(branch), "")
+        if tuple(args) == (
+            "config",
+            "--local",
+            "--get-regexp",
+            _PUBLISH_TRANSPORT_CONFIG_PATTERN,
+        ):
+            return ConveyorCommandResult(1, "", "")
         if (
             self.fake_landed_tree_from_validation
             and len(args) == 2
@@ -185,8 +241,9 @@ class FakePrepare:
 
 
 class FakeLand:
-    def __init__(self, branch_override: str | None = None):
+    def __init__(self, branch_override: str | None = None, *, behind: int = 0):
         self.branch_override = branch_override
+        self.behind = behind
         self.calls: list[tuple[Path, str, str, Path]] = []
 
     def __call__(
@@ -200,6 +257,7 @@ class FakeLand:
     ) -> ConveyorBundleLandingResult:
         self.calls.append((bundle_path, branch_name, base_ref, repo_path))
         landed_branch = self.branch_override or branch_name
+        _write_carrier_manifest(repo_path, branch_slug=landed_branch)
         return ConveyorBundleLandingResult(
             ready=True,
             reasons=(),
@@ -209,7 +267,7 @@ class FakeLand:
             base_ref=base_ref,
             head_sha=HEAD_SHA,
             ahead=1,
-            behind=0,
+            behind=self.behind,
         )
 
 
@@ -235,8 +293,15 @@ class FakePodmanRunner:
 
 
 class FakeValidationSandboxRunner:
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        side_effect_path: Path | None = None,
+        side_effect_record: Mapping[str, object] | None = None,
+    ):
         self.calls: list[tuple[object, dict]] = []
+        self.side_effect_path = side_effect_path
+        self.side_effect_record = side_effect_record
 
     def __call__(self, spec, **kwargs) -> ValidationSandboxContainerRun:
         self.calls.append((spec, dict(kwargs)))
@@ -253,6 +318,8 @@ class FakeValidationSandboxRunner:
         return ValidationSandboxContainerRun(
             result=ValidationSandboxResult(rc=0, stdout="validated\n", stderr="", duration=0.01, spec=spec),
             receipt=receipt,
+            side_effect_path=self.side_effect_path,
+            side_effect_record=self.side_effect_record,
         )
 
 
@@ -325,6 +392,40 @@ def _git(cwd: Path, *args: str) -> str:
         text=True,
     )
     return completed.stdout.strip()
+
+
+def _default_manifest_paths(branch_slug: str) -> tuple[str, ...]:
+    return (
+        f".ce/changelog/{branch_slug}.md",
+        f".ce/pr-manifests/{branch_slug}.md",
+        "validators/creator_engine_validator/conveyor.py",
+    )
+
+
+def _default_diff_name_status(branch_slug: str) -> str:
+    return "".join(f"A\t{path}\n" for path in _default_manifest_paths(branch_slug))
+
+
+def _write_carrier_manifest(repo_path: Path, *, branch_slug: str, paths: Sequence[str] | None = None) -> None:
+    manifest_paths = tuple(paths or _default_manifest_paths(branch_slug))
+    normalized = "\n".join(sorted(set(manifest_paths))) + "\n"
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    path = repo_path / ".ce" / "pr-manifests" / f"{branch_slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                f"PR_PATHS_COUNT={len(set(manifest_paths))}",
+                f"PR_PATHS_SHA256={digest}",
+                "",
+                "```text",
+                *sorted(set(manifest_paths)),
+                "```",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _init_clean_git_worktree(path: Path) -> str:
@@ -482,25 +583,25 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert git.calls == [
         (("rev-parse", "HEAD^{tree}"), item.worktree_path),
         (("rev-parse", "feature-one^{tree}"), item.repo_path),
+        (("rev-parse", "feature-one^{commit}"), item.repo_path),
+        (("rev-parse", "feature-one^{tree}"), item.repo_path),
+        (("rev-list", "--left-right", "--count", "origin/main...feature-one"), item.repo_path),
+        (("diff", "--name-status", "--find-renames", "origin/main..feature-one"), item.repo_path),
+        (
+            ("config", "--local", "--get-regexp", _PUBLISH_TRANSPORT_CONFIG_PATTERN),
+            item.repo_path,
+        ),
         (("push", "--", "origin", "feature-one:feature-one"), item.repo_path),
     ]
-    assert git.envs == [
-        {
+    assert all(
+        env
+        == {
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0",
             "PATH": "/usr/bin:/bin",
-        },
-        {
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_TERMINAL_PROMPT": "0",
-            "PATH": "/usr/bin:/bin",
-        },
-        {
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_TERMINAL_PROMPT": "0",
-            "PATH": "/usr/bin:/bin",
-        },
-    ]
+        }
+        for env in git.envs
+    )
     assert gh.calls == [
         (
             (
@@ -528,12 +629,28 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert any(
         "conveyor allocation audit" in message
         and '"allocation_id"' in message
+        and '"action": "conveyor_allocation_audit"' in message
+        and '"phase": "allocation"' in message
         and '"item_key": "feature-one"' in message
         and '"root_kind"' in message
         and '"mode_check"' in message
         and '"cleanup": {"cleaned": true, "status": "success"}' in message
         and '"nonce"' not in message
         and '"signature"' not in message
+        for message in logs
+    )
+    assert any(
+        "conveyor validation audit" in message
+        and '"action": "conveyor_validation_phase_audit"' in message
+        and '"tree_sha": "' in message
+        and '"nonce"' not in message
+        and '"signature"' not in message
+        for message in logs
+    )
+    assert any(
+        "conveyor publish audit" in message
+        and '"action": "conveyor_publish_phase_audit"' in message
+        and '"status": "success"' in message
         for message in logs
     )
 
@@ -566,6 +683,237 @@ def test_armed_path_without_validation_record_fails_before_push_or_pr():
     assert git.calls == []
     assert gh.calls == []
     assert ledger == []
+
+
+def test_publish_time_tree_drift_is_refused_before_push_or_pr():
+    item = _item()
+    drift_tree = "f" * 40
+    git = FakeGit(landed_tree_shas=[HEAD_SHA, drift_tree])
+    gh = FakeGh()
+    logs: list[str] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == (
+        "landed tip tree does not match validation record tree: "
+        f"landed={drift_tree} validation_record={HEAD_SHA}",
+    )
+    assert ("push", "--", "origin", "feature-one:feature-one") not in [call for call, _cwd in git.calls]
+    assert gh.calls == []
+    assert any(
+        "conveyor publish audit" in message
+        and '"status": "failed"' in message
+        and "head_tree_identity" in message
+        for message in logs
+    )
+
+
+def test_publish_time_commit_drift_with_same_tree_is_refused_before_push_or_pr():
+    item = _item()
+    drift_commit = "c" * 40
+    git = FakeGit(landed_commit_sha=drift_commit)
+    gh = FakeGh()
+    logs: list[str] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == (
+        "landed head commit does not match landing result head: "
+        f"landed={drift_commit} landing_result={HEAD_SHA}",
+    )
+    assert ("push", "--", "origin", "feature-one:feature-one") not in [call for call, _cwd in git.calls]
+    assert gh.calls == []
+    assert any("conveyor publish audit" in message and "head_tree_identity" in message for message in logs)
+
+
+def test_publish_time_behind_base_is_refused_before_push_or_pr():
+    item = _item()
+    git = FakeGit()
+    gh = FakeGh()
+    logs: list[str] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(behind=1),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == (
+        "publish base ancestry re-check failed: landed result is behind base by 1 commits",
+    )
+    assert ("push", "--", "origin", "feature-one:feature-one") not in [call for call, _cwd in git.calls]
+    assert gh.calls == []
+    assert any("conveyor publish audit" in message and "base_ancestry" in message for message in logs)
+
+
+def test_publish_time_manifest_mismatch_is_refused_before_push_or_pr():
+    item = _item()
+    git = FakeGit(diff_stdout=_default_diff_name_status("feature-one") + "A\tdocs/extra.md\n")
+    gh = FakeGh()
+    logs: list[str] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == (
+        "publish manifest fidelity re-check failed: diff paths do not match carrier manifest "
+        "extra_diff=['docs/extra.md'] missing_diff=[]",
+    )
+    assert ("push", "--", "origin", "feature-one:feature-one") not in [call for call, _cwd in git.calls]
+    assert gh.calls == []
+    assert any("conveyor publish audit" in message and "manifest_fidelity" in message for message in logs)
+
+
+def test_publish_time_malformed_manifest_diff_is_refused_before_push_or_pr():
+    item = _item()
+    git = FakeGit(diff_stdout=_default_diff_name_status("feature-one") + "this is not name-status\n")
+    gh = FakeGh()
+    logs: list[str] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == (
+        "publish manifest fidelity re-check failed: malformed name-status output: "
+        "line 4 expected status and path",
+    )
+    assert ("push", "--", "origin", "feature-one:feature-one") not in [call for call, _cwd in git.calls]
+    assert gh.calls == []
+    assert any("conveyor publish audit" in message and "manifest_fidelity" in message for message in logs)
+
+
+def test_publish_time_local_transport_config_mutation_is_refused_before_push_or_pr():
+    item = _item()
+    git = FakeGit(config_returncode=0, config_stdout="core.hookspath .githooks\nurl.ext::foo.insteadof ssh://git@\n")
+    gh = FakeGh()
+    logs: list[str] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == (
+        "publish transport config guard failed: forbidden local git config keys present: "
+        "core.hookspath .githooks, url.ext::foo.insteadof ssh://git@",
+    )
+    assert ("push", "--", "origin", "feature-one:feature-one") not in [call for call, _cwd in git.calls]
+    assert gh.calls == []
+    assert any("conveyor publish audit" in message and "transport_config" in message for message in logs)
+
+
+def test_validation_audit_summarizes_side_effect_record_without_nonce_or_signature():
+    item = _item()
+    logs: list[str] = []
+    side_effect_record = {
+        "effect_kind": "validation_sandbox_run",
+        "subject_git_sha": HEAD_SHA,
+        "nonce": "nonce-secret-value",
+        "signature": "signature-secret-value",
+        "unexpected_payload": {"nested": "not for audit logs"},
+    }
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(side_effect_record=side_effect_record),
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    validation_audits = [message for message in logs if "conveyor validation audit" in message]
+    assert len(validation_audits) == 1
+    audit = validation_audits[0]
+    assert '"effect_kind": "validation_sandbox_run"' in audit
+    assert f'"subject_git_sha": "{HEAD_SHA}"' in audit
+    assert "nonce" not in audit
+    assert "signature" not in audit
+    assert "unexpected_payload" not in audit
+    assert "nonce-secret-value" not in audit
+    assert "signature-secret-value" not in audit
 
 
 def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Path):
@@ -1196,6 +1544,19 @@ def test_daemon_pinned_base_and_remote_used_for_item_objects():
 
     def git_runner(args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
         git_calls.append(tuple(args))
+        if len(args) == 2 and args[0] == "rev-parse" and str(args[1]).endswith(("^{tree}", "^{commit}")):
+            return ConveyorCommandResult(0, f"{HEAD_SHA}\n", "")
+        if tuple(args) == ("rev-list", "--left-right", "--count", "origin/main...feature-one"):
+            return ConveyorCommandResult(0, "0\t1\n", "")
+        if tuple(args) == ("diff", "--name-status", "--find-renames", "origin/main..feature-one"):
+            return ConveyorCommandResult(0, _default_diff_name_status("feature-one"), "")
+        if tuple(args) == (
+            "config",
+            "--local",
+            "--get-regexp",
+            _PUBLISH_TRANSPORT_CONFIG_PATTERN,
+        ):
+            return ConveyorCommandResult(1, "", "")
         return ConveyorCommandResult(0, "pushed\n", "")
 
     ConveyorDaemon(

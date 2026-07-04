@@ -29,7 +29,7 @@ from .conveyor import (
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
 from .daemon_lease import DaemonLease
-from .checks.path_manifest_fidelity import branch_slug
+from .checks.path_manifest_fidelity import branch_slug, extract_manifest_paths_from_file
 from .forge.daemon_allocation import (
     DaemonAllocationError,
     DaemonPathAllocation,
@@ -59,6 +59,11 @@ ValidationSandboxRunner = Callable[..., ValidationSandboxContainerRun]
 
 
 PLAN_ACTIONS = ("prepare-harvest", "land-bundle", "push", "pr-open")
+_PUBLISH_TRANSPORT_CONFIG_PATTERN = (
+    r"^([cC][oO][rR][eE]\.[hH][oO][oO][kK][sS][pP][aA][tT][hH]|"
+    r"[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]\.[hH][eE][lL][pP][eE][rR]|"
+    r"[uU][rR][lL]\..*\.[iI][nN][sS][tT][eE][aA][dD][oO][fF])$"
+)
 
 # base and remote are pinned at the ConveyorDaemon level (mirrors
 # validate_command below) rather than being read from an untrusted discovery
@@ -582,6 +587,27 @@ class ConveyorDaemon:
                     ledger_records=records,
                 )
 
+            publish_recheck = self._validate_publish_rechecks(
+                item=item,
+                landed=landed,
+                validation_tree_sha=validation_tree_sha,
+            )
+            if publish_recheck:
+                self._audit_publish(item=item, landed=landed, status="failed", checks=publish_recheck)
+                return self._failed(
+                    item,
+                    tuple(publish_recheck.values()),
+                    prepare_result=prepared,
+                    landing_result=landed,
+                    ledger_records=records,
+                )
+            self._audit_publish(
+                item=item,
+                landed=landed,
+                status="success",
+                checks={"status": "publish re-checks passed"},
+            )
+
             push_args = _git_push_args(self.remote, landed.branch)
             push_result = _coerce_result(
                 self.git_runner(
@@ -796,13 +822,14 @@ class ConveyorDaemon:
             )
         record = {
             "action": "conveyor_allocation_audit",
+            "phase": "allocation",
             "allocation_id": allocation.allocation_id,
             "item_key": item.key,
             "paths": paths,
             "mode_check": dict(mode_check or {}),
             "cleanup": dict(cleanup_result),
         }
-        self._log(f"conveyor allocation audit: {json.dumps(record, sort_keys=True)}")
+        self._log(f"conveyor allocation audit: {json.dumps(record, sort_keys=True, default=str)}")
 
     def _path_confinement_violations(
         self, item: ConveyorDaemonItem
@@ -989,9 +1016,57 @@ class ConveyorDaemon:
                         },
                     )
                 )
+                self._audit_validation(
+                    item=item,
+                    allocation=allocation,
+                    tree_sha=sandbox_run.receipt.tree_sha,
+                    result=result,
+                    side_effect_path=sandbox_run.side_effect_path,
+                    side_effect_record=sandbox_run.side_effect_record,
+                )
             return result
 
         return run
+
+    def _audit_validation(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        allocation: DaemonPathAllocation,
+        tree_sha: str,
+        result: ConveyorCommandResult,
+        side_effect_path: Path | None,
+        side_effect_record: Mapping[str, Any] | None,
+    ) -> None:
+        record = {
+            "action": "conveyor_validation_phase_audit",
+            "allocation_id": allocation.allocation_id,
+            "item_key": item.key,
+            "tree_sha": tree_sha,
+            "status": "success" if result.returncode == 0 else "failed",
+            "returncode": result.returncode,
+            "side_effect_path": None if side_effect_path is None else str(side_effect_path),
+            "side_effect_record": _validation_side_effect_summary(side_effect_record),
+        }
+        self._log(f"conveyor validation audit: {json.dumps(record, sort_keys=True, default=str)}")
+
+    def _audit_publish(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        landed: ConveyorBundleLandingResult,
+        status: str,
+        checks: Mapping[str, str],
+    ) -> None:
+        record = {
+            "action": "conveyor_publish_phase_audit",
+            "item_key": item.key,
+            "branch": landed.branch,
+            "head_sha": landed.head_sha or "",
+            "status": status,
+            "checks": dict(checks),
+        }
+        self._log(f"conveyor publish audit: {json.dumps(record, sort_keys=True, default=str)}")
 
     def _validate_landed_tree_matches_record(
         self,
@@ -1020,6 +1095,155 @@ class ConveyorDaemon:
                 "landed tip tree does not match validation record tree: "
                 f"landed={landed_tree_sha} validation_record={validation_tree_sha}"
             )
+        return None
+
+    def _validate_publish_rechecks(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        landed: ConveyorBundleLandingResult,
+        validation_tree_sha: str,
+    ) -> dict[str, str]:
+        checks: dict[str, str] = {}
+        head_check = self._validate_landed_head_and_tree_identity(
+            item=item,
+            landed=landed,
+            validation_tree_sha=validation_tree_sha,
+        )
+        if head_check is not None:
+            checks["head_tree_identity"] = head_check
+        ancestry_check = self._validate_publish_base_ancestry(item=item, landed=landed)
+        if ancestry_check is not None:
+            checks["base_ancestry"] = ancestry_check
+        manifest_check = self._validate_publish_manifest_fidelity(item=item, landed=landed)
+        if manifest_check is not None:
+            checks["manifest_fidelity"] = manifest_check
+        config_check = self._validate_publish_transport_config(item=item)
+        if config_check is not None:
+            checks["transport_config"] = config_check
+        return checks
+
+    def _validate_landed_head_and_tree_identity(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        landed: ConveyorBundleLandingResult,
+        validation_tree_sha: str,
+    ) -> str | None:
+        assert self.git_runner is not None
+        if item.repo_path is None:
+            return "repo_path is required to compare landed head/tree identity"
+        head = _coerce_result(
+            self.git_runner(
+                ("rev-parse", f"{landed.branch}^{{commit}}"),
+                item.repo_path,
+                git_env_for_phase(ConveyorGitPhase.LOCAL),
+            )
+        )
+        if head.returncode != 0:
+            return f"landed head identity failed: {_command_detail(head)}"
+        landed_head_sha = head.stdout.strip()
+        if not landed_head_sha:
+            return "landed head identity failed: empty rev-parse output"
+        if landed.head_sha and landed_head_sha != landed.head_sha:
+            return (
+                "landed head commit does not match landing result head: "
+                f"landed={landed_head_sha} landing_result={landed.head_sha}"
+            )
+        return self._validate_landed_tree_matches_record(
+            item=item,
+            landed=landed,
+            validation_tree_sha=validation_tree_sha,
+        )
+
+    def _validate_publish_base_ancestry(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        landed: ConveyorBundleLandingResult,
+    ) -> str | None:
+        assert self.git_runner is not None
+        if item.repo_path is None:
+            return "repo_path is required to re-check publish base ancestry"
+        if landed.behind != 0:
+            return f"publish base ancestry re-check failed: landed result is behind base by {landed.behind} commits"
+        result = _coerce_result(
+            self.git_runner(
+                ("rev-list", "--left-right", "--count", f"{self.base}...{landed.branch}"),
+                item.repo_path,
+                git_env_for_phase(ConveyorGitPhase.LOCAL),
+            )
+        )
+        if result.returncode != 0:
+            return f"publish base ancestry re-check failed: {_command_detail(result)}"
+        parts = result.stdout.strip().split()
+        if len(parts) != 2:
+            return f"publish base ancestry re-check failed: could not parse rev-list output {result.stdout.strip()!r}"
+        try:
+            behind = int(parts[0])
+        except ValueError:
+            return f"publish base ancestry re-check failed: could not parse rev-list output {result.stdout.strip()!r}"
+        if behind != 0:
+            return f"publish base ancestry re-check failed: landed branch is behind base by {behind} commits"
+        return None
+
+    def _validate_publish_manifest_fidelity(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        landed: ConveyorBundleLandingResult,
+    ) -> str | None:
+        assert self.git_runner is not None
+        if item.repo_path is None:
+            return "repo_path is required to re-check publish manifest fidelity"
+        diff = _coerce_result(
+            self.git_runner(
+                ("diff", "--name-status", "--find-renames", f"{self.base}..{landed.branch}"),
+                item.repo_path,
+                git_env_for_phase(ConveyorGitPhase.LOCAL),
+            )
+        )
+        if diff.returncode != 0:
+            return f"publish manifest fidelity re-check failed: {_command_detail(diff)}"
+        try:
+            changed = _paths_from_name_status(diff.stdout)
+        except ValueError as exc:
+            return f"publish manifest fidelity re-check failed: malformed name-status output: {exc}"
+        manifest = item.repo_path / ".ce" / "pr-manifests" / f"{branch_slug(landed.branch)}.md"
+        manifest_paths = set(extract_manifest_paths_from_file(manifest))
+        if not manifest_paths:
+            return f"publish manifest fidelity re-check failed: no manifest paths in {manifest.relative_to(item.repo_path)}"
+        if changed != manifest_paths:
+            missing = sorted(changed - manifest_paths)
+            unfulfilled = sorted(manifest_paths - changed)
+            return (
+                "publish manifest fidelity re-check failed: diff paths do not match carrier manifest "
+                f"extra_diff={missing} missing_diff={unfulfilled}"
+            )
+        return None
+
+    def _validate_publish_transport_config(self, *, item: ConveyorDaemonItem) -> str | None:
+        assert self.git_runner is not None
+        if item.repo_path is None:
+            return "repo_path is required to inspect local transport config"
+        result = _coerce_result(
+            self.git_runner(
+                ("config", "--local", "--get-regexp", _PUBLISH_TRANSPORT_CONFIG_PATTERN),
+                item.repo_path,
+                git_env_for_phase(ConveyorGitPhase.LOCAL),
+            )
+        )
+        if result.returncode == 1 and not result.stdout.strip():
+            return None
+        if result.returncode != 0:
+            return f"publish transport config guard failed: {_command_detail(result)}"
+        matches = tuple(
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip() and _is_forbidden_publish_transport_config(line)
+        )
+        if matches:
+            return f"publish transport config guard failed: forbidden local git config keys present: {', '.join(matches)}"
         return None
 
     def _failed(
@@ -1128,6 +1352,53 @@ def _latest_validation_record_tree_sha(records: Sequence[ConveyorDaemonLedgerRec
         if record.sha:
             return record.sha
     return None
+
+
+def _paths_from_name_status(stdout: str) -> set[str]:
+    paths: set[str] = set()
+    for line_number, line in enumerate(stdout.splitlines(), start=1):
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        status = parts[0].strip()
+        if not status:
+            raise ValueError(f"line {line_number} has empty status")
+        if status.startswith(("R", "C")):
+            if len(parts) != 3:
+                raise ValueError(f"line {line_number} expected status, old path, and new path")
+        elif len(parts) != 2:
+            raise ValueError(f"line {line_number} expected status and path")
+        current_path = parts[-1].strip()
+        if not current_path:
+            raise ValueError(f"line {line_number} has empty path")
+        paths.add(current_path)
+    return {path for path in paths if path}
+
+
+def _validation_side_effect_summary(side_effect_record: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    if not side_effect_record:
+        return {"present": False}
+    fields: dict[str, Any] = {}
+    for key in ("effect_kind", "subject_git_sha", "status", "returncode", "controller_id", "lane_id"):
+        if key not in side_effect_record:
+            continue
+        value = side_effect_record[key]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            fields[key] = _bounded_audit_scalar(value)
+    return {"present": True, "fields": fields}
+
+
+def _bounded_audit_scalar(value: Any) -> Any:
+    if isinstance(value, str) and len(value) > 128:
+        return value[:125] + "..."
+    return value
+
+
+def _is_forbidden_publish_transport_config(line: str) -> bool:
+    key = line.strip().split(maxsplit=1)[0].lower()
+    return key in {"core.hookspath", "credential.helper"} or (
+        key.startswith("url.") and key.endswith(".insteadof")
+    )
 
 
 def _pr_base(base: str, item: ConveyorDaemonItem) -> str:
