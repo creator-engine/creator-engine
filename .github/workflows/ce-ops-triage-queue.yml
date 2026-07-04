@@ -3,9 +3,9 @@ name: CE Ops Triage Queue
 # Advisory inbound issue triage for creator-engine/ce-ops.
 #
 # This workflow never ratifies, approves, reviews, dispatches, merges, or blocks
-# CI. The scheduled run is dry-run only. A manual workflow_dispatch with
-# apply=true patches an existing ce-ops#67 sentinel comment; it never creates
-# the sentinel comment.
+# CI. Scheduled runs apply the advisory ce-ops#67 sentinel comment unless
+# CE_TRIAGE_APPLY_KILL_SWITCH is truthy. A manual workflow_dispatch keeps its
+# explicit apply input.
 
 on:
   schedule:
@@ -46,12 +46,24 @@ jobs:
         continue-on-error: true
         env:
           CE_CROSS_REPO_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
+          CE_TRIAGE_APPLY_KILL_SWITCH: ${{ vars.CE_TRIAGE_APPLY_KILL_SWITCH }}
           GH_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
-          APPLY: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == true && 'true' || 'false' }}
+          REQUESTED_APPLY: ${{ github.event_name == 'schedule' && 'true' || (github.event_name == 'workflow_dispatch' && inputs.apply == true && 'true' || 'false') }}
         run: |
           set +e
           audit_root="${RUNNER_TEMP}/ce-ops-triage-queue-audit"
           mkdir -p "${audit_root}"
+
+          apply="${REQUESTED_APPLY}"
+          kill_switch="$(printf '%s' "${CE_TRIAGE_APPLY_KILL_SWITCH:-}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            case "${kill_switch}" in
+              1|true|yes|on)
+                echo "CE_TRIAGE_APPLY_KILL_SWITCH truthy; scheduled run forced to dry-run"
+                apply="false"
+                ;;
+            esac
+          fi
 
           args=(
             triage queue scan
@@ -60,7 +72,7 @@ jobs:
             --audit-root "${audit_root}"
             --json
           )
-          if [[ "${APPLY}" == "true" ]]; then
+          if [[ "${apply}" == "true" ]]; then
             args+=(--apply)
           fi
 

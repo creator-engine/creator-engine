@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import urllib.parse
+from pathlib import Path
 
 import pytest
 
@@ -64,17 +66,24 @@ class FakeGhRunner:
         self.calls: list[tuple[list[str], str | None]] = []
         self.write_calls: list[tuple[list[str], str | None]] = []
         self.label_write_calls: list[tuple[list[str], str | None]] = []
+        self._next_comment_id = 1000
 
     def __call__(self, argv, input_text=None):
         argv = list(argv)
         self.calls.append((argv, input_text))
         path = self._path(argv)
         method = self._method(argv)
-        if method in {"POST", "PATCH"}:
+        if method in {"POST", "PATCH", "DELETE"}:
             self.write_calls.append((argv, input_text))
         if self._is_label_write(path, method):
             self.label_write_calls.append((argv, input_text))
         if path.startswith("repos/creator-engine/ce-ops/issues/67/comments"):
+            if method == "POST":
+                body = json.loads(input_text or "{}")
+                comment = {"id": self._next_comment_id, "body": body.get("body", "")}
+                self._next_comment_id += 1
+                self.comments.append(comment)
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(comment), stderr="")
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.comments), stderr="")
         if path.startswith("search/issues"):
             if self.fail_search:
@@ -88,6 +97,12 @@ class FakeGhRunner:
         if path.startswith("repos/creator-engine/ce-ops/issues/comments/"):
             if self.fail_patch:
                 return subprocess.CompletedProcess(argv, 1, stdout="", stderr="patch unavailable")
+            body = json.loads(input_text or "{}")
+            comment_id = int(path.rsplit("/", 1)[-1])
+            for comment in self.comments:
+                if comment.get("id") == comment_id:
+                    comment["body"] = body.get("body", comment.get("body", ""))
+                    break
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": 123}), stderr="")
         if path.startswith("repos/creator-engine/ce-ops/labels/"):
             label = path.rsplit("/", 1)[-1].replace("%3A", ":")
@@ -138,6 +153,38 @@ class FakeGhRunner:
 
 def _queue_comment(entries) -> dict:
     return {"id": 123, "body": qt.render_queue_body(entries)}
+
+
+def _mutating_calls(fake: FakeGhRunner) -> list[tuple[str, str, str | None]]:
+    return [
+        (FakeGhRunner._method(argv), FakeGhRunner._path(argv), body)
+        for argv, body in fake.write_calls
+    ]
+
+
+def _assert_mutations_are_bounded(fake: FakeGhRunner) -> None:
+    for method, path, body_text in _mutating_calls(fake):
+        if method == "POST" and path == "repos/creator-engine/ce-ops/issues/67/comments":
+            assert body_text is not None
+            assert qt.QUEUE_SENTINEL in json.loads(body_text)["body"]
+            continue
+        if method == "PATCH" and path.startswith("repos/creator-engine/ce-ops/issues/comments/"):
+            assert body_text is not None
+            assert qt.QUEUE_SENTINEL in json.loads(body_text)["body"]
+            continue
+        if method == "POST" and path == "repos/creator-engine/ce-ops/labels":
+            assert body_text is not None
+            assert qt._is_managed_label(json.loads(body_text)["name"])
+            continue
+        if method == "POST" and path.endswith("/labels") and "/issues/" in path:
+            assert body_text is not None
+            assert all(qt._is_managed_label(label) for label in json.loads(body_text)["labels"])
+            continue
+        if method == "DELETE" and "/issues/" in path and "/labels/" in path:
+            label = urllib.parse.unquote(path.rsplit("/", 1)[-1])
+            assert qt._is_managed_label(label)
+            continue
+        raise AssertionError(f"unexpected mutating gh api call: {method} {path}")
 
 
 def test_empty_body_parses_to_no_entries():
@@ -454,6 +501,51 @@ def test_apply_patches_existing_queue_comment():
     assert fake.label_write_calls == []
 
 
+def test_apply_creates_missing_queue_comment_once_then_patches_existing():
+    fake = FakeGhRunner(
+        comments=[],
+        issues=[_issue(14, labels=[{"name": "triage:ready"}, {"name": "wc:S"}])],
+    )
+
+    first = qt.scan_and_triage(gh_runner=fake, apply=True, now="2026-06-30T00:00:00Z")
+    second = qt.scan_and_triage(gh_runner=fake, apply=True, now="2026-06-30T00:00:00Z")
+
+    mutating = _mutating_calls(fake)
+    comment_creates = [
+        call
+        for call in mutating
+        if call[0] == "POST" and call[1] == "repos/creator-engine/ce-ops/issues/67/comments"
+    ]
+    comment_patches = [
+        call
+        for call in mutating
+        if call[0] == "PATCH" and call[1].startswith("repos/creator-engine/ce-ops/issues/comments/")
+    ]
+    assert first["applied"] is True
+    assert first["write"]["created"] is True
+    assert second["applied"] is True
+    assert second["write"].get("created") is None
+    assert len(comment_creates) == 1
+    assert len(comment_patches) == 1
+    assert len([comment for comment in fake.comments if qt.QUEUE_SENTINEL in comment["body"]]) == 1
+
+
+def test_apply_mutations_are_bounded_to_queue_comment_and_managed_labels():
+    fake = FakeGhRunner(
+        comments=[],
+        issues=[
+            _issue(15, labels=[]),
+            _issue(16, labels=[{"name": "blocked"}, {"name": "triage:ready"}, {"name": "wc:M"}]),
+        ],
+    )
+
+    result = qt.scan_and_triage(gh_runner=fake, apply=True, now="2026-06-30T00:00:00Z")
+
+    assert result["applied"] is True
+    assert _mutating_calls(fake)
+    _assert_mutations_are_bounded(fake)
+
+
 def test_label_delta_only_manages_work_class_and_readiness_namespaces():
     delta = qt.plan_label_delta(
         _entry(10, blockers=("dependency",)),
@@ -524,3 +616,14 @@ def test_triage_queue_cli_help_exits_zero(argv):
         ce_cli.main(argv)
 
     assert exc.value.code == 0
+
+
+def test_triage_queue_workflow_scheduled_apply_has_kill_switch():
+    workflow = Path(".github/workflows/ce-ops-triage-queue.yml").read_text(encoding="utf-8")
+
+    assert "CE_TRIAGE_APPLY_KILL_SWITCH: ${{ vars.CE_TRIAGE_APPLY_KILL_SWITCH }}" in workflow
+    assert "github.event_name == 'schedule' && 'true'" in workflow
+    assert "workflow_dispatch' && inputs.apply == true" in workflow
+    assert "CE_TRIAGE_APPLY_KILL_SWITCH truthy; scheduled run forced to dry-run" in workflow
+    assert 'if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then' in workflow
+    assert "1|true|yes|on)" in workflow

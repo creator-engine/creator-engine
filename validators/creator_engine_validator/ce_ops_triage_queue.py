@@ -245,6 +245,18 @@ def read_queue_comment(
     *,
     gh_runner: GhRunner | None = None,
 ) -> Mapping[str, Any] | None:
+    matches = _read_queue_comments(repo, queue_issue, gh_runner=gh_runner)
+    if not matches:
+        return None
+    return matches[-1]
+
+
+def _read_queue_comments(
+    repo: str = DEFAULT_REPO,
+    queue_issue: int = DEFAULT_QUEUE_ISSUE,
+    *,
+    gh_runner: GhRunner | None = None,
+) -> tuple[Mapping[str, Any], ...]:
     runner = gh_runner or default_gh_runner
     code, payload, _stderr = _gh_api(
         runner,
@@ -252,15 +264,13 @@ def read_queue_comment(
         method="GET",
     )
     if code != 0 or not isinstance(payload, list):
-        return None
-    matches = [
+        return ()
+    matches = tuple(
         comment
         for comment in payload
         if isinstance(comment, Mapping) and QUEUE_SENTINEL in str(comment.get("body") or "")
-    ]
-    if not matches:
-        return None
-    return matches[-1]
+    )
+    return matches
 
 
 def parse_queue_entries(body: str | None) -> tuple[QueueEntry, ...]:
@@ -619,6 +629,13 @@ def upsert_queue_comment(
     body = render_queue_body(entries)
     comment_id = _comment_id(comment)
     if comment_id is None:
+        if apply:
+            return _create_queue_comment(
+                repo,
+                queue_issue,
+                body,
+                gh_runner=runner,
+            )
         return {
             "applied": False,
             "planned": bool(not apply),
@@ -633,8 +650,18 @@ def upsert_queue_comment(
             "comment_id": comment_id,
             "body_sha256": _sha256(body),
         }
+    return _patch_queue_comment(repo, comment_id, body, gh_runner=runner)
+
+
+def _patch_queue_comment(
+    repo: str,
+    comment_id: int,
+    body: str,
+    *,
+    gh_runner: GhRunner,
+) -> dict[str, Any]:
     code, _payload, stderr = _gh_api(
-        runner,
+        gh_runner,
         f"repos/{repo}/issues/comments/{comment_id}",
         method="PATCH",
         body={"body": body},
@@ -645,6 +672,48 @@ def upsert_queue_comment(
         "comment_id": comment_id,
         "body_sha256": _sha256(body),
         **({"warning": f"patch_failed:{stderr.strip() or code}"} if code != 0 else {}),
+    }
+
+
+def _create_queue_comment(
+    repo: str,
+    queue_issue: int,
+    body: str,
+    *,
+    gh_runner: GhRunner,
+) -> dict[str, Any]:
+    comment = read_queue_comment(repo, queue_issue, gh_runner=gh_runner)
+    if comment is not None:
+        comment_id = _comment_id(comment)
+        if comment_id is not None:
+            result = _patch_queue_comment(repo, comment_id, body, gh_runner=gh_runner)
+            result["created"] = False
+            return result
+
+    code, _payload, stderr = _gh_api(
+        gh_runner,
+        f"repos/{repo}/issues/{queue_issue}/comments",
+        method="POST",
+        body={"body": body},
+    )
+    comment = read_queue_comment(repo, queue_issue, gh_runner=gh_runner)
+    comment_id = _comment_id(comment)
+    return {
+        "applied": code == 0 and comment_id is not None,
+        "planned": False,
+        "created": code == 0 and comment_id is not None,
+        "comment_id": comment_id,
+        "body_sha256": _sha256(body),
+        **(
+            {"warning": f"create_failed:{stderr.strip() or code}"}
+            if code != 0
+            else {}
+        ),
+        **(
+            {"warning": "create_verify_failed"}
+            if code == 0 and comment_id is None
+            else {}
+        ),
     }
 
 
