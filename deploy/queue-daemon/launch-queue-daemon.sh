@@ -5,9 +5,13 @@ usage() {
   cat <<'USAGE'
 Usage: launch-queue-daemon.sh [--health]
 
-Starts the Creator Engine v3 merge-queue daemon with fail-closed credential
-checks. Secrets must be supplied by the host environment or the systemd
-EnvironmentFile; never place secret values in this script or the unit.
+Starts the Creator Engine v3 merge-queue daemon in the canonical daemon
+container. Set CE_DAEMON_UNCONTAINED=1 only for the documented rollback escape
+hatch to use the legacy direct host launch path.
+
+Secrets must be supplied by the host environment, the systemd EnvironmentFile,
+or the documented runtime token file path; never place secret values in this
+script or the unit.
 
 Required environment:
   GH_TOKEN                                  GitHub overwatch/integrator token
@@ -23,7 +27,7 @@ Required environment:
 
 Optional environment:
   BAO_CACERT                                OpenBao CA certificate path
-  CE_QUEUE_DAEMON_BIN                       executable wrapper; default v3_cli, fallback to repo venv module
+  CE_QUEUE_DAEMON_BIN                       executable wrapper; default cev3, fallback to repo venv module
   CE_QUEUE_DAEMON_INTERVAL_SECONDS          default 120
   CE_QUEUE_DAEMON_APPROVAL_SETTLE_SECONDS   default 0
   CE_QUEUE_DAEMON_ROOT                      v3 local-state root
@@ -35,6 +39,15 @@ Optional environment:
   CE_APPROVAL_WALL_SECRET_TTL_SECONDS       default 600
   CE_APPROVAL_WALL_MARKER_TTL_SECONDS       default 3600
   CE_QUEUE_DAEMON_DRY_RUN                   set to 1 only for controlled dry-run tests
+  CE_DAEMON_UNCONTAINED                     set to 1 for the legacy direct-launch escape hatch
+  CE_CONTAINER_ENGINE                       docker or podman for contained launch; default docker
+  CE_DAEMON_IMAGE                           canonical runtime image for contained launch
+  CE_DAEMON_STATE_ROOT                      host state root mounted into the container
+  CE_DAEMON_LEASE_ROOT                      queue singleton lease root; default derived from daemon state root
+  CE_DAEMON_LEASE_HEARTBEAT_SECONDS         default 30
+  CE_DAEMON_LEASE_TTL_SECONDS               default 300
+  CE_DAEMON_HOLDER_ID                       optional lease holder id; default queue-daemon:<host>:<pid>
+  CE_DAEMON_TOKEN_FILE                      optional token file mounted read-only
 USAGE
 }
 
@@ -75,7 +88,7 @@ validate_required_env() {
 
 resolve_queue_daemon_command() {
   local root="$1"
-  local bin="${CE_QUEUE_DAEMON_BIN:-v3_cli}"
+  local bin="${CE_QUEUE_DAEMON_BIN:-cev3}"
   if command -v "$bin" >/dev/null 2>&1; then
     QUEUE_DAEMON_CMD=("$bin")
     return 0
@@ -84,7 +97,134 @@ resolve_queue_daemon_command() {
     QUEUE_DAEMON_CMD=("$root/.venv/bin/python" "-m" "creator_engine_validator.v3_cli")
     return 0
   fi
-  die "cannot find $bin and no repo venv module fallback at $root/.venv/bin/python. Install v3_cli or set CE_QUEUE_DAEMON_BIN."
+  die "cannot find $bin and no repo venv module fallback at $root/.venv/bin/python. Install cev3 or set CE_QUEUE_DAEMON_BIN."
+}
+
+resolve_lease_python() {
+  local root="$1"
+  if [[ -n "${CE_DAEMON_LEASE_PYTHON:-}" ]]; then
+    printf '%s\n' "$CE_DAEMON_LEASE_PYTHON"
+    return 0
+  fi
+  if [[ -x "$root/.venv/bin/python" ]]; then
+    printf '%s\n' "$root/.venv/bin/python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return 0
+  fi
+  die "cannot find python for queue-daemon singleton lease supervisor"
+}
+
+queue_daemon_lease_root() {
+  local root="$1"
+  if [[ -n "${CE_DAEMON_LEASE_ROOT:-}" ]]; then
+    printf '%s\n' "$CE_DAEMON_LEASE_ROOT"
+  elif [[ -n "${CE_DAEMON_STATE_ROOT:-}" ]]; then
+    printf '%s\n' "$CE_DAEMON_STATE_ROOT/daemon-leases"
+  elif [[ -n "${CE_QUEUE_DAEMON_ROOT:-}" ]]; then
+    printf '%s\n' "$(dirname -- "$CE_QUEUE_DAEMON_ROOT")/daemon-leases"
+  else
+    printf '%s\n' "$root/.ce/state/daemon-leases"
+  fi
+}
+
+exec_with_queue_daemon_lease() {
+  local root="$1"
+  shift
+  local lease_root
+  lease_root="$(queue_daemon_lease_root "$root")"
+  install -d -m 0700 "$lease_root"
+  export CE_DAEMON_LEASE_ROOT="$lease_root"
+  local lease_python
+  lease_python="$(resolve_lease_python "$root")"
+
+  exec "$lease_python" - "$@" <<'PY'
+from __future__ import annotations
+
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from creator_engine_validator.daemon_lease import DaemonLeaseError, acquire
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise SystemExit(f"ERROR: {name} must be numeric")
+    if value <= 0:
+        raise SystemExit(f"ERROR: {name} must be positive")
+    return value
+
+
+cmd = sys.argv[1:]
+if not cmd:
+    raise SystemExit("ERROR: queue-daemon singleton lease supervisor received no command")
+
+lease_root = Path(os.environ["CE_DAEMON_LEASE_ROOT"])
+ttl_seconds = _float_env("CE_DAEMON_LEASE_TTL_SECONDS", 300.0)
+heartbeat_seconds = min(_float_env("CE_DAEMON_LEASE_HEARTBEAT_SECONDS", 30.0), ttl_seconds / 2.0)
+holder_id = os.environ.get("CE_DAEMON_HOLDER_ID") or f"queue-daemon:{socket.gethostname()}:{os.getpid()}"
+takeover_reason = os.environ.get("CE_DAEMON_LEASE_TAKEOVER_REASON") or None
+
+try:
+    lease = acquire(
+        "queue-daemon",
+        holder_id,
+        state_root=lease_root,
+        ttl_seconds=ttl_seconds,
+        allow_takeover=takeover_reason is not None,
+        takeover_reason=takeover_reason,
+    )
+except DaemonLeaseError as exc:
+    print(f"ERROR: queue-daemon singleton lease refused: {exc}", file=sys.stderr)
+    raise SystemExit(73)
+
+process = subprocess.Popen(cmd)
+
+
+def _forward(signum: int, _frame: object) -> None:
+    if process.poll() is None:
+        process.send_signal(signum)
+
+
+signal.signal(signal.SIGTERM, _forward)
+signal.signal(signal.SIGINT, _forward)
+
+try:
+    while True:
+        try:
+            returncode = process.wait(timeout=heartbeat_seconds)
+            raise SystemExit(returncode)
+        except subprocess.TimeoutExpired:
+            try:
+                lease.heartbeat()
+            except Exception as exc:
+                print(f"ERROR: queue-daemon singleton lease heartbeat failed: {exc}", file=sys.stderr)
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise SystemExit(74)
+finally:
+    lease.release()
+PY
 }
 
 curl_bao() {
@@ -117,10 +257,17 @@ daemon_alive() {
   if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ce-queue-daemon.service 2>/dev/null; then
     return 0
   fi
+  local engine="${CE_CONTAINER_ENGINE:-docker}"
+  local container_name="${CE_DAEMON_CONTAINER_NAME:-ce-queue-daemon}"
+  if command -v "$engine" >/dev/null 2>&1; then
+    if "$engine" ps --filter "name=^${container_name}$" --format '{{.Names}}' 2>/dev/null | grep -Fx "$container_name" >/dev/null; then
+      return 0
+    fi
+  fi
   if command -v pgrep >/dev/null 2>&1; then
     pgrep -af '((v3_cli|cev3|creator_engine_validator[.]v3_cli).*[[:space:]]queue-daemon|queue-daemon.*--loop)' >/dev/null
   else
-    die "--health requires systemctl or pgrep to verify daemon liveness"
+    die "--health requires systemctl, $engine, or pgrep to verify daemon liveness"
   fi
 }
 
@@ -132,7 +279,13 @@ health() {
   printf 'OK: ce-queue-daemon alive; GH_TOKEN and BAO_TOKEN are valid\n'
 }
 
-main() {
+container_adapter() {
+  local root
+  root="$(repo_root)"
+  exec "$root/deploy/daemons/run-daemon-container.sh" queue-daemon "$@"
+}
+
+main_uncontained() {
   local mode="start"
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -206,7 +359,27 @@ main() {
     args+=(--dry-run)
   fi
 
-  exec "${QUEUE_DAEMON_CMD[@]}" "${args[@]}"
+  exec_with_queue_daemon_lease "$root" "${QUEUE_DAEMON_CMD[@]}" "${args[@]}"
+}
+
+main() {
+  case "${1:-}" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --health)
+      main_uncontained "$@"
+      return
+      ;;
+  esac
+
+  if [[ "${CE_DAEMON_UNCONTAINED:-0}" == "1" ]]; then
+    main_uncontained "$@"
+    return
+  fi
+
+  container_adapter "$@"
 }
 
 main "$@"

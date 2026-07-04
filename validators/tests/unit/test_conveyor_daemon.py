@@ -31,7 +31,20 @@ TEST_ALLOCATOR = DaemonPathAllocator(
     DaemonRuntimeRoots.from_root(TEST_RUNTIME_ROOT, create=True),
     secret=b"conveyor-daemon-unit-test-secret",
 )
-ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR}
+
+
+class FakeLease:
+    def __init__(self, *, fail_on_call: int | None = None):
+        self.heartbeat_calls = 0
+        self.fail_on_call = fail_on_call
+
+    def heartbeat(self) -> None:
+        self.heartbeat_calls += 1
+        if self.fail_on_call == self.heartbeat_calls:
+            raise RuntimeError("lost lease heartbeat")
+
+
+ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR, "daemon_lease": FakeLease()}
 
 
 class FakeGit:
@@ -296,6 +309,107 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     )
 
 
+def test_armed_start_without_lease_is_refused():
+    with pytest.raises(ValueError, match="daemon_lease"):
+        ConveyorDaemon(
+            discovery_runner=lambda: [],
+            armed=True,
+            path_allocator=TEST_ALLOCATOR,
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+        )
+
+
+def test_armed_run_heartbeats_lease():
+    lease = FakeLease()
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [],
+        armed=True,
+        path_allocator=TEST_ALLOCATOR,
+        daemon_lease=lease,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+    )
+
+    daemon.run_once()
+
+    assert lease.heartbeat_calls == 1
+
+
+def test_armed_run_heartbeats_before_each_item_boundary():
+    lease = FakeLease()
+    first_item = _item("Feature/One")
+    second_item = _item("Feature/Two")
+    prepare_seen_heartbeats: list[int] = []
+
+    def prepare_runner(
+        spec: ConveyorHarvestSpec,
+        *,
+        git_runner,
+        validate_runner,
+    ) -> ConveyorHarvestResult:
+        prepare_seen_heartbeats.append(lease.heartbeat_calls)
+        return _harvest_result(spec, ready=True, reasons=())
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [first_item, second_item],
+        armed=True,
+        path_allocator=TEST_ALLOCATOR,
+        daemon_lease=lease,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare_runner,
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert [item.status for item in result.results] == ["pr-opened", "pr-opened"]
+    assert prepare_seen_heartbeats == [2, 3]
+    assert lease.heartbeat_calls == 3
+
+
+def test_armed_run_heartbeat_failure_before_item_stops_without_processing_item():
+    lease = FakeLease(fail_on_call=3)
+    prepare = FakePrepare()
+    git = FakeGit()
+    gh = FakeGh()
+    logs: list[str] = []
+    first_item = _item("Feature/One")
+    second_item = _item("Feature/Two")
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [first_item, second_item],
+        armed=True,
+        path_allocator=TEST_ALLOCATOR,
+        daemon_lease=lease,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert [item.status for item in result.results] == ["pr-opened", "failed"]
+    assert result.results[1].branch == "Feature/Two"
+    assert result.results[1].reasons == ("daemon lease heartbeat failed: lost lease heartbeat",)
+    assert [spec.branch for spec in prepare.calls] == ["Feature/One"]
+    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), first_item.repo_path)]
+    assert len(gh.calls) == 1
+    assert lease.heartbeat_calls == 3
+    assert any("daemon lease heartbeat failed: lost lease heartbeat" in message for message in logs)
+
+
 def test_per_item_failure_isolated_and_loop_continues():
     prepare = FakePrepare(failing_branches={"Feature/One"})
     git = FakeGit()
@@ -468,6 +582,7 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
         discovery_runner=lambda: [_data_only_payload()],
         armed=True,
         path_allocator=allocator,
+        daemon_lease=FakeLease(),
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,

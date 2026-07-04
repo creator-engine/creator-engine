@@ -27,6 +27,7 @@ from .conveyor import (
     prepare_harvest,
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
+from .daemon_lease import DaemonLease
 from .checks.path_manifest_fidelity import branch_slug
 from .forge.daemon_allocation import (
     DaemonAllocationError,
@@ -275,9 +276,11 @@ class ConveyorDaemon:
         repo_root: Path | str | None = None,
         bundle_root: Path | str | None = None,
         path_allocator: DaemonPathAllocator | None = None,
+        daemon_lease: DaemonLease | None = None,
     ) -> None:
         self.discovery_runner = discovery_runner
         self.armed = armed
+        self.daemon_lease = daemon_lease
         self.git_runner = git_runner
         self.validate_runner = validate_runner
         self.gh_runner = gh_runner
@@ -344,6 +347,8 @@ class ConveyorDaemon:
                 missing.append("repo_root")
             if self.bundle_root is None:
                 missing.append("bundle_root")
+            if self.daemon_lease is None:
+                missing.append("daemon_lease")
             if missing:
                 raise ValueError(f"armed conveyor daemon requires injected {', '.join(missing)}")
 
@@ -353,6 +358,16 @@ class ConveyorDaemon:
         Disarmed mode plans only. Armed mode processes each item independently
         and continues after per-item failures.
         """
+
+        if self.armed:
+            heartbeat_error = self._heartbeat_lease()
+            if heartbeat_error is not None:
+                return ConveyorDaemonRunResult(
+                    armed=self.armed,
+                    discovered_count=0,
+                    results=(),
+                    discovery_error=heartbeat_error,
+                )
 
         try:
             discovered_items: list[ConveyorDaemonItem] = []
@@ -388,6 +403,11 @@ class ConveyorDaemon:
         seen_this_pass: set[str] = set()
         results: list[ConveyorDaemonItemResult] = []
         for item in discovered:
+            if self.armed and (heartbeat_error := self._heartbeat_lease()) is not None:
+                results.append(self._failed(item, (heartbeat_error,)))
+                self._log(f"conveyor stopping pass before item after heartbeat failure: {heartbeat_error}")
+                break
+
             if item.key in seen_this_pass or item.key in self._completed_keys:
                 results.append(
                     ConveyorDaemonItemResult(
@@ -845,6 +865,16 @@ class ConveyorDaemon:
         if not isinstance(timestamp, str) or not timestamp.strip():
             raise ValueError("now must return a non-empty timestamp string")
         return timestamp
+
+    def _heartbeat_lease(self) -> str | None:
+        assert self.daemon_lease is not None
+        try:
+            self.daemon_lease.heartbeat()
+        except Exception as exc:
+            error = f"daemon lease heartbeat failed: {exc}"
+            self._log(f"conveyor {error}")
+            return error
+        return None
 
     def _log(self, message: str) -> None:
         if self.log_runner is not None:
