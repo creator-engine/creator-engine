@@ -12,9 +12,9 @@ live pane discovery, or inferred scheduler intent.
 Command surface (mirrors the `notify once|watch|status` I/O-edge daemon style):
 
 ```text
-cev3 reap once      # one fold + one bounded action pass
-cev3 reap watch     # repeat `once` at an interval (SIGINT/SIGTERM stop cleanly)
-cev3 reap status    # a no-mutation read model (classification + counts)
+ce reap once      # one fold + one bounded action pass
+ce reap watch     # repeat `once` at an interval (SIGINT/SIGTERM stop cleanly)
+ce reap status    # a no-mutation read model (classification + counts)
 ```
 
 ## Architecture
@@ -48,7 +48,7 @@ would forge writer-provenance + mutate the trigger surface on every pass.
 
 ## Read-only discipline
 
-`cev3 reap status`, and the **evaluation phase** of `once`/`watch`, write nothing:
+`ce reap status`, and the **evaluation phase** of `once`/`watch`, write nothing:
 no `events.jsonl` append, no dispatch / escalation / reaper-ledger / archive /
 pane-registry write. `events.jsonl` is byte-identical before and after any
 evaluation pass that does not retire.
@@ -133,7 +133,7 @@ merely archiving, or merely killing a pane.
 
 ## Rollback
 
-Stop any `cev3 reap watch` process. Do **not** delete archives, dispatch records,
+Stop any `ce reap watch` process. Do **not** delete archives, dispatch records,
 sentinel events, runtime evidence, or escalations created by prior runs. Rely on
 `pco-release` idempotency for already-released seats. Resolve reaper-created
 escalations only after human inspection. If archive succeeded but a later step

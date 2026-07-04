@@ -1,12 +1,12 @@
 # Solo + Dev Mode Onboarding
 
 *This guide is for a solo developer who has chosen **Dev mode**: you drive the
-pipeline yourself by typing `cev3` commands inside your governed agent session.
+pipeline yourself by typing `ce` commands inside your governed agent session.
 You hold the Frame + Shape decisions directly at each step. If you prefer the
 agent to drive the pipeline under the hood while you frame intent and ratify
 gates, see [`solo-ceo-onboarding.md`](./solo-ceo-onboarding.md) instead.*
 
-> **You are in: Solo + Dev mode.** In this cell you type `cev3` commands
+> **You are in: Solo + Dev mode.** In this cell you type `ce` commands
 > explicitly to move work through the pipeline: you file the Scope, optionally
 > run the grill-me to sharpen it, ratify the bet, launch the build, review the
 > artifacts, and gate the merge. Each gesture is a deliberate shell command —
@@ -22,10 +22,10 @@ Every piece of CE work follows the same loop: **Frame → Shape → Build → Re
 | Stage | What you do | Command |
 | --- | --- | --- |
 | **Frame** | Describe the problem conversationally with the agent | *(conversation)* |
-| **Shape** | File a Scope; optionally run the grill-me to sharpen it | `cev3 scope`, `cev3 shape` |
-| **Build** | Ratify the Scope; launch the governed run | `cev3 ratify`, `cev3 drive --spawn` |
-| **Review** | Inspect the run's artifacts against your Done-when | `cev3 artifacts`, `cev3 show` |
-| **Ship** | Read the merge gate; apply the gated merge | `cev3 merge`, `cev3 merge --apply` |
+| **Shape** | File a Scope; optionally run the grill-me to sharpen it | `ce scope`, `ce shape` |
+| **Build** | Ratify the Scope; launch the governed run | `ce ratify`, `ce drive --spawn` |
+| **Review** | Inspect the run's artifacts against your Done-when | `ce artifacts`, `ce show` |
+| **Ship** | Read the merge gate; apply the gated merge | `ce merge`, `ce merge --apply` |
 
 ---
 
@@ -45,7 +45,7 @@ ce launch
 
 This opens your coding agent in a governed terminal pane. Everything flows
 through the agent conversation, with CE's governance layer around it. You can
-confirm the install is healthy with `cev3 status` — it will show an empty scope
+confirm the install is healthy with `ce status` — it will show an empty scope
 list on a fresh workspace.
 
 ---
@@ -70,7 +70,7 @@ Once you have framed the problem, file a Scope — the governed unit of work.
 Choose a stable slug (a short kebab-case identifier) for this piece of work:
 
 ```bash
-cev3 scope rate-limit-login \
+ce scope rate-limit-login \
   --goal "Add per-IP rate limiting to the public login API with configurable limits and 429 responses" \
   --done-when "Rate limiter returns 429 with Retry-After header when per-IP limit exceeded" \
   --done-when "Limit thresholds are configurable via environment variable without code change" \
@@ -99,14 +99,14 @@ If the Scope has gaps or you are unsure about any field, run the Shape
 grill-me. It asks targeted questions and surfaces missing criteria:
 
 ```bash
-cev3 shape rate-limit-login
+ce shape rate-limit-login
 ```
 
 Read the output and revise the Scope if the grill-me surfaces important gaps.
 You can also inspect the Scope at any time with:
 
 ```bash
-cev3 show rate-limit-login
+ce show rate-limit-login
 ```
 
 When the Scope reads **Ready**, move to Phase 3.
@@ -117,10 +117,10 @@ When the Scope reads **Ready**, move to Phase 3.
 
 **Read the Scope carefully** before ratifying. Once ratified, the governed run
 is authorized to build inside the Scope's envelope. Generate a fresh approver
-ref and pass it to `cev3 ratify`:
+ref and pass it to `ce ratify`:
 
 ```bash
-cev3 ratify rate-limit-login --approver-ref $(openssl rand -hex 32)
+ce ratify rate-limit-login --approver-ref $(openssl rand -hex 32)
 ```
 
 The `--approver-ref` is a value-free fingerprint. It records that a human
@@ -138,14 +138,14 @@ Budget after ratification, and it cannot self-ratify on your behalf.
 First do a dry-run to confirm the dispatch envelope looks right:
 
 ```bash
-cev3 drive rate-limit-login
+ce drive rate-limit-login
 ```
 
 This prints the governed dispatch envelope without launching anything. When it
 looks right, spawn the run:
 
 ```bash
-cev3 drive rate-limit-login --spawn
+ce drive rate-limit-login --spawn
 ```
 
 This launches the governed seat in the background. You can follow progress in
@@ -163,7 +163,7 @@ The run identifier appears in the session output when the run completes.
 Enumerate the artifacts:
 
 ```bash
-cev3 artifacts rate-limit-login --run-id <run-id>
+ce artifacts rate-limit-login --run-id <run-id>
 ```
 
 This lists the evidence chain: the diff, test output, the coverage file, and
@@ -172,7 +172,7 @@ any other artifacts the run produced.
 Inspect the Scope state after the run:
 
 ```bash
-cev3 show rate-limit-login
+ce show rate-limit-login
 ```
 
 **Now judge the artifacts.** Read the PR diff and test evidence. Ask yourself:
@@ -186,7 +186,7 @@ reading a real diff against criteria you set — not evaluating a summary.
 When the PR looks right and CI is green, read the merge gate:
 
 ```bash
-cev3 merge rate-limit-login --run <run-id>
+ce merge rate-limit-login --run <run-id>
 ```
 
 Without `--apply`, this command reads the gate and tells you exactly what is
@@ -194,7 +194,7 @@ satisfied and what is blocking. Run it plan-only as many times as you like.
 When everything is green, apply the gated merge:
 
 ```bash
-cev3 merge rate-limit-login --run <run-id> --apply
+ce merge rate-limit-login --run <run-id> --apply
 ```
 
 **The merge gate checks:** ratification bound to this Scope, independent review
@@ -208,7 +208,7 @@ is what authorizes the merge.
 After the merge, render the Completion Report:
 
 ```bash
-cev3 report rate-limit-login --run-id <run-id>
+ce report rate-limit-login --run-id <run-id>
 ```
 
 This renders a compact record of what was delivered: how it scored against your
@@ -223,16 +223,16 @@ the evidence is durable and replayable from a git clone.
 Once you have done the first Scope, every piece of work follows the same shape:
 
 1. **Frame** — describe what you want to build conversationally with the agent.
-2. **Scope** — `cev3 scope <slug> --goal "..." --done-when "..." --budget N --change-type <type>`.
-3. **Shape (optional)** — `cev3 shape <slug>` to sharpen criteria if needed.
-4. **Ratify** — `cev3 ratify <slug> --approver-ref $(openssl rand -hex 32)` — your "yes, build this."
-5. **Drive** — `cev3 drive <slug> --spawn` — launch the governed run.
-6. **Review** — `cev3 artifacts <slug> --run-id <run-id>` — read the diff against your Done-when.
-7. **Merge** — `cev3 merge <slug> --run <run-id> --apply` — gate and apply.
-8. **Report** — `cev3 report <slug> --run-id <run-id>` — capture the evidence.
+2. **Scope** — `ce scope <slug> --goal "..." --done-when "..." --budget N --change-type <type>`.
+3. **Shape (optional)** — `ce shape <slug>` to sharpen criteria if needed.
+4. **Ratify** — `ce ratify <slug> --approver-ref $(openssl rand -hex 32)` — your "yes, build this."
+5. **Drive** — `ce drive <slug> --spawn` — launch the governed run.
+6. **Review** — `ce artifacts <slug> --run-id <run-id>` — read the diff against your Done-when.
+7. **Merge** — `ce merge <slug> --run <run-id> --apply` — gate and apply.
+8. **Report** — `ce report <slug> --run-id <run-id>` — capture the evidence.
 
-Check what is in flight at any time with `cev3 status`. Check items awaiting
-your attention with `cev3 inbox --repo <owner/repo>`.
+Check what is in flight at any time with `ce status`. Check items awaiting
+your attention with `ce inbox --repo <owner/repo>`.
 
 ---
 
@@ -244,10 +244,10 @@ CE is designed so that a small set of decisions always stays with you:
 | --- | --- |
 | The **Done-when** criteria on every Scope | Goal drafting, plan, tasks, code, and test execution |
 | The **Budget** on every Scope | Spending within the ratified cap |
-| **Ratifying** the Scope (`cev3 ratify`) | Running the build inside the ratified envelope |
+| **Ratifying** the Scope (`ce ratify`) | Running the build inside the ratified envelope |
 | Making a change **riskier** | Making a change safer within its envelope |
 | **Judging the artifacts** at Review | Producing the artifacts and the Completion Report |
-| The **gated merge** (`cev3 merge --apply`) | Opening the PR and reading the merge gate |
+| The **gated merge** (`ce merge --apply`) | Opening the PR and reading the merge gate |
 | Authorizing **privileged surfaces** | Refusing privileged actions and surfacing the reason |
 
 In Dev mode you drive each gesture explicitly. You see every step of the
@@ -259,7 +259,7 @@ agent, so it cannot be reasoned around.
 ## A note on spec-kit
 
 An earlier version of CE used `/speckit-*` slash commands to drive the Frame
-and Shape stages. Spec-kit is being retired. The `cev3 scope` / `cev3 shape` loop
+and Shape stages. Spec-kit is being retired. The `ce scope` / `ce shape` loop
 replaces it: it is the same conceptual pipeline with a governed shell interface
 instead of slash commands. If you have an existing project with spec-kit
 artifacts, they remain valid inputs to the agent conversation; you do not need

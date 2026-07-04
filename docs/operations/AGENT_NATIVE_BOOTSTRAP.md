@@ -41,7 +41,7 @@ fallback.
 The clone-mode contract is `source-bootstrap-offline-installed-app`: create the
 target venv, run the checkout's stdlib-only bootstrap module, install cp314
 runtime dependencies from `validators/wheelhouse`, link the local `validators/`
-source into the venv, and write the `ce`/`cev3` console scripts. Clone-mode does
+source into the venv, and write the CE console scripts. Clone-mode does
 not commit or consume a first-party app wheel from `validators/wheelhouse`.
 
 Create the target venv with uv when available:
@@ -97,7 +97,7 @@ exits **non-zero** on any refused clause:
 | RED-G-4 | ungoverned `.hermes/` state-path posture (not git-ignored) |
 | RED-G-5 | unsafe hidden continuation (no visible pane / dead-pane) |
 | RED-G-6 | dependency wheelhouse drift from the Option B contract |
-| CE-SEAT-ENV | target app package not importable or `ce`/`cev3` scripts missing |
+| CE-SEAT-ENV | target app package not importable or CE console scripts missing |
 
 ## 5. Blocked-report semantics on failed preflight
 

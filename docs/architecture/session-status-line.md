@@ -1,7 +1,7 @@
 # CE v3 — Session frame + the unified resource status line (G-7.1)
 
 *Curated design/contract note (provenance: G-7 product-surface build, 2026-06-08).
-**BUILT — `creator_engine_validator/v3_session.py` (pure render) + `cev3 session`.**
+**BUILT — `creator_engine_validator/v3_session.py` (pure render) + `ce session`.**
 Companions: [`pilot-uiux-model.md`](./pilot-uiux-model.md) (the surface),
 [`stage-vocabulary.md`](./stage-vocabulary.md) (the stage skin),
 [`../contracts/spend-envelope.md`](../contracts/spend-envelope.md) (the G-5 spend
@@ -39,7 +39,7 @@ A governed CE seat launches with `--setting-sources project`, which loads **only
 the repo's settings and **excludes** the user `~/.claude` settings. Consequently a
 user-level `statusLine` is **never loaded by a governed seat** — so the resource
 surface cannot live in user settings. CE's surface is therefore **CE-native and
-project-scoped**: it ships *with the v3 CLI* (`cev3 session` renders it), not in
+project-scoped**: it ships *with the v3 CLI* (`ce session` renders it), not in
 user config. This is what makes the meter survive the hermetic governed posture
 that #157 flagged.
 

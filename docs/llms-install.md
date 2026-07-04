@@ -13,8 +13,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRDNkK3RPOEtpYWo3L1AydmIrOVVmZGVnaS9vSVkrQUh5STRsbSs1Uyt2RlNnaTJwNktxWEN3dFgKdzIrTEVYR3pBcGl0THRHRTR1aHVhdFliQXpWNHdGCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: b1418f73ca033ea97d6ffb1464cba75aaa8eb473240f3b2faffbb769613efef2
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQ3ZaSWJKR1EreHFwUHVKK1R0a0ZBd21rRGdxMUVvd25MYm1ObkFQNU8vZEJFRkp3RjM3TWc2YWoKQnpiZXNpNGUrNmpsR1VkQmJTL0pXMEtQSk1JNkFHCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: cb391ee11bee21d2aabe060e918c8afe427f334cbebec253c0d9976abc092ac9
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -193,7 +193,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   inventory:
 
   ```text
-  <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
+  <venv>/bin/ce install --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
   ```
 
   E1 does **not** run sudo, provision gVisor/proxy, automate the GitHub-App
@@ -215,7 +215,7 @@ Every input the rest of this journey needs is declared in ONE machine-readable
 inventory (`schemas/install-answers.schema.yaml` — the single source of truth).
 Work the loop:
 
-1. **`<venv>/bin/cev3 onboard --spec <verified-spec> --trust-root
+1. **`<venv>/bin/ce install --spec <verified-spec> --trust-root
    <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor>
    --answers-schema <verified-schema> --inventory`** (the one-liner runs this
    once already) — emits every input with
@@ -288,10 +288,9 @@ converged state is fully declarative.
 
 ## 5. Expose the CLI as `ce`
 
-The E1 venv installs both console scripts and invokes **`cev3`** by absolute
-path for the bootstrap handoff. A user-facing **`ce`** shim remains a later
-user-local exposure step; no system-wide symlink is created by E1. The operator
-eventually drives work with `ce session` / `ce scope` / `ce drive` / `ce report`.
+The E1 venv installs the user-facing **`ce`** command. User-local exposure remains
+a later step; no system-wide symlink is created by E1. The operator eventually
+drives work with `ce session` / `ce scope` / `ce drive` / `ce report`.
 
 ## 6. Confirm
 

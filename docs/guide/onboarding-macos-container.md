@@ -162,7 +162,6 @@ Confirm the CLIs are on `PATH`:
 
 ```bash
 command -v ce
-command -v cev3
 ce --help
 ```
 
@@ -197,7 +196,7 @@ ce launch
 ```
 
 `ce hud` is documented as an alias for the same launcher. The full governed
-pilot path also documents `cev3 session` after its plan/apply setup, but the
+pilot path also documents `ce session` after its plan/apply setup, but the
 solo container path should start with the everyday `ce launch` flow.
 
 ## Caveats

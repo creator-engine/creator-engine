@@ -83,7 +83,7 @@ the stale fence, and the standing ops rule.
 - **`ce claim acquire|release|status <ticket>`** (in `ce_cli.py`) — the
   user-facing MVP. Exit `0` success, `1` refused (foreign/invalid/drift), `2` bad
   local input / ambiguous ticket / unavailable `gh`.
-- **Dispatch enforcement.** `cev3 drive --spawn` and `cev3 review --spawn` take a
+- **Dispatch enforcement.** `ce drive --spawn` and `ce review --spawn` take a
   required `--ticket`; the claim is acquired + verified **before** any dispatch
   side effect (`materialize_dispatch` / `materialize_review_dispatch` / pane /
   tmux). v1 `ce launch` / `ce lane launch` take an optional `--claim-ticket` for
