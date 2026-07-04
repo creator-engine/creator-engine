@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from creator_engine_validator.conveyor import ConveyorCommandResult, ConveyorHarvestSpec, land_bundle, prepare_harvest
+import pytest
+
+from creator_engine_validator.conveyor import (
+    ConveyorCommandResult,
+    ConveyorGitPhase,
+    ConveyorHarvestSpec,
+    _default_git_runner,
+    _default_validate_runner,
+    git_env_for_phase,
+    land_bundle,
+    prepare_harvest,
+)
 
 
 class FakeGit:
@@ -12,9 +24,11 @@ class FakeGit:
         self.current_branch = current_branch
         self.diff = diff
         self.calls: list[tuple[str, ...]] = []
+        self.envs: list[Mapping[str, str]] = []
 
-    def __call__(self, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
+    def __call__(self, args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
         self.calls.append(tuple(args))
+        self.envs.append(dict(env))
         if tuple(args) == ("branch", "--show-current"):
             return ConveyorCommandResult(0, f"{self.current_branch}\n", "")
         if tuple(args) == ("branch", "-m", "feature-test"):
@@ -51,9 +65,11 @@ class FakeLandingGit:
     def __init__(self, rebase_returncode: int = 0):
         self.rebase_returncode = rebase_returncode
         self.calls: list[tuple[str, ...]] = []
+        self.envs: list[Mapping[str, str]] = []
 
-    def __call__(self, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
+    def __call__(self, args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
         self.calls.append(tuple(args))
+        self.envs.append(dict(env))
         if tuple(args) == ("bundle", "verify", "/tmp/ce-test-bundle.bundle"):
             return ConveyorCommandResult(0, "The bundle is okay\n", "")
         if tuple(args) == (
@@ -132,10 +148,14 @@ def test_prepare_harvest_renames_branch_cleans_artifacts_writes_carriers_and_val
         ("rebase", "origin/main"),
         ("diff", "--name-only", "--find-renames", "origin/main..HEAD"),
     ]
+    assert all(env["GIT_CONFIG_NOSYSTEM"] == "1" for env in git.envs)
+    assert all(env["GIT_TERMINAL_PROMPT"] == "0" for env in git.envs)
+    assert all(env["PATH"] == "/usr/bin:/bin" for env in git.envs)
+    assert all("GH_TOKEN" not in env and "SSH_AUTH_SOCK" not in env for env in git.envs)
     assert validate.calls == [
         (
             (
-                "python",
+                sys.executable,
                 "-m",
                 "creator_engine_validator.ce_cli",
                 "validate-pr",
@@ -150,7 +170,7 @@ def test_prepare_harvest_renames_branch_cleans_artifacts_writes_carriers_and_val
                 "--allow-dirty",
             ),
             root,
-            {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp"},
+            {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"},
         )
     ]
     assert not (root / "validators" / "build").exists()
@@ -303,3 +323,67 @@ def test_land_bundle_wrong_base_rebase_failure_is_not_ready(tmp_path: Path):
     assert [reason.code for reason in result.reasons] == ["base_rebase_failed"]
     assert "base conflict" in result.reasons[0].detail
     assert ("rev-parse", "HEAD") not in git.calls
+
+
+def test_default_git_runner_uses_explicit_scrubbed_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    captured: dict[str, Mapping[str, str]] = {}
+
+    monkeypatch.setenv("GH_TOKEN", "ambient-secret")
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/ambient-agent.sock")
+
+    def fake_run(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(args[0], 0, "ok\n", "")
+
+    monkeypatch.setattr("creator_engine_validator.conveyor.subprocess.run", fake_run)
+
+    result = _default_git_runner(
+        ["status", "--short"],
+        tmp_path,
+        git_env_for_phase(ConveyorGitPhase.LOCAL),
+    )
+
+    assert result.returncode == 0
+    assert captured["env"] == {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def test_default_validate_runner_uses_only_passed_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    captured: dict[str, Mapping[str, str]] = {}
+    allowed_env = {"PYTHONPATH": str(tmp_path / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"}
+
+    monkeypatch.setenv("GH_TOKEN", "ambient-secret")
+
+    def fake_run(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(args[0], 0, "ok\n", "")
+
+    monkeypatch.setattr("creator_engine_validator.conveyor.subprocess.run", fake_run)
+
+    result = _default_validate_runner([sys.executable, "-m", "validator"], tmp_path, allowed_env)
+
+    assert result.returncode == 0
+    assert captured["env"] == allowed_env
+
+
+def test_default_validate_runner_resolves_current_interpreter_with_scrubbed_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    monkeypatch.setenv("GH_TOKEN", "ambient-secret")
+
+    result = _default_validate_runner(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.environ.get('GH_TOKEN', '')); print(os.environ['PATH'])",
+        ],
+        tmp_path,
+        {"PYTHONPATH": str(tmp_path / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"},
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["", "/usr/bin:/bin"]

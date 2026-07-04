@@ -16,10 +16,13 @@ from typing import Any
 
 from .conveyor import (
     DEFAULT_VALIDATE_COMMAND,
+    ConveyorGitPhase,
     ConveyorBundleLandingResult,
     ConveyorCommandResult,
     ConveyorHarvestResult,
     ConveyorHarvestSpec,
+    GitRunner,
+    git_env_for_phase,
     land_bundle,
     prepare_harvest,
 )
@@ -34,7 +37,7 @@ from .forge.daemon_allocation import (
 
 
 DiscoveryRunner = Callable[[], Iterable["ConveyorDaemonItem | Mapping[str, Any]"]]
-CommandRunner = Callable[[Sequence[str], Path], ConveyorCommandResult | tuple[int, str, str]]
+GhRunner = Callable[[Sequence[str], Path], ConveyorCommandResult | tuple[int, str, str]]
 ValidateRunner = Callable[
     [Sequence[str], Path, Mapping[str, str] | None],
     ConveyorCommandResult | tuple[int, str, str],
@@ -257,9 +260,9 @@ class ConveyorDaemon:
         *,
         discovery_runner: DiscoveryRunner,
         armed: bool = False,
-        git_runner: CommandRunner | None = None,
+        git_runner: GitRunner | None = None,
         validate_runner: ValidateRunner | None = None,
-        gh_runner: CommandRunner | None = None,
+        gh_runner: GhRunner | None = None,
         now: NowRunner | None = None,
         ledger_writer: LedgerWriter | None = None,
         ledger_path: Path | str | None = None,
@@ -499,7 +502,11 @@ class ConveyorDaemon:
 
             push_args = _git_push_args(self.remote, landed.branch)
             push_result = _coerce_result(
-                self.git_runner(push_args, item.repo_path)
+                self.git_runner(
+                    push_args,
+                    item.repo_path,
+                    git_env_for_phase(ConveyorGitPhase.TRANSPORT),
+                )
             )
             records.append(
                 self._record_mutation(
