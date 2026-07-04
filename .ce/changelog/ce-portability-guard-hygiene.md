@@ -1,9 +1,9 @@
 ---
 slug: ce-portability-guard-hygiene
 date: 2026-07-04
-kind: S
+kind: fix
 scope: validators/tests/unit/test_portability_plane.py
-issue: ce-portability-guard-hygiene
+issue: ce-ops#437
 ---
 
 **Portability guard test hygiene.**
@@ -11,4 +11,4 @@ issue: ce-portability-guard-hygiene
 - Isolate runtime-only subprocess command fixtures.
 - Add wrapper and absolute-path command fixtures.
 - Document fail-closed runtime-command prose behavior.
-- **Declared work class:** S
+- **Declared work class:** tiny
