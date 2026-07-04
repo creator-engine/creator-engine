@@ -39,12 +39,12 @@ For the checked-in systemd belt unit, remove any `Environment=PYTHONPATH=validat
 line and invoke the installed console script:
 
 ```ini
-ExecStart=/usr/bin/env cev3 queue-daemon --repo "$CE_GATE_REPO" --loop --interval 120 --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" --json
+ExecStart=/usr/bin/env ce queue-daemon --repo "$CE_GATE_REPO" --loop --interval 120 --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" --json
 ```
 
 The daemon still needs the same `CE_GATE_REPO`, `GH_TOKEN`, and
 `CE_GATE_AUTHORIZED_REVIEWERS` environment. Ensure the systemd manager's PATH
-can resolve the installed `cev3` script, or provide PATH in the env file.
+can resolve the installed `ce` script, or provide PATH in the env file.
 
 ## Review Pickup Daemon
 
@@ -63,7 +63,7 @@ ce review-pickup --identity <controller-identity> --repo <owner/repo> --seat <pe
 For the checked-in systemd review unit:
 
 ```ini
-ExecStart=/usr/bin/env cev3 review-pickup --identity <controller-identity> --repo "$CE_GATE_REPO" --seat <peer-seats> --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
+ExecStart=/usr/bin/env ce review-pickup --identity <controller-identity> --repo "$CE_GATE_REPO" --seat <peer-seats> --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
 ```
 
 Keep the review pickup token posture unchanged: `CE_PICKUP_TOKEN` is preferred,
