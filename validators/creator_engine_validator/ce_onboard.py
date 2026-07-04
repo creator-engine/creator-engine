@@ -6,7 +6,7 @@ sequence into one guided, idempotent, resumable, gracefully-degrading flow. It
 is a thin **composition + UX** layer: every consequential leg is delegated to an
 existing surface (``ce doctor``, ``install.sh`` / a detected install,
 ``ce verify-install``, the profile-PATH writer, ``ce init``, ``ce brain init``,
-``ce launch``). This module never re-implements adoption (``cev3 onboard``) and
+``ce launch``). This module never re-implements adoption (``cev3 install``) and
 never re-types the §0 trust-verify (the published one-liner owns that).
 
 Design authority: ``.ce/state/research/DESIGN_197_CE_ONBOARD.md`` (§A three

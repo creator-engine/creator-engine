@@ -4376,8 +4376,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_install = sub.add_parser(
         "install",
+        aliases=["onboard"],
         help="two-mode install: verify the signed spec, plan, and explicitly apply "
-             "(agent loop: --inventory → prepare answers → --plan → --apply)",
+             "(agent loop: --inventory → prepare answers → --plan → --apply). "
+             "'onboard' is a one-release-cycle legacy alias (docs/install.sh still invokes it).",
     )
     p_install.add_argument("--spec", required=True, help="path to the served install spec to verify")
     p_install.add_argument("--key-id", default="ce-root-v1", help="the signing key id (must be pinned)")
@@ -5533,6 +5535,11 @@ _DISPATCH = {
     "artifacts": _cmd_artifacts,
     "report": _cmd_report,
     "install": _cmd_onboard,
+    # argparse stores the *literal* alias string in args.command (dest="command"),
+    # not the canonical subparser name — so the "onboard" alias registered on
+    # the "install" subparser (docs/install.sh legacy invocation) needs its own
+    # explicit dispatch entry rather than falling through via the "install" key.
+    "onboard": _cmd_onboard,
     "guide": _cmd_guide,
     "session": _cmd_session,
     "cockpit": _cmd_cockpit,

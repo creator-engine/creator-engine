@@ -3300,3 +3300,21 @@ def test_12_watch_tick_shape_and_clean_signal_stop(tmp_path, monkeypatch, capsys
     assert rc == 0
     assert seen == ["reap_watch_tick"]  # exactly one pass, then a clean stop
     assert "reap watch tick" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# install — the "onboard" legacy alias (ce-ops#440 S1: docs/install.sh still
+# invokes ``cev3 onboard`` and is release-signed; kept for one release cycle)
+# ---------------------------------------------------------------------------
+def test_install_subparser_accepts_legacy_onboard_alias():
+    parser = v3_cli._build_parser()
+    args = parser.parse_args(["onboard", "--spec", "some/spec.yaml"])
+    # argparse stores the literal alias string in the subparsers dest, not the
+    # canonical subparser name — so the dispatch table must key it explicitly.
+    assert args.command == "onboard"
+    assert args.spec == "some/spec.yaml"
+    handler = v3_cli._DISPATCH.get(args.command)
+    assert handler is v3_cli._cmd_onboard
+    # and the canonical spelling still resolves to the very same handler
+    canonical_args = parser.parse_args(["install", "--spec", "some/spec.yaml"])
+    assert v3_cli._DISPATCH.get(canonical_args.command) is handler
