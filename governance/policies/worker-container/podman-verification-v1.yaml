@@ -1,0 +1,30 @@
+kind: worker-container-policy-record
+record_type: worker_container_policy
+schema_version: "1"
+policy_id: podman-verification-v1
+policy_sha: "72ba5b0a1be4321668ad01b22ed55cb66b01ead57ad9b0e06cdd858fa70a322e"
+role: verification
+runtime_engine: podman-rootless
+image_ref:
+  name: ghcr.io/creator-engine/verification:latest
+  sha: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+mount_manifest:
+  - path: /worktrees/pco-slice2i-s-substrate
+    mode: ro
+  - path: governance
+    mode: ro
+  - path: schemas
+    mode: ro
+  - path: validators
+    mode: ro
+egress_allowlist: []
+secret_allowlist: []
+grant_extensible: false
+grant_authority: source
+note: >
+  Verification role policy. Read-only on allocated worktree and governance
+  tree; no egress by default (offline-cached dependencies); no secrets;
+  the principle is "tests should not need the internet." Runtime
+  validation-sandbox runs additionally bind the allocator workspace
+  read-only at the identical absolute path declared by the
+  ValidationSandboxSpec.
