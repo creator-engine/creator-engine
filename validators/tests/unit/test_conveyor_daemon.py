@@ -16,6 +16,8 @@ from creator_engine_validator.conveyor import (
     ConveyorHarvestResult,
     ConveyorHarvestSpec,
 )
+from creator_engine_validator.validation_sandbox import ValidationSandboxResult
+from creator_engine_validator.validation_sandbox_runner import ValidationSandboxContainerRun
 from creator_engine_validator.conveyor_daemon import (
     PLAN_ACTIONS,
     ConveyorDaemon,
@@ -65,13 +67,7 @@ class FakeGit:
         self.calls.append((tuple(args), cwd))
         self.envs.append(dict(env))
         if tuple(args) == ("rev-parse", "HEAD^{tree}"):
-            completed = subprocess.run(
-                ["git", "-C", str(cwd), "rev-parse", "HEAD^{tree}"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            return ConveyorCommandResult(completed.returncode, completed.stdout, completed.stderr)
+            return ConveyorCommandResult(0, f"{self.landed_tree_sha}\n", "")
         if len(args) == 2 and args[0] == "rev-parse" and str(args[1]).endswith("^{tree}"):
             return ConveyorCommandResult(0, f"{self.landed_tree_sha}\n", "")
         if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
@@ -141,9 +137,18 @@ class FakeValidate:
         return ConveyorCommandResult(0, "ok\n", "")
 
 
+def _run_fake_validation(spec: ConveyorHarvestSpec, validate_runner) -> ConveyorCommandResult:
+    return validate_runner(
+        spec.validate_command,
+        spec.worktree_path,
+        {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(spec.worktree_path / "validators")},
+    )
+
+
 class FakePrepare:
-    def __init__(self, failing_branches: set[str] | None = None):
+    def __init__(self, failing_branches: set[str] | None = None, *, record_validation: bool = False):
         self.failing_branches = failing_branches or set()
+        self.record_validation = record_validation
         self.calls: list[ConveyorHarvestSpec] = []
 
     def __call__(
@@ -156,6 +161,10 @@ class FakePrepare:
         self.calls.append(spec)
         if spec.branch in self.failing_branches:
             return _harvest_result(spec, ready=False, reasons=("prepare failed",))
+        if self.record_validation:
+            validation = _run_fake_validation(spec, validate_runner)
+            if validation.returncode != 0:
+                return _harvest_result(spec, ready=False, reasons=(validation.stderr,))
         return _harvest_result(spec, ready=True, reasons=())
 
 
@@ -207,6 +216,28 @@ class FakePodmanRunner:
     def run(self, argv: Sequence[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
         self.calls.append((list(argv), timeout))
         return subprocess.CompletedProcess(list(argv), 0, "validated\n", "")
+
+
+class FakeValidationSandboxRunner:
+    def __init__(self):
+        self.calls: list[tuple[object, dict]] = []
+
+    def __call__(self, spec, **kwargs) -> ValidationSandboxContainerRun:
+        self.calls.append((spec, dict(kwargs)))
+        receipt = kwargs["receipt_issuer"].mint(
+            tree_sha=kwargs["tree_sha"],
+            command=spec.command,
+            policy_sha="a" * 64,
+            image_sha="sha256:" + "b" * 64,
+            mount_manifest_applied=({"path": str(spec.cwd), "mode": "ro"},),
+            egress_allowlist_applied=(),
+            secret_allowlist_applied=(),
+            returncode=0,
+        )
+        return ValidationSandboxContainerRun(
+            result=ValidationSandboxResult(rc=0, stdout="validated\n", stderr="", duration=0.01, spec=spec),
+            receipt=receipt,
+        )
 
 
 class FakeLedgerResult:
@@ -396,7 +427,7 @@ def test_dry_run_plans_no_mutation():
 
 
 def test_armed_path_calls_prepare_land_push_pr_and_ledger():
-    prepare = FakePrepare()
+    prepare = FakePrepare(record_validation=True)
     land = FakeLand()
     git = FakeGit()
     gh = FakeGh()
@@ -416,6 +447,7 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
         log_runner=logs.append,
         prepare_runner=prepare,
         land_runner=land,
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert result.results[0].status == "pr-opened"
@@ -424,13 +456,27 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert prepare.calls[0].allow_dirty_validation is False
     assert prepare.calls[0].commit_carriers_before_validation is True
     assert land.calls == [(item.bundle_path, "feature-one", "origin/main", item.repo_path)]
-    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), item.repo_path)]
+    assert git.calls == [
+        (("rev-parse", "HEAD^{tree}"), item.worktree_path),
+        (("rev-parse", "feature-one^{tree}"), item.repo_path),
+        (("push", "--", "origin", "feature-one:feature-one"), item.repo_path),
+    ]
     assert git.envs == [
         {
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0",
             "PATH": "/usr/bin:/bin",
-        }
+        },
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "PATH": "/usr/bin:/bin",
+        },
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "PATH": "/usr/bin:/bin",
+        },
     ]
     assert gh.calls == [
         (
@@ -449,9 +495,13 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
             item.repo_path,
         )
     ]
-    assert [record.action for record in ledger] == ["push", "pr-open"]
-    assert [record.sha for record in ledger] == [HEAD_SHA, HEAD_SHA]
-    assert [record.timestamp for record in ledger] == ["2026-07-01T00:00:02Z", "2026-07-01T00:00:03Z"]
+    assert [record.action for record in ledger] == ["validate", "push", "pr-open"]
+    assert [record.sha for record in ledger] == [HEAD_SHA, HEAD_SHA, HEAD_SHA]
+    assert [record.timestamp for record in ledger] == [
+        "2026-07-01T00:00:02Z",
+        "2026-07-01T00:00:03Z",
+        "2026-07-01T00:00:04Z",
+    ]
     assert any(
         "conveyor allocation audit" in message
         and '"allocation_id"' in message
@@ -463,6 +513,36 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
         and '"signature"' not in message
         for message in logs
     )
+
+
+def test_armed_path_without_validation_record_fails_before_push_or_pr():
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    item = _item()
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        prepare_runner=prepare,
+        land_runner=land,
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("refusing to land unverified tree: no successful validation record found",)
+    assert result.results[0].landing_result is not None
+    assert land.calls == [(item.bundle_path, "feature-one", "origin/main", item.repo_path)]
+    assert git.calls == []
+    assert gh.calls == []
+    assert ledger == []
 
 
 def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Path):
@@ -706,6 +786,9 @@ def test_armed_run_heartbeats_before_each_item_boundary():
         validate_runner,
     ) -> ConveyorHarvestResult:
         prepare_seen_heartbeats.append(lease.heartbeat_calls)
+        validation = _run_fake_validation(spec, validate_runner)
+        if validation.returncode != 0:
+            return _harvest_result(spec, ready=False, reasons=(validation.stderr,))
         return _harvest_result(spec, ready=True, reasons=())
 
     result = ConveyorDaemon(
@@ -721,6 +804,7 @@ def test_armed_run_heartbeats_before_each_item_boundary():
         ledger_writer=lambda record: None,
         prepare_runner=prepare_runner,
         land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert [item.status for item in result.results] == ["pr-opened", "pr-opened"]
@@ -730,7 +814,7 @@ def test_armed_run_heartbeats_before_each_item_boundary():
 
 def test_armed_run_heartbeat_failure_before_item_stops_without_processing_item():
     lease = FakeLease(fail_on_call=3)
-    prepare = FakePrepare()
+    prepare = FakePrepare(record_validation=True)
     git = FakeGit()
     gh = FakeGh()
     logs: list[str] = []
@@ -751,20 +835,21 @@ def test_armed_run_heartbeat_failure_before_item_stops_without_processing_item()
         log_runner=logs.append,
         prepare_runner=prepare,
         land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert [item.status for item in result.results] == ["pr-opened", "failed"]
     assert result.results[1].branch == "Feature/Two"
     assert result.results[1].reasons == ("daemon lease heartbeat failed: lost lease heartbeat",)
     assert [spec.branch for spec in prepare.calls] == ["Feature/One"]
-    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), first_item.repo_path)]
+    assert (("push", "--", "origin", "feature-one:feature-one"), first_item.repo_path) in git.calls
     assert len(gh.calls) == 1
     assert lease.heartbeat_calls == 3
     assert any("daemon lease heartbeat failed: lost lease heartbeat" in message for message in logs)
 
 
 def test_per_item_failure_isolated_and_loop_continues():
-    prepare = FakePrepare(failing_branches={"Feature/One"})
+    prepare = FakePrepare(failing_branches={"Feature/One"}, record_validation=True)
     git = FakeGit()
     gh = FakeGh()
     ledger: list[ConveyorDaemonLedgerRecord] = []
@@ -782,13 +867,14 @@ def test_per_item_failure_isolated_and_loop_continues():
         ledger_writer=ledger.append,
         prepare_runner=prepare,
         land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert [item.status for item in result.results] == ["failed", "pr-opened"]
     assert result.results[0].reasons == ("prepare failed",)
-    assert git.calls == [(("push", "--", "origin", "feature-two:feature-two"), good_item.repo_path)]
+    assert (("push", "--", "origin", "feature-two:feature-two"), good_item.repo_path) in git.calls
     assert len(gh.calls) == 1
-    assert [record.branch for record in ledger] == ["feature-two", "feature-two"]
+    assert [record.branch for record in ledger] == ["Feature/Two", "feature-two", "feature-two"]
 
 
 def test_armed_push_failure_records_ledger_and_skips_pr_open():
@@ -804,13 +890,17 @@ def test_armed_push_failure_records_ledger_and_skips_pr_open():
         gh_runner=gh,
         now=FakeClock(),
         ledger_writer=ledger.append,
-        prepare_runner=FakePrepare(),
+        prepare_runner=FakePrepare(record_validation=True),
         land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert result.results[0].status == "failed"
     assert result.results[0].reasons == ("push failed: push denied",)
-    assert [(record.action, record.status, record.returncode) for record in ledger] == [("push", "failed", 1)]
+    assert [(record.action, record.status, record.returncode) for record in ledger] == [
+        ("validate", "success", 0),
+        ("push", "failed", 1),
+    ]
     assert gh.calls == []
 
 
@@ -870,7 +960,7 @@ def test_discovery_mapping_with_legacy_control_field_is_rejected_and_audited(
 
 
 def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item():
-    prepare = FakePrepare()
+    prepare = FakePrepare(record_validation=True)
     land = FakeLand()
     git = FakeGit()
     gh = FakeGh()
@@ -891,6 +981,7 @@ def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item()
         log_runner=logs.append,
         prepare_runner=prepare,
         land_runner=land,
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert result.discovery_error is None
@@ -898,7 +989,7 @@ def test_schema_rejected_discovery_item_is_skipped_without_dropping_valid_item()
     assert [item.status for item in result.results] == ["pr-opened"]
     assert [spec.branch for spec in prepare.calls] == ["Feature/One"]
     assert land.calls == [(valid_item.bundle_path, "feature-one", "origin/main", valid_item.repo_path)]
-    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), valid_item.repo_path)]
+    assert (("push", "--", "origin", "feature-one:feature-one"), valid_item.repo_path) in git.calls
     assert len(gh.calls) == 1
     assert any(
         "conveyor discovery payload audit" in message
@@ -926,7 +1017,7 @@ def test_data_only_discovery_mapping_plans_without_payload_paths():
 
 
 def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
-    prepare = FakePrepare()
+    prepare = FakePrepare(record_validation=True)
     git = FakeGit()
     gh = FakeGh()
     allocator = CountingAllocator()
@@ -944,6 +1035,7 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
         ledger_writer=lambda record: None,
         prepare_runner=prepare,
         land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert result.results[0].status == "pr-opened"
@@ -951,7 +1043,7 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
     assert len(allocator.allocations) == 1
     allocation = allocator.allocations[0]
     assert prepare.calls[0].worktree_path == allocation.worktree_path
-    assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), allocation.repo_path)]
+    assert (("push", "--", "origin", "feature-one:feature-one"), allocation.repo_path) in git.calls
     assert len(gh.calls) == 1
 
 
@@ -1047,7 +1139,7 @@ def test_daemon_pinned_validate_command_used_for_item_objects():
 
 
 def test_daemon_pinned_base_and_remote_used_for_item_objects():
-    prepare = FakePrepare()
+    prepare = FakePrepare(record_validation=True)
     land = FakeLand()
     git_calls: list[tuple[str, ...]] = []
 
@@ -1068,6 +1160,7 @@ def test_daemon_pinned_base_and_remote_used_for_item_objects():
         land_runner=land,
         base="origin/main",
         remote="origin",
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert prepare.calls[0].base == "origin/main"
@@ -1092,8 +1185,9 @@ def test_gh_pr_title_and_body_leading_dashes_remain_flag_values():
         gh_runner=gh,
         now=FakeClock(),
         ledger_writer=lambda record: None,
-        prepare_runner=FakePrepare(),
+        prepare_runner=FakePrepare(record_validation=True),
         land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
     assert result.results[0].status == "pr-opened"
@@ -1212,15 +1306,16 @@ def test_idempotent_re_discovery_skips_completed_item():
         gh_runner=gh,
         now=FakeClock(),
         ledger_writer=lambda record: None,
-        prepare_runner=FakePrepare(),
+        prepare_runner=FakePrepare(record_validation=True),
         land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
     )
 
     first, second = daemon.run_loop(iterations=2)
 
     assert first.results[0].status == "pr-opened"
     assert second.results[0].status == "skipped"
-    assert len(git.calls) == 1
+    assert [call for call, _cwd in git.calls].count(("push", "--", "origin", "feature-one:feature-one")) == 1
     assert len(gh.calls) == 1
 
 
@@ -1429,7 +1524,7 @@ def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
     symlink_bundle.symlink_to(real_bundle)
 
     try:
-        prepare = FakePrepare()
+        prepare = FakePrepare(record_validation=True)
         land = FakeLand()
         git = FakeGit()
         gh = FakeGh()
@@ -1446,6 +1541,7 @@ def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
             ledger_writer=ledger.append,
             prepare_runner=prepare,
             land_runner=land,
+            validation_sandbox_runner=FakeValidationSandboxRunner(),
         ).run_once()
 
         assert result.results[0].status == "pr-opened"
@@ -1460,7 +1556,7 @@ def test_toctou_resolved_path_used_not_raw_item_value_after_confinement_check():
         assert land.calls[0][0] != symlink_bundle
         assert land.calls[0][3] != symlink_repo
 
-        assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), real_repo)]
+        assert (("push", "--", "origin", "feature-one:feature-one"), real_repo) in git.calls
         assert all(cwd != symlink_repo for _, cwd in git.calls)
 
         assert len(gh.calls) == 1

@@ -558,20 +558,27 @@ class ConveyorDaemon:
                 )
 
             validation_tree_sha = _latest_validation_record_tree_sha(records)
-            if validation_tree_sha is not None:
-                landed_tree_check = self._validate_landed_tree_matches_record(
-                    item=item,
-                    landed=landed,
-                    validation_tree_sha=validation_tree_sha,
+            if validation_tree_sha is None:
+                return self._failed(
+                    item,
+                    ("refusing to land unverified tree: no successful validation record found",),
+                    prepare_result=prepared,
+                    landing_result=landed,
+                    ledger_records=records,
                 )
-                if landed_tree_check is not None:
-                    return self._failed(
-                        item,
-                        (landed_tree_check,),
-                        prepare_result=prepared,
-                        landing_result=landed,
-                        ledger_records=records,
-                    )
+            landed_tree_check = self._validate_landed_tree_matches_record(
+                item=item,
+                landed=landed,
+                validation_tree_sha=validation_tree_sha,
+            )
+            if landed_tree_check is not None:
+                return self._failed(
+                    item,
+                    (landed_tree_check,),
+                    prepare_result=prepared,
+                    landing_result=landed,
+                    ledger_records=records,
+                )
 
             push_args = _git_push_args(self.remote, landed.branch)
             push_result = _coerce_result(
