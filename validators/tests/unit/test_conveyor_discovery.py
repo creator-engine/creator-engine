@@ -46,6 +46,31 @@ def test_parse_tolerates_bullets_ansi_markers_and_wrapping(
     )
 
 
+@pytest.mark.parametrize(
+    ("pane_text", "sha", "tag"),
+    [
+        (
+            f"  READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE} REWORK",
+            SHA_ONE,
+            "REWORK",
+        ),
+        (
+            f"• READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_TWO} REWORK-2",
+            SHA_TWO,
+            "REWORK-2",
+        ),
+    ],
+)
+def test_parse_accepts_rework_and_rework_n_suffixes(
+    pane_text: str,
+    sha: str,
+    tag: str,
+):
+    assert parse_ready_for_harvest_signals(pane_text) == (
+        ReadyForHarvestSignal(branch="ce-388-conveyor-discovery", sha=sha, tag=tag),
+    )
+
+
 def test_placeholder_and_diff_echoes_are_rejected_and_audited():
     audit: list[dict] = []
     pane_text = "\n".join(
