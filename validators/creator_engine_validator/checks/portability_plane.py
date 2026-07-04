@@ -32,7 +32,30 @@ CODE_VIOLATION = "CE-PORTABILITY"
 SYSTEMD_RE = re.compile(r"\b(?:systemd|sdnotify)\b", re.IGNORECASE)
 RUN_PATH_RE = re.compile(r"^/run(?:/|$)|/run/")
 DEV_SHM_RE = re.compile(r"^/dev/shm(?:/|$)|/dev/shm/")
-SUBPROCESS_COMMAND_RE = re.compile(r"^(?:systemctl|setfacl|journalctl)(?:\s|$)")
+SUBPROCESS_COMMANDS = frozenset({"systemctl", "setfacl", "journalctl"})
+SUBPROCESS_WRAPPERS = frozenset({"env", "sudo"})
+WRAPPER_OPTIONS_WITH_VALUE = {
+    "env": frozenset({"-C", "-S", "-u", "--chdir", "--split-string", "--unset"}),
+    "sudo": frozenset({
+        "-C",
+        "-g",
+        "-h",
+        "-p",
+        "-r",
+        "-T",
+        "-t",
+        "-u",
+        "--close-from",
+        "--group",
+        "--host",
+        "--prompt",
+        "--role",
+        "--type",
+        "--user",
+    }),
+}
+ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @dataclass(frozen=True)
@@ -180,6 +203,17 @@ def _load_manifest(root: Path) -> tuple[PlaneManifest | None, list[ValidationErr
                 )
                 continue
             normalized[field] = value
+        if "date" in normalized and not DATE_RE.fullmatch(normalized["date"]):
+            errors.append(
+                make_error(
+                    CODE_MALFORMED_MANIFEST,
+                    MANIFEST,
+                    f"baseline_exemptions[{index}].date",
+                    "expected YYYY-MM-DD",
+                    CONTRACT,
+                )
+            )
+            normalized.pop("date")
         if len(normalized) == 5:
             normalized_baseline.append(normalized)
 
@@ -225,6 +259,47 @@ def _literal_value(token_text: str) -> str:
     return value if isinstance(value, str) else token_text
 
 
+def _command_basename(token: str) -> str:
+    return Path(token).name
+
+
+def _shell_words(value: str) -> list[str]:
+    try:
+        import shlex
+
+        return shlex.split(value, comments=False, posix=True)
+    except ValueError:
+        return value.split()
+
+
+def _skip_wrapper_options(words: list[str], index: int, command: str) -> int:
+    options_with_value = WRAPPER_OPTIONS_WITH_VALUE[command]
+    while index < len(words) and words[index].startswith("-"):
+        option = words[index]
+        index += 1
+        if "=" not in option and option in options_with_value and index < len(words):
+            index += 1
+    return index
+
+
+def _contains_runtime_command(value: str) -> bool:
+    words = _shell_words(value)
+    index = 0
+    while index < len(words):
+        command = _command_basename(words[index])
+        if command in SUBPROCESS_COMMANDS:
+            return True
+        if command in SUBPROCESS_WRAPPERS:
+            index += 1
+            index = _skip_wrapper_options(words, index, command)
+            if command == "env":
+                while index < len(words) and ENV_ASSIGNMENT_RE.fullmatch(words[index]):
+                    index += 1
+            continue
+        return False
+    return False
+
+
 def _line_offenses(rel: str, text: str) -> list[PortabilityOffense]:
     source_lines = text.splitlines()
     docstrings = _docstring_lines(text)
@@ -247,7 +322,6 @@ def _line_offenses(rel: str, text: str) -> list[PortabilityOffense]:
                     ("systemd-reference", "systemd or sdnotify reference", SYSTEMD_RE),
                     ("run-path-literal", "literal /run path", RUN_PATH_RE),
                     ("dev-shm-path-literal", "literal /dev/shm path", DEV_SHM_RE),
-                    ("subprocess-command", "runtime-only subprocess command", SUBPROCESS_COMMAND_RE),
                 ):
                     if regex.search(value):
                         key = (line, pattern)
@@ -262,6 +336,19 @@ def _line_offenses(rel: str, text: str) -> list[PortabilityOffense]:
                                 )
                             )
                             seen.add(key)
+                if _contains_runtime_command(value):
+                    key = (line, "subprocess-command")
+                    if key not in seen:
+                        offenses.append(
+                            PortabilityOffense(
+                                path=rel,
+                                line=line,
+                                pattern="subprocess-command",
+                                label="runtime-only subprocess command",
+                                text=source_lines[line - 1].strip(),
+                            )
+                        )
+                        seen.add(key)
                 continue
             if token.type == tokenize.NAME and SYSTEMD_RE.fullmatch(token_text):
                 key = (line, "systemd-reference")
