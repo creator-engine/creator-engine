@@ -60,10 +60,9 @@ ce verify-install     # provenance: confirms the installed CE matches signed art
 ce onboard            # governed onboarding plan the pilot reviews and approves
 ```
 
-> **User-facing commands are `ce …`, not `cev3 …`.** `ce verify-install` and
-> `ce onboard` are the real user-facing kernel commands. `cev3` is the internal
-> driver used by the co-drive script in Phase 3 — never tell a pilot to type
-> `cev3 onboard`.
+> User-facing commands are `ce …`. `ce verify-install` and `ce onboard` are the
+> real kernel commands for this pilot path; do not ask a pilot to use legacy
+> version-stamped commands.
 
 ---
 
@@ -130,12 +129,12 @@ content). It is distinct from the reviewer identity:
   gated merge. The reviewer and the merging bot are deliberately different
   identities; never collapse them.
 
-The script then runs the canonical governed sequence in order: `cev3 scope` ->
-`cev3 ratify` (records the approver-ref) -> `cev3 drive --spawn` (author seat) ->
-`cev3 pr --apply` (push branch + open PR with the declared manifest) -> `cev3
-review --spawn` (distinct reviewer venue) -> `cev3 collect` (fold reviewer then
-author runs into runtime evidence) -> `cev3 merge --apply` (gated merge) ->
-`cev3 report` (completion report).
+The script then runs the canonical governed sequence in order: `ce scope` ->
+`ce ratify` (records the approver-ref) -> `ce drive --spawn` (author seat) ->
+`ce pr --apply` (push branch + open PR with the declared manifest) ->
+`ce review --spawn` (distinct reviewer venue) -> `ce collect` (fold reviewer
+then author runs into runtime evidence) -> `ce merge --apply` (gated merge) ->
+`ce report` (completion report).
 
 The controller watches the spawned venues and confirms the pilot repo's manifest
 path matches the actual first-value PR diff before the merge step lands.

@@ -24,7 +24,7 @@ tarball, verifies its hash, and installs CPython 3.14 in user space if needed.
 
 ## 1. E1 Inventory
 
-A successful E1 run installs `ce` and `cev3` into a user-local verified venv,
+A successful E1 run installs `ce` into a user-local verified venv,
 adds user-local CLI shims, and runs authenticated inventory. Save the verified
 paths printed by the installer summary:
 
@@ -45,7 +45,7 @@ Run the plan first. It shows the exact remaining asks and the privileged changes
 that still need human approval.
 
 ```bash
-cev3 onboard \
+ce install \
   --spec <verified-spec> \
   --trust-root <verified-trust-root> \
   --trust-anchor <source>=<verified-trust-anchor> \
@@ -57,7 +57,7 @@ cev3 onboard \
 When the plan is acceptable, apply it explicitly:
 
 ```bash
-cev3 onboard \
+ce install \
   --spec <verified-spec> \
   --trust-root <verified-trust-root> \
   --trust-anchor <source>=<verified-trust-anchor> \
@@ -75,17 +75,17 @@ host changes remain human-approved apply seams.
 After apply converges, open the governed session in the target repo:
 
 ```bash
-cev3 session
+ce session
 ```
 
 Frame a concrete change, confirm the Scope, ratify it, drive the Build, review
 the PR in a distinct venue, and merge through the governed merge path:
 
 ```bash
-cev3 ratify <scope>
-cev3 drive <scope>
-cev3 report <scope>
-cev3 merge --apply
+ce ratify <scope>
+ce drive <scope>
+ce report <scope>
+ce merge --apply
 ```
 
 The first bootstrap commit or scaffold is onboarding evidence only. The first

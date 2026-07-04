@@ -5,9 +5,9 @@ This guide is the worked first-value path for the pilot repo
 as a thin driver around the canonical governed sequence:
 
 ```text
-cev3 scope -> cev3 ratify <scope> -> cev3 drive <scope> --spawn
--> cev3 pr ... --apply -> cev3 review ... --spawn -> cev3 collect ...
--> cev3 merge ... --apply -> cev3 report ...
+ce scope -> ce ratify <scope> -> ce drive <scope> --spawn
+-> ce pr ... --apply -> ce review ... --spawn -> ce collect ...
+-> ce merge ... --apply -> ce report ...
 ```
 
 The bootstrap README, App installation, CI setup, and initial branch are
@@ -35,7 +35,7 @@ evidence for each step:
 - Reviewer dispatch and reviewer authority envelope
 - Runtime evidence chains under `.ce/state/runs/`
 - Merge evidence appended to the author runtime evidence chain
-- Completion report rendered by `cev3 report`
+- Completion report rendered by `ce report`
 
 Use dry-run first whenever changing the target checkout, scope id, branch, or
 manifest path.
@@ -54,7 +54,7 @@ MYTHOS_CE_CLIENT_ID=<github-app-client-id>
 MYTHOS_CE_PEM_PATH=/path/to/app-private-key.pem
 ```
 
-Alternatively, provide an existing `cev3 pr --app-config` JSON:
+Alternatively, provide an existing `ce pr --app-config` JSON:
 
 ```bash
 MYTHOS_CE_APP_CONFIG=/path/to/mythos-app-config.json
@@ -96,16 +96,16 @@ bash scripts/first-value.sh \
 
 The live path runs the commands in this order:
 
-1. `cev3 scope` files the first-value Scope.
-2. `cev3 ratify` records the human-only front-gate digest.
-3. `cev3 drive --spawn` launches the governed author seat.
-4. `cev3 pr --apply` pushes the authored branch and opens the PR with the
+1. `ce scope` files the first-value Scope.
+2. `ce ratify` records the human-only front-gate digest.
+3. `ce drive --spawn` launches the governed author seat.
+4. `ce pr --apply` pushes the authored branch and opens the PR with the
    declared manifest path.
-5. `cev3 review --spawn` launches a distinct reviewer venue.
-6. `cev3 collect` folds the reviewer run, then the author run, into runtime
+5. `ce review --spawn` launches a distinct reviewer venue.
+6. `ce collect` folds the reviewer run, then the author run, into runtime
    evidence.
-7. `cev3 merge --apply` performs the gated merge.
-8. `cev3 report` emits the completion report.
+7. `ce merge --apply` performs the gated merge.
+8. `ce report` emits the completion report.
 
 The controller remains responsible for supplying the live Mythos credentials,
 watching the spawned venues, and confirming that the target repo's manifest path

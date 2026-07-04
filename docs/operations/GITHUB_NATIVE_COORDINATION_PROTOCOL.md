@@ -125,7 +125,7 @@ unchanged).
 
 ## i. Known limitation — the JIT App push leg cannot ship `.github/workflows/**`
 
-**The limitation.** The `cev3 pr --apply` ship leg pushes the seat's authored head
+**The limitation.** The `ce pr --apply` ship leg pushes the seat's authored head
 under a JIT least-privilege installation token whose mint request is a FIXED,
 in-repo least-privilege set — `contents: write` + `pull_requests: write`
 (`v3_forge_join.PR_TOKEN_PERMISSIONS`, doc comment "never broader"). It carries
@@ -146,7 +146,7 @@ scope, so a CI-touching gate is diagnosable in-run (this is how PR #206 was diag
 touches `.github/workflows/**`, the ORCHESTRATOR/Operator session pushes the authored
 head FIRST, with an ambient `workflow`-scoped identity (the same HTTPS identity used
 for other orchestrator pushes), and **DECLARES that pre-push on the gate's forge
-trail** (the #206 precedent wording). Then `cev3 pr --apply` runs unchanged: with the
+trail** (the #206 precedent wording). Then `ce pr --apply` runs unchanged: with the
 head already on the remote, the App push leg verifies an idempotent no-op
 (`up_to_date=True`, nothing pushed — `forge/change_push.py`) and the PR-open stays
 App-authored. This composes BY DESIGN; it is not a governance bypass — the binding
@@ -181,7 +181,7 @@ state was tested. Two tiers:
 | **Content change** | any changed diff identity / path-set / content pin / re-targeted branch-base, or an unprovable chain | **REFUSE** before any merge PUT (`content_drift_requires_reratification` / `restamp_legacy_unprovable`); route through the existing fresh ratification / adopt path — never a silent accept |
 | **Base-only motion** | only the base moved; CE machine-proves unchanged branch/base/PR identity + unchanged carrier path-set + unchanged normalized non-mechanical diff identity + unchanged stable patch-id, with the live head green + review-satisfied | **auto re-stamp**: append `runtime_change_restamp` (`authority: machine_rebase_equivalence`), then squash-merge the NEW head |
 
-`cev3 merge` (plan-by-default) reports `head_status` as `unchanged`,
+`ce merge` (plan-by-default) reports `head_status` as `unchanged`,
 `base_only_restamp_available`, `content_drift_refused`, or `legacy_unprovable`, and the
 old/new SHAs; `--apply` re-stamps (if proven) and merges, then appends `pr_merged` + a
 `runtime_merge_audit`. The audit makes squash honest: with squash-only the merged commit
@@ -189,7 +189,7 @@ is not the reviewed head, so CE records the conserved **tree-equivalence** invar
 (tested head tree == merged tree); a mismatch is an operator-visible alarm
 (`merge_audit_tree_mismatch`), never a silent pass. The change-identity anchor (`base_sha`
 + content/patch identity) is stamped at PR-open onto the dispatch `change` block and
-propagated into the chain's `pr_opened.change_set` by `cev3 collect`; a pre-F6 chain that
+propagated into the chain's `pr_opened.change_set` by `ce collect`; a pre-F6 chain that
 lacks `base_sha` is **legacy-unprovable** and is refused, never overridden. The merge still
 mints **no** per-run token and rides the Operator's ambient `gh` identity (§e).
 
@@ -218,7 +218,7 @@ What Phase-1 changes:
   emits it through the existing `upsert_ruleset` adapter (plan-by-default, idempotent,
   verify-on-apply). Classic branch protection cannot express a merge queue; the queue is
   ruleset-only.
-- `cev3 merge --apply` switches from direct squash PUT to **enqueue** (supplying the current
+- `ce merge --apply` switches from direct squash PUT to **enqueue** (supplying the current
   ratified/re-stamped head), appending `pr_enqueued` then `pr_merged` only after GitHub
   reports the queue merge.
 - Required review / dismiss-stale / last-push-approval / code-owner / `enforce_admins` /

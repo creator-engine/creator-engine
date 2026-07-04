@@ -109,7 +109,7 @@ change.
 as *events* — open-ness is recomputed statelessly per fold, and the L2 fold is
 pure by hard law. The edge-detection memory therefore lives in a **durable,
 append-only, notifier-private delivery ledger**, `<root>/notifications/ledger.ndjson`,
-owned by the `cev3 notify` composition root. Detection itself stays a **pure fold
+owned by the `ce notify` composition root. Detection itself stays a **pure fold
 of two L1-shaped inputs** — `fold_notify_feed(escalations, ledger_records, config)`
 — with delivery identity `(escalation_id, event_kind, sink_id)`, so it is
 idempotent across restarts and re-folds by construction (no clock cursor, no
@@ -173,9 +173,9 @@ title, decision text, recommendation, or hostname (the value-free off-host shape
 never leaves the host), `exec = pointer` and `webhook = pointer` (CE cannot see
 where the command/URL forwards — confidential-by-default).
 
-**Surface.** `cev3 notify once` is a single fold→dispatch→record pass (the
-cron-able, testable primitive); `cev3 notify watch [--interval 30]` is the poll
-loop; `cev3 notify status [--json]` is pure-fold counts with no dispatch. Both
+**Surface.** `ce notify once` is a single fold→dispatch→record pass (the
+cron-able, testable primitive); `ce notify watch [--interval 30]` is the poll
+loop; `ce notify status [--json]` is pure-fold counts with no dispatch. Both
 `once` and `watch` accept `--sync-repo <owner/repo> [--sync-label awaiting-operator]`
 to mirror forge escalations (REUSING the existing `escalation sync` legs) before
 folding — the cross-host fan-in — with sync failure tolerated so forge downtime

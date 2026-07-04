@@ -14,11 +14,11 @@ PYTHONPATH=validators python -m creator_engine_validator.v3_cli queue-poll --rep
 After:
 
 ```bash
-cev3 queue-poll --repo creator-engine/creator-engine
+ce queue-poll --repo creator-engine/creator-engine
 ```
 
 Keep the existing token environment (`GH_TOKEN` by default) and poll flags. The
-installed `cev3` script enters the same `creator_engine_validator.v3_cli:main`
+installed `ce` command enters the same `creator_engine_validator.v3_cli:main`
 handler as `python -m creator_engine_validator.v3_cli`.
 
 ## Queue Daemon
@@ -32,7 +32,7 @@ PYTHONPATH=validators python -m creator_engine_validator.v3_cli queue-daemon --r
 After:
 
 ```bash
-cev3 queue-daemon --repo creator-engine/creator-engine --loop --interval 120 --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" --json
+ce queue-daemon --repo creator-engine/creator-engine --loop --interval 120 --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" --json
 ```
 
 For the checked-in systemd belt unit, remove any `Environment=PYTHONPATH=validators`
@@ -57,7 +57,7 @@ PYTHONPATH=validators python -m creator_engine_validator.v3_cli review-pickup --
 After:
 
 ```bash
-cev3 review-pickup --identity <controller-identity> --repo <owner/repo> --seat <peer-seats> --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
+ce review-pickup --identity <controller-identity> --repo <owner/repo> --seat <peer-seats> --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
 ```
 
 For the checked-in systemd review unit:

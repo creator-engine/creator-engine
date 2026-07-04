@@ -15,7 +15,7 @@ The contract closes the current gap between:
 - Spec Kit planning, where `tasks.md` is the human-readable task list.
 - Existing CE task sidecars, where `tasks.creator-engine.yml` records task-level
   mutation class, permitted actions, and author/approver metadata.
-- v3 Scope and Dispatch, where `cev3 scope`, `cev3 ratify`, and `cev3 drive
+- v3 Scope and Dispatch, where `ce scope`, `ce ratify`, and `ce drive
   --spawn` produce a governed seat mandate, dispatch record, runtime policy, and
   brief.
 
@@ -130,7 +130,7 @@ own `sha_binding`, and the task-set hash includes only ids and task hashes.
    `sha_binding.task_set_sha256` and source artifact digests. For privileged
    mutation classes, the Operator is the ratifier. Non-privileged delegation is
    allowed only if separately ratified by the authority matrix.
-5. **Dispatch assembles from the ratified task set.** A future `cev3 drive` or
+5. **Dispatch assembles from the ratified task set.** A future `ce drive` or
    assignment-envelope bridge selects task ids and records the selected
    `{tasks_ref, task_ids, task_set_sha256}` in the dispatch record before spawn.
 6. **Worker preflight checks the binding.** Before any mutation, the worker
@@ -143,7 +143,7 @@ own `sha_binding`, and the task-set hash includes only ids and task hashes.
    under-scoped, over-scoped, blocked by missing authority, or stale, the worker
    reports `needs_replan` evidence and stops. The Controller/Operator re-plans
    and ratifies a new task set.
-9. **Collect folds evidence.** `cev3 collect` or the current evidence sink folds
+9. **Collect folds evidence.** `ce collect` or the current evidence sink folds
    completion evidence and records whether the selected task ids were satisfied,
    blocked, or refused due to drift. Surfaces such as Cockpit may render task
    checkbox state derived from evidence without the worker writing task files.
@@ -164,7 +164,7 @@ own `sha_binding`, and the task-set hash includes only ids and task hashes.
 
 Allowed worker discretion is limited to implementation tactics inside the
 ratified file scope and harness/runtime policy. Completion is evidence-only:
-the Controller or `cev3 collect` folds worker evidence into CE state, and UI
+the Controller or `ce collect` folds worker evidence into CE state, and UI
 surfaces render completion from that evidence.
 
 ## SHA Drift Detection
@@ -205,7 +205,7 @@ Each task entry declares the harness contract the worker must obey:
 - `role`: normally `implementer`; reviewer/security/release roles are future
   explicit variants and do not inherit implementer write authority.
 - `allowed_harnesses`: `claude`, `codex`, or both.
-- `runtime_policy_ref`: optional policy ref that `cev3 drive` must merge or
+- `runtime_policy_ref`: optional policy ref that `ce drive` must merge or
   enforce.
 - `requires_containment`: whether the task requires contained execution.
 - `required_validation`: command ids or command strings to run.
@@ -273,7 +273,7 @@ Green tests:
    let workers preflight only selected packets.
 3. **Worker task-file mutation:** forbidden. Workers never edit `tasks.md` or
    `tasks.ce.yml`; completion lives in CE evidence and is folded by the
-   Controller or `cev3 collect`.
+   Controller or `ce collect`.
 4. **Who emits `tasks.ce.yml`:** three hands. The planner writes human
    `tasks.md`, the Controller shapes the governed packet, and deterministic
    `cev3 tasks bind` materializes, validates, and stamps digests before Operator

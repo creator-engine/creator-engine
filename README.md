@@ -221,7 +221,7 @@ space if needed.
    The script fetches the signed agent-native spec, verifies it against the
    pinned `ce-root-v1` OpenSSH trust root, verifies the wheelhouse manifest and
    every artifact hash, obtains Python 3.14 through the pinned `uv` artifact if
-   needed, installs `creator-engine-validator==0.3.0` offline, proves `cev3`,
+   needed, installs `creator-engine-validator==0.3.0` offline, proves `ce`,
    and runs authenticated inventory. This E1 bootstrap does **not** run sudo,
    automate the GitHub App click, mutate branch protection, or create/adopt a
    project. A successful E1 run is inventory-only; a full governed seat still

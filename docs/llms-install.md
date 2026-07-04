@@ -193,7 +193,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   inventory:
 
   ```text
-  <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
+  <venv>/bin/ce install --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
   ```
 
   E1 does **not** run sudo, provision gVisor/proxy, automate the GitHub-App
@@ -215,7 +215,7 @@ Every input the rest of this journey needs is declared in ONE machine-readable
 inventory (`schemas/install-answers.schema.yaml` — the single source of truth).
 Work the loop:
 
-1. **`<venv>/bin/cev3 onboard --spec <verified-spec> --trust-root
+1. **`<venv>/bin/ce install --spec <verified-spec> --trust-root
    <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor>
    --answers-schema <verified-schema> --inventory`** (the one-liner runs this
    once already) — emits every input with
@@ -288,10 +288,9 @@ converged state is fully declarative.
 
 ## 5. Expose the CLI as `ce`
 
-The E1 venv installs both console scripts and invokes **`cev3`** by absolute
-path for the bootstrap handoff. A user-facing **`ce`** shim remains a later
-user-local exposure step; no system-wide symlink is created by E1. The operator
-eventually drives work with `ce session` / `ce scope` / `ce drive` / `ce report`.
+The E1 venv installs the user-facing **`ce`** command. User-local exposure remains
+a later step; no system-wide symlink is created by E1. The operator eventually
+drives work with `ce session` / `ce scope` / `ce drive` / `ce report`.
 
 ## 6. Confirm
 

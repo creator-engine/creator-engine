@@ -120,7 +120,7 @@
     </div>
     <article class="article">
 <h1 id="creator-engine-pilot-runbook-v31-pilot-ready">Creator Engine — Pilot Runbook (v3.1 pilot-ready)</h1>
-<p><em>The end-to-end pilot onboarding path: install CE, provision a repo + the GitHub App, file work as a Scope, and get governed, cost-safe PRs + merges — all under the branded <code>cev3 session</code> frame, on your own agent. Brand new? Begin at the <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>Welcome / Start Here</code></a> front door. Plain-language intro: <a href="understanding-ce.html"><code>understanding-ce.md</code></a>. The mechanics live in the cited contracts/designs. For the shortest command sequence, see <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>.</em></p>
+<p><em>The end-to-end pilot onboarding path: install CE, provision a repo + the GitHub App, file work as a Scope, and get governed, cost-safe PRs + merges — all under the branded <code>ce session</code> frame, on your own agent. Brand new? Begin at the <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>Welcome / Start Here</code></a> front door. Plain-language intro: <a href="understanding-ce.html"><code>understanding-ce.md</code></a>. The mechanics live in the cited contracts/designs. For the shortest command sequence, see <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>.</em></p>
 <blockquote>
 <p><strong>Pilot scope.</strong> The E1 one-liner now performs a real authenticated inventory</p>
 <p>bootstrap: it verifies the signed spec, installs CE into a user-local venv from</p>
@@ -145,13 +145,13 @@
 <p>Your agent fetches the <strong>signed</strong> install spec, <strong>verifies it against the pinned   CE public key before executing</strong>, and assists the GitHub-App step.</p>
 <p>Both modes are the SAME journey; the only difference is <em>where answers come from</em> (<code>interactive &gt; answers-file &gt; detected &gt; default</code>). You can prepare every answer <strong>upfront, IaC-style</strong>, in a committable <code>ce-install.answers.yaml</code> (schema: <a href="https://github.com/creator-engine/creator-engine/blob/main/schemas/install-answers.schema.yaml"><code>../../schemas/install-answers.schema.yaml</code></a>) — or answer interactively as each journey step batches its asks. The agent loop:</p>
 <pre><code># the one-liner runs this once with verified absolute paths:
-&lt;venv&gt;/bin/cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --inventory
+&lt;venv&gt;/bin/ce install --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --inventory
 # prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
 # sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
-cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --answers ce-install.answers.yaml --plan
-cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --answers ce-install.answers.yaml --apply --non-interactive</code></pre>
+ce install --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --answers ce-install.answers.yaml --plan
+ce install --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&gt; --answers-schema &lt;verified-schema&gt; --answers ce-install.answers.yaml --apply --non-interactive</code></pre>
 <p><code>--plan</code> shows the full plan plus the <em>exact remaining asks</em>; <code>--apply --non-interactive</code> is fail-closed — it refuses with that list instead of ever asking (unattended/VPS runs). The one-liner passes a file through too: <code>CE_ANSWERS=ce-install.answers.yaml curl … | bash</code> (or <code>bash -s -- --answers &lt;file&gt;</code>). An answers value can configure anything <strong>except a weaker grader</strong> — weakening (the cost opt-out, protections below the CE floor) requires your explicit ratified binding, educate-first.</p>
-<p>The E1 venv installs both <code>ce</code> and <code>cev3</code>; the bootstrap invokes <code>cev3</code> by absolute path. Durable user-facing <code>ce</code> exposure is user-local and belongs to the later apply path, not a system-wide E1 symlink.</p>
+<p>The E1 venv installs the user-facing <code>ce</code> command. Durable user-local exposure belongs to the later apply path, not a system-wide E1 symlink.</p>
 <h3 id="cost-safety-the-1-pilot-question">Cost safety (the #1 pilot question)</h3>
 <p>Cost-runaway protection is <strong>on by default</strong> (<code>spend_cap_enforcement: enforce</code>). You may opt out of the per-run / per-fleet <strong>budget caps</strong> only with an explicit, ratified choice — and CE educates you first:</p>
 <blockquote>
@@ -175,11 +175,11 @@ cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&g
 <li><strong>Branch protections reconcile as a desired-state diff</strong> against the CE</li>
 </ul>
 <p>reference floor (required CE check · strict up-to-date · dismiss-stale ·   enforce-admins · reviews ≥ 1 · squash-only): read current → diff → apply   ONLY the drift, shown to you first. Same answers, second run → empty plan.</p>
-<p>For a brand-new project, set <code>github.mode: new</code>, <code>github.repo</code>, <code>project.name</code> (optional; defaults to the repo basename), and <code>project.scaffold.kind: minimal</code> in the answers file. <code>cev3 onboard --plan</code> then shows <code>first_project</code>: the project root under <code>host.workspace_root</code>, the minimal scaffold input supplied to E2&#x27;s <code>workspace_checkout</code> leg, and the Frame→Ship flags that remain false until your first real Scope ships. The bootstrap README and initial branch are onboarding evidence only; they do not count as first ship.</p>
-<p>For an existing repo, <code>cev3 onboard --inventory</code> and <code>--plan</code> also report <code>brownfield</code> / <code>brownfield_adoption</code>: workflows and checks to preserve, detected test commands, Git history posture, branch/commit conventions, scrub preflight, project skill artifacts, and a first Scope seed. These paths are read-only until E2&#x27;s <code>onboard_apply</code> brownfield extension legs perform the writes; a build without those legs refuses apply with <code>e2_brownfield_seam_unavailable</code>.</p>
+<p>For a brand-new project, set <code>github.mode: new</code>, <code>github.repo</code>, <code>project.name</code> (optional; defaults to the repo basename), and <code>project.scaffold.kind: minimal</code> in the answers file. <code>ce install --plan</code> then shows <code>first_project</code>: the project root under <code>host.workspace_root</code>, the minimal scaffold input supplied to E2&#x27;s <code>workspace_checkout</code> leg, and the Frame→Ship flags that remain false until your first real Scope ships. The bootstrap README and initial branch are onboarding evidence only; they do not count as first ship.</p>
+<p>For an existing repo, <code>ce install --inventory</code> and <code>--plan</code> also report <code>brownfield</code> / <code>brownfield_adoption</code>: workflows and checks to preserve, detected test commands, Git history posture, branch/commit conventions, scrub preflight, project skill artifacts, and a first Scope seed. These paths are read-only until E2&#x27;s <code>onboard_apply</code> brownfield extension legs perform the writes; a build without those legs refuses apply with <code>e2_brownfield_seam_unavailable</code>.</p>
 <h2 id="3-drive-work-as-a-scope-frame-shape-build-review-ship">3. Drive work as a Scope (Frame → Shape → Build → Review → Ship)</h2>
 <p>Launch the session frame:</p>
-<pre><code>cev3 session
+<pre><code>ce session
 ◆ Creator Engine · governed session · repo &lt;owner/repo&gt; · transport cc-hooks · backend gvisor · state .ce/state
 ◆ CE · Frame 0 · Shape 0 · Build 0 · Review 0 · Ship 0  │  ctx 8%  │  spend —</code></pre>
 <p>The status line shows your <strong>stage</strong> (the canon Frame→Shape→Build→Review→Ship over the conserved machine), plus a <strong>unified context + spend meter</strong> with a boundary-aware checkpoint/<code>/clear</code> nudge. Vocabulary canon: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>../architecture/stage-vocabulary.md</code></a>.</p>
@@ -187,19 +187,19 @@ cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&g
 <li><strong>Frame</strong> — just chat with your agent about what you want. Nothing is tracked.</li>
 <li><strong>Shape</strong> — when a concrete change emerges, CE offers to crystallize it into a</li>
 </ol>
-<p><strong>Scope</strong> (the chat→Scope detect-and-offer; cheap, inline, cancel-safe). The    Scope card fills in the canon labels — <strong>Goal · Done-when · Budget ·    Change-type · Ready</strong>. You set the <strong>Budget</strong> (your call); the agent drafts the    rest and may make a change <em>safer</em> on its own but only <em>you</em> can make it    riskier. Shaping design: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/shaping-ux.md"><code>../architecture/shaping-ux.md</code></a>.    When the card reads <strong>Ready ✓</strong>, place the bet: <code>cev3 ratify &lt;scope&gt;</code>.</p>
+<p><strong>Scope</strong> (the chat→Scope detect-and-offer; cheap, inline, cancel-safe). The    Scope card fills in the canon labels — <strong>Goal · Done-when · Budget ·    Change-type · Ready</strong>. You set the <strong>Budget</strong> (your call); the agent drafts the    rest and may make a change <em>safer</em> on its own but only <em>you</em> can make it    riskier. Shaping design: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/shaping-ux.md"><code>../architecture/shaping-ux.md</code></a>.    When the card reads <strong>Ready ✓</strong>, place the bet: <code>ce ratify &lt;scope&gt;</code>.</p>
 <ol>
-<li><strong>Build</strong> — <code>cev3 drive &lt;scope&gt;</code> dispatches one governed, boxed run (the front</li>
+<li><strong>Build</strong> — <code>ce drive &lt;scope&gt;</code> dispatches one governed, boxed run (the front</li>
 </ol>
 <p>gate refuses unless Ready + ratified; the appetite becomes the run&#x27;s spend cap).</p>
 <ol>
-<li><strong>Review</strong> — read the <strong>◆ CE Completion Report</strong>: <code>cev3 report &lt;scope&gt;</code>:</li>
+<li><strong>Review</strong> — read the <strong>◆ CE Completion Report</strong>: <code>ce report &lt;scope&gt;</code>:</li>
 </ol>
 <pre><code>┌─ ◆ CE COMPLETION REPORT · run r-91a · Scope cs-4f2 ──────────────────
 │ Outcome   PR opened → #7
 │ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S
 │ Next      → Review PR #7  (Change-type code → your approval)
-│ Inspect   gh pr view 7   |   cev3 show cs-4f2   |   cev3 artifacts r-91a
+│ Inspect   gh pr view 7   |   ce show cs-4f2   |   ce artifacts r-91a
 └──────────────────────────────────────────────────────────</code></pre>
 <p>You judge <strong>artifacts</strong> (the PR, the manifest-scoped diff, the evidence) — not a    transcript. The grader lives outside the agent.</p>
 <ol>
@@ -207,11 +207,11 @@ cev3 onboard --spec &lt;verified-spec&gt; --trust-root &lt;verified-trust-root&g
 </ol>
 <p>branch protection enforces independent review). <code>Ship</code> is plural — a merged PR,    delivered research, or a ratified &quot;no change.&quot;</p>
 <h2 id="4-inspect-anything">4. Inspect anything</h2>
-<p><code>cev3 artifacts &lt;run&gt;</code> and <code>cev3 show &lt;scope&gt;</code> enumerate every artifact (PR · Scope · ratification · closed manifest · evidence-chain · spend) with its inspect command. For the plain-language tour, run <code>cev3 guide</code>.</p>
+<p><code>ce artifacts &lt;run&gt;</code> and <code>ce show &lt;scope&gt;</code> enumerate every artifact (PR · Scope · ratification · closed manifest · evidence-chain · spend) with its inspect command. For the plain-language tour, run <code>ce guide</code>.</p>
 <h2 id="5-greenfield-oss-quickstart">5. Greenfield-OSS quickstart</h2>
-<p>For a fresh open-source repo: prepare answers with <code>github.mode: new</code>, run <code>cev3 onboard --spec llms-install.md --answers ce-install.answers.yaml --plan</code>, then apply after the plan is clean:</p>
-<pre><code>cev3 onboard --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive</code></pre>
-<p>Authorize the App when prompted, then open <code>cev3 session</code>. Chat in Frame, confirm a real first Scope, set the Budget, ratify it, drive the Build, review the PR in a distinct venue, and merge through <code>cev3 merge --apply</code>. From there, every change is a governed, cost-safe, evidence-backed Scope.</p>
+<p>For a fresh open-source repo: prepare answers with <code>github.mode: new</code>, run <code>ce install --spec llms-install.md --answers ce-install.answers.yaml --plan</code>, then apply after the plan is clean:</p>
+<pre><code>ce install --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive</code></pre>
+<p>Authorize the App when prompted, then open <code>ce session</code>. Chat in Frame, confirm a real first Scope, set the Budget, ratify it, drive the Build, review the PR in a distinct venue, and merge through <code>ce merge --apply</code>. From there, every change is a governed, cost-safe, evidence-backed Scope.</p>
 <h2 id="deferred-after-e1">Deferred (after E1)</h2>
 <p>Runtime provisioning · the interactive GitHub-App click · live status-line tap · live run dispatch. These are the human-gated live seams the authenticated inventory bootstrap prepares but does not claim.</p>
 <h2 id="companions">Companions</h2>

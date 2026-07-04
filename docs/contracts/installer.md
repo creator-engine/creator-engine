@@ -25,7 +25,7 @@ commands. Two modes, one human contract.
 E1 stops at authenticated inventory. It does **not** run sudo, provision the
 runtime backend, automate the GitHub-App click, mutate branch protections, or
 create/adopt a project. Those remain explicit later apply gates. E1 does create
-or reuse the venv and proves the `cev3` entry point before inventory.
+or reuse the venv and proves the `ce` entry point before inventory.
 
 **Human contract:** the operator types nothing during E1. Later apply gates are
 where the human approves sudo-scoped host changes and the GitHub-App
@@ -64,12 +64,12 @@ present.
    in user space.
 6. Build a staging venv under
    `${CE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/creator-engine}/bootstrap`,
-   install the validator offline from the verified wheelhouse, prove `cev3
+   install the validator offline from the verified wheelhouse, prove `ce
    --help`, and atomically promote or reuse the existing matching venv.
 7. Execute:
 
    ```text
-   <venv>/bin/cev3 onboard --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
+   <venv>/bin/ce install --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
    ```
 
 This is the E1 stopping point. The inventory output is the handoff artifact for
