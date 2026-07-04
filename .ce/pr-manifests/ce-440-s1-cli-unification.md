@@ -6,17 +6,20 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-AUTHORIZED_PATHS_COUNT=12
+AUTHORIZED_PATHS_COUNT=15
 
-AUTHORIZED_PATHS_SHA256=cb38a3da8df3cbc24aa425ca85e18a4375f533102e6b619c06c44081262d6b49
+AUTHORIZED_PATHS_SHA256=fe6a7c45910138cb6b8b85f40db3c81c5daac9bb843047c7b6cc122c0fd84584
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-440-s1-cli-unification.md
 .ce/pr-manifests/ce-440-s1-cli-unification.md
 .ce/reference/cli.generated.md
 README.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/v3_cli.py
+validators/tests/integration/test_greenfield_first_project.py
+validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_ce_cli_v3_shim.py
 validators/tests/unit/test_dispatch_plan.py
 validators/tests/unit/test_onboard_apply.py
