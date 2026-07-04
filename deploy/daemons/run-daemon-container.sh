@@ -24,6 +24,8 @@ Optional container variables:
   CE_DAEMON_STATE_CONTAINER_PATH   default /ce/state
   CE_DAEMON_LEASE_ROOT             host lease root; default <state root>/daemon-leases
   CE_DAEMON_CONTAINER_LEASE_ROOT   explicit in-container lease root; default maps host lease root into /ce/state
+  CE_DAEMON_ENV_FILE               optional host env file; must exist with mode 0600
+  CE_DAEMON_CACERT_FILE            optional host CA cert mounted read-only for BAO_CACERT
   CE_DAEMON_TOKEN_FILE             optional host token file mounted read-only
   CE_DAEMON_TOKEN_CONTAINER_PATH   default /run/creator-engine/daemon-token
   CE_CONVEYOR_DAEMON_*             conveyor-daemon config forwarded when present
@@ -53,6 +55,20 @@ add_env_if_present() {
   if [[ -n "${!name+x}" ]]; then
     container_args+=(--env "$name")
   fi
+}
+
+file_mode() {
+  local path="$1"
+  stat -c '%a' -- "$path" 2>/dev/null || stat -f '%Lp' -- "$path"
+}
+
+require_mode_0600() {
+  local name="$1"
+  local path="$2"
+  [[ -f "$path" ]] || die "$name does not name a file: $path"
+  local mode
+  mode="$(file_mode "$path")" || die "cannot stat $name: $path"
+  [[ "$mode" == "600" ]] || die "$name must be mode 0600: $path (mode $mode)"
 }
 
 main() {
@@ -97,6 +113,13 @@ main() {
   fi
   local image="${CE_DAEMON_IMAGE:-creator-engine/ce-validator:0.3.1}"
   local container_name="${CE_DAEMON_CONTAINER_NAME:-ce-$daemon}"
+  local queue_secret_container_dir="$state_container/queue-daemon-secret"
+  local queue_secret_target="$state_container/queue-daemon/approval-wall-secret"
+  local queue_secret_uses_tmpfs=0
+  if [[ -n "${CE_APPROVAL_WALL_SECRET_TARGET_FILE:-}" ]]; then
+    queue_secret_target="$queue_secret_container_dir/approval-wall-secret"
+    queue_secret_uses_tmpfs=1
+  fi
 
   install -d -m 0700 "$state_root"
   install -d -m 0700 "$host_lease_root"
@@ -114,9 +137,20 @@ main() {
     --env "CE_QUEUE_DAEMON_BIN=cev3"
     --env "CE_QUEUE_DAEMON_REPO_ROOT=$repo_container"
     --env "CE_QUEUE_DAEMON_ROOT=$state_container/queue-daemon/v3"
-    --env "CE_APPROVAL_WALL_SECRET_TARGET_FILE=$state_container/queue-daemon/approval-wall-secret"
+    --env "CE_APPROVAL_WALL_SECRET_TARGET_FILE=$queue_secret_target"
     --env "CE_APPROVAL_WALL_STATE=$state_container/queue-daemon/approval-wall-state.json"
   )
+
+  if [[ "$queue_secret_uses_tmpfs" == "1" ]]; then
+    container_args+=(--tmpfs "$queue_secret_container_dir:rw,size=1m,mode=0700")
+  fi
+
+  if [[ -n "${CE_DAEMON_ENV_FILE:-}" ]]; then
+    require_mode_0600 CE_DAEMON_ENV_FILE "$CE_DAEMON_ENV_FILE"
+    # Docker and Podman let explicit --env values override values loaded from
+    # --env-file, so keep direct exports below as the higher-precedence source.
+    container_args+=(--env-file "$CE_DAEMON_ENV_FILE")
+  fi
 
   for env_name in \
     GH_TOKEN \
@@ -141,8 +175,18 @@ main() {
     CE_QUEUE_DAEMON_APPROVAL_SETTLE_SECONDS \
     CE_QUEUE_DAEMON_DRY_RUN
   do
+    if [[ "$env_name" == "BAO_CACERT" && -n "${CE_DAEMON_CACERT_FILE:-}" ]]; then
+      continue
+    fi
     add_env_if_present "$env_name"
   done
+
+  if [[ -n "${CE_DAEMON_CACERT_FILE:-}" ]]; then
+    [[ -f "$CE_DAEMON_CACERT_FILE" ]] || die "CE_DAEMON_CACERT_FILE does not name a file: $CE_DAEMON_CACERT_FILE"
+    local cacert_container="/ce/etc/openbao-ca.crt"
+    container_args+=(--volume "$CE_DAEMON_CACERT_FILE:$cacert_container:ro")
+    container_args+=(--env "BAO_CACERT=$cacert_container")
+  fi
 
   if [[ -n "${CE_DAEMON_TOKEN_FILE:-}" ]]; then
     [[ -f "$CE_DAEMON_TOKEN_FILE" ]] || die "CE_DAEMON_TOKEN_FILE does not name a file: $CE_DAEMON_TOKEN_FILE"
@@ -173,7 +217,9 @@ main() {
       done
       if [[ -n "${CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE:-}" ]]; then
         [[ -f "$CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE" ]] || die "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE does not name a file: $CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE"
-        local conveyor_secret_container="/run/creator-engine/conveyor-signing-secret"
+        local conveyor_secret_container_dir="/run/creator-engine/conveyor-daemon-secret"
+        local conveyor_secret_container="$conveyor_secret_container_dir/signing-secret"
+        container_args+=(--tmpfs "$conveyor_secret_container_dir:rw,size=1m,mode=0700")
         container_args+=(--volume "$CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE:$conveyor_secret_container:ro")
         container_args+=(--env "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE=$conveyor_secret_container")
       fi

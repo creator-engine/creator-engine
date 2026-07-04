@@ -110,6 +110,28 @@ def _write_fake_container_engine(path: Path, argv_file: Path) -> None:
     path.chmod(0o755)
 
 
+def _container_runner_env(tmp_path: Path, fake_engine: Path) -> dict[str, str]:
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "CE_CONTAINER_ENGINE": str(fake_engine),
+        "CE_DAEMON_REPO_ROOT": str(_repo_root()),
+        "CE_DAEMON_STATE_ROOT": str(tmp_path / "state"),
+        "CE_DAEMON_IMAGE": "example.invalid/ce-runtime@sha256:abc",
+    }
+
+
+def _run_container_runner(daemon: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(_repo_root() / "deploy" / "daemons" / "run-daemon-container.sh"), daemon],
+        cwd=_repo_root(),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+
 def _wait_for(predicate, *, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -544,6 +566,147 @@ def test_container_runner_maps_host_lease_root_to_container_state_mount(tmp_path
     assert "--env" in argv
     assert "CE_DAEMON_LEASE_ROOT=/ce/state/daemon-leases" in argv
     assert str(host_lease) not in argv
+
+
+def test_container_runner_rejects_env_file_without_0600_mode(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    env_file = tmp_path / "daemon.env"
+    env_file.write_text("GH_TOKEN=from-env-file\n", encoding="utf-8")
+    env_file.chmod(0o644)
+    env = _container_runner_env(tmp_path, fake_engine)
+    env["CE_DAEMON_ENV_FILE"] = str(env_file)
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode != 0
+    assert "CE_DAEMON_ENV_FILE must be mode 0600" in proc.stderr
+    assert not argv_file.exists()
+
+
+def test_container_runner_passes_env_file_before_explicit_env(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    env_file = tmp_path / "daemon.env"
+    env_file.write_text("GH_TOKEN=from-env-file\n", encoding="utf-8")
+    env_file.chmod(0o600)
+    env = _container_runner_env(tmp_path, fake_engine)
+    env.update({"CE_DAEMON_ENV_FILE": str(env_file), "GH_TOKEN": "explicit-token"})
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert argv[argv.index("--env-file") + 1] == str(env_file)
+    assert argv.index("--env-file") < argv.index("GH_TOKEN")
+
+
+def test_container_runner_maps_cacert_file_to_container_bao_cacert(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    cacert_file = tmp_path / "openbao-ca.crt"
+    cacert_file.write_text("unit-test-ca\n", encoding="utf-8")
+    env = _container_runner_env(tmp_path, fake_engine)
+    env.update(
+        {
+            "BAO_CACERT": "/usr/local/share/ca-certificates/host-only.crt",
+            "CE_DAEMON_CACERT_FILE": str(cacert_file),
+        }
+    )
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert f"{cacert_file}:/ce/etc/openbao-ca.crt:ro" in argv
+    assert "BAO_CACERT=/ce/etc/openbao-ca.crt" in argv
+    assert "BAO_CACERT" not in argv
+    assert "/usr/local/share/ca-certificates/host-only.crt" not in argv
+
+
+def test_container_runner_uses_tmpfs_for_queue_secret_target_when_host_sets_target(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    host_secret_target = tmp_path / "run" / "approval-wall-secret"
+    env = _container_runner_env(tmp_path, fake_engine)
+    env["CE_APPROVAL_WALL_SECRET_TARGET_FILE"] = str(host_secret_target)
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert "--tmpfs" in argv
+    assert "/ce/state/queue-daemon-secret:rw,size=1m,mode=0700" in argv
+    assert "CE_APPROVAL_WALL_SECRET_TARGET_FILE=/ce/state/queue-daemon-secret/approval-wall-secret" in argv
+    assert str(host_secret_target) not in argv
+
+
+def test_container_runner_keeps_queue_default_invocation_byte_identical(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    env = _container_runner_env(tmp_path, fake_engine)
+    repo_root = _repo_root()
+    state_root = tmp_path / "state"
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert argv_file.read_text(encoding="utf-8") == "\n".join(
+        [
+            "run",
+            "--rm",
+            "--name",
+            "ce-queue-daemon",
+            "--workdir",
+            "/workspace/creator-engine",
+            "--volume",
+            f"{repo_root}:/workspace/creator-engine:ro",
+            "--volume",
+            f"{state_root}:/ce/state",
+            "--env",
+            "CE_DAEMON_UNCONTAINED=1",
+            "--env",
+            "CE_DAEMON_STATE_ROOT=/ce/state",
+            "--env",
+            "CE_DAEMON_LEASE_ROOT=/ce/state/daemon-leases",
+            "--env",
+            "CE_QUEUE_DAEMON_BIN=cev3",
+            "--env",
+            "CE_QUEUE_DAEMON_REPO_ROOT=/workspace/creator-engine",
+            "--env",
+            "CE_QUEUE_DAEMON_ROOT=/ce/state/queue-daemon/v3",
+            "--env",
+            "CE_APPROVAL_WALL_SECRET_TARGET_FILE=/ce/state/queue-daemon/approval-wall-secret",
+            "--env",
+            "CE_APPROVAL_WALL_STATE=/ce/state/queue-daemon/approval-wall-state.json",
+            "example.invalid/ce-runtime@sha256:abc",
+            "bash",
+            "/workspace/creator-engine/deploy/queue-daemon/launch-queue-daemon.sh",
+        ]
+    ) + "\n"
+
+
+def test_container_runner_uses_tmpfs_for_conveyor_secret_file_mount(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    signing_secret_file = tmp_path / "signing-secret"
+    signing_secret_file.write_text("unit-test-secret\n", encoding="utf-8")
+    env = _container_runner_env(tmp_path, fake_engine)
+    env["CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE"] = str(signing_secret_file)
+
+    proc = _run_container_runner("conveyor-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert "/run/creator-engine/conveyor-daemon-secret:rw,size=1m,mode=0700" in argv
+    assert f"{signing_secret_file}:/run/creator-engine/conveyor-daemon-secret/signing-secret:ro" in argv
+    assert "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE=/run/creator-engine/conveyor-daemon-secret/signing-secret" in argv
 
 
 def test_container_runner_refuses_unmounted_host_lease_root(tmp_path: Path):
