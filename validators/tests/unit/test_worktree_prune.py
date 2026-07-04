@@ -161,6 +161,91 @@ def test_apply_never_removes_invocation_linked_worktree(tmp_path: Path):
     assert json.loads(audit_lines[0])["path"] == str(other.resolve())
 
 
+def test_apply_protects_cwd_worktree_when_repo_root_points_elsewhere(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    scan_root = _add_worktree(repo, tmp_path, "wt-scan-root", "scan-root-merged")
+    cwd_worktree = _add_worktree(repo, tmp_path, "wt-cwd", "cwd-merged")
+    other = _add_worktree(repo, tmp_path, "wt-other", "other-merged")
+    nested_cwd = cwd_worktree / "nested"
+    nested_cwd.mkdir()
+    for path in (scan_root, cwd_worktree, other):
+        _set_old(path)
+    monkeypatch.chdir(nested_cwd)
+
+    state_root = tmp_path / "state"
+    result = worktree_prune.apply_prune(
+        scan_root,
+        extra_roots=[],
+        age_hours=72,
+        state_root=state_root,
+    )
+    entries = _by_path(result)
+
+    assert entries[scan_root.resolve()].verdict == "REPORT_ONLY"
+    assert entries[scan_root.resolve()].reason == "active-worktree"
+    assert scan_root.exists()
+    assert entries[cwd_worktree.resolve()].verdict == "REPORT_ONLY"
+    assert entries[cwd_worktree.resolve()].reason == "active-worktree"
+    assert entries[cwd_worktree.resolve()].removed is False
+    assert cwd_worktree.exists()
+    assert entries[other.resolve()].verdict == "PRUNABLE"
+    assert entries[other.resolve()].removed is True
+    assert not other.exists()
+
+
+def test_scan_classifies_diverged_empty_tip_content_as_prunable(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    empty_tip = _add_worktree(repo, tmp_path, "wt-empty-tip", "empty-tip")
+    _git(empty_tip, "commit", "--allow-empty", "-m", "empty branch tip")
+    _git(repo, "commit", "--allow-empty", "-m", "empty main tip")
+    _git(repo, "push", "origin", "main")
+    _git(empty_tip, "fetch", "origin", "main")
+    _set_old(empty_tip)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[empty_tip.resolve()]
+
+    assert entry.verdict == "PRUNABLE"
+    assert entry.reason == "empty-tip-content"
+    assert entry.evidence["head_ancestor_origin_main"] is False
+    assert entry.evidence["empty_tip_content_vs_origin_main"] is True
+
+
+def test_scan_keeps_diverged_non_empty_tip_content_report_only(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    non_empty = _add_worktree(repo, tmp_path, "wt-non-empty-tip", "non-empty-tip")
+    (non_empty / "feature.txt").write_text("branch content\n", encoding="utf-8")
+    _git(non_empty, "add", "feature.txt")
+    _git(non_empty, "commit", "-m", "non-empty branch tip")
+    _git(repo, "commit", "--allow-empty", "-m", "empty main tip")
+    _git(repo, "push", "origin", "main")
+    _git(non_empty, "fetch", "origin", "main")
+    _set_old(non_empty)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[non_empty.resolve()]
+
+    assert entry.verdict == "REPORT_ONLY"
+    assert entry.reason == "unpushed-commits"
+    assert entry.evidence["head_ancestor_origin_main"] is False
+    assert entry.evidence["empty_tip_content_vs_origin_main"] is False
+
+
+def test_scan_reports_locked_registered_worktree_explicitly(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    locked = _add_worktree(repo, tmp_path, "wt-locked", "locked-merged")
+    _git(repo, "worktree", "lock", "--reason", "in use", str(locked))
+    _set_old(locked)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[locked.resolve()]
+
+    assert entry.verdict == "REPORT_ONLY"
+    assert entry.reason == "locked"
+    assert entry.evidence["locked"] is True
+    assert entry.evidence["lock_reason"] == "in use"
+
+
 def test_cli_worktree_prune_json_dry_run(tmp_path: Path, monkeypatch, capsys):
     repo = _make_repo(tmp_path)
     clean = _add_worktree(repo, tmp_path, "wt-clean", "clean-merged")

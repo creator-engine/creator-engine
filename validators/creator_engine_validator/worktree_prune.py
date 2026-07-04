@@ -39,6 +39,8 @@ class WorktreeCandidate:
     branch: str | None = None
     head: str | None = None
     gitdir: Path | None = None
+    locked: bool = False
+    lock_reason: str | None = None
     primary: bool = False
     registered: bool = False
 
@@ -112,6 +114,14 @@ def _resolve_repo_root(repo_root: Path | str) -> Path:
     return Path(result.stdout.strip()).resolve()
 
 
+def _resolve_cwd_worktree_root() -> Path | None:
+    cwd = Path(os.getcwd()).resolve()
+    result = _run_git(cwd, ["rev-parse", "--show-toplevel"])
+    if result.returncode != 0:
+        return None
+    return Path(result.stdout.strip()).resolve()
+
+
 def _parse_worktree_porcelain(text: str) -> list[WorktreeCandidate]:
     candidates: list[WorktreeCandidate] = []
     current: dict[str, Any] = {}
@@ -128,6 +138,8 @@ def _parse_worktree_porcelain(text: str) -> list[WorktreeCandidate]:
             kind="registered",
             branch=branch,
             head=current.get("HEAD"),
+            locked="locked" in current,
+            lock_reason=current.get("locked") if isinstance(current.get("locked"), str) else None,
             primary=len(candidates) == 0,
             registered=True,
         )
@@ -319,12 +331,20 @@ def classify_candidate(
     age_hours: float = DEFAULT_AGE_HOURS,
     now: float | None = None,
     active_worktree: Path | None = None,
+    protected_worktrees: Sequence[Path] = (),
 ) -> WorktreeVerdict:
+    protected = {Path(path).resolve() for path in protected_worktrees}
+    if active_worktree is not None:
+        protected.add(Path(active_worktree).resolve())
     evidence: dict[str, Any] = {
         "registered": candidate.registered,
         "primary": candidate.primary,
         "active_worktree": str(active_worktree) if active_worktree is not None else None,
+        "protected_worktrees": sorted(str(path) for path in protected),
+        "locked": candidate.locked,
     }
+    if candidate.lock_reason is not None:
+        evidence["lock_reason"] = candidate.lock_reason
     if candidate.gitdir is not None:
         evidence["gitdir"] = str(candidate.gitdir)
 
@@ -335,7 +355,7 @@ def classify_candidate(
             candidate.path, candidate.branch, candidate.head, candidate.kind,
             "REPORT_ONLY", "unknown-state", evidence,
         )
-    if active_worktree is not None and candidate.path == active_worktree:
+    if candidate.path in protected:
         return WorktreeVerdict(
             candidate.path, candidate.branch, candidate.head, candidate.kind,
             "REPORT_ONLY", "active-worktree", evidence,
@@ -344,6 +364,11 @@ def classify_candidate(
         return WorktreeVerdict(
             candidate.path, candidate.branch, candidate.head, candidate.kind,
             "REPORT_ONLY", "primary-worktree", evidence,
+        )
+    if candidate.locked:
+        return WorktreeVerdict(
+            candidate.path, candidate.branch, candidate.head, candidate.kind,
+            "REPORT_ONLY", "locked", evidence,
         )
     if not old_enough:
         return WorktreeVerdict(
@@ -401,8 +426,18 @@ def scan_worktrees(
     now: float | None = None,
 ) -> WorktreePruneResult:
     repo = _resolve_repo_root(repo_root)
+    protected_worktrees = {repo}
+    cwd_worktree = _resolve_cwd_worktree_root()
+    if cwd_worktree is not None:
+        protected_worktrees.add(cwd_worktree)
     entries = [
-        classify_candidate(candidate, age_hours=age_hours, now=now, active_worktree=repo)
+        classify_candidate(
+            candidate,
+            age_hours=age_hours,
+            now=now,
+            active_worktree=repo,
+            protected_worktrees=tuple(protected_worktrees),
+        )
         for candidate in discover_worktrees(repo, extra_roots)
     ]
     entries.sort(key=lambda entry: str(entry.path))
