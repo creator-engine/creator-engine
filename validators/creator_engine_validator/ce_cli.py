@@ -204,6 +204,8 @@ INTERNAL_COMMAND_GROUPS = frozenset(
     {"herdr", "ask", "support", "triage", "automerge-kill-switch"}
 )
 
+_V3_FORWARDED_ENV = "CE_V3_FORWARDED"
+
 V3_FORWARDING_SHIMS: dict[str, tuple[str, str]] = {
     "seats": ("list governed seat liveness from CE state", "seats"),
     "fleet": ("aggregated fleet status", "fleet"),
@@ -2712,6 +2714,8 @@ def _dequeue(args) -> int:
 
 def _forward_v3_argv(name: str, remainder: Sequence[str]) -> int:
     _help_text, v3_name = V3_FORWARDING_SHIMS[name]
+    env = os.environ.copy()
+    env[_V3_FORWARDED_ENV] = "1"
     argv = [
         sys.executable,
         "-m",
@@ -2719,7 +2723,7 @@ def _forward_v3_argv(name: str, remainder: Sequence[str]) -> int:
         v3_name,
         *remainder,
     ]
-    proc = subprocess.run(argv, check=False)
+    proc = subprocess.run(argv, check=False, env=env)
     return int(proc.returncode)
 
 
