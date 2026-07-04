@@ -621,6 +621,9 @@ def test_triage_queue_cli_help_exits_zero(argv):
 def test_triage_queue_workflow_scheduled_apply_has_kill_switch():
     workflow = Path(".github/workflows/ce-ops-triage-queue.yml").read_text(encoding="utf-8")
 
+    assert "concurrency:" in workflow
+    assert "group: ce-ops-triage-queue" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert "CE_TRIAGE_APPLY_KILL_SWITCH: ${{ vars.CE_TRIAGE_APPLY_KILL_SWITCH }}" in workflow
     assert "github.event_name == 'schedule' && 'true'" in workflow
     assert "workflow_dispatch' && inputs.apply == true" in workflow

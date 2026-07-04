@@ -18,6 +18,10 @@ on:
         default: false
         required: false
 
+concurrency:
+  group: ce-ops-triage-queue
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
