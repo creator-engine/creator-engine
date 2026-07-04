@@ -13,6 +13,8 @@ from creator_engine_validator.forge.automerge_policy import (
     AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE,
     AUTOMERGE_TIER_CARRIER_CHANGELOG,
     AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
+    AUTOMERGE_TIER_DOCS_ENVELOPE,
+    AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
     brain_supersede_tier_evidence,
 )
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
@@ -25,6 +27,11 @@ BRAIN_SUPERSEDE_PATHS = [
     ".ce/brain/assertions.yaml",
     ".ce/changelog/ce-413-automerge-tier-b.md",
     ".ce/pr-manifests/ce-413-automerge-tier-b.md",
+]
+DOCS_ENVELOPE_PATHS = [
+    "docs/adr/ADR-0071-docs-envelope-automerge.md",
+    ".ce/changelog/ce-a3-docs-envelope-automerge.md",
+    ".ce/pr-manifests/ce-a3-docs-envelope-automerge.md",
 ]
 
 
@@ -191,6 +198,7 @@ def _write_live_policy(
     *,
     run_mode: str = "ceo",
     kill_switch: bool = False,
+    docs_class: bool = False,
     carrier_changelog_tier: bool = False,
     brain_supersede_tier: bool = False,
 ) -> Path:
@@ -200,7 +208,7 @@ def _write_live_policy(
     payload = {
         "run_mode": run_mode,
         "kill_switch": kill_switch,
-        "classes": {},
+        "classes": {"docs": {"auto_merge": docs_class}},
         "tiers": {
             AUTOMERGE_TIER_CARRIER_CHANGELOG: {
                 "auto_merge": carrier_changelog_tier,
@@ -368,6 +376,84 @@ def test_actuate_cli_appends_audit_log(tmp_path: Path, monkeypatch: pytest.Monke
     assert records[0]["acted"] is True
     assert records[0]["single_pr"] is True
     assert records[0]["reviewer_venue"] == "reviewer-dev"
+
+
+def test_actuates_docs_envelope_tier_with_live_docs_class_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, docs_class=True)
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_DOCS_ENVELOPE,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
+                changed_paths=DOCS_ENVELOPE_PATHS,
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.actuated is True
+    assert result.audit_record["tier"] == AUTOMERGE_TIER_DOCS_ENVELOPE
+    assert result.audit_record["tier_flag"] is True
+    assert result.audit_record["path_envelope"] == AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE
+    assert result.audit_record["reviewer_venue"] == "reviewer-dev"
+
+
+def test_refuses_docs_envelope_tier_when_live_docs_class_flag_is_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, docs_class=False)
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_DOCS_ENVELOPE,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
+                changed_paths=DOCS_ENVELOPE_PATHS,
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.refused is True
+    assert result.reason == "live_docs_class_flag_not_true"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_docs_envelope_tier_when_path_predicate_fails(tmp_path: Path) -> None:
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_DOCS_ENVELOPE,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
+                changed_paths=[
+                    *DOCS_ENVELOPE_PATHS,
+                    "validators/creator_engine_validator/forge/automerge_policy.py",
+                ],
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.refused is True
+    assert result.reason == "tier_docs_envelope_path_predicate_failed"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
 
 
 def test_actuates_carrier_changelog_tier_with_audit_fields(
