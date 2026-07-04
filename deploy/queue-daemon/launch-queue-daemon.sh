@@ -27,7 +27,7 @@ Required environment:
 
 Optional environment:
   BAO_CACERT                                OpenBao CA certificate path
-  CE_QUEUE_DAEMON_BIN                       executable wrapper; default v3_cli, fallback to repo venv module
+  CE_QUEUE_DAEMON_BIN                       executable wrapper; default cev3, fallback to repo venv module
   CE_QUEUE_DAEMON_INTERVAL_SECONDS          default 120
   CE_QUEUE_DAEMON_APPROVAL_SETTLE_SECONDS   default 0
   CE_QUEUE_DAEMON_ROOT                      v3 local-state root
@@ -88,7 +88,7 @@ validate_required_env() {
 
 resolve_queue_daemon_command() {
   local root="$1"
-  local bin="${CE_QUEUE_DAEMON_BIN:-v3_cli}"
+  local bin="${CE_QUEUE_DAEMON_BIN:-cev3}"
   if command -v "$bin" >/dev/null 2>&1; then
     QUEUE_DAEMON_CMD=("$bin")
     return 0
@@ -97,7 +97,7 @@ resolve_queue_daemon_command() {
     QUEUE_DAEMON_CMD=("$root/.venv/bin/python" "-m" "creator_engine_validator.v3_cli")
     return 0
   fi
-  die "cannot find $bin and no repo venv module fallback at $root/.venv/bin/python. Install v3_cli or set CE_QUEUE_DAEMON_BIN."
+  die "cannot find $bin and no repo venv module fallback at $root/.venv/bin/python. Install cev3 or set CE_QUEUE_DAEMON_BIN."
 }
 
 resolve_lease_python() {
@@ -213,7 +213,7 @@ try:
         except subprocess.TimeoutExpired:
             try:
                 lease.heartbeat()
-            except DaemonLeaseError as exc:
+            except Exception as exc:
                 print(f"ERROR: queue-daemon singleton lease heartbeat failed: {exc}", file=sys.stderr)
                 process.terminate()
                 try:

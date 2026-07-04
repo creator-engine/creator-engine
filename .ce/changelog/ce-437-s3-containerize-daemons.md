@@ -10,3 +10,6 @@
   legacy direct-launch escape hatch.
 - Added a `queue-daemon` singleton lease supervisor to the queue launch path so
   contained and uncontained queue loops share the same live-daemon gate.
+- Rework: same-host expired leases now honor live PIDs, conveyor passes
+  heartbeat between item boundaries and stop fail-closed on heartbeat loss, and
+  the queue supervisor terminates its child with exit 74 on heartbeat errors.

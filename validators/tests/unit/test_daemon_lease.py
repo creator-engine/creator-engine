@@ -24,14 +24,24 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _payload(*, holder_id: str, heartbeat_at: float) -> dict[str, object]:
+def _payload(*, holder_id: str, heartbeat_at: float, pid: int | None = None) -> dict[str, object]:
     return {
         "holder_id": holder_id,
-        "pid": os.getpid(),
+        "pid": os.getpid() if pid is None else pid,
         "host": socket.gethostname(),
         "acquired_at": heartbeat_at,
         "heartbeat_at": heartbeat_at,
     }
+
+
+def _missing_pid() -> int:
+    pid = 999_999_999
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return pid
+        pid += 1
 
 
 def _queue_daemon_env(tmp_path: Path, lease_root: Path, fake_bin: Path) -> dict[str, str]:
@@ -64,13 +74,23 @@ def _queue_daemon_env(tmp_path: Path, lease_root: Path, fake_bin: Path) -> dict[
     return env
 
 
-def _write_fake_queue_daemon(path: Path, *, marker: Path, stop_file: Path | None = None) -> None:
+def _write_fake_queue_daemon(
+    path: Path,
+    *,
+    marker: Path,
+    stop_file: Path | None = None,
+    pid_file: Path | None = None,
+) -> None:
+    pid_block = f'printf "%s\\n" "$$" > "{pid_file}"\n' if pid_file is not None else ""
     wait_block = ""
     if stop_file is not None:
         wait_block = f'while [ ! -e "{stop_file}" ]; do sleep 0.02; done\n'
+    else:
+        wait_block = "while true; do sleep 0.02; done\n"
     path.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        f"{pid_block}"
         f'touch "{marker}"\n'
         f"{wait_block}",
         encoding="utf-8",
@@ -115,7 +135,10 @@ def test_stale_lease_requires_explicit_audited_takeover_record(tmp_path: Path):
     root = tmp_path / "leases"
     root.mkdir()
     lease_path = root / "conveyor.lease"
-    lease_path.write_text(json.dumps(_payload(holder_id="old-holder", heartbeat_at=10.0)), encoding="utf-8")
+    lease_path.write_text(
+        json.dumps(_payload(holder_id="old-holder", heartbeat_at=10.0, pid=_missing_pid())),
+        encoding="utf-8",
+    )
 
     with pytest.raises(DaemonLeaseStale, match="explicit audited takeover"):
         acquire("conveyor", "new-holder", state_root=root, ttl_seconds=30.0, now=100.0)
@@ -142,6 +165,28 @@ def test_stale_lease_requires_explicit_audited_takeover_record(tmp_path: Path):
         assert records[0]["new"]["holder_id"] == "new-holder"
     finally:
         lease.release()
+
+
+def test_same_host_expired_ttl_with_alive_pid_is_live_and_refuses_takeover(tmp_path: Path):
+    root = tmp_path / "leases"
+    root.mkdir()
+    lease_path = root / "conveyor.lease"
+    lease_path.write_text(json.dumps(_payload(holder_id="old-holder", heartbeat_at=10.0)), encoding="utf-8")
+
+    with pytest.raises(DaemonLeaseHeld, match="live conveyor lease"):
+        acquire(
+            "conveyor",
+            "new-holder",
+            state_root=root,
+            ttl_seconds=30.0,
+            allow_takeover=True,
+            takeover_reason="operator requested takeover",
+            now=1000.0,
+        )
+
+    payload = json.loads(lease_path.read_text(encoding="utf-8"))
+    assert payload["holder_id"] == "old-holder"
+    assert not (root / "conveyor.lease.takeovers.jsonl").exists()
 
 
 def test_malformed_lease_fails_closed(tmp_path: Path):
@@ -231,7 +276,10 @@ def test_takeover_lock_blocks_unaudited_normal_acquire_during_audited_takeover(
     root = tmp_path / "leases"
     root.mkdir()
     lease_path = root / "conveyor.lease"
-    lease_path.write_text(json.dumps(_payload(holder_id="old-holder", heartbeat_at=10.0)), encoding="utf-8")
+    lease_path.write_text(
+        json.dumps(_payload(holder_id="old-holder", heartbeat_at=10.0, pid=_missing_pid())),
+        encoding="utf-8",
+    )
 
     original_replace = daemon_lease._replace_lease
     takeover_paused = threading.Event()
@@ -399,6 +447,41 @@ def test_queue_daemon_launcher_holds_and_heartbeats_singleton_lease(tmp_path: Pa
     assert proc.returncode == 0, stderr
     assert stdout == ""
     assert not lease_path.exists()
+
+
+def test_queue_daemon_launcher_heartbeat_failure_terminates_child_and_exits_74(tmp_path: Path):
+    lease_root = tmp_path / "leases"
+    fake_bin = tmp_path / "fake-queue-daemon"
+    started = tmp_path / "started"
+    child_pid_file = tmp_path / "child.pid"
+    _write_fake_queue_daemon(fake_bin, marker=started, pid_file=child_pid_file)
+    env = _queue_daemon_env(tmp_path, lease_root, fake_bin)
+    script = _repo_root() / "deploy" / "queue-daemon" / "launch-queue-daemon.sh"
+
+    proc = subprocess.Popen(
+        ["bash", str(script)],
+        cwd=_repo_root(),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        lease_path = lease_root / "queue-daemon.lease"
+        _wait_for(lambda: started.exists() and child_pid_file.exists() and lease_path.exists())
+        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+        lease_path.unlink()
+        stdout, stderr = proc.communicate(timeout=5)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+    assert proc.returncode == 74
+    assert stdout == ""
+    assert "queue-daemon singleton lease heartbeat failed" in stderr
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
 
 
 def test_queue_daemon_launcher_refuses_live_singleton_lease_before_child_exec(tmp_path: Path):

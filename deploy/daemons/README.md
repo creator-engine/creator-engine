@@ -26,6 +26,12 @@ default host lease root is `<state root>/daemon-leases`, which maps to
 `/ce/state/daemon-leases`. Use `CE_DAEMON_CONTAINER_LEASE_ROOT` only when an
 explicit in-container path is required.
 
+Lease mutation is serialized by adjacent `.lease.op.lock` files. If a host
+crashes while holding an operation lock, verify no launcher or daemon process is
+still running for that lease, then remove only the orphaned `.lease.op.lock`
+file. Do not delete a `.lease` payload to force takeover; use the audited
+takeover path with `CE_DAEMON_LEASE_TAKEOVER_REASON`.
+
 `Dockerfile` is only a thin label layer over the canonical runtime image. Release
 automation should set `CE_CANONICAL_RUNTIME_IMAGE` or `CE_DAEMON_IMAGE` to the
 digest-pinned image reference governed by the release manifest.

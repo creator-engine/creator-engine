@@ -322,11 +322,11 @@ def _read_payload(path: Path) -> DaemonLeasePayload:
 
 
 def _lease_is_live(payload: DaemonLeasePayload, *, ttl_seconds: float, now: float) -> bool:
-    if now - payload.heartbeat_at <= ttl_seconds:
-        if payload.host != socket.gethostname():
-            return True
+    if payload.host == socket.gethostname():
         return _pid_exists(payload.pid)
-    return False
+    # Remote-host liveness is intentionally TTL-only: this host cannot safely
+    # prove a foreign PID is alive, so takeover remains gated by heartbeat age.
+    return now - payload.heartbeat_at <= ttl_seconds
 
 
 def _pid_exists(pid: int) -> bool:

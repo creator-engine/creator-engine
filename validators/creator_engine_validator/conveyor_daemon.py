@@ -360,8 +360,14 @@ class ConveyorDaemon:
         """
 
         if self.armed:
-            assert self.daemon_lease is not None
-            self.daemon_lease.heartbeat()
+            heartbeat_error = self._heartbeat_lease()
+            if heartbeat_error is not None:
+                return ConveyorDaemonRunResult(
+                    armed=self.armed,
+                    discovered_count=0,
+                    results=(),
+                    discovery_error=heartbeat_error,
+                )
 
         try:
             discovered_items: list[ConveyorDaemonItem] = []
@@ -397,6 +403,11 @@ class ConveyorDaemon:
         seen_this_pass: set[str] = set()
         results: list[ConveyorDaemonItemResult] = []
         for item in discovered:
+            if self.armed and (heartbeat_error := self._heartbeat_lease()) is not None:
+                results.append(self._failed(item, (heartbeat_error,)))
+                self._log(f"conveyor stopping pass before item after heartbeat failure: {heartbeat_error}")
+                break
+
             if item.key in seen_this_pass or item.key in self._completed_keys:
                 results.append(
                     ConveyorDaemonItemResult(
@@ -854,6 +865,16 @@ class ConveyorDaemon:
         if not isinstance(timestamp, str) or not timestamp.strip():
             raise ValueError("now must return a non-empty timestamp string")
         return timestamp
+
+    def _heartbeat_lease(self) -> str | None:
+        assert self.daemon_lease is not None
+        try:
+            self.daemon_lease.heartbeat()
+        except Exception as exc:
+            error = f"daemon lease heartbeat failed: {exc}"
+            self._log(f"conveyor {error}")
+            return error
+        return None
 
     def _log(self, message: str) -> None:
         if self.log_runner is not None:
