@@ -1,0 +1,72 @@
+portability_plane:
+  runtime_plane_paths:
+    - validators/creator_engine_validator/containment_probe.py
+    - validators/creator_engine_validator/lane_runtime.py
+    - validators/creator_engine_validator/launch_runtime.py
+    - validators/creator_engine_validator/openbao_golive.py
+    - validators/creator_engine_validator/resource_bound_spec.py
+    - validators/creator_engine_validator/runner/herdr_containment.py
+    - validators/creator_engine_validator/seat_sentinel.py
+    - validators/creator_engine_validator/v3_seat_bridge.py
+    - validators/creator_engine_validator/worker_runtime.py
+  baseline_exemptions:
+    - path: validators/creator_engine_validator/ce_cli.py
+      pattern: systemd-reference
+      match: '"bound this seat (systemd-run --user wrap); enforce refuses loudly on an "'
+      date: "2026-07-04"
+      reason: "Existing CLI help text names runtime enforcement behavior pending portable wording cleanup."
+    - path: validators/creator_engine_validator/ce_cli.py
+      pattern: systemd-reference
+      match: '"bound this seat (systemd-run --user wrap); --dry-run renders the "'
+      date: "2026-07-04"
+      reason: "Existing CLI help text names runtime enforcement behavior pending portable wording cleanup."
+    - path: validators/creator_engine_validator/checks/ce_runtime_policy.py
+      pattern: run-path-literal
+      match: '"/var/run/docker.sock",'
+      date: "2026-07-04"
+      reason: "Existing runtime-policy socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/checks/ce_runtime_policy.py
+      pattern: run-path-literal
+      match: '"/run/docker.sock",'
+      date: "2026-07-04"
+      reason: "Existing runtime-policy socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/checks/ce_runtime_policy.py
+      pattern: run-path-literal
+      match: '"/run/podman/podman.sock",'
+      date: "2026-07-04"
+      reason: "Existing runtime-policy socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/checks/ce_runtime_policy.py
+      pattern: run-path-literal
+      match: '"/var/run/podman/podman.sock",'
+      date: "2026-07-04"
+      reason: "Existing runtime-policy socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/checks/worker_container_policy.py
+      pattern: run-path-literal
+      match: '"/var/run/docker.sock",'
+      date: "2026-07-04"
+      reason: "Existing worker-container socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/checks/worker_container_policy.py
+      pattern: run-path-literal
+      match: '"/run/docker.sock",'
+      date: "2026-07-04"
+      reason: "Existing worker-container socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/checks/worker_container_policy.py
+      pattern: run-path-literal
+      match: '"/run/podman/podman.sock",'
+      date: "2026-07-04"
+      reason: "Existing worker-container socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/checks/worker_container_policy.py
+      pattern: run-path-literal
+      match: '"/var/run/podman/podman.sock",'
+      date: "2026-07-04"
+      reason: "Existing worker-container socket compatibility value pending portability cleanup."
+    - path: validators/creator_engine_validator/public_docs_confidentiality.py
+      pattern: systemd-reference
+      match: '_ALLOWED_OFFENSE_ROWS = """\'
+      date: "2026-07-04"
+      reason: "Existing confidentiality baseline data contains runtime filenames pending data relocation."
+    - path: validators/creator_engine_validator/v3_installer.py
+      pattern: dev-shm-path-literal
+      match: '"file:///dev/shm/ce-app.pem) — never a raw key"'
+      date: "2026-07-04"
+      reason: "Existing installer text references host-local secret material pending portability cleanup."
