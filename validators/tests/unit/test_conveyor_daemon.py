@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import shutil
+import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -20,8 +21,10 @@ from creator_engine_validator.conveyor_daemon import (
     ConveyorDaemon,
     ConveyorDaemonItem,
     ConveyorDaemonLedgerRecord,
+    ConveyorValidationLedgerBinding,
 )
 from creator_engine_validator.forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
+from creator_engine_validator.validation_sandbox_receipt import ValidationSandboxReceiptIssuer
 
 
 HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -44,7 +47,11 @@ class FakeLease:
             raise RuntimeError("lost lease heartbeat")
 
 
-ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR, "daemon_lease": FakeLease()}
+def _receipt_issuer() -> ValidationSandboxReceiptIssuer:
+    return ValidationSandboxReceiptIssuer(secret=b"conveyor-validation-receipt-secret")
+
+
+ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR, "daemon_lease": FakeLease(), "receipt_issuer": _receipt_issuer()}
 
 
 class FakeGit:
@@ -56,6 +63,14 @@ class FakeGit:
     def __call__(self, args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
         self.calls.append((tuple(args), cwd))
         self.envs.append(dict(env))
+        if tuple(args) == ("rev-parse", "HEAD^{tree}"):
+            completed = subprocess.run(
+                ["git", "-C", str(cwd), "rev-parse", "HEAD^{tree}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return ConveyorCommandResult(completed.returncode, completed.stdout, completed.stderr)
         if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
             if self.push_returncode:
                 return ConveyorCommandResult(self.push_returncode, "", "push denied\n")
@@ -145,6 +160,24 @@ class FakeClock:
         return f"2026-07-01T00:00:0{self.count}Z"
 
 
+class FakePodmanRunner:
+    def __init__(self):
+        self.calls: list[tuple[list[str], float | None]] = []
+
+    def podman_run_supports_timeout(self, binary: str) -> bool:
+        return binary == "podman"
+
+    def run(self, argv: Sequence[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
+        self.calls.append((list(argv), timeout))
+        return subprocess.CompletedProcess(list(argv), 0, "validated\n", "")
+
+
+class FakeLedgerResult:
+    def __init__(self, record_path: Path, record: dict):
+        self.record_path = record_path
+        self.record = record
+
+
 class CountingAllocator:
     def __init__(self):
         runtime_root = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-counting-alloc-"))
@@ -191,6 +224,55 @@ def _item(branch: str = "Feature/One") -> ConveyorDaemonItem:
 def _item_without_receipt(branch: str = "Feature/One") -> ConveyorDaemonItem:
     item = _item(branch)
     return dataclasses.replace(item, allocation_receipt=None)
+
+
+def _git(cwd: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _init_clean_git_worktree(path: Path) -> str:
+    _git(path, "init", "-q")
+    _git(path, "config", "user.email", "ce@example.invalid")
+    _git(path, "config", "user.name", "CE Test")
+    _git(path, "commit", "--allow-empty", "-q", "-m", "empty tree")
+    return _git(path, "rev-parse", "HEAD^{tree}")
+
+
+def _write_validation_policy(tmp_path: Path) -> Path:
+    path = tmp_path / "governance" / "policies" / "worker-container" / "podman-verification-v1.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "\n".join(
+            [
+                "kind: worker-container-policy-record",
+                "record_type: worker_container_policy",
+                "schema_version: '1'",
+                "policy_id: podman-verification-v1",
+                f"policy_sha: {'a' * 64}",
+                "role: verification",
+                "runtime_engine: podman-rootless",
+                "image_ref:",
+                "  name: ghcr.io/example/verification:latest",
+                f"  sha: sha256:{'b' * 64}",
+                "mount_manifest:",
+                "  - path: /worktrees/example",
+                "    mode: ro",
+                "egress_allowlist: []",
+                "secret_allowlist: []",
+                "grant_extensible: false",
+                "grant_authority: source",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _data_only_payload() -> dict[str, str]:
@@ -309,6 +391,108 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     )
 
 
+def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Path):
+    item = _item()
+    assert item.worktree_path is not None
+    tree_sha = _init_clean_git_worktree(item.worktree_path)
+    podman = FakePodmanRunner()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    side_effect_records: list[dict] = []
+
+    def ledger_recorder(**kwargs):
+        side_effect_records.append(dict(kwargs))
+        return FakeLedgerResult(tmp_path / "side-effect.json", dict(kwargs))
+
+    def prepare_runner(
+        spec: ConveyorHarvestSpec,
+        *,
+        git_runner,
+        validate_runner,
+    ) -> ConveyorHarvestResult:
+        result = validate_runner(
+            ("ce", "validate-pr", "--repo-root", str(spec.worktree_path)),
+            spec.worktree_path,
+            {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(spec.worktree_path / "validators")},
+        )
+        return _harvest_result(
+            spec,
+            ready=result.returncode == 0,
+            reasons=() if result.returncode == 0 else (result.stderr,),
+        )
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        prepare_runner=prepare_runner,
+        land_runner=FakeLand(),
+        validation_sandbox_policy_path=_write_validation_policy(tmp_path),
+        validation_sandbox_command_runner=podman,
+        validation_ledger_binding=ConveyorValidationLedgerBinding(
+            controller_id="hermes-primary",
+            lane_id="conveyor-slice8c",
+            claim_ref="claims/hermes-primary/conveyor-slice8c.yaml",
+            repo_root=tmp_path,
+            side_effect_ledger_root=tmp_path / "side-effect-ledger",
+            active_work_ledger_root=tmp_path / "active-work-ledger",
+        ),
+        validation_ledger_recorder=ledger_recorder,
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    assert [record.action for record in ledger] == ["validate", "push", "pr-open"]
+    validate_record = ledger[0]
+    assert validate_record.sha == tree_sha
+    receipt = validate_record.details["receipt"]
+    assert receipt["tree_sha"] == tree_sha
+    assert receipt["secret_allowlist_applied"] == []
+    assert validate_record.details["side_effect_record"]["effect_kind"] == "validation_sandbox_run"
+    assert validate_record.details["side_effect_record"]["subject_git_sha"] == tree_sha
+    assert side_effect_records[0]["effect_kind"] == "validation_sandbox_run"
+    assert side_effect_records[0]["subject_git_sha"] == tree_sha
+    assert podman.calls
+    podman_argv = podman.calls[0][0]
+    assert "--secret" not in podman_argv
+    assert "conveyor-validation-receipt-secret" not in " ".join(podman_argv)
+
+
+def test_armed_start_without_receipt_issuer_is_refused():
+    with pytest.raises(ValueError, match="receipt_issuer"):
+        ConveyorDaemon(
+            discovery_runner=lambda: [],
+            armed=True,
+            path_allocator=TEST_ALLOCATOR,
+            daemon_lease=FakeLease(),
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+        )
+
+
+def test_disarmed_path_does_not_require_or_call_validation_sandbox_runner():
+    called = False
+
+    def sandbox_runner(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("disarmed planning must not call validation sandbox")
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [_item()],
+        validation_sandbox_runner=sandbox_runner,
+    ).run_once()
+
+    assert result.results[0].status == "planned"
+    assert called is False
+
+
 def test_armed_start_without_lease_is_refused():
     with pytest.raises(ValueError, match="daemon_lease"):
         ConveyorDaemon(
@@ -330,6 +514,7 @@ def test_armed_run_heartbeats_lease():
         armed=True,
         path_allocator=TEST_ALLOCATOR,
         daemon_lease=lease,
+        receipt_issuer=_receipt_issuer(),
         git_runner=FakeGit(),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
@@ -362,6 +547,7 @@ def test_armed_run_heartbeats_before_each_item_boundary():
         armed=True,
         path_allocator=TEST_ALLOCATOR,
         daemon_lease=lease,
+        receipt_issuer=_receipt_issuer(),
         git_runner=FakeGit(),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
@@ -390,6 +576,7 @@ def test_armed_run_heartbeat_failure_before_item_stops_without_processing_item()
         armed=True,
         path_allocator=TEST_ALLOCATOR,
         daemon_lease=lease,
+        receipt_issuer=_receipt_issuer(),
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,
@@ -583,6 +770,7 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
         armed=True,
         path_allocator=allocator,
         daemon_lease=FakeLease(),
+        receipt_issuer=_receipt_issuer(),
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,

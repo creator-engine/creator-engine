@@ -460,14 +460,24 @@ def _run_validation(
     if spec.allow_dirty_validation:
         command.append("--allow-dirty")
     env = {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp", "PATH": _MINIMAL_GIT_PATH}
-    sandbox = ValidationSandboxSpec(
-        context=_validation_sandbox_context(root),
-        command=command,
-        cwd=root,
-        timeout_seconds=600,
-        env=env,
-    )
+    sandbox = validation_sandbox_spec_from_command(command, root, env, timeout_seconds=600)
     return _coerce_result(runner(sandbox.command, sandbox.cwd, sandbox.env))
+
+
+def validation_sandbox_spec_from_command(
+    command: Sequence[str],
+    cwd: Path,
+    env: Mapping[str, str] | None,
+    *,
+    timeout_seconds: float,
+) -> ValidationSandboxSpec:
+    return ValidationSandboxSpec(
+        context=_validation_sandbox_context(cwd),
+        command=command,
+        cwd=cwd,
+        timeout_seconds=timeout_seconds,
+        env={} if env is None else env,
+    )
 
 
 def _fetch_base(
@@ -636,4 +646,5 @@ __all__ = [
     "land_bundle",
     "git_env_for_phase",
     "prepare_harvest",
+    "validation_sandbox_spec_from_command",
 ]
