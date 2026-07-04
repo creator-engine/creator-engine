@@ -1,5 +1,11 @@
 # OQ-1 OS-Native Sandbox Mechanism
 
+> **Superseded:** The OQ-1 `os-native` solo mapping is superseded by
+> [ADR-0014](../decisions/ADR-0014-two-plane-os-architecture.md). CE is now
+> container-first everywhere: the control plane remains portable Python, and the
+> runtime plane is standardized on the canonical Linux container runtime image.
+> This document remains as historical decision context.
+
 Status: ratified 2026-06-29 (Option A)
 
 ## Problem Statement
