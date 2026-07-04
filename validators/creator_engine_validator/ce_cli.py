@@ -2708,7 +2708,9 @@ def _dequeue(args) -> int:
         argv.append("--convert-to-draft")
     if getattr(args, "json_output", False):
         argv.append("--json")
-    proc = subprocess.run(argv, check=False)
+    env = os.environ.copy()
+    env[_V3_FORWARDED_ENV] = "1"
+    proc = subprocess.run(argv, check=False, env=env)
     return int(proc.returncode)
 
 
