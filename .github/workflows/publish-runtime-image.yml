@@ -1,0 +1,133 @@
+name: Publish Runtime Image
+
+# Publishes a package only. It does not approve, merge, ratify, or mutate source.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Runtime image version tag, for example 0.3.1"
+        required: true
+        type: string
+  push:
+    tags:
+      - "release/v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish canonical runtime image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve image metadata
+        id: image
+        env:
+          DISPATCH_VERSION: ${{ inputs.version || '' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${DISPATCH_VERSION}"
+          else
+            tag_name="${GITHUB_REF#refs/tags/}"
+            if [[ ! "${tag_name}" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "runtime image publish only accepts release/vX.Y.Z tags: ${tag_name}" >&2
+              exit 1
+            fi
+            version="${tag_name#release/v}"
+          fi
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "runtime image version must be X.Y.Z: ${version}" >&2
+            exit 1
+          fi
+
+          repository="${GITHUB_REPOSITORY,,}"
+          image="ghcr.io/${repository}/ce-runtime"
+          git_sha="${GITHUB_SHA}"
+
+          {
+            echo "version=${version}"
+            echo "image=${image}"
+            echo "git_sha=${git_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Build and push multi-arch runtime image
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          VERSION: ${{ steps.image.outputs.version }}
+          GIT_SHA: ${{ steps.image.outputs.git_sha }}
+        run: |
+          set -euo pipefail
+
+          docker buildx build \
+            --file deploy/runtime-image/Dockerfile \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg OCI_CPYTHON_BASE_IMAGE_SOURCE=docker.io/library/python \
+            --build-arg OCI_CPYTHON_BASE_IMAGE_VERSION=3.14-slim-bookworm \
+            --build-arg OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST=4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9 \
+            --build-arg CE_IMAGE_VERSION="${VERSION}" \
+            --build-arg CE_IMAGE_REVISION="${GIT_SHA}" \
+            --tag "${IMAGE}:${VERSION}" \
+            --tag "${IMAGE}:${GIT_SHA}" \
+            --push \
+            .
+
+      - name: Surface manifest-list digest
+        id: digest
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          VERSION: ${{ steps.image.outputs.version }}
+          GIT_SHA: ${{ steps.image.outputs.git_sha }}
+        run: |
+          set -euo pipefail
+
+          manifest_digest="$(docker buildx imagetools inspect "${IMAGE}:${GIT_SHA}" --format '{{.Manifest.Digest}}')"
+          if [[ ! "${manifest_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "could not resolve manifest-list digest for ${IMAGE}:${GIT_SHA}: ${manifest_digest}" >&2
+            exit 1
+          fi
+
+          digest_ref="${IMAGE}@${manifest_digest}"
+          {
+            echo "manifest_digest=${manifest_digest}"
+            echo "digest_ref=${digest_ref}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## Runtime image"
+            echo
+            echo "- Version tag: \`${IMAGE}:${VERSION}\`"
+            echo "- Git SHA tag: \`${IMAGE}:${GIT_SHA}\`"
+            echo "- Manifest-list digest: \`${manifest_digest}\`"
+            echo "- Digest-pinned reference: \`${digest_ref}\`"
+            echo
+            echo "Consumers must pin the manifest-list digest, not an architecture child digest."
+          } >> "${GITHUB_STEP_SUMMARY}"
