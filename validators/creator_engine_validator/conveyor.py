@@ -18,6 +18,8 @@ from pathlib import Path
 
 from .carrier_gen import CarrierSpec, WrittenCarriers, write_carriers
 from .checks.path_manifest_fidelity import branch_slug
+from .forge.authority_contexts import ValidationSandboxContext
+from .validation_sandbox import ValidationSandboxSpec, run_validation_sandbox
 
 
 OLD_WORK_CLASSES = frozenset({"tiny", "story", "feature", "epic"})
@@ -458,7 +460,14 @@ def _run_validation(
     if spec.allow_dirty_validation:
         command.append("--allow-dirty")
     env = {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp", "PATH": _MINIMAL_GIT_PATH}
-    return _coerce_result(runner(command, root, env))
+    sandbox = ValidationSandboxSpec(
+        context=_validation_sandbox_context(root),
+        command=command,
+        cwd=root,
+        timeout_seconds=600,
+        env=env,
+    )
+    return _coerce_result(runner(sandbox.command, sandbox.cwd, sandbox.env))
 
 
 def _fetch_base(
@@ -537,19 +546,21 @@ def _default_validate_runner(
     cwd: Path,
     env: Mapping[str, str] | None,
 ) -> ConveyorCommandResult:
-    try:
-        completed = subprocess.run(
-            list(args),
+    result = run_validation_sandbox(
+        ValidationSandboxSpec(
+            context=_validation_sandbox_context(cwd),
+            command=args,
             cwd=cwd,
-            env={} if env is None else dict(env),
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=False,
+            timeout_seconds=600,
+            env={} if env is None else env,
         )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
-        return ConveyorCommandResult(1, "", str(exc))
-    return ConveyorCommandResult(completed.returncode, completed.stdout, completed.stderr)
+    )
+    return ConveyorCommandResult(result.rc, result.stdout, result.stderr)
+
+
+def _validation_sandbox_context(root: Path) -> ValidationSandboxContext:
+    sandbox_root = Path("/var/tmp") / "creator-engine-validation-sandbox" / branch_slug(str(root.resolve()))
+    return ValidationSandboxContext.from_sandbox(sandbox_root)
 
 
 def _command_reason(label: str, result: ConveyorCommandResult) -> str:

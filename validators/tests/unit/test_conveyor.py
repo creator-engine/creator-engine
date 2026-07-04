@@ -387,3 +387,42 @@ def test_default_validate_runner_resolves_current_interpreter_with_scrubbed_env(
 
     assert result.returncode == 0
     assert result.stdout.splitlines() == ["", "/usr/bin:/bin"]
+
+
+def test_run_validation_preserves_slice6_command_and_env(tmp_path: Path):
+    root = _repo(tmp_path)
+    validate = FakeValidate()
+
+    result = prepare_harvest(
+        ConveyorHarvestSpec(
+            worktree_path=root,
+            branch="feature-test",
+            base="origin/main",
+            declared_work_class="story",
+            refresh_base=False,
+            rebase=False,
+        ),
+        git_runner=FakeGit(current_branch="feature-test"),
+        validate_runner=validate,
+    )
+
+    assert result.ready is True
+    assert validate.calls[-1] == (
+        (
+            sys.executable,
+            "-m",
+            "creator_engine_validator.ce_cli",
+            "validate-pr",
+            "--repo-root",
+            str(root),
+            "--base",
+            "origin/main",
+            "--declared-work-class",
+            "story",
+            "--head-ref",
+            "feature-test",
+            "--allow-dirty",
+        ),
+        root,
+        {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"},
+    )
