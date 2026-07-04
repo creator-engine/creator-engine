@@ -8,11 +8,15 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: launch-conveyor-daemon.sh [--health] [--dry-run]
+Usage: launch-conveyor-daemon.sh [--health] [--one-shot]
 
 Starts the Creator Engine conveyor harvest daemon in shadow mode. The daemon
 discovers READY-FOR-HARVEST seat signals and opens PRs; it does not approve,
 merge, enqueue, or call reviewer-authority surfaces.
+
+Options:
+  --health    verify daemon liveness and GH_TOKEN access
+  --one-shot  run one armed daemon pass, then exit
 
 Required environment:
   CE_CONVEYOR_DAEMON_SEAT_PROBES          JSON array: [{"seat_id":"...","argv":["..."]}]
@@ -217,9 +221,12 @@ main_uncontained() {
         mode="health"
         shift
         ;;
-      --dry-run)
+      --one-shot)
         export CE_CONVEYOR_DAEMON_ITERATIONS=1
         shift
+        ;;
+      --dry-run)
+        die "--dry-run was renamed to --one-shot; the conveyor daemon has no disarmed launcher mode."
         ;;
       -h|--help)
         usage
@@ -254,6 +261,23 @@ main_uncontained() {
 }
 
 main() {
+  local normalized_args=()
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --one-shot)
+        export CE_CONVEYOR_DAEMON_ITERATIONS=1
+        ;;
+      --dry-run)
+        die "--dry-run was renamed to --one-shot; the conveyor daemon has no disarmed launcher mode."
+        ;;
+      *)
+        normalized_args+=("$arg")
+        ;;
+    esac
+  done
+  set -- "${normalized_args[@]}"
+
   case "${1:-}" in
     -h|--help)
       usage
