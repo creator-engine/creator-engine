@@ -246,6 +246,46 @@ def test_allocate_podman_run_argv_is_rootless_and_value_free(tmp_path):
     assert "super-secret" not in joined
 
 
+def test_worker_runtime_detached_argv_is_byte_identical_contract() -> None:
+    grants = [
+        worker_runtime.BrokerGrant(
+            broker_grant_id="grant-env",
+            secret_name="MODEL_KEY",
+            mode="env",
+            granted_at="2026-07-04T00:00:00Z",
+            ttl_seconds=60,
+        ),
+        worker_runtime.BrokerGrant(
+            broker_grant_id="grant-file",
+            secret_name="CONFIG_FILE",
+            mode="file",
+            granted_at="2026-07-04T00:00:00Z",
+            ttl_seconds=60,
+        ),
+    ]
+
+    argv = worker_runtime.build_podman_run_argv(
+        image_name="ghcr.io/example/verification:latest",
+        image_sha=_IMAGE_SHA,
+        instance_id="inst-worker-001",
+        mounts=[{"path": "/worktree", "mode": "ro"}],
+        secret_grants=grants,
+        network_mode="none",
+    )
+
+    assert argv == [
+        "podman", "run", "--detach",
+        "--name", "inst-worker-001",
+        "--userns=keep-id",
+        "--security-opt", "no-new-privileges",
+        "--network", "none",
+        "-v", "/worktree:/worktree:ro",
+        "--secret", "MODEL_KEY,type=env,target=MODEL_KEY",
+        "--secret", "CONFIG_FILE,type=mount,target=/run/secrets/CONFIG_FILE",
+        f"ghcr.io/example/verification:latest@{_IMAGE_SHA}",
+    ]
+
+
 def test_allocate_fails_closed_when_podman_unavailable(tmp_path):
     runner, broker = FakeRunner(available_flag=False), FakeBroker()
     with pytest.raises(worker_runtime.PodmanUnavailable):
