@@ -1,5 +1,14 @@
-# ce-n5-worktree-prune
+---
+slug: ce-n5-worktree-prune
+date: 2026-07-04
+kind: feature
+scope: validators
+issue: ce-ops#N5
+---
 
-- Added `ce worker worktree-prune` as a dry-run-by-default stale worktree scanner.
-- Added fail-safe pruning for clean, merged or content-empty old worktrees, plus empty orphan directories with broken `.git` pointers.
-- Added apply-mode audit records under `.ce/state/worktree-prune.jsonl`.
+**Add fail-safe worktree prune tool.**
+
+- Added `ce worker worktree-prune` (dry-run by default; `--apply` required for destructive action).
+- Classification uses three-dot content diff vs origin/main (not ancestry alone); dirty/unpushed worktrees are report-only, never touched.
+- Fixes a self-delete defect found in the seat's own internal review: apply_prune() previously only protected the primary worktree, not the actively-invoking linked worktree; now both are protected (see test_apply_never_removes_invocation_linked_worktree).
+- Harvested from contained seat dev-4 (self-push gap, ce-ops#337).
