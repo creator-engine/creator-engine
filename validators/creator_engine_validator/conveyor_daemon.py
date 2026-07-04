@@ -27,6 +27,7 @@ from .conveyor import (
     prepare_harvest,
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
+from .daemon_lease import DaemonLease
 from .checks.path_manifest_fidelity import branch_slug
 from .forge.daemon_allocation import (
     DaemonAllocationError,
@@ -275,9 +276,11 @@ class ConveyorDaemon:
         repo_root: Path | str | None = None,
         bundle_root: Path | str | None = None,
         path_allocator: DaemonPathAllocator | None = None,
+        daemon_lease: DaemonLease | None = None,
     ) -> None:
         self.discovery_runner = discovery_runner
         self.armed = armed
+        self.daemon_lease = daemon_lease
         self.git_runner = git_runner
         self.validate_runner = validate_runner
         self.gh_runner = gh_runner
@@ -344,6 +347,8 @@ class ConveyorDaemon:
                 missing.append("repo_root")
             if self.bundle_root is None:
                 missing.append("bundle_root")
+            if self.daemon_lease is None:
+                missing.append("daemon_lease")
             if missing:
                 raise ValueError(f"armed conveyor daemon requires injected {', '.join(missing)}")
 
@@ -353,6 +358,10 @@ class ConveyorDaemon:
         Disarmed mode plans only. Armed mode processes each item independently
         and continues after per-item failures.
         """
+
+        if self.armed:
+            assert self.daemon_lease is not None
+            self.daemon_lease.heartbeat()
 
         try:
             discovered_items: list[ConveyorDaemonItem] = []

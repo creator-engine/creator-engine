@@ -31,7 +31,17 @@ TEST_ALLOCATOR = DaemonPathAllocator(
     DaemonRuntimeRoots.from_root(TEST_RUNTIME_ROOT, create=True),
     secret=b"conveyor-daemon-unit-test-secret",
 )
-ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR}
+
+
+class FakeLease:
+    def __init__(self):
+        self.heartbeat_calls = 0
+
+    def heartbeat(self) -> None:
+        self.heartbeat_calls += 1
+
+
+ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR, "daemon_lease": FakeLease()}
 
 
 class FakeGit:
@@ -296,6 +306,39 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     )
 
 
+def test_armed_start_without_lease_is_refused():
+    with pytest.raises(ValueError, match="daemon_lease"):
+        ConveyorDaemon(
+            discovery_runner=lambda: [],
+            armed=True,
+            path_allocator=TEST_ALLOCATOR,
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+        )
+
+
+def test_armed_run_heartbeats_lease():
+    lease = FakeLease()
+    daemon = ConveyorDaemon(
+        discovery_runner=lambda: [],
+        armed=True,
+        path_allocator=TEST_ALLOCATOR,
+        daemon_lease=lease,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+    )
+
+    daemon.run_once()
+
+    assert lease.heartbeat_calls == 1
+
+
 def test_per_item_failure_isolated_and_loop_continues():
     prepare = FakePrepare(failing_branches={"Feature/One"})
     git = FakeGit()
@@ -468,6 +511,7 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
         discovery_runner=lambda: [_data_only_payload()],
         armed=True,
         path_allocator=allocator,
+        daemon_lease=FakeLease(),
         git_runner=git,
         validate_runner=FakeValidate(),
         gh_runner=gh,

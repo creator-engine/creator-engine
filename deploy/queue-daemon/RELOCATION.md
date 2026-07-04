@@ -1,16 +1,23 @@
 # Queue Daemon Relocation Runbook
 
-This package moves the merge-queue daemon from an ad-hoc DGX launch into a
-boot-persistent systemd service. The same persistence applies whichever host
-runs the unit: CE-DEV-1 VPS for cutover, or DGX again during rollback.
+This package moves the merge-queue daemon from an ad-hoc DGX launch into the
+canonical daemon container. The systemd unit is only a host bootstrap adapter:
+it starts `deploy/daemons/run-daemon-container.sh queue-daemon` and lets the
+container runtime own the daemon process.
 
 ## Files
 
-- `ce-queue-daemon.service`: system service with `Restart=always`,
+- `ce-queue-daemon.service`: thin system service with `Restart=always`,
   `RestartSec=5`, journald logging, start-limit protection, and
-  `WantedBy=multi-user.target`.
-- `launch-queue-daemon.sh`: fail-closed launcher for `v3_cli queue-daemon` with
-  a `--health` mode.
+  `WantedBy=multi-user.target`. By default it invokes the contained daemon
+  runner.
+- `deploy/daemons/run-daemon-container.sh`: engine-agnostic Docker/Podman runner
+  for daemon containers. It mounts the checkout read-only, the daemon state root
+  read-write, and an optional token file read-only.
+- `launch-queue-daemon.sh`: fail-closed direct launcher for `cev3 queue-daemon`
+  with a `--health` mode. Default start delegates to the container runner;
+  setting `CE_DAEMON_UNCONTAINED=1` keeps the legacy direct host path available
+  as an explicit escape hatch.
 - `/etc/creator-engine/ce-queue-daemon.env`: host-local secret environment file.
   Do not commit this file or its values.
 
@@ -29,7 +36,9 @@ runs the unit: CE-DEV-1 VPS for cutover, or DGX again during rollback.
 
    ```bash
    sudo install -d -m 0755 /etc/creator-engine
+   sudo install -d -m 0755 /workspace/creator-engine/deploy/daemons
    sudo install -m 0644 deploy/queue-daemon/ce-queue-daemon.service /etc/systemd/system/ce-queue-daemon.service
+   sudo install -m 0755 deploy/daemons/run-daemon-container.sh /workspace/creator-engine/deploy/daemons/run-daemon-container.sh
    sudo install -m 0755 deploy/queue-daemon/launch-queue-daemon.sh /workspace/creator-engine/deploy/queue-daemon/launch-queue-daemon.sh
    ```
 
@@ -57,7 +66,30 @@ runs the unit: CE-DEV-1 VPS for cutover, or DGX again during rollback.
    ```
 
    The unit pins `BAO_ADDR=https://100.72.252.20:8200`, and sets runtime/state
-   paths under `/run/ce-queue-daemon` and `/var/lib/ce-queue-daemon`.
+   paths under `/run/ce-queue-daemon` and `/var/lib/ce-queue-daemon`. The
+   contained path maps `/var/lib/ce-queue-daemon` to `/ce/state` inside the
+   container. Optional container settings:
+
+   ```text
+   CE_CONTAINER_ENGINE=docker
+   CE_DAEMON_IMAGE=creator-engine/ce-validator:0.3.1
+   CE_DAEMON_LEASE_ROOT=/var/lib/ce-queue-daemon/daemon-leases
+   CE_DAEMON_TOKEN_FILE=/approved/runtime/token-file
+   ```
+
+   Use a digest-pinned `CE_DAEMON_IMAGE` when release automation publishes the
+   canonical runtime image digest.
+
+   The queue loop is singleton-gated by the filesystem lease named
+   `queue-daemon`. `CE_DAEMON_LEASE_ROOT` is a host path and must stay under the
+   host `CE_DAEMON_STATE_ROOT` (`/var/lib/ce-queue-daemon` in this unit). The
+   container runner maps that host lease root to the corresponding path under
+   `/ce/state`; the default host path
+   `/var/lib/ce-queue-daemon/daemon-leases` becomes
+   `/ce/state/daemon-leases` inside the container. Use
+   `CE_DAEMON_CONTAINER_LEASE_ROOT` only for an explicit in-container override.
+   The `CE_DAEMON_UNCONTAINED=1` rollback path still acquires the same lease; it
+   is an old launch method, not permission to run a duplicate live daemon.
 
 4. Verify and start:
 
@@ -106,11 +138,19 @@ enqueue the controlled test PR.
 
 2. Reinstall the same committed unit on DGX, or restart the existing DGX
    launcher only as a temporary bridge. Prefer the committed unit because
-   `Restart=always` and boot persistence apply on DGX too.
+   `Restart=always` and boot persistence apply on DGX too. To use the legacy
+   direct host launch path temporarily, add this line to
+   `/etc/creator-engine/ce-queue-daemon.env`:
+
+   ```text
+   CE_DAEMON_UNCONTAINED=1
+   ```
 
    ```bash
    sudo install -d -m 0755 /etc/creator-engine
+   sudo install -d -m 0755 /workspace/creator-engine/deploy/daemons
    sudo install -m 0644 deploy/queue-daemon/ce-queue-daemon.service /etc/systemd/system/ce-queue-daemon.service
+   sudo install -m 0755 deploy/daemons/run-daemon-container.sh /workspace/creator-engine/deploy/daemons/run-daemon-container.sh
    sudoedit /etc/creator-engine/ce-queue-daemon.env
    sudo systemd-analyze verify /etc/systemd/system/ce-queue-daemon.service
    sudo systemctl daemon-reload
