@@ -25,6 +25,7 @@ from .conveyor import (
     git_env_for_phase,
     land_bundle,
     prepare_harvest,
+    validation_sandbox_spec_from_command,
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
 from .daemon_lease import DaemonLease
@@ -34,6 +35,12 @@ from .forge.daemon_allocation import (
     DaemonPathAllocation,
     DaemonPathAllocator,
     DaemonPathReceipt,
+)
+from .validation_sandbox_receipt import ValidationSandboxReceiptIssuer
+from .validation_sandbox_runner import (
+    DEFAULT_POLICY_PATH as DEFAULT_VALIDATION_SANDBOX_POLICY_PATH,
+    ValidationSandboxContainerRun,
+    run_validation_sandbox_in_container,
 )
 
 
@@ -48,6 +55,7 @@ LandRunner = Callable[..., ConveyorBundleLandingResult]
 NowRunner = Callable[[], str]
 LedgerWriter = Callable[["ConveyorDaemonLedgerRecord"], None]
 LogRunner = Callable[[str], None]
+ValidationSandboxRunner = Callable[..., ValidationSandboxContainerRun]
 
 
 PLAN_ACTIONS = ("prepare-harvest", "land-bundle", "push", "pr-open")
@@ -221,6 +229,18 @@ class ConveyorDaemonLedgerRecord:
 
 
 @dataclass(frozen=True)
+class ConveyorValidationLedgerBinding:
+    """Side-effect ledger coordinates for validation sandbox receipts."""
+
+    controller_id: str
+    lane_id: str
+    claim_ref: str
+    repo_root: Path | str
+    side_effect_ledger_root: Path | str
+    active_work_ledger_root: Path | str
+
+
+@dataclass(frozen=True)
 class ConveyorDaemonItemResult:
     """Outcome for one discovered item."""
 
@@ -277,11 +297,19 @@ class ConveyorDaemon:
         bundle_root: Path | str | None = None,
         path_allocator: DaemonPathAllocator | None = None,
         daemon_lease: DaemonLease | None = None,
+        receipt_issuer: ValidationSandboxReceiptIssuer | None = None,
+        validation_sandbox_runner: ValidationSandboxRunner = run_validation_sandbox_in_container,
+        validation_sandbox_policy_path: Path | str = DEFAULT_VALIDATION_SANDBOX_POLICY_PATH,
+        validation_sandbox_command_runner: Any | None = None,
+        validation_ledger_binding: ConveyorValidationLedgerBinding | None = None,
+        validation_ledger_recorder: Callable[..., Any] | None = None,
     ) -> None:
         self.discovery_runner = discovery_runner
         self.armed = armed
         self.daemon_lease = daemon_lease
         self.git_runner = git_runner
+        # Retained for constructor/API compatibility; armed mode injects the
+        # sandbox-backed validator at prepare time instead of using this seam.
         self.validate_runner = validate_runner
         self.gh_runner = gh_runner
         self.now = now
@@ -290,6 +318,12 @@ class ConveyorDaemon:
         self.prepare_runner = prepare_runner
         self.land_runner = land_runner
         self.path_allocator = path_allocator
+        self.receipt_issuer = receipt_issuer
+        self.validation_sandbox_runner = validation_sandbox_runner
+        self.validation_sandbox_policy_path = Path(validation_sandbox_policy_path)
+        self.validation_sandbox_command_runner = validation_sandbox_command_runner
+        self.validation_ledger_binding = validation_ledger_binding
+        self.validation_ledger_recorder = validation_ledger_recorder
         # validate_command is pinned here, at daemon construction time, and is
         # never sourced from a discovery payload (see ConveyorDaemonItem.from_mapping).
         self.validate_command: tuple[str, ...] = tuple(
@@ -333,8 +367,6 @@ class ConveyorDaemon:
             missing = []
             if self.git_runner is None:
                 missing.append("git_runner")
-            if self.validate_runner is None:
-                missing.append("validate_runner")
             if self.gh_runner is None:
                 missing.append("gh_runner")
             if self.now is None:
@@ -349,6 +381,8 @@ class ConveyorDaemon:
                 missing.append("bundle_root")
             if self.daemon_lease is None:
                 missing.append("daemon_lease")
+            if self.receipt_issuer is None:
+                missing.append("receipt_issuer")
             if missing:
                 raise ValueError(f"armed conveyor daemon requires injected {', '.join(missing)}")
 
@@ -483,17 +517,20 @@ class ConveyorDaemon:
             )
             audit_item = item
             assert self.git_runner is not None
-            assert self.validate_runner is not None
             assert self.gh_runner is not None
             carrier_date = item.carrier_date or _date_from_timestamp(self._timestamp())
             prepared = self.prepare_runner(
-                item.harvest_spec(
-                    carrier_date=carrier_date,
-                    validate_command=self.validate_command,
-                    base=self.base,
+                dataclasses.replace(
+                    item.harvest_spec(
+                        carrier_date=carrier_date,
+                        validate_command=self.validate_command,
+                        base=self.base,
+                    ),
+                    allow_dirty_validation=False,
+                    commit_carriers_before_validation=True,
                 ),
                 git_runner=self.git_runner,
-                validate_runner=self.validate_runner,
+                validate_runner=self._armed_validate_runner(item, allocation, records),
             )
             if not prepared.ready:
                 return self._failed(item, prepared.reasons, prepare_result=prepared, ledger_records=records)
@@ -515,6 +552,29 @@ class ConveyorDaemon:
                 return self._failed(
                     item,
                     (str(exc),),
+                    prepare_result=prepared,
+                    landing_result=landed,
+                    ledger_records=records,
+                )
+
+            validation_tree_sha = _latest_validation_record_tree_sha(records)
+            if validation_tree_sha is None:
+                return self._failed(
+                    item,
+                    ("refusing to land unverified tree: no successful validation record found",),
+                    prepare_result=prepared,
+                    landing_result=landed,
+                    ledger_records=records,
+                )
+            landed_tree_check = self._validate_landed_tree_matches_record(
+                item=item,
+                landed=landed,
+                validation_tree_sha=validation_tree_sha,
+            )
+            if landed_tree_check is not None:
+                return self._failed(
+                    item,
+                    (landed_tree_check,),
                     prepare_result=prepared,
                     landing_result=landed,
                     ledger_records=records,
@@ -821,8 +881,12 @@ class ConveyorDaemon:
         branch: str,
         command: Sequence[str],
         result: ConveyorCommandResult,
+        details: Mapping[str, Any] | None = None,
     ) -> ConveyorDaemonLedgerRecord:
         assert self.ledger_writer is not None
+        record_details: dict[str, Any] = {"command": tuple(command)}
+        if details is not None:
+            record_details.update(dict(details))
         record = ConveyorDaemonLedgerRecord(
             timestamp=self._timestamp(),
             action=action,
@@ -833,10 +897,128 @@ class ConveyorDaemon:
             returncode=result.returncode,
             stdout=result.stdout,
             stderr=result.stderr,
-            details={"command": tuple(command)},
+            details=record_details,
         )
         self.ledger_writer(record)
         return record
+
+    def _armed_validate_runner(
+        self,
+        item: ConveyorDaemonItem,
+        allocation: DaemonPathAllocation,
+        records: list[ConveyorDaemonLedgerRecord],
+    ) -> ValidateRunner:
+        def run(
+            args: Sequence[str],
+            cwd: Path,
+            env: Mapping[str, str] | None,
+        ) -> ConveyorCommandResult:
+            assert self.path_allocator is not None
+            assert self.git_runner is not None
+            assert self.receipt_issuer is not None
+            if allocation.worktree_path is None:
+                return ConveyorCommandResult(1, "", "daemon allocation is missing worktree_path")
+            try:
+                sandbox_cwd = self.path_allocator.roots.confine_path(cwd, "worktree")
+            except DaemonAllocationError as exc:
+                return ConveyorCommandResult(1, "", f"validation cwd rejected: {exc}")
+            expected_cwd = Path(allocation.worktree_path).resolve()
+            if sandbox_cwd != expected_cwd:
+                return ConveyorCommandResult(1, "", "validation cwd does not match daemon allocation receipt")
+
+            head_tree = _coerce_result(
+                self.git_runner(
+                    ("rev-parse", "HEAD^{tree}"),
+                    sandbox_cwd,
+                    git_env_for_phase(ConveyorGitPhase.LOCAL),
+                )
+            )
+            if head_tree.returncode != 0:
+                return ConveyorCommandResult(
+                    head_tree.returncode,
+                    head_tree.stdout,
+                    f"validation tree identity failed: {_command_detail(head_tree)}",
+                )
+
+            spec = validation_sandbox_spec_from_command(
+                args,
+                sandbox_cwd,
+                env,
+                timeout_seconds=600,
+            )
+            kwargs: dict[str, Any] = {
+                "tree_sha": head_tree.stdout.strip(),
+                "policy_path": self.validation_sandbox_policy_path,
+                "receipt_issuer": self.receipt_issuer,
+                "instance_id": f"conveyor-validation-{allocation.allocation_id}",
+            }
+            if self.validation_sandbox_command_runner is not None:
+                kwargs["command_runner"] = self.validation_sandbox_command_runner
+            if self.validation_ledger_recorder is not None:
+                kwargs["ledger_recorder"] = self.validation_ledger_recorder
+            if self.validation_ledger_binding is not None:
+                kwargs.update(dataclasses.asdict(self.validation_ledger_binding))
+
+            try:
+                sandbox_run = self.validation_sandbox_runner(spec, **kwargs)
+            except Exception as exc:
+                return ConveyorCommandResult(1, "", f"validation sandbox failed: {exc}")
+
+            result = ConveyorCommandResult(
+                sandbox_run.result.returncode,
+                sandbox_run.result.stdout,
+                sandbox_run.result.stderr,
+            )
+            if sandbox_run.receipt is not None:
+                records.append(
+                    self._record_mutation(
+                        action="validate",
+                        path=str(sandbox_cwd),
+                        sha=sandbox_run.receipt.tree_sha,
+                        branch=item.branch,
+                        command=spec.command,
+                        result=result,
+                        details={
+                            "receipt": sandbox_run.receipt.to_dict(),
+                            "side_effect_path": None
+                            if sandbox_run.side_effect_path is None
+                            else str(sandbox_run.side_effect_path),
+                            "side_effect_record": sandbox_run.side_effect_record,
+                        },
+                    )
+                )
+            return result
+
+        return run
+
+    def _validate_landed_tree_matches_record(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        landed: ConveyorBundleLandingResult,
+        validation_tree_sha: str,
+    ) -> str | None:
+        assert self.git_runner is not None
+        if item.repo_path is None:
+            return "repo_path is required to compare landed tree with validation record tree"
+
+        landed_tree = _coerce_result(
+            self.git_runner(
+                ("rev-parse", f"{landed.branch}^{{tree}}"),
+                item.repo_path,
+                git_env_for_phase(ConveyorGitPhase.LOCAL),
+            )
+        )
+        if landed_tree.returncode != 0:
+            return f"landed tree identity failed: {_command_detail(landed_tree)}"
+
+        landed_tree_sha = landed_tree.stdout.strip()
+        if landed_tree_sha != validation_tree_sha:
+            return (
+                "landed tip tree does not match validation record tree: "
+                f"landed={landed_tree_sha} validation_record={validation_tree_sha}"
+            )
+        return None
 
     def _failed(
         self,
@@ -930,6 +1112,20 @@ def _pr_create_args(
 
 def _git_push_args(remote: str, branch: str) -> list[str]:
     return ["push", "--", remote, f"{branch}:{branch}"]
+
+
+def _latest_validation_record_tree_sha(records: Sequence[ConveyorDaemonLedgerRecord]) -> str | None:
+    for record in reversed(records):
+        if record.action != "validate" or record.returncode != 0:
+            continue
+        receipt = record.details.get("receipt")
+        if isinstance(receipt, Mapping):
+            tree_sha = receipt.get("tree_sha")
+            if isinstance(tree_sha, str) and tree_sha:
+                return tree_sha
+        if record.sha:
+            return record.sha
+    return None
 
 
 def _pr_base(base: str, item: ConveyorDaemonItem) -> str:
@@ -1054,5 +1250,6 @@ __all__ = [
     "ConveyorDaemonItemResult",
     "ConveyorDaemonLedgerRecord",
     "ConveyorDaemonRunResult",
+    "ConveyorValidationLedgerBinding",
     "PLAN_ACTIONS",
 ]
