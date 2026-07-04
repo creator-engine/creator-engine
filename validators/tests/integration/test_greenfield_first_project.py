@@ -20,7 +20,7 @@ def test_greenfield_onboard_plan_is_read_only_and_bootstrap_not_ship(tmp_path, c
     answers.write_text(_GREENFIELD_ANSWERS_YAML, encoding="utf-8")
 
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(answers),
         "--plan",
