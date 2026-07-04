@@ -74,6 +74,8 @@ def test_runtime_dockerfile_installs_validator_from_wheel_seam_offline() -> None
 
     assert "COPY validators/pyproject.toml validators/pyproject.toml" in text
     assert "COPY validators/creator_engine_validator validators/creator_engine_validator" in text
+    assert "COPY validators/wheelhouse-dev /opt/build-tools" in text
+    assert "python -m pip install --no-index --find-links=/opt/build-tools setuptools" in text
     assert "python -m pip wheel" in text
     assert "--no-deps" in text
     assert "--no-build-isolation" in text

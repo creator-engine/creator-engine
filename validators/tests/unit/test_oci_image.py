@@ -64,6 +64,8 @@ def test_oci_dockerfile_builds_first_party_wheel_from_repo_source() -> None:
     ) in text
     assert "COPY validators/pyproject.toml validators/pyproject.toml" in text
     assert "COPY validators/creator_engine_validator validators/creator_engine_validator" in text
+    assert "COPY validators/wheelhouse-dev /opt/build-tools" in text
+    assert "python -m pip install --no-index --find-links=/opt/build-tools setuptools" in text
     assert "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" in text
     assert "python -m pip wheel" in text
     assert "--no-deps" in text

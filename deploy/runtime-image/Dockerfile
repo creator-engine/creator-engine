@@ -19,6 +19,9 @@ WORKDIR /src
 
 COPY validators/pyproject.toml validators/pyproject.toml
 COPY validators/creator_engine_validator validators/creator_engine_validator
+COPY validators/wheelhouse-dev /opt/build-tools
+
+RUN python -m pip install --no-index --find-links=/opt/build-tools setuptools
 
 RUN set -eux; \
     python -m pip wheel \
