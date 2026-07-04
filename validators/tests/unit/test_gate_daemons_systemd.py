@@ -36,7 +36,7 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
         assert unit["Service"]["Restart"] == "on-failure"
         assert unit["Service"]["RestartSec"]
         assert "Environment" not in unit["Service"]
-        assert unit["Service"]["ExecStart"].startswith(("/usr/bin/env cev3 ", "/usr/bin/env bash "))
+        assert unit["Service"]["ExecStart"].startswith(("/usr/bin/env ce ", "/usr/bin/env bash "))
         assert "PYTHONPATH=validators" not in unit["Service"]["ExecStart"]
         assert "creator_engine_validator.v3_cli" not in unit["Service"]["ExecStart"]
 
