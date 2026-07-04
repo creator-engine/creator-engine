@@ -6,9 +6,9 @@ scope: conveyor
 issue: ce-ops#410
 ---
 
-**ce-ops#410 slice 10: final publish re-verification + per-phase audit.**
+**slice 10: final publish re-verification + per-phase audit.**
 
-Part of ce-ops#410 (slice 10 — final slice before the Re-Arming Evidence Bundle)
+Part of the conveyor publish hardening arc (slice 10 — final slice before the Re-Arming Evidence Bundle)
 
 Pre-existing checks preserved:
 - Validation sandbox receipts record the daemon-owned worktree tree.
