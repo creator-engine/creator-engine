@@ -770,6 +770,25 @@ def run_preflight(
     )
     checks.append(
         _run_check(
+            "Control-plane portability guard",
+            lambda: (
+                _run_checked(
+                    "Control-plane portability guard",
+                    [py, "-m", "creator_engine_validator", "scan-portability-plane", "."],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "no undeclared Linux runtime-plane assumptions",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Install-spec signature guard",
             lambda: _install_spec_signature_required(
                 config,
