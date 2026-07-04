@@ -75,7 +75,7 @@ def test_v3_shim_inventory_matches_v3_help_without_importing_v3() -> None:
     }
 
     # "onboard" is a one-release-cycle legacy alias on the v3 "install"
-    # subparser (ce-ops#440 S1: docs/install.sh still invokes it); it must not
+    # subparser (the release-signed installer still invokes it); it must not
     # get its own first-class `ce` forwarding shim.
     assert set(ce_cli.V3_FORWARDING_SHIMS) == v3_commands - {"playbook", "onboard"}
     assert "install" in ce_cli.V3_FORWARDING_SHIMS
