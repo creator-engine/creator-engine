@@ -55,8 +55,9 @@ ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR, "daemon_lease": FakeLease(), "r
 
 
 class FakeGit:
-    def __init__(self, push_returncode: int = 0):
+    def __init__(self, push_returncode: int = 0, landed_tree_sha: str = HEAD_SHA):
         self.push_returncode = push_returncode
+        self.landed_tree_sha = landed_tree_sha
         self.calls: list[tuple[tuple[str, ...], Path]] = []
         self.envs: list[Mapping[str, str]] = []
 
@@ -71,6 +72,8 @@ class FakeGit:
                 text=True,
             )
             return ConveyorCommandResult(completed.returncode, completed.stdout, completed.stderr)
+        if len(args) == 2 and args[0] == "rev-parse" and str(args[1]).endswith("^{tree}"):
+            return ConveyorCommandResult(0, f"{self.landed_tree_sha}\n", "")
         if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
             if self.push_returncode:
                 return ConveyorCommandResult(self.push_returncode, "", "push denied\n")
@@ -81,7 +84,8 @@ class FakeGit:
 
 
 class RealLocalGit:
-    def __init__(self):
+    def __init__(self, *, fake_landed_tree_from_validation: bool = False):
+        self.fake_landed_tree_from_validation = fake_landed_tree_from_validation
         self.calls: list[tuple[tuple[str, ...], Path]] = []
         self.envs: list[Mapping[str, str]] = []
         self.rev_parse_trees: list[str] = []
@@ -91,6 +95,15 @@ class RealLocalGit:
         self.envs.append(dict(env))
         if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
             return ConveyorCommandResult(0, "pushed\n", "")
+        if (
+            self.fake_landed_tree_from_validation
+            and len(args) == 2
+            and args[0] == "rev-parse"
+            and str(args[1]).endswith("^{tree}")
+            and args[1] != "HEAD^{tree}"
+            and self.rev_parse_trees
+        ):
+            return ConveyorCommandResult(0, f"{self.rev_parse_trees[-1]}\n", "")
         completed = subprocess.run(
             ["git", *args],
             cwd=cwd,
@@ -286,6 +299,23 @@ def _init_feature_git_worktree(path: Path) -> str:
     return _git(path, "rev-parse", "HEAD^{tree}")
 
 
+def _init_landing_repo(path: Path, *, remote_path: Path) -> None:
+    _git(path, "init", "-q", "--initial-branch=main")
+    _git(path, "config", "user.email", "ce@example.invalid")
+    _git(path, "config", "user.name", "CE Test")
+    _git(path, "remote", "add", "origin", str(remote_path))
+    _git(path, "fetch", "origin", "main")
+    _git(path, "switch", "-q", "-c", "main", "origin/main")
+
+
+def _write_bundle_from_branch(source: Path, bundle_path: Path, branch: str) -> None:
+    if bundle_path.is_dir():
+        shutil.rmtree(bundle_path)
+    elif bundle_path.exists():
+        bundle_path.unlink()
+    _git(source, "bundle", "create", str(bundle_path), branch)
+
+
 def _write_validation_policy(tmp_path: Path) -> Path:
     path = tmp_path / "governance" / "policies" / "worker-container" / "podman-verification-v1.yaml"
     path.parent.mkdir(parents=True)
@@ -468,7 +498,7 @@ def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Pat
         discovery_runner=lambda: [item],
         armed=True,
         **ARMED_ROOTS,
-        git_runner=FakeGit(),
+        git_runner=FakeGit(landed_tree_sha=tree_sha),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
         now=FakeClock(),
@@ -509,7 +539,7 @@ def test_armed_real_prepare_commits_carriers_before_container_validation(tmp_pat
     item = _item()
     assert item.worktree_path is not None
     pre_carrier_tree = _init_feature_git_worktree(item.worktree_path)
-    git = RealLocalGit()
+    git = RealLocalGit(fake_landed_tree_from_validation=True)
     podman = FakePodmanRunner()
     ledger: list[ConveyorDaemonLedgerRecord] = []
 
@@ -553,6 +583,48 @@ def test_armed_real_prepare_commits_carriers_before_container_validation(tmp_pat
     podman_argv = podman.calls[0][0]
     assert "--allow-dirty" not in podman_argv
     assert "validation sandbox mounted tree must be clean" not in result.results[0].reasons
+
+
+def test_armed_real_land_fails_before_push_when_landed_tree_differs_from_validation_record(tmp_path: Path):
+    item = _item()
+    assert item.worktree_path is not None
+    assert item.repo_path is not None
+    assert item.bundle_path is not None
+    _init_feature_git_worktree(item.worktree_path)
+    _git(item.worktree_path, "branch", "-m", "feature-one")
+    pre_carrier_tree = _git(item.worktree_path, "rev-parse", "HEAD^{tree}")
+    _write_bundle_from_branch(item.worktree_path, item.bundle_path, "feature-one")
+    _init_landing_repo(item.repo_path, remote_path=item.worktree_path)
+    git = RealLocalGit()
+    podman = FakePodmanRunner()
+    gh = FakeGh()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        base="main",
+        validation_sandbox_policy_path=_write_validation_policy(tmp_path),
+        validation_sandbox_command_runner=podman,
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    validate_record = ledger[0]
+    validation_tree = validate_record.details["receipt"]["tree_sha"]
+    assert validation_tree != pre_carrier_tree
+    assert result.results[0].landing_result is not None
+    assert result.results[0].landing_result.ready is True
+    assert result.results[0].reasons == (
+        "landed tip tree does not match validation record tree: "
+        f"landed={pre_carrier_tree} validation_record={validation_tree}",
+    )
+    assert ("push", "--", "origin", "feature-one:feature-one") not in [call for call, _cwd in git.calls]
+    assert gh.calls == []
 
 
 def test_armed_start_without_receipt_issuer_is_refused():

@@ -557,6 +557,22 @@ class ConveyorDaemon:
                     ledger_records=records,
                 )
 
+            validation_tree_sha = _latest_validation_record_tree_sha(records)
+            if validation_tree_sha is not None:
+                landed_tree_check = self._validate_landed_tree_matches_record(
+                    item=item,
+                    landed=landed,
+                    validation_tree_sha=validation_tree_sha,
+                )
+                if landed_tree_check is not None:
+                    return self._failed(
+                        item,
+                        (landed_tree_check,),
+                        prepare_result=prepared,
+                        landing_result=landed,
+                        ledger_records=records,
+                    )
+
             push_args = _git_push_args(self.remote, landed.branch)
             push_result = _coerce_result(
                 self.git_runner(
@@ -968,6 +984,35 @@ class ConveyorDaemon:
 
         return run
 
+    def _validate_landed_tree_matches_record(
+        self,
+        *,
+        item: ConveyorDaemonItem,
+        landed: ConveyorBundleLandingResult,
+        validation_tree_sha: str,
+    ) -> str | None:
+        assert self.git_runner is not None
+        if item.repo_path is None:
+            return "repo_path is required to compare landed tree with validation record tree"
+
+        landed_tree = _coerce_result(
+            self.git_runner(
+                ("rev-parse", f"{landed.branch}^{{tree}}"),
+                item.repo_path,
+                git_env_for_phase(ConveyorGitPhase.LOCAL),
+            )
+        )
+        if landed_tree.returncode != 0:
+            return f"landed tree identity failed: {_command_detail(landed_tree)}"
+
+        landed_tree_sha = landed_tree.stdout.strip()
+        if landed_tree_sha != validation_tree_sha:
+            return (
+                "landed tip tree does not match validation record tree: "
+                f"landed={landed_tree_sha} validation_record={validation_tree_sha}"
+            )
+        return None
+
     def _failed(
         self,
         item: ConveyorDaemonItem,
@@ -1060,6 +1105,20 @@ def _pr_create_args(
 
 def _git_push_args(remote: str, branch: str) -> list[str]:
     return ["push", "--", remote, f"{branch}:{branch}"]
+
+
+def _latest_validation_record_tree_sha(records: Sequence[ConveyorDaemonLedgerRecord]) -> str | None:
+    for record in reversed(records):
+        if record.action != "validate" or record.returncode != 0:
+            continue
+        receipt = record.details.get("receipt")
+        if isinstance(receipt, Mapping):
+            tree_sha = receipt.get("tree_sha")
+            if isinstance(tree_sha, str) and tree_sha:
+                return tree_sha
+        if record.sha:
+            return record.sha
+    return None
 
 
 def _pr_base(base: str, item: ConveyorDaemonItem) -> str:
