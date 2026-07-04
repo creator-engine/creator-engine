@@ -168,7 +168,7 @@ A few things worth knowing:
   • Nothing is tracked until you say yes. Plain chat stays plain chat.
 
 Commands:  ce session · ce scope · ce shape · ce ratify · ce drive · ce report
-           ce status · ce show · ce artifacts · ce onboard · ce guide
+           ce status · ce show · ce artifacts · ce install · ce guide
 
 These friendly words are a clear skin over a precise state machine — you can
 always look underneath. Full guide: docs/guide/understanding-ce.md ; pilot path:
@@ -3247,7 +3247,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             lines.append(
                 f"{_BRAND} · prepare {v3_installer.ANSWERS_BASENAME} from this "
                 "(secrets ONLY as env:// file:// prompt:// keychain:// refs), then: "
-                f"{CE_CMD} onboard --spec <spec> --answers <file> --plan"
+                f"{CE_CMD} install --spec <spec> --answers <file> --plan"
             )
             lines.append(
                 f"{_BRAND} · brownfield inventory — {len(brownfield['ci'])} workflow(s), "
@@ -3603,7 +3603,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 + "; ".join(f"step {m.step}: {m.key} ({m.reason})" for m in missing)
             )
         else:
-            lines.append(f"    remaining asks · none — apply-ready (run `{CE_CMD} onboard --apply`)")
+            lines.append(f"    remaining asks · none — apply-ready (run `{CE_CMD} install --apply`)")
     if first_project_plan is not None:
         lines.append(
             f"    first project · greenfield · scaffold {first_project_plan['scaffold_input']['kind']} "
@@ -4374,56 +4374,58 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="detected intent-to-act signal strength (for the dial)")
     p_shape.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
-    p_onboard = sub.add_parser(
-        "onboard",
+    p_install = sub.add_parser(
+        "install",
+        aliases=["onboard"],
         help="two-mode install: verify the signed spec, plan, and explicitly apply "
-             "(agent loop: --inventory → prepare answers → --plan → --apply)",
+             "(agent loop: --inventory → prepare answers → --plan → --apply). "
+             "'onboard' is a one-release-cycle legacy alias (docs/install.sh still invokes it).",
     )
-    p_onboard.add_argument("--spec", required=True, help="path to the served install spec to verify")
-    p_onboard.add_argument("--key-id", default="ce-root-v1", help="the signing key id (must be pinned)")
-    p_onboard.add_argument("--sig-value", default=None,
+    p_install.add_argument("--spec", required=True, help="path to the served install spec to verify")
+    p_install.add_argument("--key-id", default="ce-root-v1", help="the signing key id (must be pinned)")
+    p_install.add_argument("--sig-value", default=None,
                            help="the published signature value (default: the spec's own content digest)")
-    p_onboard.add_argument("--sig-algo", default=None,
+    p_install.add_argument("--sig-algo", default=None,
                            choices=[v3_installer.CONTENT_ALGO, v3_installer.SSH_ED25519_ALGO],
                            help="signature algorithm (apply requires ssh-ed25519)")
-    p_onboard.add_argument("--content-sha256", default=None,
+    p_install.add_argument("--content-sha256", default=None,
                            help="canonical signed-spec digest when --sig-value is supplied out of band")
-    p_onboard.add_argument("--trust-root", default=None,
+    p_install.add_argument("--trust-root", default=None,
                            help="OpenSSH allowed_signers trust root; implies authentic SSHSIG verification")
-    p_onboard.add_argument("--trust-anchor", action="append", default=[],
+    p_install.add_argument("--trust-anchor", action="append", default=[],
                            metavar="SOURCE=PATH",
                            help="out-of-band ce-root fingerprint evidence, e.g. dns-txt=/tmp/ce-root-v1.txt")
-    p_onboard.add_argument("--require-authentic", action="store_true",
+    p_install.add_argument("--require-authentic", action="store_true",
                            help="refuse sha256 self-attestation; require embedded SSHSIG + --trust-root")
-    p_onboard.add_argument("--mode", choices=["one-liner", "agent-native"], default="agent-native",
+    p_install.add_argument("--mode", choices=["one-liner", "agent-native"], default="agent-native",
                            help="install mode")
-    p_onboard.add_argument("--answers", default=None,
+    p_install.add_argument("--answers", default=None,
                            help="path to the ce-install.answers.yaml IaC answers file "
                                 "(schema-validated; fail-closed on unknown keys; secrets by SecretRef only)")
-    p_onboard.add_argument("--answers-schema", default=v3_installer.ANSWERS_SCHEMA_PATH,
+    p_install.add_argument("--answers-schema", default=v3_installer.ANSWERS_SCHEMA_PATH,
                            help="the answers schema document (the input-inventory source of truth)")
-    p_onboard.add_argument("--inventory", action="store_true",
+    p_install.add_argument("--inventory", action="store_true",
                            help="emit the operator-input inventory (the agent-awareness artifact) and exit")
-    p_onboard.add_argument("--plan", action="store_true", dest="show_plan",
+    p_install.add_argument("--plan", action="store_true", dest="show_plan",
                            help="terraform-plan analog: the full plan incl. the exact remaining asks "
                                 "+ the decomposed GitHub leg (no execution)")
-    p_onboard.add_argument("--apply", action="store_true",
-                           help="execute the verified E2 onboard apply drive (side-effecting)")
-    p_onboard.add_argument("--non-interactive", action="store_true",
+    p_install.add_argument("--apply", action="store_true",
+                           help="execute the verified E2 install apply drive (side-effecting)")
+    p_install.add_argument("--non-interactive", action="store_true",
                            help="fail-closed: refuse with the exact missing list instead of ever asking")
-    p_onboard.add_argument("--opt-out", action="store_true",
+    p_install.add_argument("--opt-out", action="store_true",
                            help="opt out of spend CAPS (ratified-human-only; detection net stays on)")
-    p_onboard.add_argument("--ratified-prompt-sha", default=None, help="64-hex opt-out ratification digest")
-    p_onboard.add_argument("--approver-ref", default=None, help="64-hex opt-out approver digest")
-    p_onboard.add_argument("--first-scope-id", default=onboard_apply.DEFAULT_FIRST_SCOPE_ID,
+    p_install.add_argument("--ratified-prompt-sha", default=None, help="64-hex opt-out ratification digest")
+    p_install.add_argument("--approver-ref", default=None, help="64-hex opt-out approver digest")
+    p_install.add_argument("--first-scope-id", default=onboard_apply.DEFAULT_FIRST_SCOPE_ID,
                            help="scope id for the first governed smoke Scope")
-    p_onboard.add_argument("--spawn-smoke", action="store_true",
+    p_install.add_argument("--spawn-smoke", action="store_true",
                            help="include the optional spawn preflight in the first-project smoke leg")
-    p_onboard.add_argument("--lock-timeout", type=float, default=None,
-                           help="seconds to wait for another onboard apply lock before refusing")
-    p_onboard.add_argument("--root", default=V3_LOCAL_STATE_ROOT,
+    p_install.add_argument("--lock-timeout", type=float, default=None,
+                           help="seconds to wait for another install apply lock before refusing")
+    p_install.add_argument("--root", default=V3_LOCAL_STATE_ROOT,
                            help=f"v3 local-state root for apply ledger/lock (default: {V3_LOCAL_STATE_ROOT})")
-    p_onboard.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    p_install.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_carrier = sub.add_parser(
         "carrier",
@@ -5532,6 +5534,11 @@ _DISPATCH = {
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,
     "report": _cmd_report,
+    "install": _cmd_onboard,
+    # argparse stores the *literal* alias string in args.command (dest="command"),
+    # not the canonical subparser name — so the "onboard" alias registered on
+    # the "install" subparser (docs/install.sh legacy invocation) needs its own
+    # explicit dispatch entry rather than falling through via the "install" key.
     "onboard": _cmd_onboard,
     "guide": _cmd_guide,
     "session": _cmd_session,

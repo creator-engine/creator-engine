@@ -1028,7 +1028,7 @@ def test_v3_cli_imports_no_v1_module():
 def test_onboard_verifies_spec_and_dry_runs(tmp_path, capsys):
     spec = tmp_path / "llms-install.md"
     spec.write_text("# Install CE\n", encoding="utf-8")
-    code = v3_cli.main(["onboard", "--spec", str(spec), "--key-id", "ce-root-v1", "--json"])
+    code = v3_cli.main(["install", "--spec", str(spec), "--key-id", "ce-root-v1", "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["verified"]["ok"] is True
@@ -1044,7 +1044,7 @@ def test_onboard_with_published_sig_is_not_self_attested(tmp_path, capsys):
     spec = tmp_path / "spec.md"
     spec.write_text("# spec\n", encoding="utf-8")
     digest = v3_installer.content_digest(spec.read_bytes())
-    v3_cli.main(["onboard", "--spec", str(spec), "--key-id", "ce-root-v1", "--sig-value", digest, "--json"])
+    v3_cli.main(["install", "--spec", str(spec), "--key-id", "ce-root-v1", "--sig-value", digest, "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["verified"]["ok"] is True and payload["self_attested"] is False
 
@@ -1053,7 +1053,7 @@ def test_onboard_refuses_tampered_spec(tmp_path, capsys):
     spec = tmp_path / "spec.md"
     spec.write_text("# real spec\n", encoding="utf-8")
     # a sig value that does not match the spec content → refuse before execute
-    code = v3_cli.main(["onboard", "--spec", str(spec), "--key-id", "ce-root-v1",
+    code = v3_cli.main(["install", "--spec", str(spec), "--key-id", "ce-root-v1",
                         "--sig-value", "0" * 64])
     assert code == 1
     assert "REFUSED" in capsys.readouterr().out
@@ -1063,10 +1063,10 @@ def test_onboard_optout_requires_ratification_and_educates(tmp_path, capsys):
     spec = tmp_path / "spec.md"
     spec.write_text("# spec\n", encoding="utf-8")
     # opt-out without a valid ratification binding → refused (human-only)
-    assert v3_cli.main(["onboard", "--spec", str(spec), "--opt-out"]) == 1
+    assert v3_cli.main(["install", "--spec", str(spec), "--opt-out"]) == 1
     capsys.readouterr()
     # with a ratified binding → custom profile + the educate copy surfaces
-    code = v3_cli.main(["onboard", "--spec", str(spec), "--opt-out",
+    code = v3_cli.main(["install", "--spec", str(spec), "--opt-out",
                         "--ratified-prompt-sha", "a" * 64, "--approver-ref", "b" * 64, "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -1495,7 +1495,7 @@ def _brownfield_answers_for(repo: str) -> str:
 
 
 def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "onboard_inventory"
@@ -1516,7 +1516,7 @@ def test_onboard_inventory_warns_for_missing_selected_backend_dependency(
         lambda tool: tool in ("python", "uv", "claude"),
     )
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(_answers_file(tmp_path)),
         "--inventory",
@@ -1544,7 +1544,7 @@ def test_onboard_inventory_human_output_shows_missing_git_warn(
         lambda tool: tool in ("python", "uv", "claude"),
     )
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(_answers_file(tmp_path)),
         "--inventory",
@@ -1580,7 +1580,7 @@ def test_onboard_inventory_warns_when_brownfield_probe_misses_dependency(tmp_pat
         lambda tool: tool in ("python", "uv", "claude"),
     )
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(_answers_file(tmp_path)),
         "--inventory",
@@ -1602,7 +1602,7 @@ def test_onboard_inventory_refuses_on_non_dependency_brownfield_fault(tmp_path, 
         )
 
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", refused)
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "refused"
@@ -1619,7 +1619,7 @@ def test_onboard_plan_fails_closed_on_missing_git_dependency(tmp_path, capsys, m
         )
 
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", refused)
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--plan", "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "refused"
@@ -1636,7 +1636,7 @@ def test_onboard_authentic_inventory_uses_fetched_trust_root(tmp_path, capsys, m
 
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", fake_runner)
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
         "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
@@ -1660,7 +1660,7 @@ def test_onboard_authentic_reports_actionable_missing_ssh_keygen(tmp_path, capsy
     monkeypatch.setattr(v3_cli.shutil, "which", lambda _name: None)
 
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
         "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
@@ -1680,7 +1680,7 @@ def test_onboard_authentic_reports_actionable_missing_ssh_keygen(tmp_path, capsy
 
 def test_onboard_refuses_self_attested_when_authentic_required(tmp_path, capsys):
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--trust-root", str(_trust_root(tmp_path)),
         "--inventory",
@@ -1695,7 +1695,7 @@ def test_onboard_refuses_self_attested_when_authentic_required(tmp_path, capsys)
 def test_onboard_authentic_refuses_same_origin_only_trust_root(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
         "--inventory",
@@ -1710,7 +1710,7 @@ def test_onboard_authentic_refuses_same_origin_only_trust_root(tmp_path, capsys,
 def test_onboard_authentic_refuses_same_origin_url_trust_anchor(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
         "--trust-anchor", f"https://creator-engine.dev/trust/ce-root-v1.txt={_trust_anchor(tmp_path)}",
@@ -1728,7 +1728,7 @@ def test_onboard_authentic_refuses_same_origin_url_trust_anchor(tmp_path, capsys
 def test_onboard_authentic_refuses_mismatched_trust_anchor(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
         "--trust-anchor", f"github-org-profile={_trust_anchor(tmp_path, 'ce-root-v1=SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')}",
@@ -1746,7 +1746,7 @@ def test_onboard_authentic_refuses_tampered_spec_before_inventory(tmp_path, caps
     spec = _signed_spec(tmp_path)
     spec.write_text(spec.read_text(encoding="utf-8") + "\ntamper\n", encoding="utf-8")
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(spec),
         "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
         "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
@@ -1760,7 +1760,7 @@ def test_onboard_authentic_refuses_tampered_spec_before_inventory(tmp_path, caps
 
 def test_onboard_inventory_derives_greenfield_inputs(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     rows = {row["key"]: row for row in payload["inventory"]}
@@ -1778,7 +1778,7 @@ def test_onboard_answers_file_resolves_the_asks(tmp_path, capsys, monkeypatch):
         lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"),
     )
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe())
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)),
                         "--answers", str(_answers_file(tmp_path)), "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -1789,7 +1789,7 @@ def test_onboard_answers_file_resolves_the_asks(tmp_path, capsys, monkeypatch):
 
 def test_onboard_refuses_typo_key_fail_closed(tmp_path, capsys):
     bad = _answers_file(tmp_path, _GOOD_ANSWERS_YAML + "workspce_root: typo\n")
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--answers", str(bad)])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--answers", str(bad)])
     assert code == 1
     assert "REFUSED" in capsys.readouterr().out
 
@@ -1797,7 +1797,7 @@ def test_onboard_refuses_typo_key_fail_closed(tmp_path, capsys):
 def test_onboard_refuses_raw_secret_in_answers(tmp_path, capsys):
     bad = _answers_file(tmp_path, _GOOD_ANSWERS_YAML.replace(
         "prompt://github-bootstrap-token", "ghp_rawsecret123"))
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--answers", str(bad)])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--answers", str(bad)])
     assert code == 1
     out = capsys.readouterr().out
     assert "REFUSED" in out and "SecretRef" in out
@@ -1806,7 +1806,7 @@ def test_onboard_refuses_raw_secret_in_answers(tmp_path, capsys):
 def test_onboard_non_interactive_refuses_with_exact_missing_list(tmp_path, capsys, monkeypatch):
     # no origin remote detected here, so github.mode/repo remain real missing inputs
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--non-interactive", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--non-interactive", "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "refused"
@@ -1823,7 +1823,7 @@ def test_onboard_non_interactive_succeeds_on_complete_answers(tmp_path, capsys, 
         lambda tool: tool in ("git", "python", "uv", "claude"),
     )
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe())
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)),
                         "--answers", str(_answers_file(tmp_path)),
                         "--non-interactive", "--json"])
     assert code == 0
@@ -1841,7 +1841,7 @@ def test_onboard_non_interactive_refuses_sudo_outside_the_grant(tmp_path, capsys
     narrow = _answers_file(tmp_path, _GOOD_ANSWERS_YAML.replace(
         "profile: solo-pilot", "profile: team").replace(
         "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: [runsc]"))
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)),
                         "--answers", str(narrow), "--non-interactive", "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
@@ -1856,7 +1856,7 @@ def test_onboard_answers_custom_cost_profile_flows_to_the_g5_fragment(tmp_path, 
         f"    approver_ref: {'b' * 64}\n"
         "    educate_acknowledged: true",
     ))
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)),
                         "--answers", str(custom), "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -1867,7 +1867,7 @@ def test_onboard_answers_custom_cost_profile_flows_to_the_g5_fragment(tmp_path, 
 
 
 def test_onboard_plan_composes_the_github_leg(tmp_path, capsys):
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)),
                         "--answers", str(_answers_file(tmp_path)), "--plan", "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -1883,7 +1883,7 @@ def test_onboard_plan_without_profile_defaults_to_os_native_no_sudo(tmp_path, ca
     monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "claude"))
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
 
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--plan", "--json"])
     payload = json.loads(capsys.readouterr().out)
 
     assert code == 0, payload
@@ -1894,7 +1894,7 @@ def test_onboard_plan_without_profile_defaults_to_os_native_no_sudo(tmp_path, ca
     assert payload["profile"]["isolation_tier"] == 1
     assert "sudo (privileged dependency installs)" not in payload["human_approves"]
 
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--plan"])
     text = capsys.readouterr().out
     assert code == 0
     assert "dependencies · backend os-native · install —" in text
@@ -1904,7 +1904,7 @@ def test_onboard_plan_without_profile_defaults_to_os_native_no_sudo(tmp_path, ca
 def test_onboard_authentic_plan_trust_anchor_evidence_is_value_free(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--trust-root", str(_trust_root(tmp_path, v3_installer.PINNED_KEYS["ce-root-v1"])),
         "--trust-anchor", f"dns-txt={_trust_anchor(tmp_path)}",
@@ -1923,7 +1923,7 @@ def test_onboard_plan_emits_greenfield_first_project(tmp_path, capsys, monkeypat
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe(origin_remote=None))
     answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(answers),
         "--plan",
@@ -1941,7 +1941,7 @@ def test_onboard_plan_emits_greenfield_first_project(tmp_path, capsys, monkeypat
 
 
 def test_onboard_apply_rejects_read_only_modes(tmp_path, capsys):
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)), "--plan", "--apply", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--plan", "--apply", "--json"])
     assert code == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "invalid_onboard_mode"
@@ -1950,11 +1950,11 @@ def test_onboard_apply_rejects_read_only_modes(tmp_path, capsys):
 def test_onboard_inventory_and_plan_do_not_create_apply_state(tmp_path, capsys):
     root = tmp_path / "state"
     assert v3_cli.main([
-        "onboard", "--spec", str(_spec(tmp_path)), "--inventory", "--root", str(root), "--json",
+        "install", "--spec", str(_spec(tmp_path)), "--inventory", "--root", str(root), "--json",
     ]) == 0
     capsys.readouterr()
     assert v3_cli.main([
-        "onboard", "--spec", str(_spec(tmp_path)), "--answers", str(_answers_file(tmp_path)),
+        "install", "--spec", str(_spec(tmp_path)), "--answers", str(_answers_file(tmp_path)),
         "--plan", "--root", str(root), "--json",
     ]) == 0
     capsys.readouterr()
@@ -1972,7 +1972,7 @@ def test_onboard_brownfield_inventory_is_read_only(tmp_path, capsys, monkeypatch
 
     monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
         "--inventory",
@@ -1991,7 +1991,7 @@ def test_onboard_plan_emits_brownfield_adoption_payload(tmp_path, capsys, monkey
     monkeypatch.chdir(project)
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2026,7 +2026,7 @@ def test_onboard_apply_existing_brownfield_refuses_without_e2_extension(tmp_path
     monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2090,7 +2090,7 @@ def test_onboard_apply_authorized_brownfield_routes_to_adoption(tmp_path, capsys
 
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2153,7 +2153,7 @@ def test_onboard_apply_authorized_brownfield_gets_driver_from_onboard_apply_seam
 
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2230,7 +2230,7 @@ def test_onboard_apply_existing_already_ce_repo_routes_to_plain_join(tmp_path, c
     monkeypatch.setattr(onboard_apply, "apply_onboard", fake_apply)
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2256,7 +2256,7 @@ def test_onboard_plan_surfaces_plain_join_route_for_already_ce_repo(tmp_path, ca
     monkeypatch.setattr(v3_cli, "_onboard_apply_driver", lambda: FakeDriver(repo_exists=True))
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2288,7 +2288,7 @@ def test_onboard_plan_refuses_when_protection_floor_unenforceable(tmp_path, caps
     monkeypatch.setattr(v3_cli, "_onboard_apply_driver", lambda: UnenforceableDriver(repo_exists=True))
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2330,7 +2330,7 @@ def test_onboard_apply_preflight_refuses_when_protection_floor_unenforceable(
     monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
     answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers),
         "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
@@ -2348,7 +2348,7 @@ def test_onboard_apply_refuses_self_attested_signature(tmp_path, capsys):
     spec = _spec(tmp_path)
     digest = v3_installer.content_digest(spec.read_bytes())
     code = v3_cli.main([
-        "onboard", "--spec", str(spec), "--apply", "--sig-algo", v3_installer.CONTENT_ALGO,
+        "install", "--spec", str(spec), "--apply", "--sig-algo", v3_installer.CONTENT_ALGO,
         "--sig-value", digest, "--json",
     ])
     assert code == 1
@@ -2365,7 +2365,7 @@ def test_onboard_apply_requires_complete_answers_before_executor(tmp_path, capsy
         raise AssertionError("apply_onboard must not run with missing answers")
 
     monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
-    code = v3_cli.main(["onboard", "--spec", str(_signed_spec(tmp_path)), "--apply", "--json"])
+    code = v3_cli.main(["install", "--spec", str(_signed_spec(tmp_path)), "--apply", "--json"])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "refused"
@@ -2410,7 +2410,7 @@ def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monk
     root = tmp_path / "state"
     greenfield_answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
     code = v3_cli.main([
-        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "install", "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(greenfield_answers),
         "--apply", "--root", str(root), "--json",
     ])
@@ -2452,7 +2452,7 @@ def _fake_apply_success_summary(request):
 
 def test_onboard_apply_solo_pilot_os_native_not_refused_without_runsc_or_proxy(tmp_path, capsys, monkeypatch):
     # ce-ops#71 MAJOR-1 (the headline bug) — driven through the REAL CLI entrypoint
-    # (`ce onboard --apply` → ``_cmd_onboard``), NOT apply_onboard/_prepare directly.
+    # (`ce install --apply` → ``_cmd_onboard``), NOT apply_onboard/_prepare directly.
     # A solo-pilot install resolves the os-native backend BEFORE the preflight, so on
     # a host WITHOUT runsc/proxy and with an EMPTY sudo grant the command does NOT
     # falsely refuse (the old flat-Tier-2 preflight planned runsc/proxy and tripped
@@ -2474,7 +2474,7 @@ def test_onboard_apply_solo_pilot_os_native_not_refused_without_runsc_or_proxy(t
     answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML.replace(
         "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: []"))
     code = v3_cli.main([
-        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "install", "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers), "--apply", "--root", str(tmp_path / "state"), "--json",
     ])
     payload = json.loads(capsys.readouterr().out)
@@ -2503,7 +2503,7 @@ def test_onboard_apply_team_gvisor_still_refuses_when_runsc_proxy_missing(tmp_pa
         "profile: solo-pilot", "profile: team").replace(
         "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: []"))
     code = v3_cli.main([
-        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "install", "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers), "--apply", "--root", str(tmp_path / "state"), "--json",
     ])
     assert code == 1
@@ -2531,7 +2531,7 @@ def test_onboard_apply_solo_pilot_os_native_real_e2e_succeeds_with_held_runtime(
     root = tmp_path / "state"
     answers = _answers_file(tmp_path, _GREENFIELD_ANSWERS_YAML)
     code = v3_cli.main([
-        "onboard", "--spec", str(_signed_spec(tmp_path)),
+        "install", "--spec", str(_signed_spec(tmp_path)),
         "--answers", str(answers), "--apply", "--non-interactive",
         "--root", str(root), "--json",
     ])
@@ -2559,7 +2559,7 @@ def test_onboard_answers_conflict_with_detected_fact_is_surfaced(tmp_path, capsy
         lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "codex"),
     )
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_cli_probe())
-    code = v3_cli.main(["onboard", "--spec", str(_spec(tmp_path)),
+    code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)),
                         "--answers", str(_answers_file(tmp_path)), "--json"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -2576,17 +2576,17 @@ def test_shipped_llms_install_spec_verifies_through_the_real_path(capsys):
 
     spec = Path(__file__).resolve().parents[3] / "docs" / "llms-install.md"
     digest = v3_installer.content_digest(spec.read_bytes())
-    code = v3_cli.main(["onboard", "--spec", str(spec), "--sig-value", digest, "--json"])
+    code = v3_cli.main(["install", "--spec", str(spec), "--sig-value", digest, "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert code == 0
     assert payload["verified"]["ok"] is True and payload["self_attested"] is False
 
 
-def test_onboard_inventory_help_names_the_loop():
+def test_install_inventory_help_names_the_loop():
     # the agent loop is discoverable from --help (inventory → answers → plan)
     parser = v3_cli._build_parser()
     help_text = parser.format_help()
-    assert "onboard" in help_text
+    assert "install" in help_text
 
 
 # ---------------------------------------------------------------------------
@@ -3300,3 +3300,21 @@ def test_12_watch_tick_shape_and_clean_signal_stop(tmp_path, monkeypatch, capsys
     assert rc == 0
     assert seen == ["reap_watch_tick"]  # exactly one pass, then a clean stop
     assert "reap watch tick" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# install — the "onboard" legacy alias (ce-ops#440 S1: docs/install.sh still
+# invokes ``cev3 onboard`` and is release-signed; kept for one release cycle)
+# ---------------------------------------------------------------------------
+def test_install_subparser_accepts_legacy_onboard_alias():
+    parser = v3_cli._build_parser()
+    args = parser.parse_args(["onboard", "--spec", "some/spec.yaml"])
+    # argparse stores the literal alias string in the subparsers dest, not the
+    # canonical subparser name — so the dispatch table must key it explicitly.
+    assert args.command == "onboard"
+    assert args.spec == "some/spec.yaml"
+    handler = v3_cli._DISPATCH.get(args.command)
+    assert handler is v3_cli._cmd_onboard
+    # and the canonical spelling still resolves to the very same handler
+    canonical_args = parser.parse_args(["install", "--spec", "some/spec.yaml"])
+    assert v3_cli._DISPATCH.get(canonical_args.command) is handler

@@ -119,7 +119,7 @@ def test_onboard_plan_warns_for_missing_spawn_prereqs(tmp_path, capsys, monkeypa
     monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in {"git", "python", "uv"})
 
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec",
         str(_signed_spec(tmp_path)),
         "--answers",

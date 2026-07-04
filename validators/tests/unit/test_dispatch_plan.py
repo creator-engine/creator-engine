@@ -103,8 +103,8 @@ def test_cli_json_output_shape(tmp_path, capsys):
 
     rc = ce_cli.main(
         [
-            "dispatch",
-            "plan",
+            "pickup",
+            "dispatch-plan",
             "--arc-ticket",
             "creator-engine/ce-ops#187",
             "--issues-json",
@@ -126,8 +126,8 @@ def test_cli_human_output_prints_one_line_per_item_with_seat_and_work_class(tmp_
 
     rc = ce_cli.main(
         [
-            "dispatch",
-            "plan",
+            "pickup",
+            "dispatch-plan",
             "--arc-ticket",
             "creator-engine/ce-ops#187",
             "--issues-json",
@@ -150,8 +150,8 @@ def test_cli_json_flag_accepts_stdin_and_outputs_valid_json(monkeypatch, capsys)
 
     rc = ce_cli.main(
         [
-            "dispatch",
-            "plan",
+            "pickup",
+            "dispatch-plan",
             "--arc-ticket",
             "creator-engine/ce-ops#187",
             "--json",

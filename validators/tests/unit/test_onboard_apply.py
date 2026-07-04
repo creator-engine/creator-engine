@@ -1259,14 +1259,15 @@ def test_cli_apply_userspace_install_uses_selected_driver(tmp_path, capsys, monk
     monkeypatch.setattr(v3_cli, "_select_onboard_apply_driver", select_driver)
     monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
     monkeypatch.setattr(v3_cli, "_detect_brownfield_project", lambda _root: _brownfield_probe_without_origin())
+    monkeypatch.setattr(v3_cli.shutil, "which", lambda tool: "/usr/bin/ssh-keygen" if tool == "ssh-keygen" else None)
     monkeypatch.setattr(
         v3_cli,
         "_which",
-        lambda tool: tool in {"git", "python", "runsc", "proxy", "codex"},
+            lambda tool: tool in {"git", "python", "runsc", "proxy", "codex", "ssh-keygen"},
     )
 
     code = v3_cli.main([
-        "onboard",
+        "install",
         "--spec",
         str(spec),
         "--answers",
