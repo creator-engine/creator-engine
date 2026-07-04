@@ -3,7 +3,7 @@ slug: ce-438-complete-walkthrough
 date: 2026-07-04
 kind: docs
 scope: guide
-issue: ce-ops#438
+issue: "438"
 ---
 
 **Complete Walkthrough public guide.**

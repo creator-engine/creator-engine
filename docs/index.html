@@ -580,9 +580,9 @@
           <div class="h"><span class="ce">&#9670; CE Completion Report</span><span>external grade</span></div>
           <div class="b">
             <div class="fld"><b>Outcome</b><span>PR opened &rarr; #42</span></div>
-            <div class="fld"><b>Verdict</b><span class="ok">Done-when 4/4 met &middot; tests green &middot; in scope &#10003; &middot; 18% of Budget S</span></div>
+            <div class="fld"><b>Verdict</b><span class="ok">Done-when 4/4 met &middot; tests green &middot; in scope &#10003; &middot; 18% of $25</span></div>
             <div class="fld"><b>Next</b><span>Review PR #42. A deploy would require a higher Change-type and explicit ratification.</span></div>
-            <div class="fld"><b>Inspect</b><span><code>ce fanin inspect</code> &middot; <code>ce ledger verify</code> &middot; <code>ce check</code></span></div>
+            <div class="fld"><b>Inspect</b><span><code>ce fanin inspect --packet PATH</code> &middot; <code>ce ledger verify --side-effect-ledger-root PATH</code> &middot; <code>ce check</code></span></div>
           </div>
         </div>
       </div>
@@ -707,7 +707,7 @@
         <a class="doc-card" href="guide/solo-dev-onboarding.html">
           <span class="tag">Guide</span>
           <h3>Solo + Dev onboarding</h3>
-          <p>For developers in Dev mode: drive the pipeline yourself with <code>cev3</code> commands — scope, ratify, drive, review, and gate the merge.</p>
+          <p>For developers in Dev mode: drive the pipeline yourself with <code>ce</code> commands — scope, ratify, drive, review, and gate the merge.</p>
           <span class="go">Open page -&gt;</span>
         </a>
         <a class="doc-card" href="guide/solo-ceo-onboarding.html">

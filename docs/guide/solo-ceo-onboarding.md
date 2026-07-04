@@ -5,7 +5,7 @@ intent and ratify each gate; the agent does the rest. You do not type slash
 commands — the agent drives the CE Scope/Shape/build loop under the hood,
 assembles the plan and tasks, builds the work, and surfaces each decision point
 for your ratification. If you prefer to drive the pipeline yourself with explicit
-`cev3` commands, see [`solo-dev-onboarding.md`](./solo-dev-onboarding.md) for
+`ce` commands, see [`solo-dev-onboarding.md`](./solo-dev-onboarding.md) for
 the Solo + Dev path.*
 
 > **You are in: Solo + CEO mode.** In this cell you Frame the problem and Ratify
@@ -25,10 +25,10 @@ in every CE mode. What changes is who drives the stages and how:
 | Stage | Solo + Dev (you type commands) | Solo + CEO (agent drives; you ratify) |
 | --- | --- | --- |
 | **Frame** | You describe the problem to the agent | Same — you describe the problem conversationally |
-| **Shape** | You drive the Scope/Shape loop with `cev3 scope` and `cev3 shape` — see [`solo-dev-onboarding.md`](./solo-dev-onboarding.md) | The agent drives the Scope/Shape loop; it assembles the Scope and presents it to you for review |
+| **Shape** | You drive the Scope/Shape loop with `ce scope <id> --goal ... --change-type ...` and `ce shape <id>` — see [`solo-dev-onboarding.md`](./solo-dev-onboarding.md) | The agent drives the Scope/Shape loop; it assembles the Scope and presents it to you for review |
 | **Build** | You trigger the build after ratifying | Same — the build runs after you ratify; you don't need to start it |
 | **Review** | You dispatch a reviewer, then read the PR artifacts | Same — you read the PR artifacts and judge them against the Done-when you confirmed |
-| **Ship** | You run `cev3 merge --apply` | Same — `cev3 merge --apply` is the human-gated finish |
+| **Ship** | You run `ce merge <id> --run <run-id> --apply` | Same — `ce merge <id> --run <run-id> --apply` is the human-gated finish |
 
 The key difference is **Shape**: in CEO mode you never run the Scope/Shape loop
 by hand. The agent does that work on your behalf and surfaces the result — a
@@ -46,7 +46,7 @@ first. Once installed, `ce launch` is your daily entry point.
 ### The one concept to anchor on
 
 In CEO mode the agent is your executor, not your co-typist. Instead of running
-`cev3 scope` and `cev3 shape` yourself, you tell it *what you want to build*, in
+`ce scope <id> --goal ... --change-type ...` and `ce shape <id>` yourself, you tell it *what you want to build*, in
 plain language. It translates that intent into the governed pipeline, then brings you
 the artifact to ratify. You are the CEO of the work: you set direction, you
 approve gates, you own the outcome. The agent handles the mechanics.
@@ -110,18 +110,19 @@ accept as done. If anything is wrong, tell the agent and it will revise the Scop
 When the Scope looks right and reads **Ready**, ratify it:
 
 ```bash
-cev3 ratify <scope-id> --approver-ref <opaque-64-hex-digest>
+ce ratify <scope-id> --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
-Generate a fresh approver ref with `openssl rand -hex 32` and pass that value.
+The literal above is valid 64-hex syntax for the example. In a real run,
+generate a fresh approver ref with `openssl rand -hex 32` and pass that value.
 The `--approver-ref` is a value-free fingerprint: it records that a human
 ratified this Scope without encoding who or any credential.
 
 **Ratification is your explicit "yes — build this."** Nothing builds until a
 Ready Scope is ratified. The agent cannot ratify on its own behalf.
 
-> You can inspect any Scope before ratifying with `cev3 show <scope-id>`, and
-> see what is queued with `cev3 status`.
+> You can inspect any Scope before ratifying with `ce show <scope-id>`, and
+> see what is queued with `ce status`.
 
 ---
 
@@ -150,7 +151,7 @@ reading a real diff against the criteria you wrote.
 When the PR looks right and the gate is green, you perform the gated merge:
 
 ```bash
-cev3 merge <scope-id> --run <run-id> --apply
+ce merge <scope-id> --run <run-id> --apply
 ```
 
 Without `--apply`, this command reads the gate and tells you exactly what is
@@ -169,20 +170,20 @@ is what authorizes the merge; CI just verifies the change is well-formed.
 After the merge:
 
 ```bash
-cev3 report <scope-id> --run-id <run-id>
+ce report <scope-id> --run-id <run-id>
 ```
 
 This renders the **CE Completion Report** — a compact record of what was
 delivered, how it scored against your Done-when criteria, that tests were green,
 that the change stayed in scope, and what fraction of the Budget it used. The
-report looks like:
+following is illustrative output:
 
 ```text
 ┌─ CE COMPLETION REPORT · run <run-id> · Scope <scope-id> ──────
 │ Outcome   PR opened → #N (merged)
 │ Verdict   Done-when 3/3 met · tests green · in scope · 14% of Budget
 │ Next      → (done)
-│ Inspect   gh pr view N  |  cev3 show <scope-id>  |  cev3 artifacts <run-id>
+│ Inspect   gh pr view N  |  ce show <scope-id>  |  ce artifacts <scope-id> --run-id <run-id>
 └──────────────────────────────────────────────────────────────
 ```
 
@@ -199,7 +200,7 @@ Phases: escalations, gate holds, or items waiting for human input. These land in
 your **decision inbox**:
 
 ```bash
-cev3 inbox --repo <owner/repo>
+ce inbox --repo <owner/repo>
 ```
 
 This is a read-only view of items awaiting operator decision. Check it when the
@@ -216,11 +217,11 @@ Once you have done the first Scope, every piece of work follows the same shape:
 1. **Frame** — tell the agent what you want to build, in plain language.
 2. **Review the Scope** — read the Goal and Done-when the agent assembled;
    adjust if needed; confirm the Budget.
-3. **Ratify** — `cev3 ratify <id> --approver-ref <digest>` — your "yes, build this."
+3. **Ratify** — `ce ratify <id> --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef` — your "yes, build this."
 4. **Watch the build** — the agent drives; the gate holds privileged actions for you.
 5. **Judge the PR** — read the diff and evidence against your Done-when.
-6. **Gate the merge** — `cev3 merge <id> --run <run-id> --apply`.
-7. **Read the report** — `cev3 report <id> --run-id <run-id>` — capture the evidence, move on.
+6. **Gate the merge** — `ce merge <id> --run <run-id> --apply`.
+7. **Read the report** — `ce report <id> --run-id <run-id>` — capture the evidence, move on.
 
 New initiative? Tell the agent about the bigger goal; it will run the full
 planning pipeline and produce a backlog of Scopes. Your job is still to ratify
@@ -235,10 +236,10 @@ CE is designed so that a small set of decisions always stays with you:
 | You always decide | The agent handles |
 | --- | --- |
 | The **Budget** on every Scope | Goal, Done-when, plan, tasks, code, and test execution |
-| **Ratifying** the Scope (`cev3 ratify`) | Running the build inside the ratified envelope |
+| **Ratifying** the Scope (`ce ratify <id> --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`) | Running the build inside the ratified envelope |
 | Making a change **riskier** | Making a change safer within its envelope |
 | **Judging the artifacts** at Review | Producing the artifacts and the Completion Report |
-| The **gated merge** (`cev3 merge --apply`) | Opening the PR and reading the merge gate |
+| The **gated merge** (`ce merge <id> --run <run-id> --apply`) | Opening the PR and reading the merge gate |
 | Authorizing **privileged surfaces** | Refusing privileged actions and surfacing the reason |
 
 In CEO mode the agent handles significantly more of the mechanical work — it

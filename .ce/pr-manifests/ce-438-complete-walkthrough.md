@@ -1,4 +1,4 @@
-# PR path manifest — ce-ops#438 · Complete Walkthrough public guide
+# PR path manifest — Complete Walkthrough public guide
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-438-complete-walkthrough` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 

@@ -104,7 +104,8 @@ you can re-run it.
 > kernel one-shot that gets you to a working governed session on your machine.
 > Standing up a **fully governed seat on a GitHub repo** — with the GitHub App
 > connection and branch-protection floor — is a separate, deliberately
-> human-approved flow (`cev3 onboard --plan` then `--apply`), covered in the
+> human-approved flow (`ce install --spec <verified-spec> --answers ce-install.answers.yaml --plan`
+> then `ce install --spec <verified-spec> --answers ce-install.answers.yaml --apply`), covered in the
 > [Quickstart](./zero-to-governed-seat-quickstart.md) and the
 > [Pilot Runbook](./pilot-runbook.md). Keep them distinct: the quick rail gets
 > you using CE; the governed-seat rail connects CE to a repo it can ship to.

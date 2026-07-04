@@ -136,9 +136,10 @@ before it lands.</p>
 inside that bet. The result is graded against the bet, not against the agent's
 confidence.</p>
 </blockquote>
-<p>If you get stuck at any point, use <code>ce ask</code>. Treat it like the help hatch: ask
-what a stage means, why a gate is blocked, how to inspect an artifact, or what
-command should come next.</p>
+<p>If you get stuck at any point, start with <code>ce --help</code> or
+<code>ce &lt;command&gt; --help</code>, then follow the linked docs for the stage you are in. If
+a gate is still unclear, ask your operator which decision is missing before you
+continue.</p>
 <hr />
 <h2 id="2-get-running">2. Get Running</h2>
 <p>There are two supported rails. They end in the same place: a governed agent
@@ -264,8 +265,9 @@ it better:</p>
 <pre><code class="language-text">The activity page is blank before the first governed run. Frame a small docs/UI
 ticket for adding an empty state. Keep it narrow: copy only, no backend changes.
 </code></pre>
-<p>You can also ask <code>ce ask &quot;what should I decide before shaping this?&quot;</code> if the
-problem still feels fuzzy.</p>
+<p>If the problem still feels fuzzy, keep the work in Frame and ask your operator
+which outcome, boundary, or acceptance criterion must be decided before you
+Shape it.</p>
 <p><strong>What CE does.</strong> CE keeps this as conversation until there is a real unit of
 work. It does not create a Scope just because you chatted. When the agent has
 enough context, it summarizes the candidate work and asks whether to Shape it.</p>
@@ -285,7 +287,8 @@ Budget, and the Change type.</p>
   --done-when &quot;A new project activity page shows empty-state copy instead of a blank panel&quot; \
   --done-when &quot;The copy points users back to launching their first governed run&quot; \
   --done-when &quot;Existing populated activity pages are unchanged&quot; \
-  --budget S \
+  --budget 25 \
+  --budget-unit '$' \
   --change-type code
 </code></pre>
 <p>Budget is an effort cap you commit to. It is not a clock estimate, and it is not
@@ -299,14 +302,14 @@ bet is placed. You can run a sharpening pass:</p>
 <pre><code class="language-text">◆ CE · Shape → &quot;activity-empty-state&quot;
 Goal        Show a helpful empty state on the activity page before the first run
 Done-when   3 checks
-Budget      S
+Budget      $25
 Change type code
 Ready       ✓
 
 Front gate: ratify this Scope before Build.
 </code></pre>
 <p>Then you place the bet:</p>
-<pre><code class="language-bash">ce ratify activity-empty-state
+<pre><code class="language-bash">ce ratify activity-empty-state --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 </code></pre>
 <p>Ratification is the human &quot;yes&quot;: this is the work, this is the cap, and this is
 the risk tier.</p>
@@ -324,7 +327,7 @@ the agent tries to step outside the envelope, CE refuses and explains the gate.<
 <pre><code class="language-text">◆ CE · Build
 Scope       activity-empty-state
 Run         activity-empty-state-1
-Envelope    Change type code · Budget S · Done-when 3
+Envelope    Change type code · Budget $25 · Done-when 3
 
 Agent plan:
 1. Locate activity page rendering.
@@ -333,9 +336,9 @@ Agent plan:
 4. Run focused tests and lint.
 </code></pre>
 <p>If the agent needs a privileged action, you see a refusal or an approval prompt
-through the agent's normal terminal UI. When in doubt, ask:</p>
-<pre><code class="language-bash">ce ask &quot;why is this gate blocked?&quot;
-</code></pre>
+through the agent's normal terminal UI. When in doubt, run <code>ce drive --help</code> to
+check the Build command surface, then ask your operator which approval is
+missing.</p>
 <h3 id="review">Review</h3>
 <p><strong>What you do.</strong> You inspect the artifacts, not the transcript. Start with the
 Completion Report and the PR:</p>
@@ -346,17 +349,14 @@ ce artifacts activity-empty-state --run-id activity-empty-state-1
 <p><strong>What CE does.</strong> CE grades the run against the Scope. It reports whether the
 Done-when checks are met, whether checks passed, whether the diff stayed in
 scope, and what remains for Ship.</p>
-<p><strong>What you see.</strong></p>
-<pre><code class="language-text">◆ CE Completion Report
-Outcome   PR opened → #24
-Verdict   Done-when 3/3 met · tests green · in scope ✓ · within Budget S
-Next      → Review PR #24  (Change type code → human review before merge)
-
-Artifacts
-- Pull request: #24
-- Diff summary: activity page empty-state copy
-- Checks: focused UI test, lint
-- Scope: activity-empty-state
+<p><strong>What you see.</strong> A sample <code>ce report</code> render looks like:</p>
+<pre><code class="language-text">┌─ ◆ CE COMPLETION REPORT · run activity-empty-state-1 · Scope activity-empty-state ──────────────────
+│ Outcome   — → #24
+│ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 0% of $25
+│ Next      —
+│ Artifacts PR #24 · Scope activity-empty-state · evidence-chain ✓ · spend
+│ Inspect   gh pr view 24   |   ce show activity-empty-state   |   ce artifacts activity-empty-state --run-id activity-empty-state-1
+└────────────────────────────────────────────────────────────
 </code></pre>
 <p>Review is where CE differs from a plain coding-agent run. The agent does not get
 to mark itself done because it sounded confident. The external grade is based on
@@ -394,11 +394,13 @@ ratified outcome. It is not only a merged PR.</p>
 <p>Use one branch per Scope unless your team's policy says otherwise. If a request
 starts to sprawl, split it before ratification. CE works best when the bet is
 small enough that Review can be honest.</p>
-<p><code>ce ask</code> is useful throughout the loop:</p>
-<pre><code class="language-bash">ce ask &quot;what stage am I in?&quot;
-ce ask &quot;show me the Scope fields for this run&quot;
-ce ask &quot;which artifact should I inspect before merge?&quot;
+<p>The local help surface is useful throughout the loop:</p>
+<pre><code class="language-bash">ce --help
+ce scope --help
+ce merge --help
 </code></pre>
+<p>If help output does not explain the gate you are seeing, ask your operator and
+include the Scope id, run id, and exact refusal text.</p>
 <hr />
 <h2 id="6-your-irreducible-gestures">6. Your Irreducible Gestures</h2>
 <p>CE automates a lot, but it intentionally leaves a few decisions with you.</p>
@@ -452,9 +454,13 @@ review depth. CE should not invent precision it does not have.</p>
 Scope, but increasing risk, broadening files, or changing the Goal needs your
 explicit ratification.</p>
 <h3 id="what-if-i-do-not-know-the-right-command">What if I do not know the right command?</h3>
-<p>Ask <code>ce ask</code>. For example:</p>
-<pre><code class="language-bash">ce ask &quot;I have a PR open; what do I inspect before Ship?&quot;
+<p>Use <code>ce --help</code> or the command-specific help first:</p>
+<pre><code class="language-bash">ce report --help
+ce artifacts --help
+ce merge --help
 </code></pre>
+<p>If the next decision is still unclear, ask your operator which artifact or gate
+they expect you to inspect before Ship.</p>
 <h3 id="do-i-need-to-understand-the-machine-underneath">Do I need to understand the machine underneath?</h3>
 <p>Not to start. The five-stage vocabulary is the everyday interface. When you
 want the deeper mapping, read

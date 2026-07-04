@@ -120,3 +120,10 @@ def test_docs_anchor_exists_and_links_to_current_docs():
         target = (_DOCS_ROOT / parsed.path).resolve()
         assert target.is_relative_to(_DOCS_ROOT.resolve())
         assert target.is_file(), f"docs link target does not exist: {href}"
+
+
+def test_site_index_uses_unified_ce_public_surface():
+    text = _SITE_INDEX.read_text(encoding="utf-8")
+
+    assert "cev3" not in text
+    assert "ce ask" not in text
