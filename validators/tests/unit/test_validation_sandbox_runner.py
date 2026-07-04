@@ -5,7 +5,6 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -20,11 +19,12 @@ from creator_engine_validator.validation_sandbox_receipt import (
 )
 from creator_engine_validator.validation_sandbox_runner import (
     TMPFS_TMPDIR,
+    ValidationSandboxRunnerError,
     run_validation_sandbox_in_container,
 )
 
 
-TREE_SHA = "1" * 40
+TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 POLICY_SHA = "a" * 64
 IMAGE_SHA = "sha256:" + "b" * 64
 
@@ -71,9 +71,23 @@ def _context(tmp_path: Path) -> ValidationSandboxContext:
     return ValidationSandboxContext.from_sandbox(tmp_path / "validation-context")
 
 
+def _git(cwd: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
 def _spec(tmp_path: Path, *, timeout_seconds: float = 11) -> ValidationSandboxSpec:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    _git(workspace, "init", "-q")
+    _git(workspace, "config", "user.email", "ce@example.invalid")
+    _git(workspace, "config", "user.name", "CE Test")
+    _git(workspace, "commit", "--allow-empty", "-q", "-m", "empty mounted tree")
     return ValidationSandboxSpec(
         context=_context(tmp_path),
         command=("ce", "validate-pr", "--offline"),
@@ -118,6 +132,38 @@ def _write_policy(tmp_path: Path, **overrides: Any) -> Path:
 
 def _issuer() -> ValidationSandboxReceiptIssuer:
     return ValidationSandboxReceiptIssuer(secret=b"test-secret", nonce_factory=lambda: "nonce-001")
+
+
+def _write_claim(
+    active_work_ledger_root: Path,
+    *,
+    claim_ref: str,
+    controller_id: str,
+    lane_id: str,
+) -> Path:
+    path = active_work_ledger_root / claim_ref
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "kind": "active-work-ledger-record",
+                "record_type": "claim",
+                "schema_version": "4",
+                "controller_id": controller_id,
+                "lane_id": lane_id,
+                "record_timestamp": "2026-07-04T12:00:00Z",
+                "worktree_path": "worktrees/example",
+                "envelope_ref": "none",
+                "lease_seconds": 3600,
+                "claimed_at": "2026-07-04T12:00:00Z",
+                "last_heartbeat_at": "2026-07-04T12:00:00Z",
+                "pane_label": "implementer",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_spec_maps_to_foreground_podman_argv_with_identical_readonly_mount_and_timeouts(tmp_path: Path):
@@ -175,6 +221,39 @@ def test_receipt_minted_only_after_observed_exit_and_binds_fields(tmp_path: Path
     assert run.receipt.egress_allowlist_applied == ()
     assert run.receipt.secret_allowlist_applied == ()
     assert run.receipt.returncode == 17
+
+
+def test_tree_sha_mismatch_refuses_before_receipt_mint_or_container_run(tmp_path: Path):
+    spec = _spec(tmp_path)
+    runner = FakeCommandRunner()
+    issuer = RecordingIssuer(_issuer())
+
+    with pytest.raises(ValidationSandboxRunnerError, match="tree_sha mismatch"):
+        run_validation_sandbox_in_container(
+            spec,
+            tree_sha="2" * 40,
+            policy_path=_write_policy(tmp_path),
+            command_runner=runner,
+            receipt_issuer=issuer,  # type: ignore[arg-type]
+        )
+
+    assert runner.calls == []
+    assert issuer.minted == 0
+
+
+def test_receipt_issuer_is_required_and_not_default_ephemeral(tmp_path: Path):
+    spec = _spec(tmp_path)
+    runner = FakeCommandRunner()
+
+    with pytest.raises(ValidationSandboxRunnerError, match="receipt_issuer is required"):
+        run_validation_sandbox_in_container(
+            spec,
+            tree_sha=TREE_SHA,
+            policy_path=_write_policy(tmp_path),
+            command_runner=runner,
+        )
+
+    assert runner.calls == []
 
 
 def test_receipt_hmac_verification_fails_after_any_field_tamper(tmp_path: Path):
@@ -236,11 +315,16 @@ def test_no_receipt_is_minted_on_timeout_and_host_timeout_is_propagated(tmp_path
 
 def test_side_effect_ledger_record_is_appended_with_validation_sandbox_kind(tmp_path: Path):
     spec = _spec(tmp_path)
-    calls: list[dict[str, Any]] = []
-
-    def fake_record(**kwargs: Any) -> SimpleNamespace:
-        calls.append(kwargs)
-        return SimpleNamespace(record_path=tmp_path / "ledger.json", record=kwargs)
+    controller_id = "hermes-primary"
+    lane_id = "pco-slice8b"
+    claim_ref = "claims/hermes-primary/pco-slice8b.yaml"
+    active_work_ledger_root = tmp_path / ".hermes" / "active-work-ledger"
+    _write_claim(
+        active_work_ledger_root,
+        claim_ref=claim_ref,
+        controller_id=controller_id,
+        lane_id=lane_id,
+    )
 
     run = run_validation_sandbox_in_container(
         spec,
@@ -248,24 +332,23 @@ def test_side_effect_ledger_record_is_appended_with_validation_sandbox_kind(tmp_
         policy_path=_write_policy(tmp_path),
         command_runner=FakeCommandRunner(),
         receipt_issuer=_issuer(),
-        ledger_recorder=fake_record,
-        controller_id="hermes-primary",
-        lane_id="pco-slice8b",
-        claim_ref="claims/hermes-primary/pco-slice8b.yaml",
+        controller_id=controller_id,
+        lane_id=lane_id,
+        claim_ref=claim_ref,
         repo_root=tmp_path,
         side_effect_ledger_root=tmp_path / "side-effect-ledger",
-        active_work_ledger_root=tmp_path / ".hermes" / "active-work-ledger",
+        active_work_ledger_root=active_work_ledger_root,
         now=datetime(2026, 7, 4, 12, 0, 0, tzinfo=UTC),
     )
 
-    assert run.side_effect_path == tmp_path / "ledger.json"
-    assert len(calls) == 1
-    call = calls[0]
-    assert call["effect_kind"] == "validation_sandbox_run"
-    assert call["effect_status"] == "succeeded"
-    assert call["actor_role"] == "verification"
-    assert call["subject_git_sha"] == TREE_SHA
-    assert call["details"] == {
+    assert run.side_effect_path is not None
+    assert run.side_effect_path.is_file()
+    assert run.side_effect_record is not None
+    assert run.side_effect_record["effect_kind"] == "validation_sandbox_run"
+    assert run.side_effect_record["effect_status"] == "succeeded"
+    assert run.side_effect_record["actor_role"] == "verification"
+    assert run.side_effect_record["subject_git_sha"] == TREE_SHA
+    assert run.side_effect_record["details"] == {
         "returncode": 0,
         "mount_count": 1,
         "egress_count": 0,

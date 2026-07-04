@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import math
+import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -93,6 +94,53 @@ def _workspace_mount(cwd: Path) -> dict[str, str]:
     if not cwd.is_absolute():
         raise ValidationSandboxRunnerError(f"validation sandbox cwd must be absolute: {cwd}")
     return {"path": str(cwd), "mode": "ro"}
+
+
+def _git_stdout(cwd: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise ValidationSandboxRunnerError(
+            f"cannot derive validation sandbox mounted tree identity with git {' '.join(args)}"
+            + (f": {detail}" if detail else "")
+        )
+    return completed.stdout.strip()
+
+
+def _derive_mounted_tree_sha(cwd: Path) -> str:
+    repo_root = Path(_git_stdout(cwd, "rev-parse", "--show-toplevel")).resolve()
+    mounted_root = cwd.resolve()
+    try:
+        rel = mounted_root.relative_to(repo_root)
+    except ValueError as exc:
+        raise ValidationSandboxRunnerError(
+            f"validation sandbox cwd {mounted_root} is not under git root {repo_root}"
+        ) from exc
+    pathspec = "." if rel == Path(".") else rel.as_posix()
+    status = _git_stdout(repo_root, "status", "--porcelain=v1", "--untracked-files=all", "--", pathspec)
+    if status:
+        raise ValidationSandboxRunnerError(
+            "validation sandbox mounted tree must be clean before receipt minting"
+        )
+    treeish = "HEAD^{tree}" if rel == Path(".") else f"HEAD:{rel.as_posix()}"
+    tree_sha = _git_stdout(repo_root, "rev-parse", treeish)
+    if not tree_sha or any(char not in "0123456789abcdef" for char in tree_sha):
+        raise ValidationSandboxRunnerError(f"derived mounted tree identity is not lowercase hex: {tree_sha!r}")
+    return tree_sha
+
+
+def _verify_tree_sha(cwd: Path, tree_sha: str) -> str:
+    derived = _derive_mounted_tree_sha(cwd)
+    if tree_sha != derived:
+        raise ValidationSandboxRunnerError(
+            f"validation sandbox tree_sha mismatch: caller supplied {tree_sha}, mounted tree is {derived}"
+        )
+    return derived
 
 
 def _effect_id(receipt: ValidationSandboxReceipt) -> str:
@@ -199,10 +247,16 @@ def run_validation_sandbox_in_container(
     if not isinstance(spec, ValidationSandboxSpec):
         raise TypeError("run_validation_sandbox_in_container requires ValidationSandboxSpec")
     require_no_credential_env(spec.env, context_name="ValidationSandboxSpec")
+    if receipt_issuer is None:
+        raise ValidationSandboxRunnerError(
+            "validation sandbox receipt_issuer is required; source the signing secret outside "
+            "ValidationSandboxSpec.env and pass ValidationSandboxReceiptIssuer(secret=...)"
+        )
     policy = _load_verification_policy(policy_path)
     image_ref = policy["image_ref"]
     timeout_seconds = int(math.ceil(spec.timeout_seconds))
     mount = _workspace_mount(spec.cwd)
+    mounted_tree_sha = _verify_tree_sha(spec.cwd, tree_sha)
     env_items = tuple(sorted((str(key), str(value)) for key, value in spec.env.items()))
 
     start = time.monotonic()
@@ -230,9 +284,8 @@ def run_validation_sandbox_in_container(
     if run_result.timed_out:
         return ValidationSandboxContainerRun(result=result, receipt=None)
 
-    issuer = receipt_issuer or ValidationSandboxReceiptIssuer()
-    receipt = issuer.mint(
-        tree_sha=tree_sha,
+    receipt = receipt_issuer.mint(
+        tree_sha=mounted_tree_sha,
         command=spec.command,
         policy_sha=policy["policy_sha"],
         image_sha=image_ref["sha"],
@@ -240,6 +293,7 @@ def run_validation_sandbox_in_container(
         egress_allowlist_applied=(),
         secret_allowlist_applied=(),
         returncode=run_result.returncode,
+        issued_at=now,
     )
     side_effect_path, side_effect_record = _maybe_record_ledger(
         receipt=receipt,

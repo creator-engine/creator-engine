@@ -2204,7 +2204,7 @@ Properties:
 | `lane_id` | string | yes | pattern `^[a-z][a-z0-9-]{2,63}$` |  |
 | `claim_ref` | string | yes | pattern `^[A-Za-z0-9_./-]+$`<br>minLength `1` |  |
 | `effect_id` | string | yes | pattern `^[a-z][a-z0-9-]{2,127}$` |  |
-| `effect_kind` | string | yes | enum `github_mutation`, `git_mutation`, `tracked_file_change`, `external_tracker_mutation`, `runtime_process_action`, `container_action`, `provider_mcp_plugin_config_change`, `network_ci_deploy_action`, `credential_secret_adjacent_event` |  |
+| `effect_kind` | string | yes | enum `github_mutation`, `git_mutation`, `tracked_file_change`, `validation_sandbox_run`, `external_tracker_mutation`, `runtime_process_action`, `container_action`, `provider_mcp_plugin_config_change`, `network_ci_deploy_action`, `credential_secret_adjacent_event` |  |
 | `effect_status` | string | yes | enum `requested`, `started`, `succeeded`, `failed`, `cancelled`, `observed`, `unknown` |  |
 | `occurred_at` | $ref #/$defs/timestamp | yes |  |  |
 | `record_timestamp` | $ref #/$defs/timestamp | yes |  |  |

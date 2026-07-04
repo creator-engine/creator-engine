@@ -709,7 +709,7 @@ Options:
 | `--lane-id` | yes |  |  |
 | `--claim-ref` | yes |  | claim path relative to --active-work-ledger-root |
 | `--effect-id` | yes |  |  |
-| `--effect-kind` | yes | `container_action, credential_secret_adjacent_event, external_tracker_mutation, git_mutation, github_mutation, network_ci_deploy_action, provider_mcp_plugin_config_change, runtime_process_action, tracked_file_change` |  |
+| `--effect-kind` | yes | `container_action, credential_secret_adjacent_event, external_tracker_mutation, git_mutation, github_mutation, network_ci_deploy_action, provider_mcp_plugin_config_change, runtime_process_action, tracked_file_change, validation_sandbox_run` |  |
 | `--effect-status` | yes | `cancelled, failed, observed, requested, started, succeeded, unknown` |  |
 | `--summary` | yes |  |  |
 | `--occurred-at` | yes |  | ISO-8601 UTC timestamp or source-controlled ref |
