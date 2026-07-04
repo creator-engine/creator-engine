@@ -26,6 +26,7 @@ Optional container variables:
   CE_DAEMON_CONTAINER_LEASE_ROOT   explicit in-container lease root; default maps host lease root into /ce/state
   CE_DAEMON_TOKEN_FILE             optional host token file mounted read-only
   CE_DAEMON_TOKEN_CONTAINER_PATH   default /run/creator-engine/daemon-token
+  CE_CONVEYOR_DAEMON_*             conveyor-daemon config forwarded when present
 
 No secret values are baked into the image or this script. Host bootstrap must
 supply secrets through its approved runtime environment or token file path.
@@ -156,10 +157,27 @@ main() {
       daemon_cmd=(bash "$repo_container/deploy/queue-daemon/launch-queue-daemon.sh" "$@")
       ;;
     conveyor-daemon)
-      if [[ $# -lt 1 ]]; then
-        die "conveyor-daemon requires an explicit in-container command until the conveyor CLI grows a daemon entrypoint"
+      container_args+=(--env "CE_CONVEYOR_DAEMON_REPO_ROOT=${CE_CONVEYOR_DAEMON_REPO_ROOT:-$repo_container}")
+      container_args+=(--env "CE_CONVEYOR_DAEMON_RUNTIME_ROOT=${CE_CONVEYOR_DAEMON_RUNTIME_ROOT:-$state_container/conveyor-daemon/runtime}")
+      container_args+=(--env "CE_CONVEYOR_DAEMON_DISCOVERY_STATE=${CE_CONVEYOR_DAEMON_DISCOVERY_STATE:-$state_container/conveyor-daemon/discovery-state.json}")
+      container_args+=(--env "CE_CONVEYOR_DAEMON_LEDGER_PATH=${CE_CONVEYOR_DAEMON_LEDGER_PATH:-$state_container/conveyor-daemon/conveyor-daemon-ledger.jsonl}")
+      container_args+=(--env "CE_CONVEYOR_DAEMON_VALIDATION_LEDGER_ROOT=${CE_CONVEYOR_DAEMON_VALIDATION_LEDGER_ROOT:-$state_container/conveyor-daemon/side-effect-ledger}")
+      container_args+=(--env "CE_CONVEYOR_DAEMON_ACTIVE_WORK_LEDGER_ROOT=${CE_CONVEYOR_DAEMON_ACTIVE_WORK_LEDGER_ROOT:-$state_container/conveyor-daemon/active-work-ledger}")
+      for env_name in \
+        CE_CONVEYOR_DAEMON_SEAT_PROBES \
+        CE_CONVEYOR_DAEMON_SIGNING_SECRET \
+        CE_CONVEYOR_DAEMON_INTERVAL_SECONDS \
+        CE_CONVEYOR_DAEMON_ITERATIONS
+      do
+        add_env_if_present "$env_name"
+      done
+      if [[ -n "${CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE:-}" ]]; then
+        [[ -f "$CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE" ]] || die "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE does not name a file: $CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE"
+        local conveyor_secret_container="/run/creator-engine/conveyor-signing-secret"
+        container_args+=(--volume "$CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE:$conveyor_secret_container:ro")
+        container_args+=(--env "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE=$conveyor_secret_container")
       fi
-      daemon_cmd=("$@")
+      daemon_cmd=(bash "$repo_container/deploy/conveyor-daemon/launch-conveyor-daemon.sh" "$@")
       ;;
     *)
       usage >&2
