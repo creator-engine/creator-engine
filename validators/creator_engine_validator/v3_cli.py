@@ -57,6 +57,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -89,6 +90,7 @@ from . import (
     work_claims,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
+from . import daemon_lease
 from .forge import (
     RulesetBypassActor,
     RulesetPolicy,
@@ -4650,6 +4652,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="durable approval wall state file (default: <root>/approval-capability-wall/state.json)",
     )
     p_queue_daemon.add_argument(
+        "--daemon-lease-root",
+        default=None,
+        help=(
+            "queue daemon singleton lease directory "
+            "(default: CE_DAEMON_LEASE_ROOT or <approval-wall-state-dir>/queue-daemon-lease)"
+        ),
+    )
+    p_queue_daemon.add_argument(
         "--approval-wall-policy-sha",
         default=None,
         help="optional approval capability policy sha/id required in markers",
@@ -4794,7 +4804,9 @@ def _cmd_controller_inbox(args: argparse.Namespace) -> int:
 
 def _cmd_queue_daemon(args: argparse.Namespace) -> int:
     """Autonomous Integrator merge-queue daemon."""
+    lease: daemon_lease.DaemonLease | None = None
     try:
+        lease = _acquire_queue_daemon_lease(args)
         token = integrator_belt.token_from_env(args.token_env)
         logger = integrator_belt.JsonLineLogger(sys.stderr)
         wall = _approval_wall_runtime_from_args(args)
@@ -4813,11 +4825,17 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             interval_seconds=args.interval,
             dry_run=bool(args.dry_run),
             approval_wall=wall,
-            log_sink=logger,
+            log_sink=_queue_daemon_lease_log_sink(logger, lease),
             authorized_reviewers=_comma_values(getattr(args, "authorized_reviewers", ()) or ()),
             approval_marker_issuer=approval_marker_issuer,
             approval_settle_seconds=float(getattr(args, "approval_settle_seconds", 0.0)),
         )
+    except daemon_lease.DaemonLeaseHeld as exc:
+        print(_queue_daemon_lease_refusal(args, stale=False, detail=str(exc)), file=sys.stderr)
+        return 73
+    except daemon_lease.DaemonLeaseStale as exc:
+        print(_queue_daemon_lease_refusal(args, stale=True, detail=str(exc)), file=sys.stderr)
+        return 73
     except KeyboardInterrupt:  # pragma: no cover - operator stop for loop mode
         print(f"{CE_CMD} queue-daemon: stopped", file=sys.stderr)
         return 130
@@ -4827,6 +4845,9 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
     except Exception as exc:  # pragma: no cover - defensive fail-closed
         print(f"ERROR: {CE_CMD} queue-daemon failed closed: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if lease is not None:
+            lease.release()
     if getattr(args, "json_output", False):
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     else:
@@ -4836,6 +4857,59 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             f"defer={result.defer_count} failed={result.failed_count}"
         )
     return 0 if result.failed_count == 0 else 1
+
+
+def _queue_daemon_lease_root_from_args(args: argparse.Namespace) -> Path:
+    raw = getattr(args, "daemon_lease_root", None) or os.environ.get("CE_DAEMON_LEASE_ROOT")
+    if raw:
+        return Path(raw)
+    return _approval_wall_state_path_from_args(args).parent / "queue-daemon-lease"
+
+
+def _queue_daemon_holder_id() -> str:
+    return f"queue-daemon:{socket.gethostname()}:{os.getpid()}"
+
+
+def _acquire_queue_daemon_lease(args: argparse.Namespace) -> daemon_lease.DaemonLease:
+    lease_root = _queue_daemon_lease_root_from_args(args)
+    lease_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lease_root.chmod(0o700)
+    return daemon_lease.acquire(
+        "queue-daemon",
+        _queue_daemon_holder_id(),
+        state_root=lease_root,
+        allow_takeover=False,
+    )
+
+
+def _queue_daemon_lease_payload(args: argparse.Namespace) -> dict[str, Any]:
+    lease_path = _queue_daemon_lease_root_from_args(args) / "queue-daemon.lease"
+    try:
+        data = json.loads(lease_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _queue_daemon_lease_refusal(args: argparse.Namespace, *, stale: bool, detail: str) -> str:
+    lease_path = _queue_daemon_lease_root_from_args(args) / "queue-daemon.lease"
+    payload = _queue_daemon_lease_payload(args)
+    holder = str(payload.get("holder_id") or "unknown")
+    pid = str(payload.get("pid") or "unknown")
+    suffix = " verify-dead-then-remove" if stale else ""
+    return (
+        f"ERROR: {CE_CMD} queue-daemon singleton lease refused: "
+        f"lease_path={lease_path} holder={holder} pid={pid} detail={detail}{suffix}"
+    )
+
+
+def _queue_daemon_lease_log_sink(log_sink: Any, lease: daemon_lease.DaemonLease):
+    def emit(record: Mapping[str, Any]) -> None:
+        if record.get("action") == "daemon_pass_start":
+            lease.heartbeat()
+        log_sink(record)
+
+    return emit
 
 
 def _comma_values(values: Sequence[str]) -> tuple[str, ...]:

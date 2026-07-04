@@ -91,6 +91,14 @@ container runtime own the daemon process.
    The `CE_DAEMON_UNCONTAINED=1` rollback path still acquires the same lease; it
    is an old launch method, not permission to run a duplicate live daemon.
 
+   Lease recovery is manual and fail-closed. If the queue daemon refuses to
+   start because `queue-daemon.lease` is already present, verify no launcher or
+   daemon process is still running for that lease before removing the stale
+   lease file. If only `queue-daemon.lease.op.lock` remains after a host crash,
+   verify no lease operation is still active, then remove only the orphaned
+   operation-lock file. Never remove a live lease to start a second queue
+   daemon.
+
 4. Verify and start:
 
    ```bash

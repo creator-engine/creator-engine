@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from creator_engine_validator import ce_cli, v3_cli
+from creator_engine_validator import ce_cli, daemon_lease, v3_cli
 from creator_engine_validator.search_rate_limiter import SearchRateLimiter
 from creator_engine_validator.forge.approval_capability import (
     ApprovalCapabilityClaims,
@@ -2026,6 +2026,151 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys, tmp_path: Path):
     assert captured["approval_wall"].armed is True
     assert load_approval_wall_state(tmp_path / "approval-capability-wall" / "state.json").armed is True
     assert '"enqueue_count": 0' in capsys.readouterr().out
+
+
+def test_ce_queue_daemon_refuses_second_singleton_lease_before_first_pass(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    held = daemon_lease.acquire("queue-daemon", "existing-holder", state_root=lease_root)
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "token_from_env",
+        lambda _name: (_ for _ in ()).throw(AssertionError("token must not be read")),
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    try:
+        ret = v3_cli.main([
+            "queue-daemon",
+            "--repo", REPO,
+            "--once",
+            "--daemon-lease-root", str(lease_root),
+            "--root", str(tmp_path),
+        ])
+    finally:
+        held.release()
+
+    assert ret == 73
+    err = capsys.readouterr().err
+    assert "queue-daemon singleton lease refused" in err
+    assert f"lease_path={lease_root / 'queue-daemon.lease'}" in err
+    assert "holder=existing-holder" in err
+    assert "pid=" in err
+
+
+def test_ce_queue_daemon_refuses_stale_singleton_lease_without_takeover(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    (lease_root / "queue-daemon.lease").write_text(
+        json.dumps(
+            {
+                "holder_id": "old-holder",
+                "pid": 999999999,
+                "host": v3_cli.socket.gethostname(),
+                "acquired_at": 1.0,
+                "heartbeat_at": 1.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    assert ret == 73
+    err = capsys.readouterr().err
+    assert "queue-daemon singleton lease refused" in err
+    assert f"lease_path={lease_root / 'queue-daemon.lease'}" in err
+    assert "holder=old-holder" in err
+    assert "pid=999999999" in err
+    assert "verify-dead-then-remove" in err
+
+
+def test_ce_queue_daemon_heartbeats_each_pass_and_releases_cleanly(
+    monkeypatch,
+    tmp_path: Path,
+):
+    class FakeLease:
+        def __init__(self):
+            self.heartbeats = 0
+            self.released = False
+
+        def heartbeat(self):
+            self.heartbeats += 1
+
+        def release(self):
+            self.released = True
+
+    lease = FakeLease()
+    acquire_calls = []
+    flag_lease_root = tmp_path / "flag-leases"
+    monkeypatch.setenv("CE_DAEMON_LEASE_ROOT", str(tmp_path / "env-leases"))
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "daemon-secret")
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+
+    def fake_acquire(*args, **kwargs):
+        acquire_calls.append((args, kwargs))
+        return lease
+
+    def fake_loop(**kwargs):
+        kwargs["log_sink"]({"action": "daemon_pass_start", "index": 1})
+        kwargs["log_sink"]({"action": "daemon_pass_complete", "index": 1})
+        kwargs["log_sink"]({"action": "daemon_pass_start", "index": 2})
+        return belt.DaemonLoopResult(
+            ticks=(
+                belt.DaemonLoopTick(
+                    index=1,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+                belt.DaemonLoopTick(
+                    index=2,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(v3_cli.daemon_lease, "acquire", fake_acquire)
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--daemon-lease-root", str(flag_lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    assert ret == 0
+    assert acquire_calls[0][0][0] == "queue-daemon"
+    assert acquire_calls[0][1]["state_root"] == flag_lease_root
+    assert acquire_calls[0][1]["allow_takeover"] is False
+    assert lease.heartbeats == 2
+    assert lease.released is True
 
 
 def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
