@@ -289,7 +289,7 @@ in the Completion Report and the PR history.
 | The front door and big picture | [`welcome.md`](./welcome.md) |
 | The plain-language vocabulary tour | [`understanding-ce.md`](./understanding-ce.md) |
 | The Solo + Dev hands-on path | [`solo-dev-onboarding.md`](./solo-dev-onboarding.md) |
-| The Solo + Dev legacy step-by-step (speckit) | [`getting-started-step-by-step.md`](./getting-started-step-by-step.md) |
+| The complete start-to-ship walkthrough | [`complete-walkthrough.md`](./complete-walkthrough.md) |
 | A worked SCRUM-to-CE mapping | [`agile-to-ce-sdlc.md`](./agile-to-ce-sdlc.md) |
 | The full install-to-ship pilot runbook | [`pilot-runbook.md`](./pilot-runbook.md) |
 | Contribute to CE itself | [`contributing-to-ce.md`](./contributing-to-ce.md) |

@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../assets/ce-favicon-v2.svg"/>
+<title>Complete Walkthrough &#x2014; Creator Engine</title>
+<style>
+  :root{
+    --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
+    --violet-soft:rgba(160,107,255,.16);
+    --ink:#0C0B0A;--panel:#16140F;--panel-2:#191712;--line:rgba(255,255,255,.10);
+    --paper:#FAF8F1;--muted:#9A968C;--moss:#7FB069;--oxide:#E08B4C;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--ink);color:var(--paper);font-family:var(--sans);
+       line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  .wrap-full{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  /* Nav */
+  .nav{display:flex;justify-content:space-between;align-items:center;
+       padding:22px 28px;max-width:1180px;margin:0 auto}
+  .logo{display:flex;align-items:center;gap:11px;font-family:var(--mono);
+        font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+        text-decoration:none;color:var(--paper)}
+  .logo-mark{width:30px;height:30px;display:block}
+  .nav a{display:inline-flex;align-items:center;color:var(--muted);
+         text-decoration:none;font-size:13px;margin-left:26px;transition:color .15s}
+  .nav a:hover{color:var(--paper)}
+  .nav-ico{width:14px;height:14px;margin-right:6px;flex:none}
+
+  /* Page header */
+  .page-header{padding:40px 0 32px;border-bottom:1px solid var(--line)}
+  .page-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+                text-transform:uppercase;color:var(--violet);display:block;margin-bottom:12px}
+  .page-header h1{font-size:clamp(26px,5vw,44px);font-weight:700;letter-spacing:-.02em;
+                  line-height:1.08;color:var(--paper)}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+             font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+             color:var(--muted);text-decoration:none;margin-bottom:20px;
+             transition:color .15s}
+  .back-link:hover{color:var(--violet)}
+  .back-link svg{width:12px;height:12px}
+
+  /* Article body */
+  .article{padding:44px 0 80px}
+  .article h1{font-size:clamp(22px,4vw,36px);font-weight:700;letter-spacing:-.02em;
+              line-height:1.1;margin:36px 0 14px;color:var(--paper)}
+  .article h2{font-size:clamp(18px,3vw,26px);font-weight:700;letter-spacing:-.01em;
+              line-height:1.12;margin:36px 0 12px;color:var(--paper);
+              padding-top:8px;border-top:1px solid var(--line)}
+  .article h3{font-size:clamp(15px,2.4vw,20px);font-weight:700;margin:28px 0 10px;
+              color:var(--paper)}
+  .article h4{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--violet-bright)}
+  .article h5,.article h6{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--muted)}
+  .article p{margin:0 0 18px;font-size:15.5px;color:#d8d4cc;line-height:1.65}
+  .article a{color:var(--violet);text-decoration:none;
+             border-bottom:1px solid rgba(160,107,255,.3);
+             transition:color .15s,border-color .15s}
+  .article a:hover{color:var(--violet-bright);border-bottom-color:var(--violet)}
+  .article strong{color:var(--paper);font-weight:700}
+  .article em{color:#c8c2b4;font-style:italic}
+  .article code{font-family:var(--mono);font-size:13px;background:var(--panel);
+                border:1px solid var(--line);border-radius:4px;padding:2px 6px;
+                color:var(--violet-bright)}
+  .article pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+               padding:18px 20px;overflow-x:auto;margin:0 0 24px}
+  .article pre code{background:transparent;border:none;padding:0;
+                    font-size:13px;color:#d0c9be;line-height:1.6}
+  .article hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .article ul,.article ol{margin:0 0 18px;padding-left:22px}
+  .article li{margin-bottom:8px;font-size:15.5px;color:#d8d4cc;line-height:1.6}
+  .article li code{font-size:12.5px}
+  .article blockquote{border-left:3px solid var(--violet);margin:0 0 18px;
+                      padding:12px 18px;background:rgba(160,107,255,.06);
+                      border-radius:0 8px 8px 0}
+  .article blockquote p{margin:0;color:var(--muted)}
+  .article table{width:100%;border-collapse:collapse;margin:0 0 24px;
+                 font-size:14px;overflow-x:auto;display:block}
+  .article th{background:var(--panel);color:var(--paper);font-weight:700;
+              text-align:left;padding:10px 14px;border:1px solid var(--line);
+              font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+              text-transform:uppercase}
+  .article td{padding:10px 14px;border:1px solid var(--line);
+              color:#d8d4cc;vertical-align:top}
+  .article tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+  footer{border-top:1px solid var(--line);padding:30px 0;
+         text-align:center;color:var(--muted);font-size:13px}
+  @media (max-width:640px){
+    .nav{padding:16px 18px}
+    .nav a{margin-left:16px}
+    .article{padding:28px 0 60px}
+  }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div>
+      <a class="logo" href="../index.html">
+        <img class="logo-mark" src="../assets/ce-logo-v2-weldarm-transparent.svg" alt="Creator Engine logo" width="30" height="30"/>
+        Creator&nbsp;Engine
+      </a>
+    </div>
+    <div>
+      <a href="../index.html#install">Install</a>
+      <a href="../index.html#scope">How it works</a>
+      <a href="../index.html#docs"><svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 1.7h5L13 5v9.3H4z" stroke-linejoin="round"/><path d="M9 1.7V5h4M6 8.2h5M6 11h5" stroke-linecap="round"/></svg>Docs</a>
+      <a href="https://github.com/creator-engine/creator-engine"><svg class="nav-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.9c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </nav>
+  <div class="wrap">
+    <div class="page-header">
+      <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
+      <span class="page-eyebrow">Guide</span>
+      <h1>Complete Walkthrough</h1>
+    </div>
+    <article class="article">
+<h1 id="complete-walkthrough">Complete Walkthrough</h1>
+<p><em>This guide shows the whole Creator Engine loop in one continuous path: install,
+onboard, Frame a real ticket, Shape it into a Scope, Build it, Review it, and
+Ship it. If you only want the vocabulary tour, read
+<a href="understanding-ce.html"><code>understanding-ce.md</code></a>. If you want the full pilot
+operator checklist, read <a href="pilot-runbook.html"><code>pilot-runbook.md</code></a>.</em></p>
+<h2 id="1-the-promise">1. The Promise</h2>
+<p>Creator Engine runs your own coding agent under governance. You keep using
+Claude Code, Codex, or the agent you already know. CE adds a visible workflow
+around it so work is bounded before it starts, checked after it runs, and gated
+before it lands.</p>
+<p>The useful mental model is simple:</p>
+<blockquote>
+<p>You describe the change. CE turns it into a small bet. Your agent builds
+inside that bet. The result is graded against the bet, not against the agent's
+confidence.</p>
+</blockquote>
+<p>If you get stuck at any point, use <code>ce ask</code>. Treat it like the help hatch: ask
+what a stage means, why a gate is blocked, how to inspect an artifact, or what
+command should come next.</p>
+<hr />
+<h2 id="2-get-running">2. Get Running</h2>
+<p>There are two supported rails. They end in the same place: a governed agent
+session on your machine.</p>
+<table>
+<thead>
+<tr>
+<th>Rail</th>
+<th>Use it when</th>
+<th>Start here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Fast local install</strong></td>
+<td>You want the shortest path from terminal to CE</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a></td>
+</tr>
+<tr>
+<td><strong>Agent-native install</strong></td>
+<td>You want your coding agent to fetch and follow the signed install spec</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/llms-install.md"><code>../llms-install.md</code></a></td>
+</tr>
+</tbody>
+</table>
+<p>The fast path is:</p>
+<pre><code class="language-bash">curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
+ce onboard
+</code></pre>
+<p><code>ce onboard</code> checks the host, verifies the installed CE surface, initializes
+local state, and drops you into a governed agent pane. For daily work after
+that, use:</p>
+<pre><code class="language-bash">ce launch
+</code></pre>
+<p>That pane is still your normal coding agent. CE is not a separate dashboard or
+editor. It is the wrapper around the session: it tracks the work, records the
+evidence, and holds privileged actions until the right human decision is made.</p>
+<hr />
+<h2 id="3-meet-the-loop">3. Meet The Loop</h2>
+<p>CE names the work loop with five words. They are the user-facing skin over a
+more precise machine, and they match the canon in
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>stage-vocabulary.md</code></a>.</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Plain meaning</th>
+<th>What CE is protecting</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Frame</strong></td>
+<td>Understand the problem and why it matters</td>
+<td>The work is not tracked until the problem is clear</td>
+</tr>
+<tr>
+<td><strong>Shape</strong></td>
+<td>Turn the problem into a ratifiable Scope</td>
+<td>The bet has Goal, Done-when, Budget, Change type, and Ready</td>
+</tr>
+<tr>
+<td><strong>Build</strong></td>
+<td>Let the agent execute the ratified Scope</td>
+<td>The run stays inside the approved envelope</td>
+</tr>
+<tr>
+<td><strong>Review</strong></td>
+<td>Grade the result against Done-when</td>
+<td>Evidence matters more than transcript confidence</td>
+</tr>
+<tr>
+<td><strong>Ship</strong></td>
+<td>Land the governed outcome</td>
+<td>Merge, no-change, or delivered research happens through the gate</td>
+</tr>
+</tbody>
+</table>
+<p>If you know BMAD, the rough bridge is:</p>
+<table>
+<thead>
+<tr>
+<th>BMAD shape</th>
+<th>CE stage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Analysis</td>
+<td>Frame</td>
+</tr>
+<tr>
+<td>Planning + solutioning</td>
+<td>Shape</td>
+</tr>
+<tr>
+<td>Implementation</td>
+<td>Build</td>
+</tr>
+<tr>
+<td>Review and release tail</td>
+<td>Review + Ship</td>
+</tr>
+</tbody>
+</table>
+<p>The extra CE tail is deliberate. Review and Ship are first-class because the
+grader lives outside the agent, and shipping is a governed outcome, not the
+agent declaring itself done.</p>
+<hr />
+<h2 id="4-the-worked-example">4. The Worked Example</h2>
+<p>We will use Dev mode: you drive the pipeline explicitly with <code>ce</code> commands from
+inside the governed pane. In CEO mode, you can ask the agent to drive more of
+the mechanics for you, but the same human boundaries remain: you ratify the
+Scope, judge the artifacts, and authorize privileged gates.</p>
+<p>The synthesized ticket:</p>
+<blockquote>
+<p>Add a lightweight empty-state message to the project activity page so a new
+repository does not show a blank panel before its first run.</p>
+</blockquote>
+<h3 id="frame">Frame</h3>
+<p><strong>What you do.</strong> You tell the agent what feels wrong and what outcome would make
+it better:</p>
+<pre><code class="language-text">The activity page is blank before the first governed run. Frame a small docs/UI
+ticket for adding an empty state. Keep it narrow: copy only, no backend changes.
+</code></pre>
+<p>You can also ask <code>ce ask &quot;what should I decide before shaping this?&quot;</code> if the
+problem still feels fuzzy.</p>
+<p><strong>What CE does.</strong> CE keeps this as conversation until there is a real unit of
+work. It does not create a Scope just because you chatted. When the agent has
+enough context, it summarizes the candidate work and asks whether to Shape it.</p>
+<p><strong>What you see.</strong></p>
+<pre><code class="language-text">◆ CE · Frame
+Problem: activity page is blank before first run.
+Likely change: add empty-state copy in the existing activity view.
+Boundary: no backend data model or API changes.
+Next: Shape a Scope? › yes
+</code></pre>
+<p>Frame ends when the problem is bounded enough to become a bet.</p>
+<h3 id="shape">Shape</h3>
+<p><strong>What you do.</strong> You create the Scope: the Goal, the Done-when checks, the
+Budget, and the Change type.</p>
+<pre><code class="language-bash">ce scope activity-empty-state \
+  --goal &quot;Show a helpful empty state on the activity page before the first run&quot; \
+  --done-when &quot;A new project activity page shows empty-state copy instead of a blank panel&quot; \
+  --done-when &quot;The copy points users back to launching their first governed run&quot; \
+  --done-when &quot;Existing populated activity pages are unchanged&quot; \
+  --budget S \
+  --change-type code
+</code></pre>
+<p>Budget is an effort cap you commit to. It is not a clock estimate, and it is not
+chosen by the agent.</p>
+<p><strong>What CE does.</strong> CE checks whether the Scope is Ready. If the Scope is vague,
+missing a testable Done-when, or under-declares risk, it tells you before the
+bet is placed. You can run a sharpening pass:</p>
+<pre><code class="language-bash">ce shape activity-empty-state
+</code></pre>
+<p><strong>What you see.</strong></p>
+<pre><code class="language-text">◆ CE · Shape → &quot;activity-empty-state&quot;
+Goal        Show a helpful empty state on the activity page before the first run
+Done-when   3 checks
+Budget      S
+Change type code
+Ready       ✓
+
+Front gate: ratify this Scope before Build.
+</code></pre>
+<p>Then you place the bet:</p>
+<pre><code class="language-bash">ce ratify activity-empty-state
+</code></pre>
+<p>Ratification is the human &quot;yes&quot;: this is the work, this is the cap, and this is
+the risk tier.</p>
+<h3 id="build">Build</h3>
+<p><strong>What you do.</strong> You dispatch the governed run:</p>
+<pre><code class="language-bash">ce drive activity-empty-state --spawn
+</code></pre>
+<p>Then you watch for important prompts. Most mechanics belong to the agent and CE,
+not to you.</p>
+<p><strong>What CE does.</strong> CE starts a boxed run against the ratified Scope. The agent
+reads the codebase, edits inside the intended path set, runs the relevant
+checks, and opens a pull request or reports why there is no change to make. If
+the agent tries to step outside the envelope, CE refuses and explains the gate.</p>
+<p><strong>What you see.</strong></p>
+<pre><code class="language-text">◆ CE · Build
+Scope       activity-empty-state
+Run         activity-empty-state-1
+Envelope    Change type code · Budget S · Done-when 3
+
+Agent plan:
+1. Locate activity page rendering.
+2. Add empty-state copy when the activity list is empty.
+3. Preserve populated-state behavior.
+4. Run focused tests and lint.
+</code></pre>
+<p>If the agent needs a privileged action, you see a refusal or an approval prompt
+through the agent's normal terminal UI. When in doubt, ask:</p>
+<pre><code class="language-bash">ce ask &quot;why is this gate blocked?&quot;
+</code></pre>
+<h3 id="review">Review</h3>
+<p><strong>What you do.</strong> You inspect the artifacts, not the transcript. Start with the
+Completion Report and the PR:</p>
+<pre><code class="language-bash">ce report activity-empty-state --run-id activity-empty-state-1
+ce artifacts activity-empty-state --run-id activity-empty-state-1
+</code></pre>
+<p>Then read the diff and evidence against the Done-when checks you wrote.</p>
+<p><strong>What CE does.</strong> CE grades the run against the Scope. It reports whether the
+Done-when checks are met, whether checks passed, whether the diff stayed in
+scope, and what remains for Ship.</p>
+<p><strong>What you see.</strong></p>
+<pre><code class="language-text">◆ CE Completion Report
+Outcome   PR opened → #24
+Verdict   Done-when 3/3 met · tests green · in scope ✓ · within Budget S
+Next      → Review PR #24  (Change type code → human review before merge)
+
+Artifacts
+- Pull request: #24
+- Diff summary: activity page empty-state copy
+- Checks: focused UI test, lint
+- Scope: activity-empty-state
+</code></pre>
+<p>Review is where CE differs from a plain coding-agent run. The agent does not get
+to mark itself done because it sounded confident. The external grade is based on
+the Scope you ratified and the evidence the run produced.</p>
+<h3 id="ship">Ship</h3>
+<p><strong>What you do.</strong> If the PR satisfies the Scope and the required review/checks
+are green, you authorize the merge gate:</p>
+<pre><code class="language-bash">ce merge activity-empty-state --run activity-empty-state-1 --apply
+</code></pre>
+<p>If the result is not good enough, you send it back through Review with concrete
+feedback tied to the Done-when checks.</p>
+<p><strong>What CE does.</strong> CE verifies that the PR still matches the ratified envelope,
+that the required checks and review gate are satisfied, and that the change type
+is allowed to ship through this path. Then it records the terminal outcome.</p>
+<p><strong>What you see.</strong></p>
+<pre><code class="language-text">◆ CE · Ship
+Outcome   Merged
+Verdict   Scope satisfied · checks green · review complete · gate opened
+Next      → Done
+</code></pre>
+<p>Ship can also mean &quot;research delivered&quot; or &quot;no change needed&quot; when that is the
+ratified outcome. It is not only a merged PR.</p>
+<hr />
+<h2 id="5-the-daily-loop">5. The Daily Loop</h2>
+<p>After setup, most days are smaller than the full walkthrough:</p>
+<ol>
+<li>Launch your governed pane with <code>ce launch</code>.</li>
+<li>Talk to the agent about the next problem.</li>
+<li>Let CE help Frame and Shape a small Scope.</li>
+<li>Ratify the Scope when the Goal, Done-when, Budget, and Change type are right.</li>
+<li>Let the agent Build inside the envelope.</li>
+<li>Review the Completion Report and PR evidence.</li>
+<li>Ship through the gate, or send the work back with specific feedback.</li>
+</ol>
+<p>Use one branch per Scope unless your team's policy says otherwise. If a request
+starts to sprawl, split it before ratification. CE works best when the bet is
+small enough that Review can be honest.</p>
+<p><code>ce ask</code> is useful throughout the loop:</p>
+<pre><code class="language-bash">ce ask &quot;what stage am I in?&quot;
+ce ask &quot;show me the Scope fields for this run&quot;
+ce ask &quot;which artifact should I inspect before merge?&quot;
+</code></pre>
+<hr />
+<h2 id="6-your-irreducible-gestures">6. Your Irreducible Gestures</h2>
+<p>CE automates a lot, but it intentionally leaves a few decisions with you.</p>
+<table>
+<thead>
+<tr>
+<th>You decide</th>
+<th>CE and the agent handle</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What problem is worth doing</td>
+<td>Reading context and proposing a bounded Scope</td>
+</tr>
+<tr>
+<td>The Budget on the Scope</td>
+<td>Tracking run spend against that cap</td>
+</tr>
+<tr>
+<td>Whether the Scope is ratified</td>
+<td>Running only after the front gate is open</td>
+</tr>
+<tr>
+<td>Whether risk increases are acceptable</td>
+<td>Making changes safer inside the envelope</td>
+</tr>
+<tr>
+<td>Whether evidence satisfies Done-when</td>
+<td>Producing the report, artifacts, and PR</td>
+</tr>
+<tr>
+<td>Whether the merge gate opens</td>
+<td>Verifying checks, review, scope, and policy</td>
+</tr>
+</tbody>
+</table>
+<p>Those gestures are the point. CE gives the agent room to work without giving it
+authority to decide what should be true.</p>
+<hr />
+<h2 id="7-common-questions">7. Common Questions</h2>
+<h3 id="why-no-time-estimates">Why no time estimates?</h3>
+<p>Because CE Budgets are effort caps, not clock predictions. A Scope's Budget says
+how much appetite you are willing to commit before the work should stop, split,
+or come back for a new decision. In lower-level artifacts you may see this as
+work class or appetite; the meaning is still a cap on the bet, not a prediction
+about elapsed time. Runtime varies by repo, agent, dependencies, checks, and
+review depth. CE should not invent precision it does not have.</p>
+<h3 id="what-if-the-agent-wants-to-do-more-than-i-ratified">What if the agent wants to do more than I ratified?</h3>
+<p>That is a new Shape decision. The agent can make work safer inside the current
+Scope, but increasing risk, broadening files, or changing the Goal needs your
+explicit ratification.</p>
+<h3 id="what-if-i-do-not-know-the-right-command">What if I do not know the right command?</h3>
+<p>Ask <code>ce ask</code>. For example:</p>
+<pre><code class="language-bash">ce ask &quot;I have a PR open; what do I inspect before Ship?&quot;
+</code></pre>
+<h3 id="do-i-need-to-understand-the-machine-underneath">Do I need to understand the machine underneath?</h3>
+<p>Not to start. The five-stage vocabulary is the everyday interface. When you
+want the deeper mapping, read
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>stage-vocabulary.md</code></a>, then
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/agentic-sdlc-operating-model.md"><code>agentic-sdlc-operating-model.md</code></a>.</p>
+<hr />
+<h2 id="8-under-the-hood">8. Under The Hood</h2>
+<p>The friendly stage words are the surface. Under them is a conserved machine that
+records Scope state, run evidence, review evidence, and terminal outcomes. You
+do not need that layer to run your first Scope, but it is available when you
+want to inspect how the governance works.</p>
+<table>
+<thead>
+<tr>
+<th>You want to inspect</th>
+<th>Read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stage vocabulary and the machine mapping</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>stage-vocabulary.md</code></a></td>
+</tr>
+<tr>
+<td>The detailed SDLC operating model</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/agentic-sdlc-operating-model.md"><code>agentic-sdlc-operating-model.md</code></a></td>
+</tr>
+<tr>
+<td>The Scope contract</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/scope.md"><code>scope.md</code></a></td>
+</tr>
+<tr>
+<td>Review evidence</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/contracts/review-evidence.md"><code>review-evidence.md</code></a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="9-where-next">9. Where Next</h2>
+<table>
+<thead>
+<tr>
+<th>You want to understand</th>
+<th>Read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The plain-language CE concepts</td>
+<td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td>
+</tr>
+<tr>
+<td>The full install-to-ship pilot checklist</td>
+<td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td>
+</tr>
+<tr>
+<td>The quick first-host path</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a></td>
+</tr>
+<tr>
+<td>How Agile/SCRUM habits map to CE</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td>
+</tr>
+<tr>
+<td>How to contribute to CE itself</td>
+<td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td>
+</tr>
+</tbody>
+</table>
+<p>Start with one small Scope. Frame it clearly, Shape it honestly, let the agent
+Build, Review the evidence, and Ship only when the gate is truly green.</p>
+    </article>
+  </div>
+  <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
+</body>
+</html>

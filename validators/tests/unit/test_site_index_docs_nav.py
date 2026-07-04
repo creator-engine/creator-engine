@@ -33,6 +33,7 @@ _EXPECTED_DOC_LINKS = {
 _EXPECTED_RENDERED_DOC_LINKS = {
     "what-is-creator-engine.html",
     "guide/understanding-ce.html",
+    "guide/complete-walkthrough.html",
     "guide/pilot-runbook.html",
     "guide/contributing-to-ce.html",
     "guide/solo-dev-onboarding.html",
