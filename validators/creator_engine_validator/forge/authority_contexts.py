@@ -38,13 +38,35 @@ _SAFE_AMBIENT_KEYS = {
     "TZ",
 }
 _FORBIDDEN_CREDENTIAL_KEYS = {
+    "ANTHROPIC_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "BAO_TOKEN",
+    "CE_FORGE_MINT_BROKER_USER_TOKEN",
+    "CE_PICKUP_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
     "GIT_ASKPASS",
     "GIT_CREDENTIAL_HELPER",
     "GIT_SSH",
     "GIT_SSH_COMMAND",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "OPENAI_API_KEY",
+    "OPENBAO_TOKEN",
     "SSH_AUTH_SOCK",
+    "VAULT_TOKEN",
 }
 _FORBIDDEN_CREDENTIAL_PREFIXES = ("GH_", "GITHUB_", "SSH_")
+_FORBIDDEN_CREDENTIAL_TOKENS = (
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "PRIVATE_KEY",
+    "API_KEY",
+    "CREDENTIAL",
+    "AUTH",
+)
 
 
 def _string_env(env: Mapping[str, str] | None) -> dict[str, str]:
@@ -61,7 +83,11 @@ def _credential_env_findings(env: Mapping[str, str]) -> tuple[str, ...]:
     findings: list[str] = []
     for key, value in env.items():
         upper_key = key.upper()
-        if upper_key in _FORBIDDEN_CREDENTIAL_KEYS or upper_key.startswith(_FORBIDDEN_CREDENTIAL_PREFIXES):
+        if (
+            upper_key in _FORBIDDEN_CREDENTIAL_KEYS
+            or upper_key.startswith(_FORBIDDEN_CREDENTIAL_PREFIXES)
+            or any(token in upper_key for token in _FORBIDDEN_CREDENTIAL_TOKENS)
+        ):
             findings.append(key)
             continue
         if upper_key.startswith("GIT_CONFIG_KEY_") and str(value).strip().lower() == "credential.helper":
@@ -77,6 +103,18 @@ def _require_no_credential_env(env: Mapping[str, str], *, context_name: str) -> 
     if findings:
         joined = ", ".join(findings)
         raise AuthorityContextError(f"{context_name} refuses credential-bearing env keys: {joined}")
+
+
+def require_no_credential_env(env: Mapping[str, str], *, context_name: str) -> None:
+    """Reject env mappings that expose credential-bearing keys or git credential config."""
+
+    _require_no_credential_env(env, context_name=context_name)
+
+
+def is_credential_env_key(name: str) -> bool:
+    """Return True when an environment variable name is shaped like credential material."""
+
+    return bool(_credential_env_findings({str(name): ""}))
 
 
 def _scrub_ambient_env(ambient_env: Mapping[str, str] | None) -> dict[str, str]:
@@ -337,5 +375,7 @@ __all__ = [
     "gh_runner_from_transport_context",
     "git_env_from_local_context",
     "git_env_from_transport_context",
+    "is_credential_env_key",
+    "require_no_credential_env",
     "validation_env_from_context",
 ]
