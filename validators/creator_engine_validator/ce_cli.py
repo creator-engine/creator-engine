@@ -15,6 +15,7 @@ ce worker gc         # reap container-instance records that outlived a released 
 ce worker status     # read a local container-instance record
 ce worker spawn      # spawn a harness-agnostic CE worker seat under a scrubbed environment
 ce worker run        # resolve a role definition, launch a governed worker, return findings
+ce worker worktree-prune # report/apply fail-safe stale git worktree pruning
 ce bootstrap         # provision a source-clone controller/seat venv offline
 ce verify-install    # verify a post-install CE release venv provenance
 ce update            # signed in-place CE update; --check is read-only
@@ -134,6 +135,7 @@ from . import (
     worker_run,
     worker_spawn,
     worker_runtime,
+    worktree_prune,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
@@ -734,6 +736,34 @@ def _build_parser() -> argparse.ArgumentParser:
     ws.add_argument("--claim-id", required=True)
     ws.add_argument("--instance-id", required=True)
     ws.add_argument("--json", action="store_true", dest="json_output")
+
+    wtp = worker_sub.add_parser(
+        "worktree-prune",
+        help=argparse.SUPPRESS,
+        description="report/apply fail-safe stale git worktree pruning",
+    )
+    wtp.add_argument("--repo-root", default=".", help="repository root for git worktree list (default: cwd)")
+    wtp.add_argument(
+        "--extra-root",
+        action="append",
+        default=None,
+        dest="extra_roots",
+        help="extra root to scan for orphan dirs; repeatable (default includes /var/tmp)",
+    )
+    wtp.add_argument(
+        "--no-default-extra-root",
+        action="store_true",
+        help="do not scan the default /var/tmp extra root",
+    )
+    wtp.add_argument(
+        "--age-hours",
+        type=float,
+        default=worktree_prune.DEFAULT_AGE_HOURS,
+        help=f"minimum newest-mtime age for pruning (default: {worktree_prune.DEFAULT_AGE_HOURS:g})",
+    )
+    wtp.add_argument("--apply", action="store_true", help="remove only PRUNABLE entries and append audit records")
+    wtp.add_argument("--state-root", default=None, help="audit state root (default: <repo-root>/.ce/state)")
+    wtp.add_argument("--json", action="store_true", dest="json_output")
 
     # ce fanin — local read-only evidence fan-in packet (Gate 7, RV1-070/071).
     fanin = groups.add_parser(
@@ -2415,6 +2445,47 @@ def _worker_status(args) -> int:
             f"enforcement_primitive={record.get('enforcement_primitive')}"
         )
     return 0
+
+
+def _worker_worktree_prune(args) -> int:
+    extra_roots = []
+    if not args.no_default_extra_root:
+        extra_roots.append(worktree_prune.DEFAULT_EXTRA_ROOT)
+    if args.extra_roots:
+        extra_roots.extend(Path(root) for root in args.extra_roots)
+    try:
+        if args.apply:
+            result = worktree_prune.apply_prune(
+                repo_root=args.repo_root,
+                extra_roots=extra_roots,
+                age_hours=args.age_hours,
+                state_root=args.state_root,
+            )
+        else:
+            result = worktree_prune.scan_worktrees(
+                repo_root=args.repo_root,
+                extra_roots=extra_roots,
+                age_hours=args.age_hours,
+            )
+    except worktree_prune.WorktreePruneError as exc:
+        print(f"ERROR: ce worker worktree-prune refused: {exc}", file=sys.stderr)
+        return 1
+
+    payload = result.to_dict()
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        action = "applied" if result.applied else "dry-run"
+        print(f"ce worker worktree-prune: {action} ({payload['summary']['total']} candidate(s))")
+        print(f"{'VERDICT':<12} {'REASON':<18} {'BRANCH':<24} PATH")
+        for entry in result.entries:
+            branch = entry.branch or "-"
+            removed = " removed" if entry.removed else ""
+            error = f" error={entry.removal_error}" if entry.removal_error else ""
+            print(f"{entry.verdict:<12} {entry.reason:<18} {branch:<24} {entry.path}{removed}{error}")
+        if result.audit_path:
+            print(f"audit: {result.audit_path}")
+    return 1 if payload["summary"]["errors"] else 0
 
 
 def _fanin_build(args) -> int:
@@ -4794,6 +4865,7 @@ _WORKER_DISPATCH = {
     "terminate": _worker_terminate,
     "gc": _worker_gc,
     "status": _worker_status,
+    "worktree-prune": _worker_worktree_prune,
 }
 
 _FANIN_DISPATCH = {
