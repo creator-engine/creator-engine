@@ -383,6 +383,8 @@ class ConveyorDaemon:
                 missing.append("daemon_lease")
             if self.receipt_issuer is None:
                 missing.append("receipt_issuer")
+            if self.validation_ledger_binding is None:
+                missing.append("validation_ledger_binding")
             if missing:
                 raise ValueError(f"armed conveyor daemon requires injected {', '.join(missing)}")
 
