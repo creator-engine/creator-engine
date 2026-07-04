@@ -61,6 +61,7 @@ RECALL_ENDPOINT_ENV = "CE_BRAIN_RECALL_ENDPOINT"
 RECALL_ENDPOINT_MODEL_ID_ENV = "CE_BRAIN_RECALL_ENDPOINT_MODEL_ID"
 RECALL_ENDPOINT_DIM_ENV = "CE_BRAIN_RECALL_ENDPOINT_DIM"
 _RECALL_ENDPOINT_EMBEDDERS = {"vllm-openai", "openai-endpoint", "openai"}
+LAUNCH_RECALL_ENDPOINT_TIMEOUT_SECONDS = 5
 
 
 class LaunchError(Exception):
@@ -463,12 +464,24 @@ def _open_surface_kwargs(
         kwargs["endpoint_model_id"] = config.endpoint_model_id
     if config.endpoint_dim is not None:
         kwargs["endpoint_dim"] = config.endpoint_dim
+    if config.endpoint is not None:
+        adapter_kwargs: dict[str, Any] = {
+            "endpoint": config.endpoint,
+            "timeout": LAUNCH_RECALL_ENDPOINT_TIMEOUT_SECONDS,
+        }
+        if config.endpoint_model_id is not None:
+            adapter_kwargs["model_id"] = config.endpoint_model_id
+        if config.endpoint_dim is not None:
+            adapter_kwargs["dim"] = config.endpoint_dim
+        kwargs["embedder"] = brain_embedding_openai_endpoint.OpenAIEndpointEmbeddingAdapter(
+            **adapter_kwargs
+        )
     return kwargs
 
 
 def _emit_recall_status(status: Mapping[str, Any]) -> None:
     line = str(status.get("line") or _recall_status_line(status))
-    if status.get("state") == "hydrated":
+    if status.get("state") in {"hydrated", "unconfigured"}:
         LOGGER.info(line)
     else:
         LOGGER.warning(line)
@@ -509,7 +522,7 @@ def probe_controller_recall_endpoint(repo_root: Path | str | None = None) -> dic
             port = 443 if parsed.scheme == "https" else 80
         with socket.create_connection((host, port), timeout=1.0):
             pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return _status_payload(
             "unavailable",
             reason=f"unreachable: {exc}",
@@ -560,6 +573,16 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
             embedder=config.embedder_name,
         )
         return payload
+    if config.endpoint is not None:
+        probe_status = probe_controller_recall_endpoint(repo_root)
+        if probe_status.get("state") != "hydrated":
+            payload["recall_status"] = _status_payload(
+                "unavailable",
+                reason=str(probe_status.get("reason") or "endpoint pre-probe failed"),
+                endpoint=config.endpoint,
+                embedder=config.embedder_name,
+            )
+            return payload
     try:
         surface = brain_recall_surface.open_surface(**_open_surface_kwargs(repo_root, config))
         hydration = surface.hydrate_session(

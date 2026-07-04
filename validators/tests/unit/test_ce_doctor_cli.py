@@ -161,6 +161,33 @@ def test_doctor_surfaces_recall_endpoint_probe_without_refusing(
     assert "CE-BRAIN-RECALL" not in payload["refused_clauses"]
 
 
+def test_doctor_human_marks_advisory_recall_probe_as_warning(
+    inject_facts, monkeypatch, capsys
+):
+    inject_facts()
+    monkeypatch.setattr(
+        doctor_runtime.launch_runtime,
+        "probe_controller_recall_endpoint",
+        lambda repo_root: {
+            "state": "unavailable",
+            "reason": "endpoint down",
+            "endpoint": "http://127.0.0.1:8989/v1/embeddings",
+            "line": (
+                "brain recall: UNAVAILABLE (endpoint down endpoint "
+                "http://127.0.0.1:8989/v1/embeddings) - semantic recall disabled "
+                "for this session; SSOT assertions unaffected"
+            ),
+        },
+    )
+
+    ret = ce_cli.main(["doctor", "--repo-root", "."])
+
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "[WARN] CE-BRAIN-RECALL brain recall endpoint" in out
+    assert "[FAIL] CE-BRAIN-RECALL brain recall endpoint" not in out
+
+
 def test_doctor_accepts_installed_console_when_required(inject_facts, capsys):
     inject_facts(
         ce_invocation="console_script",

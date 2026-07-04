@@ -5,9 +5,10 @@
 evaluates the governed-environment guard predicate, and surfaces missing
 prerequisites by name with a deterministic non-zero exit on any refusal.
 
-Detection is deliberately offline and side-effect-free: ``tmux -V`` /
+Detection is deliberately bounded and side-effect-free: ``tmux -V`` /
 ``podman info`` are local probes, ``git check-ignore`` is local, and the
-packaging contract is read from tracked files. No network call is made. The
+packaging contract is read from tracked files. When tenant brain recall is
+configured, doctor also runs a bounded 1s endpoint reachability probe. The
 detection seam (:func:`detect_environment`) is monkeypatchable so the CLI
 branches can be tested without a real host.
 """
@@ -411,6 +412,8 @@ def render_human(report: DoctorReport) -> str:
             mark = "skip"
         elif check["ok"]:
             mark = "ok"
+        elif check.get("clause") == "CE-BRAIN-RECALL":
+            mark = "WARN"
         else:
             mark = "FAIL"
         lines.append(f"  [{mark}] {check['clause']} {check['name']}: {check['detail']}")

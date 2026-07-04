@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shlex
+import socket
 from pathlib import Path
 
 import pytest
@@ -95,6 +97,120 @@ def _assert_foreman_charter_and_worker_spawn(payload):
     assert worker_spawn["enforcement"] == "launcher-injected-non-optional"
     assert worker_spawn["surface"]["cli"] == "ce worker spawn"
     assert worker_spawn["surface"]["module"] == "creator_engine_validator.worker_spawn"
+
+
+def test_probe_controller_recall_endpoint_shortcuts_embedder_without_endpoint(monkeypatch):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "deterministic")
+
+    status = launch_runtime.probe_controller_recall_endpoint()
+
+    assert status["state"] == "hydrated"
+    assert status["embedder"] == "deterministic"
+    assert status["endpoint"] is None
+    assert "does not require an endpoint" in status["reason"]
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "expected_address"),
+    [
+        ("http://brain.example/v1/embeddings", ("brain.example", 80)),
+        ("https://brain.example/v1/embeddings", ("brain.example", 443)),
+        ("http://brain.example:1234/v1/embeddings", ("brain.example", 1234)),
+    ],
+)
+def test_probe_controller_recall_endpoint_selects_socket_port(
+    monkeypatch, endpoint, expected_address
+):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+    monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_ENV, endpoint)
+    calls = []
+
+    class ConnectedSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    def create_connection(address, timeout):
+        calls.append((address, timeout))
+        return ConnectedSocket()
+
+    monkeypatch.setattr(launch_runtime.socket, "create_connection", create_connection)
+
+    status = launch_runtime.probe_controller_recall_endpoint()
+
+    assert status["state"] == "hydrated"
+    assert calls == [(expected_address, 1.0)]
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http:///v1/embeddings",
+        "http://127.0.0.1:bad/v1/embeddings",
+    ],
+)
+def test_probe_controller_recall_endpoint_refuses_malformed_endpoint(monkeypatch, endpoint):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+    monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_ENV, endpoint)
+
+    status = launch_runtime.probe_controller_recall_endpoint()
+
+    assert status["state"] == "unavailable"
+    assert status["endpoint"] == endpoint
+    assert "unreachable:" in status["reason"]
+
+
+def test_probe_controller_recall_endpoint_reaches_real_socket(monkeypatch):
+    _clear_recall_env(monkeypatch)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        host, port = listener.getsockname()
+        endpoint = f"http://{host}:{port}/v1/embeddings"
+        monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+        monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_ENV, endpoint)
+
+        status = launch_runtime.probe_controller_recall_endpoint()
+
+    assert status["state"] == "hydrated"
+    assert status["endpoint"] == endpoint
+    assert "reachable" in status["reason"]
+
+
+def test_probe_controller_recall_endpoint_degrades_for_closed_port(monkeypatch):
+    _clear_recall_env(monkeypatch)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        host, port = probe.getsockname()
+    endpoint = f"http://{host}:{port}/v1/embeddings"
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+    monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_ENV, endpoint)
+
+    status = launch_runtime.probe_controller_recall_endpoint()
+
+    assert status["state"] == "unavailable"
+    assert status["endpoint"] == endpoint
+    assert "unreachable:" in status["reason"]
+
+
+@pytest.mark.parametrize("raw_dim", ["abc", "0", "-1"])
+def test_controller_recall_config_rejects_invalid_endpoint_dim(monkeypatch, raw_dim):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+    monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_DIM_ENV, raw_dim)
+
+    config = launch_runtime._controller_recall_config_from_env()
+    status = launch_runtime.probe_controller_recall_endpoint()
+
+    assert config.configured is True
+    assert config.reason == f"{launch_runtime.RECALL_ENDPOINT_DIM_ENV} must be a positive integer"
+    assert status["state"] == "unavailable"
+    assert status["reason"] == config.reason
 
 
 def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
@@ -458,9 +574,23 @@ def test_controller_brain_bootstrap_adds_advisory_recall_when_endpoint_configure
         return Surface()
 
     monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
+    monkeypatch.setattr(
+        launch_runtime,
+        "probe_controller_recall_endpoint",
+        lambda repo_root: {
+            "state": "hydrated",
+            "reason": "endpoint reachable",
+            "endpoint": "http://127.0.0.1:9999/v1/embeddings",
+        },
+    )
 
     payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
 
+    embedder = calls["open_surface"].pop("embedder")
+    assert embedder.endpoint == "http://127.0.0.1:9999/v1/embeddings"
+    assert embedder.model_id == "tenant-model"
+    assert embedder.dim == 768
+    assert embedder.timeout == launch_runtime.LAUNCH_RECALL_ENDPOINT_TIMEOUT_SECONDS
     assert calls["open_surface"] == {
         "state_root": tmp_path / ".ce" / "state",
         "embedder_name": "vllm-openai",
@@ -564,11 +694,43 @@ def test_controller_brain_bootstrap_marks_unconfigured_when_env_absent(tmp_path,
     assert launch_runtime.RECALL_EMBEDDER_ENV in payload["recall_status"]["reason"]
 
 
-def test_controller_brain_bootstrap_marks_unavailable_when_configured_recall_fails(
+def test_controller_brain_bootstrap_pre_probe_short_circuits_endpoint_recall(
     tmp_path, monkeypatch
 ):
     _clear_recall_env(monkeypatch)
     monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+    monkeypatch.setenv(
+        launch_runtime.RECALL_ENDPOINT_ENV,
+        "http://127.0.0.1:9999/v1/embeddings",
+    )
+
+    def open_surface(**_kwargs):
+        raise AssertionError("pre-probe failure must not open recall surface")
+
+    monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
+    monkeypatch.setattr(
+        launch_runtime,
+        "probe_controller_recall_endpoint",
+        lambda repo_root: {
+            "state": "unavailable",
+            "reason": "unreachable: connection refused",
+            "endpoint": "http://127.0.0.1:9999/v1/embeddings",
+        },
+    )
+
+    payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
+
+    assert "recall" not in payload
+    assert payload["recall_status"]["state"] == "unavailable"
+    assert payload["recall_status"]["endpoint"] == "http://127.0.0.1:9999/v1/embeddings"
+    assert "connection refused" in payload["recall_status"]["reason"]
+
+
+def test_controller_brain_bootstrap_marks_unavailable_when_configured_recall_fails(
+    tmp_path, monkeypatch
+):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "deterministic")
 
     def open_surface(**_kwargs):
         raise launch_runtime.brain_recall_surface.BrainRecallInvalid(
@@ -581,13 +743,13 @@ def test_controller_brain_bootstrap_marks_unavailable_when_configured_recall_fai
 
     assert "recall" not in payload
     assert payload["recall_status"]["state"] == "unavailable"
-    assert payload["recall_status"]["endpoint"].endswith("/v1/embeddings")
+    assert payload["recall_status"]["endpoint"] is None
     assert "store model mismatch" in payload["recall_status"]["reason"]
 
 
 def test_launch_result_and_log_surface_recall_status(tmp_path, monkeypatch, caplog):
     _clear_recall_env(monkeypatch)
-    caplog.set_level("WARNING", logger=launch_runtime.__name__)
+    caplog.set_level(logging.INFO, logger=launch_runtime.__name__)
 
     result = launch_runtime.launch(
         harness="claude",
@@ -600,6 +762,7 @@ def test_launch_result_and_log_surface_recall_status(tmp_path, monkeypatch, capl
     assert payload["recall_status"]["state"] == "unconfigured"
     assert result.plan.brain_recall_status == payload["recall_status"]
     assert "brain recall: UNCONFIGURED" in caplog.text
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
 
 
 @pytest.mark.parametrize("harness", ["claude", "hermes", "openclaw"])
