@@ -73,6 +73,7 @@ print_stage_context_commands() {
   quote_cmd cp "${repo_root}/validators/pyproject.toml" "${context_dir}/validators/pyproject.toml"
   quote_cmd cp -R "${repo_root}/validators/creator_engine_validator" "${context_dir}/validators/creator_engine_validator"
   quote_cmd cp -R "${repo_root}/validators/wheelhouse" "${context_dir}/validators/wheelhouse"
+  quote_cmd cp -R "${repo_root}/validators/wheelhouse-dev" "${context_dir}/validators/wheelhouse-dev"
   quote_cmd find "${context_dir}" -type d '(' -name __pycache__ -o -name .pytest_cache -o -name build -o -name '*.egg-info' ')' -prune -exec rm -rf '{}' '+'
   quote_cmd find "${context_dir}" -type f '(' -name '*.pyc' -o -name '*.pyo' ')' -delete
 }
@@ -83,6 +84,7 @@ stage_context() {
   cp "${repo_root}/validators/pyproject.toml" "${context_dir}/validators/pyproject.toml"
   cp -R "${repo_root}/validators/creator_engine_validator" "${context_dir}/validators/creator_engine_validator"
   cp -R "${repo_root}/validators/wheelhouse" "${context_dir}/validators/wheelhouse"
+  cp -R "${repo_root}/validators/wheelhouse-dev" "${context_dir}/validators/wheelhouse-dev"
   find "${context_dir}" -type d \( -name __pycache__ -o -name .pytest_cache -o -name build -o -name '*.egg-info' \) -prune -exec rm -rf {} +
   find "${context_dir}" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 }

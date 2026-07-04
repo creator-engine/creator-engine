@@ -6,14 +6,15 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** tiny
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=132415ae37c44e5b42c112967a3315cf1563087f6bdefb77d896a8dcdae0f2b5
+AUTHORIZED_PATHS_SHA256=f6fe81ab9c09858a53c006e4ac2561c5b9566eb24d14822d3b38a7c774aa2a3d
 
 ```text
 .ce/changelog/ce-445-g8-dockerfile-offline-setuptools.md
 .ce/pr-manifests/ce-445-g8-dockerfile-offline-setuptools.md
 deploy/oci/Dockerfile
+deploy/oci/build-image.sh
 deploy/runtime-image/Dockerfile
 validators/tests/unit/test_oci_image.py
 validators/tests/unit/test_runtime_image.py

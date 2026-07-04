@@ -130,6 +130,7 @@ def test_oci_build_script_shell_syntax_and_dry_run_contract() -> None:
     assert ["cp", str(REPO_ROOT / "validators" / "pyproject.toml"), str(TEST_CONTEXT / "validators" / "pyproject.toml")] in commands
     assert str(REPO_ROOT / "validators" / "creator_engine_validator") in copy_sources
     assert str(REPO_ROOT / "validators" / "wheelhouse") in copy_sources
+    assert str(REPO_ROOT / "validators" / "wheelhouse-dev") in copy_sources
 
     assert "--file" in docker_cmd
     assert str(DOCKERFILE) in docker_cmd
