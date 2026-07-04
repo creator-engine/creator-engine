@@ -5,9 +5,10 @@
 evaluates the governed-environment guard predicate, and surfaces missing
 prerequisites by name with a deterministic non-zero exit on any refusal.
 
-Detection is deliberately offline and side-effect-free: ``tmux -V`` /
+Detection is deliberately bounded and side-effect-free: ``tmux -V`` /
 ``podman info`` are local probes, ``git check-ignore`` is local, and the
-packaging contract is read from tracked files. No network call is made. The
+packaging contract is read from tracked files. When tenant brain recall is
+configured, doctor also runs a bounded 1s endpoint reachability probe. The
 detection seam (:func:`detect_environment`) is monkeypatchable so the CLI
 branches can be tested without a real host.
 """
@@ -23,6 +24,7 @@ from typing import Any, Sequence
 
 from . import bootstrap_runtime
 from . import environment_guard as guard
+from . import launch_runtime
 from . import resource_bound_spec
 from .packaging_runtime import interpreter_in_contract, verify_packaging_contract
 from .tmux_adapter import TmuxAdapter
@@ -311,6 +313,17 @@ def run_doctor(
     payload["ok"] = payload["ok"] and not (
         seat_env_check["applicable"] and not seat_env_check["ok"]
     )
+    recall_status = launch_runtime.probe_controller_recall_endpoint(repo_root)
+    payload["checks"].append(
+        {
+            "clause": "CE-BRAIN-RECALL",
+            "name": "brain recall endpoint",
+            "applicable": recall_status.get("state") != "unconfigured",
+            "ok": recall_status.get("state") != "unavailable",
+            "detail": recall_status.get("line") or str(recall_status.get("reason", "")),
+            "status": recall_status,
+        }
+    )
     # ce-ops#25: surface the derived CE version identity beside the packaging
     # health line (local preflight telemetry, Open-Q3 — never attestation).
     payload["ce_version"] = ce_version(repo_root)
@@ -399,6 +412,8 @@ def render_human(report: DoctorReport) -> str:
             mark = "skip"
         elif check["ok"]:
             mark = "ok"
+        elif check.get("clause") == "CE-BRAIN-RECALL":
+            mark = "WARN"
         else:
             mark = "FAIL"
         lines.append(f"  [{mark}] {check['clause']} {check['name']}: {check['detail']}")

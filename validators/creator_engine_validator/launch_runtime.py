@@ -25,6 +25,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import socket
+import sqlite3
+import urllib.error
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -32,6 +35,7 @@ from typing import Any, Mapping, Sequence
 from . import (
     _versions,
     brain_bootstrap,
+    brain_embedding_openai_endpoint,
     brain_recall_surface,
     claude_launch_spec,
     codex_launch_spec,
@@ -52,6 +56,12 @@ DEFAULT_WINDOW = "controller"
 SUPPORTED_HARNESSES = frozenset({"claude", "codex", "hermes", "openclaw"})
 VISIBILITY = "operator_visible"
 LOGGER = logging.getLogger(__name__)
+RECALL_EMBEDDER_ENV = "CE_BRAIN_RECALL_EMBEDDER"
+RECALL_ENDPOINT_ENV = "CE_BRAIN_RECALL_ENDPOINT"
+RECALL_ENDPOINT_MODEL_ID_ENV = "CE_BRAIN_RECALL_ENDPOINT_MODEL_ID"
+RECALL_ENDPOINT_DIM_ENV = "CE_BRAIN_RECALL_ENDPOINT_DIM"
+_RECALL_ENDPOINT_EMBEDDERS = {"vllm-openai", "openai-endpoint", "openai"}
+LAUNCH_RECALL_ENDPOINT_TIMEOUT_SECONDS = 5
 
 
 class LaunchError(Exception):
@@ -184,6 +194,7 @@ class LaunchPlan:
     codex_bypass_mode: str | None = None
     brain_bootstrap_ref: str | None = None
     brain_bootstrap_sha256: str | None = None
+    brain_recall_status: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -202,6 +213,7 @@ class LaunchPlan:
             "codex_bypass_mode": self.codex_bypass_mode,
             "brain_bootstrap_ref": self.brain_bootstrap_ref,
             "brain_bootstrap_sha256": self.brain_bootstrap_sha256,
+            "brain_recall_status": self.brain_recall_status,
         }
 
 
@@ -338,6 +350,193 @@ def _controller_recall_context(repo_root: Path | str | None, payload: Mapping[st
     )
 
 
+@dataclass(frozen=True)
+class _ControllerRecallConfig:
+    configured: bool
+    embedder_name: str | None = None
+    endpoint: str | None = None
+    endpoint_model_id: str | None = None
+    endpoint_dim: int | None = None
+    reason: str | None = None
+
+    @property
+    def label(self) -> str:
+        return self.embedder_name or "unconfigured"
+
+
+def _env_value(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _status_payload(
+    state: str,
+    *,
+    reason: str,
+    endpoint: str | None = None,
+    embedder: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "state": state,
+        "reason": reason,
+        "endpoint": endpoint,
+    }
+    if embedder is not None:
+        payload["embedder"] = embedder
+    payload["line"] = _recall_status_line(payload)
+    return payload
+
+
+def _recall_status_line(status: Mapping[str, Any]) -> str:
+    state = str(status.get("state") or "unknown").upper()
+    reason = str(status.get("reason") or "no detail")
+    endpoint = status.get("endpoint")
+    endpoint_part = f" endpoint {endpoint}" if endpoint else ""
+    enabled = "enabled" if status.get("state") == "hydrated" else "disabled"
+    return (
+        f"brain recall: {state} ({reason}{endpoint_part}) - "
+        f"semantic recall {enabled} for this session; SSOT assertions unaffected"
+    )
+
+
+def _configured_endpoint_for(embedder_name: str | None, endpoint: str | None) -> str | None:
+    normalized = (embedder_name or "").strip().lower().replace("_", "-")
+    if normalized in _RECALL_ENDPOINT_EMBEDDERS:
+        return endpoint or brain_embedding_openai_endpoint.DEFAULT_ENDPOINT
+    return None
+
+
+def _controller_recall_config_from_env() -> _ControllerRecallConfig:
+    raw_embedder = _env_value(RECALL_EMBEDDER_ENV)
+    raw_endpoint = _env_value(RECALL_ENDPOINT_ENV)
+    raw_model_id = _env_value(RECALL_ENDPOINT_MODEL_ID_ENV)
+    raw_dim = _env_value(RECALL_ENDPOINT_DIM_ENV)
+    if raw_embedder is None and raw_endpoint is None and raw_model_id is None and raw_dim is None:
+        return _ControllerRecallConfig(
+            configured=False,
+            reason=f"{RECALL_EMBEDDER_ENV} is not set",
+        )
+    embedder_name = raw_embedder or "vllm-openai"
+    endpoint = _configured_endpoint_for(embedder_name, raw_endpoint)
+    endpoint_dim = None
+    if raw_dim is not None:
+        try:
+            endpoint_dim = int(raw_dim)
+        except ValueError:
+            return _ControllerRecallConfig(
+                configured=True,
+                embedder_name=embedder_name,
+                endpoint=endpoint,
+                endpoint_model_id=raw_model_id,
+                reason=f"{RECALL_ENDPOINT_DIM_ENV} must be a positive integer",
+            )
+        if endpoint_dim <= 0:
+            return _ControllerRecallConfig(
+                configured=True,
+                embedder_name=embedder_name,
+                endpoint=endpoint,
+                endpoint_model_id=raw_model_id,
+                reason=f"{RECALL_ENDPOINT_DIM_ENV} must be a positive integer",
+            )
+    return _ControllerRecallConfig(
+        configured=True,
+        embedder_name=embedder_name,
+        endpoint=endpoint,
+        endpoint_model_id=raw_model_id,
+        endpoint_dim=endpoint_dim,
+    )
+
+
+def _open_surface_kwargs(
+    repo_root: Path | str | None,
+    config: _ControllerRecallConfig,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "state_root": _brain_state_root(repo_root),
+        "embedder_name": config.embedder_name,
+    }
+    if config.endpoint is not None:
+        kwargs["endpoint"] = config.endpoint
+    if config.endpoint_model_id is not None:
+        kwargs["endpoint_model_id"] = config.endpoint_model_id
+    if config.endpoint_dim is not None:
+        kwargs["endpoint_dim"] = config.endpoint_dim
+    if config.endpoint is not None:
+        adapter_kwargs: dict[str, Any] = {
+            "endpoint": config.endpoint,
+            "timeout": LAUNCH_RECALL_ENDPOINT_TIMEOUT_SECONDS,
+        }
+        if config.endpoint_model_id is not None:
+            adapter_kwargs["model_id"] = config.endpoint_model_id
+        if config.endpoint_dim is not None:
+            adapter_kwargs["dim"] = config.endpoint_dim
+        kwargs["embedder"] = brain_embedding_openai_endpoint.OpenAIEndpointEmbeddingAdapter(
+            **adapter_kwargs
+        )
+    return kwargs
+
+
+def _emit_recall_status(status: Mapping[str, Any]) -> None:
+    line = str(status.get("line") or _recall_status_line(status))
+    if status.get("state") in {"hydrated", "unconfigured"}:
+        LOGGER.info(line)
+    else:
+        LOGGER.warning(line)
+
+
+def probe_controller_recall_endpoint(repo_root: Path | str | None = None) -> dict[str, Any]:
+    """Return the non-fatal doctor probe for launch-time recall configuration."""
+    del repo_root  # Reserved for a future CE state config convention.
+    config = _controller_recall_config_from_env()
+    if not config.configured:
+        return _status_payload(
+            "unconfigured",
+            reason=config.reason or "recall is not configured",
+            embedder=config.embedder_name,
+        )
+    if config.reason:
+        return _status_payload(
+            "unavailable",
+            reason=config.reason,
+            endpoint=config.endpoint,
+            embedder=config.embedder_name,
+        )
+    if config.endpoint is None:
+        return _status_payload(
+            "hydrated",
+            reason=f"{config.label} does not require an endpoint",
+            embedder=config.embedder_name,
+        )
+    try:
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(config.endpoint)
+        host = parsed.hostname
+        if not host:
+            raise OSError("endpoint URL has no host")
+        port = parsed.port
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
+        with socket.create_connection((host, port), timeout=1.0):
+            pass
+    except (OSError, ValueError) as exc:
+        return _status_payload(
+            "unavailable",
+            reason=f"unreachable: {exc}",
+            endpoint=config.endpoint,
+            embedder=config.embedder_name,
+        )
+    return _status_payload(
+        "hydrated",
+        reason=f"endpoint {config.endpoint} reachable",
+        endpoint=config.endpoint,
+        embedder=config.embedder_name,
+    )
+
+
 def _has_launched_event(seat_dir: Path | str) -> bool:
     events_path = Path(seat_dir) / seat_sentinel.EVENTS_FILENAME
     return any(
@@ -358,31 +557,73 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
         raise BrainBootstrapLaunchRefused(
             f"refusing Controller launch before spawn: {details}"
         ) from exc
-    for embedder_name, label in (("vllm-openai", "vllm-openai"), (None, "deterministic")):
-        open_kwargs: dict[str, Any] = {"state_root": _brain_state_root(repo_root)}
-        if embedder_name is not None:
-            open_kwargs["embedder_name"] = embedder_name
-        try:
-            surface = brain_recall_surface.open_surface(**open_kwargs)
-            hydration = surface.hydrate_session(
-                _controller_recall_context(repo_root, payload),
-                top_k=5,
-                allow_confidential_egress=False,
+    config = _controller_recall_config_from_env()
+    if not config.configured:
+        payload["recall_status"] = _status_payload(
+            "unconfigured",
+            reason=config.reason or "recall is not configured",
+            embedder=config.embedder_name,
+        )
+        return payload
+    if config.reason:
+        payload["recall_status"] = _status_payload(
+            "unavailable",
+            reason=config.reason,
+            endpoint=config.endpoint,
+            embedder=config.embedder_name,
+        )
+        return payload
+    if config.endpoint is not None:
+        probe_status = probe_controller_recall_endpoint(repo_root)
+        if probe_status.get("state") != "hydrated":
+            payload["recall_status"] = _status_payload(
+                "unavailable",
+                reason=str(probe_status.get("reason") or "endpoint pre-probe failed"),
+                endpoint=config.endpoint,
+                embedder=config.embedder_name,
             )
-            recall_payload = hydration.to_dict()
-            recall_payload["advisory"] = True
-            recall_payload["source"] = "brain_recall_surface.hydrate_session"
-            recall_payload["embedder"] = label
-            recall_payload["top_k"] = 5
-            recall_payload["allow_confidential_egress"] = False
-            payload["recall"] = recall_payload
-            break
-        except Exception as exc:
-            LOGGER.warning(
-                "Controller brain semantic recall hydration skipped for %s: %s",
-                label,
-                exc,
-            )
+            return payload
+    try:
+        surface = brain_recall_surface.open_surface(**_open_surface_kwargs(repo_root, config))
+        hydration = surface.hydrate_session(
+            _controller_recall_context(repo_root, payload),
+            top_k=5,
+            allow_confidential_egress=False,
+        )
+        recall_payload = hydration.to_dict()
+        recall_payload["advisory"] = True
+        recall_payload["source"] = "brain_recall_surface.hydrate_session"
+        recall_payload["embedder"] = config.label
+        recall_payload["top_k"] = 5
+        recall_payload["allow_confidential_egress"] = False
+        payload["recall"] = recall_payload
+        payload["recall_status"] = _status_payload(
+            "hydrated",
+            reason=f"semantic recall hydrated with {config.label}",
+            endpoint=config.endpoint,
+            embedder=config.embedder_name,
+        )
+    except (
+        brain_recall_surface.BrainRecallInvalid,
+        brain_recall_surface.BrainRecallPrivacyRefused,
+        brain_embedding_openai_endpoint.BrainEmbeddingEndpointError,
+        OSError,
+        urllib.error.URLError,
+        sqlite3.Error,
+    ) as exc:
+        payload["recall_status"] = _status_payload(
+            "unavailable",
+            reason=str(exc),
+            endpoint=config.endpoint,
+            embedder=config.embedder_name,
+        )
+    except Exception as exc:
+        payload["recall_status"] = _status_payload(
+            "unavailable",
+            reason=f"unexpected recall error: {exc}",
+            endpoint=config.endpoint,
+            embedder=config.embedder_name,
+        )
     return payload
 
 
@@ -712,6 +953,12 @@ def launch(
         )
 
     brain_payload = _build_controller_brain_bootstrap(repo_root)
+    recall_status = (
+        brain_payload.get("recall_status") if isinstance(brain_payload, Mapping) else None
+    )
+    if isinstance(recall_status, Mapping):
+        _emit_recall_status(recall_status)
+        plan = replace(plan, brain_recall_status=dict(recall_status))
 
     # Defect-a fix (v3.1-G1): plain `ce launch` pins claude at the strict MCP
     # config but never created it, so the seat exits 1 silently. Provision it
