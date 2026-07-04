@@ -59,6 +59,7 @@ properties:
       - github_mutation
       - git_mutation
       - tracked_file_change
+      - validation_sandbox_run
       - external_tracker_mutation
       - runtime_process_action
       - container_action
