@@ -20,6 +20,8 @@ from creator_engine_validator.forge.automerge_policy import (
     AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE,
     AUTOMERGE_TIER_CARRIER_CHANGELOG,
     AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE,
+    AUTOMERGE_TIER_DOCS_ENVELOPE,
+    AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
     AutoMergeClassPolicy,
     AutoMergePolicyState,
     AutoMergePolicyStateError,
@@ -28,6 +30,7 @@ from creator_engine_validator.forge.automerge_policy import (
     brain_supersede_tier_evidence,
     brain_supersede_path_envelope_matches,
     carrier_changelog_tier_matches,
+    docs_envelope_tier_matches,
     decide_automerge,
     emit_automerge_dry_run_decision,
     load_automerge_policy_state,
@@ -85,6 +88,10 @@ def state_with_flags(
             AUTOMERGE_TIER_CARRIER_CHANGELOG: AutoMergeTierPolicy(
                 auto_merge=AUTOMERGE_TIER_CARRIER_CHANGELOG in enabled_tiers
             ),
+            AUTOMERGE_TIER_DOCS_ENVELOPE: AutoMergeTierPolicy(
+                auto_merge="docs" in enabled
+                or AUTOMERGE_TIER_DOCS_ENVELOPE in enabled_tiers
+            ),
             AUTOMERGE_TIER_BRAIN_SUPERSEDE: AutoMergeTierPolicy(
                 auto_merge=AUTOMERGE_TIER_BRAIN_SUPERSEDE in enabled_tiers
             ),
@@ -108,6 +115,11 @@ BRAIN_SUPERSEDE_PATHS = [
     ".ce/brain/assertions.yaml",
     ".ce/changelog/ce-413-automerge-tier-b.md",
     ".ce/pr-manifests/ce-413-automerge-tier-b.md",
+]
+DOCS_ENVELOPE_PATHS = [
+    "docs/adr/ADR-0071-docs-envelope-automerge.md",
+    ".ce/changelog/ce-a3-docs-envelope-automerge.md",
+    ".ce/pr-manifests/ce-a3-docs-envelope-automerge.md",
 ]
 
 
@@ -230,6 +242,7 @@ def test_variable_materialization_ceo_arms_docs_only(tmp_path: Path) -> None:
     assert state.kill_switch is False
     assert state.enabling_decision_ref == "ce-ops#313-enable"
     assert state.class_flag("docs") is True
+    assert state.tier_flag(AUTOMERGE_TIER_DOCS_ENVELOPE) is True
     assert all(
         not policy.auto_merge
         for class_name, policy in state.classes.items()
@@ -251,6 +264,7 @@ def test_variable_materialization_arms_carrier_changelog_tier_only_when_enabled(
     )
 
     assert state.class_flag("docs") is True
+    assert state.tier_flag(AUTOMERGE_TIER_DOCS_ENVELOPE) is True
     assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is True
     assert state.tier_flag(AUTOMERGE_TIER_BRAIN_SUPERSEDE) is False
 
@@ -268,6 +282,7 @@ def test_variable_materialization_arms_brain_supersede_tier_only_when_enabled(
     )
 
     assert state.class_flag("docs") is True
+    assert state.tier_flag(AUTOMERGE_TIER_DOCS_ENVELOPE) is True
     assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
     assert state.tier_flag(AUTOMERGE_TIER_BRAIN_SUPERSEDE) is True
 
@@ -284,6 +299,7 @@ def test_variable_materialization_tier_flag_is_subordinate_to_run_mode(tmp_path:
     )
 
     assert state.class_flag("docs") is False
+    assert state.tier_flag(AUTOMERGE_TIER_DOCS_ENVELOPE) is False
     assert state.tier_flag(AUTOMERGE_TIER_CARRIER_CHANGELOG) is False
     assert state.tier_flag(AUTOMERGE_TIER_BRAIN_SUPERSEDE) is False
 
@@ -301,6 +317,7 @@ def test_variable_materialization_strangeloop_arms_docs_only(tmp_path: Path) -> 
     assert state.kill_switch is False
     assert state.enabling_decision_ref == "ce-ops#313-enable"
     assert state.class_flag("docs") is True
+    assert state.tier_flag(AUTOMERGE_TIER_DOCS_ENVELOPE) is True
     assert all(
         not policy.auto_merge
         for class_name, policy in state.classes.items()
@@ -355,6 +372,17 @@ def test_carrier_changelog_tier_predicate_rejects_mixed_path_set() -> None:
             ".ce/changelog/ce-412-automerge-tier-a.md",
             "docs/usage.md",
         ]
+    )
+
+
+def test_docs_envelope_tier_predicate_accepts_ratified_path_set() -> None:
+    assert docs_envelope_tier_matches(DOCS_ENVELOPE_PATHS)
+    assert docs_envelope_tier_matches(["README.md", "docs/usage.md"])
+
+
+def test_docs_envelope_tier_predicate_rejects_code_path() -> None:
+    assert not docs_envelope_tier_matches(
+        [*DOCS_ENVELOPE_PATHS, "validators/creator_engine_validator/forge/example.py"]
     )
 
 
@@ -595,7 +623,7 @@ def test_carrier_changelog_tier_auto_payload_includes_audit_fields() -> None:
     assert payload["reviewer_venue"] == "reviewer-dev"
 
 
-def test_mixed_carrier_changelog_path_set_falls_through_to_existing_docs_behavior() -> None:
+def test_mixed_carrier_changelog_path_set_uses_docs_envelope_tier() -> None:
     paths = [
         ".ce/changelog/ce-412-automerge-tier-a.md",
         "README.md",
@@ -614,8 +642,74 @@ def test_mixed_carrier_changelog_path_set_falls_through_to_existing_docs_behavio
     )
 
     assert decision.decision == AUTOMERGE_DECISION_AUTO
+    assert decision.tier == AUTOMERGE_TIER_DOCS_ENVELOPE
+    assert decision.tier_flag is True
+
+
+def test_docs_envelope_tier_771_path_set_auto_when_docs_class_armed() -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(DOCS_ENVELOPE_PATHS),
+        paths=DOCS_ENVELOPE_PATHS,
+        declared_work_class="tiny",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-a3-docs-envelope-automerge",
+        base="main",
+        **canary_identity(),
+    )
+
+    payload = decision.to_payload()
+    assert decision.decision == AUTOMERGE_DECISION_AUTO
+    assert payload["tier"] == AUTOMERGE_TIER_DOCS_ENVELOPE
+    assert payload["tier_flag"] is True
+    assert payload["path_envelope"] == AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE
+    assert payload["changed_paths"] == DOCS_ENVELOPE_PATHS
+
+
+def test_docs_envelope_tier_771_path_set_plus_code_file_is_not_auto() -> None:
+    paths = [
+        *DOCS_ENVELOPE_PATHS,
+        "validators/creator_engine_validator/forge/automerge_policy.py",
+    ]
+
+    decision = decide_automerge(
+        numstat=numstat_for(paths),
+        paths=paths,
+        declared_work_class="tiny",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-a3-docs-envelope-automerge",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
     assert decision.tier is None
-    assert decision.tier_flag is None
+    assert decision.mutation_class == "code"
+    assert "gesture_class" in decision.rationale
+
+
+@pytest.mark.parametrize("declared_work_class", ["M", "L"])
+def test_docs_envelope_tier_larger_work_classes_are_not_auto(
+    declared_work_class: str,
+) -> None:
+    decision = decide_automerge(
+        numstat=numstat_for(DOCS_ENVELOPE_PATHS),
+        paths=DOCS_ENVELOPE_PATHS,
+        declared_work_class=declared_work_class,
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-a3-docs-envelope-automerge",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert decision.tier == AUTOMERGE_TIER_DOCS_ENVELOPE
+    assert "work_class_outside_canary" in decision.rationale
 
 
 def test_decide_returns_auto_with_live_pr_data_when_policy_is_armed() -> None:

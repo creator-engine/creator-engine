@@ -44,6 +44,10 @@ AUTOMERGE_TIER_CARRIER_CHANGELOG_ENV: Final[str] = "CE_AUTOMERGE_TIER_CARRIER_CH
 AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE: Final[str] = (
     ".ce/changelog,.ce/pr-manifests"
 )
+AUTOMERGE_TIER_DOCS_ENVELOPE: Final[str] = "docs_envelope"
+AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE: Final[str] = (
+    "docs/**,*.md,.ce/changelog/**,.ce/pr-manifests/**"
+)
 AUTOMERGE_TIER_BRAIN_SUPERSEDE: Final[str] = "brain_ledger_supersede"
 AUTOMERGE_TIER_BRAIN_SUPERSEDE_ENV: Final[str] = "CE_AUTOMERGE_TIER_BRAIN_SUPERSEDE"
 AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE: Final[str] = (
@@ -53,9 +57,18 @@ _CARRIER_CHANGELOG_PREFIXES: Final[tuple[str, str]] = (
     ".ce/changelog/",
     ".ce/pr-manifests/",
 )
+_DOCS_ENVELOPE_PREFIXES: Final[tuple[str, str, str]] = (
+    "docs/",
+    ".ce/changelog/",
+    ".ce/pr-manifests/",
+)
 _BRAIN_LEDGER_PATH: Final[str] = ".ce/brain/assertions.yaml"
 _AUTOMERGE_TIERS: Final[frozenset[str]] = frozenset(
-    {AUTOMERGE_TIER_CARRIER_CHANGELOG, AUTOMERGE_TIER_BRAIN_SUPERSEDE}
+    {
+        AUTOMERGE_TIER_CARRIER_CHANGELOG,
+        AUTOMERGE_TIER_DOCS_ENVELOPE,
+        AUTOMERGE_TIER_BRAIN_SUPERSEDE,
+    }
 )
 _CHAIN_FIELDS: Final[frozenset[str]] = frozenset({"sequence", "prev_hash", "content_hash"})
 
@@ -412,6 +425,9 @@ def materialize_automerge_policy_state_from_variables(
             AUTOMERGE_TIER_CARRIER_CHANGELOG: AutoMergeTierPolicy(
                 auto_merge=carrier_changelog_auto_merge
             ),
+            AUTOMERGE_TIER_DOCS_ENVELOPE: AutoMergeTierPolicy(
+                auto_merge=docs_auto_merge
+            ),
             AUTOMERGE_TIER_BRAIN_SUPERSEDE: AutoMergeTierPolicy(
                 auto_merge=brain_supersede_auto_merge
             ),
@@ -476,7 +492,7 @@ def decide_automerge(
 
     mutation_class = mutation_class_for_paths(resolved_paths, resolved_policy)
     tier = _tier_for_paths(resolved_paths, mutation_class)
-    tier_flag = resolved_state.tier_flag(tier) if tier is not None else None
+    tier_flag = _tier_flag_for_decision(resolved_state, tier, mutation_class)
     ledger_evidence: Mapping[str, Any] | None = None
     ledger_inputs: Mapping[str, Any] | None = None
     brain_predicate_reason: str | None = None
@@ -578,6 +594,8 @@ def decide_automerge(
         auto_blockers.append("enabling_decision_ref_missing")
     if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG and not tier_flag:
         auto_blockers.append("tier_carrier_changelog_false")
+    if tier == AUTOMERGE_TIER_DOCS_ENVELOPE and not tier_flag:
+        auto_blockers.append("tier_docs_envelope_false")
     if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
         if not tier_flag:
             auto_blockers.append("tier_brain_supersede_false")
@@ -779,6 +797,8 @@ def _decision(
         path_envelope=(
             AUTOMERGE_TIER_CARRIER_CHANGELOG_PATH_ENVELOPE
             if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG
+            else AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE
+            if tier == AUTOMERGE_TIER_DOCS_ENVELOPE
             else AUTOMERGE_TIER_BRAIN_SUPERSEDE_PATH_ENVELOPE
             if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE
             else None
@@ -896,6 +916,14 @@ def carrier_changelog_tier_matches(paths: Sequence[str]) -> bool:
     )
 
 
+def docs_envelope_tier_matches(paths: Sequence[str]) -> bool:
+    resolved_paths = tuple(str(path).strip() for path in paths if str(path).strip())
+    return bool(resolved_paths) and len(resolved_paths) == len(paths) and all(
+        path.startswith(_DOCS_ENVELOPE_PREFIXES) or _root_markdown(path)
+        for path in resolved_paths
+    )
+
+
 def brain_supersede_path_envelope_matches(paths: Sequence[str]) -> bool:
     resolved_paths = tuple(str(path).strip() for path in paths if str(path).strip())
     if len(resolved_paths) != len(paths) or len(set(resolved_paths)) != 3:
@@ -991,7 +1019,29 @@ def _tier_for_paths(paths: Sequence[str], mutation_class: str) -> str | None:
         return AUTOMERGE_TIER_BRAIN_SUPERSEDE
     if mutation_class == "docs" and carrier_changelog_tier_matches(paths):
         return AUTOMERGE_TIER_CARRIER_CHANGELOG
+    if mutation_class == "docs" and docs_envelope_tier_matches(paths):
+        return AUTOMERGE_TIER_DOCS_ENVELOPE
     return None
+
+
+def _tier_flag_for_decision(
+    state: AutoMergePolicyState,
+    tier: str | None,
+    mutation_class: str,
+) -> bool | None:
+    if tier is None:
+        return None
+    if tier == AUTOMERGE_TIER_DOCS_ENVELOPE:
+        return state.class_flag("docs")
+    if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
+        return state.tier_flag(tier)
+    if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG:
+        return state.tier_flag(tier)
+    return state.tier_flag(mutation_class)
+
+
+def _root_markdown(path: str) -> bool:
+    return "/" not in path and path.endswith(".md")
 
 
 def _single_child_md(path: str, parent: str) -> bool:

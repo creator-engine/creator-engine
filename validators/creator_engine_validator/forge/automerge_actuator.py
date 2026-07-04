@@ -15,8 +15,10 @@ from .automerge_policy import (
     AUTOMERGE_CANARY_WORK_CLASSES,
     AUTOMERGE_TIER_BRAIN_SUPERSEDE,
     AUTOMERGE_TIER_CARRIER_CHANGELOG,
+    AUTOMERGE_TIER_DOCS_ENVELOPE,
     brain_supersede_tier_evidence,
     carrier_changelog_tier_matches,
+    docs_envelope_tier_matches,
     AutoMergePolicyStateError,
     automerge_policy_state_path,
     load_automerge_policy_state,
@@ -113,6 +115,12 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
         return _dormant("live_run_mode_not_armed", payload, live_run_mode=live_policy.run_mode)
     if live_policy.kill_switch:
         return _refuse("live_kill_switch_active", payload, live_run_mode=live_policy.run_mode)
+    if tier == AUTOMERGE_TIER_DOCS_ENVELOPE and not live_policy.class_flag("docs"):
+        return _refuse(
+            "live_docs_class_flag_not_true",
+            payload,
+            live_run_mode=live_policy.run_mode,
+        )
     if tier in {AUTOMERGE_TIER_CARRIER_CHANGELOG, AUTOMERGE_TIER_BRAIN_SUPERSEDE} and not live_policy.tier_flag(tier):
         return _refuse(
             "live_tier_flag_not_true",
@@ -333,7 +341,11 @@ def _tier_reverification(payload: Mapping[str, Any]) -> str | None | ActuationRe
     raw_tier = payload.get("tier")
     if raw_tier in (None, ""):
         return None
-    if raw_tier not in {AUTOMERGE_TIER_CARRIER_CHANGELOG, AUTOMERGE_TIER_BRAIN_SUPERSEDE}:
+    if raw_tier not in {
+        AUTOMERGE_TIER_CARRIER_CHANGELOG,
+        AUTOMERGE_TIER_DOCS_ENVELOPE,
+        AUTOMERGE_TIER_BRAIN_SUPERSEDE,
+    }:
         return _refuse("tier_unknown", payload)
     if payload.get("tier_flag") is not True:
         return _refuse("tier_flag_not_true", payload)
@@ -347,6 +359,8 @@ def _tier_reverification(payload: Mapping[str, Any]) -> str | None | ActuationRe
         return _refuse("tier_changed_paths_invalid", payload)
     if raw_tier == AUTOMERGE_TIER_CARRIER_CHANGELOG and not carrier_changelog_tier_matches(paths):
         return _refuse("tier_carrier_changelog_path_predicate_failed", payload)
+    if raw_tier == AUTOMERGE_TIER_DOCS_ENVELOPE and not docs_envelope_tier_matches(paths):
+        return _refuse("tier_docs_envelope_path_predicate_failed", payload)
     if raw_tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
         raw_inputs = payload.get("ledger_inputs")
         if not isinstance(raw_inputs, Mapping):
