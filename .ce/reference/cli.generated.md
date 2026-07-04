@@ -14,6 +14,30 @@ Creator Engine kernel (v1.0 Gate 3 lane-launch surface)
 
 ## Commands
 
+### `approval-capability`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `artifacts`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `auto-merge`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `automerge-decide`
 
 Options:
@@ -208,6 +232,14 @@ Options:
 | `--drift` | no |  | re-verify active assertions against their evidence_ref |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `carrier`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `check`
 
 Positional arguments:
@@ -295,6 +327,30 @@ Options:
 | `--branch` | no |  | git branch to resolve (must be main) |
 | `--check` | no |  | resolve, build, and verify without installing |
 | `--json` | no |  |  |
+
+### `cockpit`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `collect`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `configure-repo`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
 
 ### `connector`
 
@@ -392,6 +448,14 @@ Options:
 | `--ring1-tool` | no |  | Ring-1 guarded tool to probe via each target PATH (default: git) |
 | `--json` | no |  | emit the machine-readable JSON fleet status |
 
+### `controller-inbox`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `dequeue`
 
 Positional arguments:
@@ -411,20 +475,11 @@ Options:
 
 ### `dispatch`
 
-plan and inspect governed seat dispatch (ce-ops#42)
+Positional arguments:
 
-### `dispatch plan`
-
-Options:
-
-| Option | Required | Choices | Description |
-| --- | --- | --- | --- |
-| `--arc-ticket` | yes |  |  |
-| `--issues-json` | no |  |  |
-| `--repo` | no |  |  |
-| `--label` | no |  |  |
-| `--seat` | no |  |  |
-| `--json` | no |  |  |
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
 
 ### `doctor`
 
@@ -441,6 +496,30 @@ Options:
 | `--require-worker` | no |  | treat missing rootless Podman (or rootful Podman) as a refusal (PCO-045) |
 | `--no-check-packaging` | no |  | skip the dependency wheelhouse contract clause (RED-G-6) |
 | `--require-installed-ce` | no |  | refuse unless doctor is running via an installed ce/cev3 console script |
+
+### `drive`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `emergency-stop`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `escalation`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
 
 ### `event`
 
@@ -533,6 +612,22 @@ Options:
 | `--packet` | yes |  | path to an existing fan-in packet |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `fleet`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `guide`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `harness-matrix`
 
 Options:
@@ -569,6 +664,14 @@ Options:
 | `--purpose` | no |  | operator-readable purpose recorded in the governed seat lifecycle record |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `inbox`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `init`
 
 Positional arguments:
@@ -583,6 +686,14 @@ Options:
 | --- | --- | --- | --- |
 | `--force` | no |  | overwrite CE scaffold files that differ from the embedded templates |
 | `--json` | no |  | emit machine-readable JSON |
+
+### `install`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
 
 ### `lane`
 
@@ -736,6 +847,22 @@ Options:
 | `--lane-id` | no |  | optional: restrict verification to one lane |
 | `--json` | no |  |  |
 
+### `merge`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `notify`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `onboard`
 
 Options:
@@ -841,6 +968,19 @@ Options:
 
 autonomous forge work-pickup poller (read-only; ce-ops#55/#182)
 
+### `pickup dispatch-plan`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--arc-ticket` | yes |  |  |
+| `--issues-json` | no |  |  |
+| `--repo` | no |  |  |
+| `--label` | no |  |  |
+| `--seat` | no |  |  |
+| `--json` | no |  |  |
+
 ### `pickup poll`
 
 Options:
@@ -908,6 +1048,14 @@ Options:
 | `--playbooks-root`, `--root` | no |  | root used to resolve playbook ids (default: cwd) |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `pr`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `publish-branch`
 
 Positional arguments:
@@ -961,6 +1109,78 @@ Options:
 | `--preview` | yes |  | path to an existing dry-run landing preview |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `queue-daemon`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `queue-dequeue`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `queue-poll`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `ratify`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `reap`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `report`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `review`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `review-pickup`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `review-submit`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `reviewer-triage`
 
 plan-only reviewer assignment decision (no source-host mutation)
@@ -995,6 +1215,62 @@ Options:
 | `--codeowners` | no |  | CODEOWNERS path (default: .github/CODEOWNERS) |
 | `--codeowners-text` | no |  | inline CODEOWNERS text for tests/offline probes |
 | `--required-team` | no |  |  |
+
+### `ruleset`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `scope`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `seats`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `session`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `shape`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `show`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
+### `status`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
 
 ### `surfaces`
 

@@ -204,6 +204,44 @@ INTERNAL_COMMAND_GROUPS = frozenset(
     {"herdr", "ask", "support", "triage", "automerge-kill-switch"}
 )
 
+V3_FORWARDING_SHIMS: dict[str, tuple[str, str]] = {
+    "seats": ("list governed seat liveness from CE state", "seats"),
+    "fleet": ("aggregated fleet status", "fleet"),
+    "scope": ("file a Scope (Goal/Done-when/Budget/Change-type)", "scope"),
+    "shape": ("run the Frame->Shape grill-me on a partial draft (gaps + questions)", "shape"),
+    "ratify": ("place the bet on a Ready Scope (human-only front gate)", "ratify"),
+    "drive": ("assemble the governed dispatch (front gate); --spawn launches the seat", "drive"),
+    "dispatch": ("dispatch governed work to an execution venue", "dispatch"),
+    "collect": ("fold a finished seat run's transcript + outcome into evidence", "collect"),
+    "pr": ("push the seat's authored branch + open its PR through the v3 forge", "pr"),
+    "review": ("dispatch a distinct CE-governed reviewer venue for a run's opened PR", "review"),
+    "merge": ("gate-read (or apply) a squash-merge of a run's opened PR", "merge"),
+    "configure-repo": ("plan/apply GitHub repo branch-protection or repo auto-merge setting", "configure-repo"),
+    "ruleset": ("plan/apply a repo ruleset with pull_request bypass actor", "ruleset"),
+    "review-submit": ("submit the separate reviewer App's APPROVE for a run's opened PR", "review-submit"),
+    "auto-merge": ("plan/apply GraphQL per-PR auto-merge for a run's opened PR", "auto-merge"),
+    "review-pickup": ("controller review-pickup: route awaiting-review PRs to distinct non-author seats", "review-pickup"),
+    "escalation": ("manage local AWAITING-OPERATOR escalation records", "escalation"),
+    "notify": ("Operator-notify feed for AWAITING-OPERATOR entry/exit", "notify"),
+    "reap": ("seat/venue retirement reaper for terminal sentinel events", "reap"),
+    "status": ("list Scopes by projected stage", "status"),
+    "show": ("show one Scope (canon labels + projection)", "show"),
+    "artifacts": ("enumerate a Scope's (and a run's) artifacts", "artifacts"),
+    "report": ("render the per-run CE Completion Report", "report"),
+    "install": ("two-mode install: verify the signed spec, plan, and explicitly apply", "install"),
+    "carrier": ("write, stage, and verify the PR path-manifest carrier files", "carrier"),
+    "guide": ("print the in-product CE guide (what CE is + the five stages)", "guide"),
+    "cockpit": ("the governed fleet Cockpit - read-only board + governance view", "cockpit"),
+    "session": ("launch the governed session frame + status line", "session"),
+    "queue-poll": ("run a bounded, witnessable Integrator merge-queue repair poll", "queue-poll"),
+    "inbox": ("read-only controller awaiting-decision inbox", "inbox"),
+    "controller-inbox": ("alias for inbox; read-only controller awaiting-decision inbox", "controller-inbox"),
+    "queue-daemon": ("run the autonomous Integrator merge-queue daemon", "queue-daemon"),
+    "emergency-stop": ("emergency merge-queue stop: dequeue one queued PR", "emergency-stop"),
+    "queue-dequeue": ("alias for emergency-stop; dequeue one queued PR", "queue-dequeue"),
+    "approval-capability": ("controller-only approval capability wall utilities", "approval-capability"),
+}
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -1863,9 +1901,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--json", action="store_true", dest="json_output",
                     help="emit machine-readable JSON")
 
-    dispatch = groups.add_parser("dispatch", help="plan and inspect governed seat dispatch (ce-ops#42)")
-    dispatch_sub = dispatch.add_subparsers(dest="dispatch_cmd")
-    dp = dispatch_sub.add_parser("plan", help="emit a deterministic seat-dispatch plan from issues JSON")
+    dp = pickup_sub.add_parser("dispatch-plan", help="emit a deterministic seat-dispatch plan from issues JSON")
     dp.add_argument("--arc-ticket", required=True, dest="arc_ticket")
     dp.add_argument("--issues-json", default="-", dest="issues_json")
     dp.add_argument("--repo", default=None)
@@ -2004,6 +2040,10 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_launch_args(launch)
     hud = groups.add_parser("hud", help="alias/seam label for `ce launch` (not a CE-native TUI)")
     _add_launch_args(hud)
+
+    for name, (help_text, _v3_name) in V3_FORWARDING_SHIMS.items():
+        shim = groups.add_parser(name, help=help_text, add_help=False)
+        shim.add_argument("v3_args", nargs=argparse.REMAINDER)
 
     # ce harness-matrix — PROBED harness-support capability matrix (SSOT).
     # Emits a HARNESS x CAPABILITY matrix DERIVED from the adapter specs/config at
@@ -2668,6 +2708,23 @@ def _dequeue(args) -> int:
         argv.append("--json")
     proc = subprocess.run(argv, check=False)
     return int(proc.returncode)
+
+
+def _forward_v3_argv(name: str, remainder: Sequence[str]) -> int:
+    _help_text, v3_name = V3_FORWARDING_SHIMS[name]
+    argv = [
+        sys.executable,
+        "-m",
+        "creator_engine_validator.v3_cli",
+        v3_name,
+        *remainder,
+    ]
+    proc = subprocess.run(argv, check=False)
+    return int(proc.returncode)
+
+
+def _forward_v3_command(args) -> int:
+    return _forward_v3_argv(args.group, getattr(args, "v3_args", ()))
 
 
 def _event_append(args) -> int:
@@ -3745,14 +3802,14 @@ def _dispatch_plan(args) -> int:
         if getattr(args, "json_output", False):
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:
-            print(f"ERROR: ce dispatch plan refused: {exc}", file=sys.stderr)
+            print(f"ERROR: ce pickup dispatch-plan refused: {exc}", file=sys.stderr)
         return 2
 
     if getattr(args, "json_output", False):
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     else:
         print(
-            f"ce dispatch plan: planned {len(result.items)} item(s); "
+            f"ce pickup dispatch-plan: planned {len(result.items)} item(s); "
             f"pickup label {result.pickup_label}"
         )
         for item in result.items:
@@ -4931,11 +4988,10 @@ _CLAIM_DISPATCH = {
 }
 
 _PICKUP_DISPATCH = {
+    "dispatch-plan": _dispatch_plan,
     "poll": _pickup_poll,
     "triage": _pickup_triage,
 }
-
-_DISPATCH_DISPATCH = {"plan": _dispatch_plan}
 
 _TRIAGE_QUEUE_DISPATCH = {
     "scan": _triage_queue_scan,
@@ -4972,6 +5028,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _conveyor_bridge(argv[1:])
     if argv and argv[0] == "press-merge-evidence":
         return _press_merge_evidence_from_argv(argv[1:])
+    if argv and argv[0] in V3_FORWARDING_SHIMS:
+        return _forward_v3_argv(argv[0], argv[1:])
     parser = _build_parser()
     args = parser.parse_args(argv)
     _maybe_print_startup_update_notice(args)
@@ -5067,13 +5125,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.print_usage(sys.stderr)
             return 2
         return handler(args)
-    if args.group == "dispatch":
-        dispatch_cmd = getattr(args, "dispatch_cmd", None)
-        handler = _DISPATCH_DISPATCH.get(dispatch_cmd)
-        if handler is None:
-            parser.print_usage(sys.stderr)
-            return 2
-        return handler(args)
+    if args.group in V3_FORWARDING_SHIMS:
+        return _forward_v3_command(args)
     if args.group == "triage":
         if getattr(args, "triage_cmd", None) != "queue":
             parser.parse_args(["triage", "--help"])  # prints triage help, exits

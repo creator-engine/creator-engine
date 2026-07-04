@@ -62,6 +62,12 @@ def test_as_built_ce_inventory_matches_expected():
         "containment-status", "herdr", "validate-pr", "dequeue", "surfaces",
         "automerge-decide", "automerge-status", "automerge-kill-switch",
         "ask", "support", "triage",
+        "seats", "fleet", "scope", "shape", "ratify", "drive", "collect", "pr",
+        "review", "merge", "configure-repo", "ruleset", "review-submit", "auto-merge",
+        "review-pickup", "escalation", "notify", "reap", "status", "show",
+        "artifacts", "report", "install", "carrier", "guide", "cockpit", "session",
+        "queue-poll", "inbox", "controller-inbox", "queue-daemon", "emergency-stop",
+        "queue-dequeue", "approval-capability",
     }
 
 

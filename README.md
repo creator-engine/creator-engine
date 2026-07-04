@@ -166,13 +166,24 @@ platform evolves:
   reads and validates Orchestrator runtime records under local state and renders
   a human or JSON cockpit summary; it is observe-only and has no dispatch,
   merge, gate, approval, arm, or mutation behavior. `ce dequeue` removes one queued
-  PR from GitHub's merge queue through the governed v3 forge bridge. `ce hud` is an alias for the
+  PR from GitHub's merge queue through the governed v3 forge bridge. The
+  v3-forwarded public command groups are `ce seats`, `ce fleet`, `ce scope`,
+  `ce shape`, `ce ratify`, `ce drive`, `ce dispatch`, `ce collect`, `ce pr`,
+  `ce review`, `ce merge`, `ce configure-repo`, `ce ruleset`,
+  `ce review-submit`, `ce auto-merge`, `ce review-pickup`, `ce escalation`,
+  `ce notify`, `ce reap`, `ce status`, `ce show`, `ce artifacts`,
+  `ce report`, `ce install`, `ce carrier`, `ce guide`, `ce cockpit`,
+  `ce session`, `ce queue-poll`, `ce inbox`, `ce controller-inbox`,
+  `ce queue-daemon`, `ce emergency-stop`, `ce queue-dequeue`, and
+  `ce approval-capability`; each forwards to the v3 work-driving CLI through a
+  subprocess boundary while keeping the Python import boundary intact. `ce hud` is an alias for the
   visible `ce launch` Controller-seat
   tmux launcher, not a CE-native TUI rename. There is no `ce dev` command in
   v1.
-- **`cev3`** is the v3 work-driving entry point in this repository. It covers the
-  v3 product surface: session framing, Scope/drive/review/merge flows,
-  onboard/install planning, cockpit/read-model commands, notification feed, and
+- **`cev3`** is retained as an internal compatibility entry point in this
+  repository while the user-facing product surface is unified under `ce`. The
+  v3 work-driving surface covers session framing, Scope/drive/review/merge
+  flows, install planning, cockpit/read-model commands, notification feed, and
   pilot-facing guide/report surfaces.
 - **The validator** is the offline conformance tool shipped as the
   `creator-engine-validator` package. It enforces schema, protocol, packaging,
@@ -214,8 +225,8 @@ space if needed.
    and runs authenticated inventory. This E1 bootstrap does **not** run sudo,
    automate the GitHub App click, mutate branch protection, or create/adopt a
    project. A successful E1 run is inventory-only; a full governed seat still
-   needs host and GitHub answers, an explicit `ce onboard --plan`, and a later
-   governed `ce onboard --apply`.
+   needs host and GitHub answers, an explicit `ce install --plan`, and a later
+   governed `ce install --apply`.
 
 2. **Clone plus offline dependency wheelhouse.**
 
