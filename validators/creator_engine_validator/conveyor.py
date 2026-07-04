@@ -85,6 +85,7 @@ class ConveyorHarvestSpec:
     refresh_base: bool = True
     validate_command: tuple[str, ...] = DEFAULT_VALIDATE_COMMAND
     allow_dirty_validation: bool = True
+    commit_carriers_before_validation: bool = False
 
 
 @dataclass(frozen=True)
@@ -212,6 +213,10 @@ def prepare_harvest(
                 git_runner=_carrier_git_runner(runner, env=local_git_env),
             )
             _write_declared_work_class(written.manifest_path, spec.declared_work_class)
+            if spec.commit_carriers_before_validation:
+                committed = _commit_carriers_before_validation(runner, root, slug, written, env=local_git_env)
+                if committed is not None and committed.returncode != 0:
+                    reasons.append(_command_reason("git commit generated carriers", committed))
         except Exception as exc:  # write_carriers converts git failures to RuntimeError.
             reasons.append(f"carrier regeneration failed: {exc}")
 
@@ -511,6 +516,35 @@ def _carrier_git_runner(
         return result.returncode, result.stdout, result.stderr
 
     return run
+
+
+def _commit_carriers_before_validation(
+    runner: GitRunner,
+    root: Path,
+    slug: str,
+    written: WrittenCarriers,
+    *,
+    env: Mapping[str, str],
+) -> ConveyorCommandResult | None:
+    rel_paths = tuple(_relative_to_root(root, path) for path in (written.changelog_path, written.manifest_path))
+    added = _git(runner, ["add", "--", *rel_paths], root, env=env)
+    if added.returncode != 0:
+        return added
+    staged = _git(runner, ["diff", "--cached", "--quiet", "--", *rel_paths], root, env=env)
+    if staged.returncode == 0:
+        return None
+    if staged.returncode != 1:
+        return staged
+    return _git(
+        runner,
+        ["commit", "-m", f"Add conveyor harvest carriers for {slug}", "--", *rel_paths],
+        root,
+        env=env,
+    )
+
+
+def _relative_to_root(root: Path, path: Path) -> str:
+    return path.relative_to(root).as_posix()
 
 
 def _git(

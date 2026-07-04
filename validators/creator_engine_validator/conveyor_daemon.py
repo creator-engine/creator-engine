@@ -308,6 +308,8 @@ class ConveyorDaemon:
         self.armed = armed
         self.daemon_lease = daemon_lease
         self.git_runner = git_runner
+        # Retained for constructor/API compatibility; armed mode injects the
+        # sandbox-backed validator at prepare time instead of using this seam.
         self.validate_runner = validate_runner
         self.gh_runner = gh_runner
         self.now = now
@@ -365,8 +367,6 @@ class ConveyorDaemon:
             missing = []
             if self.git_runner is None:
                 missing.append("git_runner")
-            if self.validate_runner is None:
-                missing.append("validate_runner")
             if self.gh_runner is None:
                 missing.append("gh_runner")
             if self.now is None:
@@ -517,14 +517,17 @@ class ConveyorDaemon:
             )
             audit_item = item
             assert self.git_runner is not None
-            assert self.validate_runner is not None
             assert self.gh_runner is not None
             carrier_date = item.carrier_date or _date_from_timestamp(self._timestamp())
             prepared = self.prepare_runner(
-                item.harvest_spec(
-                    carrier_date=carrier_date,
-                    validate_command=self.validate_command,
-                    base=self.base,
+                dataclasses.replace(
+                    item.harvest_spec(
+                        carrier_date=carrier_date,
+                        validate_command=self.validate_command,
+                        base=self.base,
+                    ),
+                    allow_dirty_validation=False,
+                    commit_carriers_before_validation=True,
                 ),
                 git_runner=self.git_runner,
                 validate_runner=self._armed_validate_runner(item, allocation, records),

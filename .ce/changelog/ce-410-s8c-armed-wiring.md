@@ -9,3 +9,5 @@ issue: creator-engine/ce-ops#410
 **Conveyor armed-mode validation via sandbox runner.**
 
 - Wired armed conveyor validation through the validation sandbox runner and recorded receipts.
+- Committed generated carriers before armed sandbox validation so receipts bind the pushed tree.
+- Documented the 8c interim: slice 9 must promote `validation_ledger_binding` into the armed required-seam list.

@@ -80,6 +80,30 @@ class FakeGit:
         return ConveyorCommandResult(1, "", f"unexpected git call: {args}")
 
 
+class RealLocalGit:
+    def __init__(self):
+        self.calls: list[tuple[tuple[str, ...], Path]] = []
+        self.envs: list[Mapping[str, str]] = []
+        self.rev_parse_trees: list[str] = []
+
+    def __call__(self, args: Sequence[str], cwd: Path, env: Mapping[str, str]) -> ConveyorCommandResult:
+        self.calls.append((tuple(args), cwd))
+        self.envs.append(dict(env))
+        if tuple(args) == ("push", "--", "origin", "feature-one:feature-one"):
+            return ConveyorCommandResult(0, "pushed\n", "")
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            env=dict(env),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if tuple(args) == ("rev-parse", "HEAD^{tree}") and completed.returncode == 0:
+            self.rev_parse_trees.append(completed.stdout.strip())
+        return ConveyorCommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+
 class FakeGh:
     def __init__(self):
         self.calls: list[tuple[tuple[str, ...], Path]] = []
@@ -244,6 +268,24 @@ def _init_clean_git_worktree(path: Path) -> str:
     return _git(path, "rev-parse", "HEAD^{tree}")
 
 
+def _init_feature_git_worktree(path: Path) -> str:
+    _git(path, "init", "-q", "--initial-branch=main")
+    _git(path, "config", "user.email", "ce@example.invalid")
+    _git(path, "config", "user.name", "CE Test")
+    (path / "README.md").write_text("base\n", encoding="utf-8")
+    _git(path, "add", "README.md")
+    _git(path, "commit", "-q", "-m", "base")
+    _git(path, "switch", "-q", "-c", "Feature/One")
+    (path / "validators" / "creator_engine_validator").mkdir(parents=True)
+    (path / "validators" / "creator_engine_validator" / "conveyor.py").write_text(
+        "# payload\n",
+        encoding="utf-8",
+    )
+    _git(path, "add", "validators/creator_engine_validator/conveyor.py")
+    _git(path, "commit", "-q", "-m", "payload")
+    return _git(path, "rev-parse", "HEAD^{tree}")
+
+
 def _write_validation_policy(tmp_path: Path) -> Path:
     path = tmp_path / "governance" / "policies" / "worker-container" / "podman-verification-v1.yaml"
     path.parent.mkdir(parents=True)
@@ -349,6 +391,8 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert result.results[0].status == "pr-opened"
     assert prepare.calls[0].carrier_date == "2026-07-01"
     assert prepare.calls[0].worktree_path == item.worktree_path
+    assert prepare.calls[0].allow_dirty_validation is False
+    assert prepare.calls[0].commit_carriers_before_validation is True
     assert land.calls == [(item.bundle_path, "feature-one", "origin/main", item.repo_path)]
     assert git.calls == [(("push", "--", "origin", "feature-one:feature-one"), item.repo_path)]
     assert git.envs == [
@@ -459,6 +503,56 @@ def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Pat
     podman_argv = podman.calls[0][0]
     assert "--secret" not in podman_argv
     assert "conveyor-validation-receipt-secret" not in " ".join(podman_argv)
+
+
+def test_armed_real_prepare_commits_carriers_before_container_validation(tmp_path: Path):
+    item = _item()
+    assert item.worktree_path is not None
+    pre_carrier_tree = _init_feature_git_worktree(item.worktree_path)
+    git = RealLocalGit()
+    podman = FakePodmanRunner()
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        land_runner=FakeLand(),
+        base="main",
+        validation_sandbox_policy_path=_write_validation_policy(tmp_path),
+        validation_sandbox_command_runner=podman,
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    committed_tree = git.rev_parse_trees[-1]
+    assert committed_tree != pre_carrier_tree
+    assert (
+        ("add", "--", ".ce/changelog/feature-one.md", ".ce/pr-manifests/feature-one.md"),
+        item.worktree_path,
+    ) in git.calls
+    assert (
+        (
+            "commit",
+            "-m",
+            "Add conveyor harvest carriers for feature-one",
+            "--",
+            ".ce/changelog/feature-one.md",
+            ".ce/pr-manifests/feature-one.md",
+        ),
+        item.worktree_path,
+    ) in git.calls
+    validate_record = ledger[0]
+    assert validate_record.action == "validate"
+    assert validate_record.sha == committed_tree
+    assert validate_record.details["receipt"]["tree_sha"] == committed_tree
+    assert podman.calls
+    podman_argv = podman.calls[0][0]
+    assert "--allow-dirty" not in podman_argv
+    assert "validation sandbox mounted tree must be clean" not in result.results[0].reasons
 
 
 def test_armed_start_without_receipt_issuer_is_refused():
