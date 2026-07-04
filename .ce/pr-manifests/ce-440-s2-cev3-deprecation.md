@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=45528c5d4da5f7c1413d71912cc50e002075bf821cae092c3765882fc15f2e5b
+AUTHORIZED_PATHS_SHA256=916a27e070d6803669450f5e6cea1081b40ff8091e2185f77e01abdd365697d6
 
 ```text
 .ce/changelog/ce-440-s2-cev3-deprecation.md
@@ -16,4 +16,5 @@ AUTHORIZED_PATHS_SHA256=45528c5d4da5f7c1413d71912cc50e002075bf821cae092c3765882f
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/v3_cli.py
 validators/tests/unit/test_ce_cli_v3_shim.py
+validators/tests/unit/test_integrator_belt.py
 ```

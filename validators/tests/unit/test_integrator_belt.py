@@ -2642,9 +2642,11 @@ def test_ce_emergency_stop_cli_json_dequeues_and_drafts(monkeypatch, capsys):
 def test_ce_cli_dequeue_bridges_to_v3_module_without_importing_forge(monkeypatch):
     captured = {}
 
-    def fake_run(argv, check=False):
+    def fake_run(argv, check=False, env=None):
         captured["argv"] = list(argv)
         captured["check"] = check
+        assert env is not None
+        assert env.get(ce_cli._V3_FORWARDED_ENV) == "1"
         return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
 
     monkeypatch.setattr(ce_cli.subprocess, "run", fake_run)
