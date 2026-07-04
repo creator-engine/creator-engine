@@ -110,6 +110,8 @@ SCOPES_SUBDIR = "scopes"
 _SCOPE_SUFFIX = ".scope.yaml"
 ESCALATIONS_SUBDIR = "escalations"
 _ESCALATION_SCHEMA = "schemas/escalation-record.schema.yaml"
+_CE_V3_FORWARDED_ENV = "CE_V3_FORWARDED"
+_CEV3_DEPRECATION_NOTICE = "WARNING: cev3 is deprecated; use ce instead."
 
 #: The conserved Scope-record envelope constants (``schemas/scope.schema.yaml``).
 _KIND = "scope-record"
@@ -5558,6 +5560,8 @@ _DISPATCH = {
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
+    if argv is None and os.environ.get(_CE_V3_FORWARDED_ENV) != "1":
+        print(_CEV3_DEPRECATION_NOTICE, file=sys.stderr)
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if not raw_argv:
         raw_argv = ["session"]
