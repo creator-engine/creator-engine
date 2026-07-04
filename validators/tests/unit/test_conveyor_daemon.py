@@ -53,7 +53,23 @@ def _receipt_issuer() -> ValidationSandboxReceiptIssuer:
     return ValidationSandboxReceiptIssuer(secret=b"conveyor-validation-receipt-secret")
 
 
-ARMED_ROOTS = {"path_allocator": TEST_ALLOCATOR, "daemon_lease": FakeLease(), "receipt_issuer": _receipt_issuer()}
+def _validation_ledger_binding() -> ConveyorValidationLedgerBinding:
+    return ConveyorValidationLedgerBinding(
+        controller_id="conveyor-daemon-test-controller",
+        lane_id="conveyor-daemon-test-lane",
+        claim_ref="claims/conveyor-daemon-test-controller/conveyor-daemon-test-lane.yaml",
+        repo_root=TEST_RUNTIME_ROOT,
+        side_effect_ledger_root=TEST_RUNTIME_ROOT / "side-effect-ledger",
+        active_work_ledger_root=TEST_RUNTIME_ROOT / "active-work-ledger",
+    )
+
+
+ARMED_ROOTS = {
+    "path_allocator": TEST_ALLOCATOR,
+    "daemon_lease": FakeLease(),
+    "receipt_issuer": _receipt_issuer(),
+    "validation_ledger_binding": _validation_ledger_binding(),
+}
 
 
 class FakeGit:
@@ -244,6 +260,13 @@ class FakeLedgerResult:
     def __init__(self, record_path: Path, record: dict):
         self.record_path = record_path
         self.record = record
+
+
+def _fake_ledger_recorder(record_path: Path):
+    def record(**kwargs):
+        return FakeLedgerResult(record_path, dict(kwargs))
+
+    return record
 
 
 class CountingAllocator:
@@ -557,6 +580,18 @@ def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Pat
         side_effect_records.append(dict(kwargs))
         return FakeLedgerResult(tmp_path / "side-effect.json", dict(kwargs))
 
+    armed_roots = {
+        **ARMED_ROOTS,
+        "validation_ledger_binding": ConveyorValidationLedgerBinding(
+            controller_id="hermes-primary",
+            lane_id="conveyor-slice8c",
+            claim_ref="claims/hermes-primary/conveyor-slice8c.yaml",
+            repo_root=tmp_path,
+            side_effect_ledger_root=tmp_path / "side-effect-ledger",
+            active_work_ledger_root=tmp_path / "active-work-ledger",
+        ),
+    }
+
     def prepare_runner(
         spec: ConveyorHarvestSpec,
         *,
@@ -577,7 +612,7 @@ def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Pat
     result = ConveyorDaemon(
         discovery_runner=lambda: [item],
         armed=True,
-        **ARMED_ROOTS,
+        **armed_roots,
         git_runner=FakeGit(landed_tree_sha=tree_sha),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
@@ -587,14 +622,6 @@ def test_armed_validation_runs_through_sandbox_and_records_receipt(tmp_path: Pat
         land_runner=FakeLand(),
         validation_sandbox_policy_path=_write_validation_policy(tmp_path),
         validation_sandbox_command_runner=podman,
-        validation_ledger_binding=ConveyorValidationLedgerBinding(
-            controller_id="hermes-primary",
-            lane_id="conveyor-slice8c",
-            claim_ref="claims/hermes-primary/conveyor-slice8c.yaml",
-            repo_root=tmp_path,
-            side_effect_ledger_root=tmp_path / "side-effect-ledger",
-            active_work_ledger_root=tmp_path / "active-work-ledger",
-        ),
         validation_ledger_recorder=ledger_recorder,
     ).run_once()
 
@@ -635,6 +662,7 @@ def test_armed_real_prepare_commits_carriers_before_container_validation(tmp_pat
         base="main",
         validation_sandbox_policy_path=_write_validation_policy(tmp_path),
         validation_sandbox_command_runner=podman,
+        validation_ledger_recorder=_fake_ledger_recorder(tmp_path / "side-effect.json"),
     ).run_once()
 
     assert result.results[0].status == "pr-opened"
@@ -691,6 +719,7 @@ def test_armed_real_land_fails_before_push_when_landed_tree_differs_from_validat
         base="main",
         validation_sandbox_policy_path=_write_validation_policy(tmp_path),
         validation_sandbox_command_runner=podman,
+        validation_ledger_recorder=_fake_ledger_recorder(tmp_path / "side-effect.json"),
     ).run_once()
 
     assert result.results[0].status == "failed"
@@ -714,6 +743,23 @@ def test_armed_start_without_receipt_issuer_is_refused():
             armed=True,
             path_allocator=TEST_ALLOCATOR,
             daemon_lease=FakeLease(),
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+            validation_ledger_binding=_validation_ledger_binding(),
+        )
+
+
+def test_armed_start_without_validation_ledger_binding_is_refused():
+    with pytest.raises(ValueError, match="validation_ledger_binding"):
+        ConveyorDaemon(
+            discovery_runner=lambda: [],
+            armed=True,
+            path_allocator=TEST_ALLOCATOR,
+            daemon_lease=FakeLease(),
+            receipt_issuer=_receipt_issuer(),
             git_runner=FakeGit(),
             validate_runner=FakeValidate(),
             gh_runner=FakeGh(),
@@ -750,6 +796,7 @@ def test_armed_start_without_lease_is_refused():
             gh_runner=FakeGh(),
             now=FakeClock(),
             ledger_writer=lambda record: None,
+            validation_ledger_binding=_validation_ledger_binding(),
         )
 
 
@@ -766,6 +813,7 @@ def test_armed_run_heartbeats_lease():
         gh_runner=FakeGh(),
         now=FakeClock(),
         ledger_writer=lambda record: None,
+        validation_ledger_binding=_validation_ledger_binding(),
     )
 
     daemon.run_once()
@@ -805,6 +853,7 @@ def test_armed_run_heartbeats_before_each_item_boundary():
         prepare_runner=prepare_runner,
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
+        validation_ledger_binding=_validation_ledger_binding(),
     ).run_once()
 
     assert [item.status for item in result.results] == ["pr-opened", "pr-opened"]
@@ -836,6 +885,7 @@ def test_armed_run_heartbeat_failure_before_item_stops_without_processing_item()
         prepare_runner=prepare,
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
+        validation_ledger_binding=_validation_ledger_binding(),
     ).run_once()
 
     assert [item.status for item in result.results] == ["pr-opened", "failed"]
@@ -1036,6 +1086,7 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
         prepare_runner=prepare,
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
+        validation_ledger_binding=_validation_ledger_binding(),
     ).run_once()
 
     assert result.results[0].status == "pr-opened"
@@ -1615,4 +1666,5 @@ def test_daemon_construction_requires_repo_root_and_bundle_root_when_armed():
             gh_runner=FakeGh(),
             now=FakeClock(),
             ledger_writer=lambda record: None,
+            validation_ledger_binding=_validation_ledger_binding(),
         )
