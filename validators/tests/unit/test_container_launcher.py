@@ -36,7 +36,7 @@ class FakeRunner:
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         self.calls.append((list(argv), timeout))
-        if self.timeout_exc is not None:
+        if self.timeout_exc is not None and list(argv)[1:2] == ["run"]:
             raise self.timeout_exc
         return subprocess.CompletedProcess(
             list(argv),
@@ -86,11 +86,13 @@ def test_build_foreground_podman_run_argv_covers_ephemeral_policy_shape() -> Non
         env=[("A", "1"), ("B", "two")],
         tmpfs=["/tmp:rw,size=64m"],
         engine_timeout_seconds=30,
+        instance_id="fg-001",
         command=["python", "-m", "pytest"],
     )
 
     assert argv == [
         "podman", "run", "--rm",
+        "--name", "fg-001",
         "--userns=keep-id",
         "--security-opt", "no-new-privileges",
         "--network", "none",
@@ -104,7 +106,7 @@ def test_build_foreground_podman_run_argv_covers_ephemeral_policy_shape() -> Non
         "python", "-m", "pytest",
     ]
     assert "--detach" not in argv
-    assert "--name" not in argv
+    assert argv[argv.index("--name") + 1] == "fg-001"
 
 
 def test_run_foreground_captures_stdout_stderr_returncode_and_host_timeout() -> None:
@@ -124,9 +126,12 @@ def test_run_foreground_captures_stdout_stderr_returncode_and_host_timeout() -> 
     assert result.stdout == "out\n"
     assert result.stderr == "err\n"
     assert result.timed_out is False
+    assert result.container_name is not None
     run_call = runner.calls[-1]
     assert run_call[1] == 12
     assert "--rm" in run_call[0]
+    assert "--name" in run_call[0]
+    assert run_call[0][run_call[0].index("--name") + 1] == result.container_name
     assert "--timeout" not in run_call[0]
 
 
@@ -165,6 +170,7 @@ def test_run_foreground_handles_host_timeout_expired() -> None:
         image_sha=IMAGE_SHA,
         command=["sleep", "99"],
         timeout_seconds=4,
+        instance_id="fg-timeout",
         runner=runner,
     )
 
@@ -173,6 +179,14 @@ def test_run_foreground_handles_host_timeout_expired() -> None:
     assert "busy" in result.stderr
     assert "timed out after 4s" in result.stderr
     assert result.timed_out is True
+    assert result.container_name == "fg-timeout"
+    assert result.cleanup_attempted is True
+    assert result.cleanup_returncode == 0
+    assert result.cleanup_error is None
+    assert runner.calls[-1] == (
+        ["podman", "rm", "-f", "fg-timeout"],
+        container_launcher.PODMAN_TIMEOUT_CLEANUP_SECONDS,
+    )
 
 
 def test_foreground_run_requires_positive_host_timeout() -> None:

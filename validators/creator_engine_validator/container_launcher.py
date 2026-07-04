@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, Sequence
 
 
 PODMAN_TIMEOUT_PROBE_SECONDS = 5
+PODMAN_TIMEOUT_CLEANUP_SECONDS = 10
 PODMAN_TIMEOUT_RETURNCODE = 124
 
 
@@ -37,6 +39,12 @@ class ContainerRunResult:
     stderr: str = ""
     container_id: str | None = None
     timed_out: bool = False
+    container_name: str | None = None
+    cleanup_attempted: bool = False
+    cleanup_returncode: int | None = None
+    cleanup_stdout: str = ""
+    cleanup_stderr: str = ""
+    cleanup_error: str | None = None
 
 
 class SubprocessCommandRunner:
@@ -105,6 +113,10 @@ def _tmpfs_argv(tmpfs: Sequence[str]) -> list[str]:
     return argv
 
 
+def _new_foreground_instance_id() -> str:
+    return f"ce-foreground-{uuid.uuid4().hex[:12]}"
+
+
 def build_podman_run_argv(
     *,
     image_name: str,
@@ -122,8 +134,8 @@ def build_podman_run_argv(
     binary: str = "podman",
 ) -> list[str]:
     """Construct a deterministic rootless ``podman run`` argv."""
-    if mode == "detached" and not instance_id:
-        raise ValueError("detached podman run requires instance_id")
+    if not instance_id:
+        raise ValueError(f"{mode} podman run requires instance_id")
     if mode == "foreground" and not command:
         raise ValueError("foreground podman run requires a trailing command")
 
@@ -131,7 +143,7 @@ def build_podman_run_argv(
     if mode == "detached":
         argv += ["--detach", "--name", str(instance_id)]
     else:
-        argv.append("--rm")
+        argv += ["--rm", "--name", str(instance_id)]
 
     argv += [
         "--userns=keep-id",
@@ -190,6 +202,34 @@ def run_detached_podman(
     )
 
 
+def _cleanup_timed_out_container(
+    *,
+    runner: CommandRunner,
+    binary: str,
+    container_name: str,
+) -> tuple[int | None, str, str, str | None]:
+    try:
+        completed = runner.run(
+            [binary, "rm", "-f", container_name],
+            timeout=PODMAN_TIMEOUT_CLEANUP_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return (
+            None,
+            _coerce_timeout_output(exc.stdout),
+            _coerce_timeout_output(exc.stderr),
+            f"podman rm -f timed out after {PODMAN_TIMEOUT_CLEANUP_SECONDS}s",
+        )
+    except (FileNotFoundError, OSError) as exc:
+        return None, "", "", str(exc)
+    return (
+        completed.returncode,
+        completed.stdout or "",
+        completed.stderr or "",
+        None,
+    )
+
+
 def run_foreground_podman(
     *,
     image_name: str,
@@ -202,6 +242,7 @@ def run_foreground_podman(
     env: Sequence[tuple[str, str]] | dict[str, str] = (),
     tmpfs: Sequence[str] = (),
     secret_grants: Sequence[Any] = (),
+    instance_id: str | None = None,
     runner: CommandRunner | None = None,
     binary: str = "podman",
 ) -> ContainerRunResult:
@@ -213,6 +254,7 @@ def run_foreground_podman(
     command_runner = runner or SubprocessCommandRunner()
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
+    container_name = instance_id or _new_foreground_instance_id()
 
     engine_timeout = (
         timeout_seconds
@@ -226,6 +268,7 @@ def run_foreground_podman(
         network_mode=network_mode,
         mounts=mounts,
         secret_grants=secret_grants,
+        instance_id=container_name,
         command=command,
         workdir=workdir,
         env=env,
@@ -241,14 +284,26 @@ def run_foreground_podman(
             stderr = f"{stderr}\npodman run timed out after {timeout_seconds}s"
         else:
             stderr = f"podman run timed out after {timeout_seconds}s"
+        cleanup_returncode, cleanup_stdout, cleanup_stderr, cleanup_error = _cleanup_timed_out_container(
+            runner=command_runner,
+            binary=binary,
+            container_name=container_name,
+        )
         return ContainerRunResult(
             PODMAN_TIMEOUT_RETURNCODE,
             _coerce_timeout_output(exc.stdout),
             stderr,
             timed_out=True,
+            container_name=container_name,
+            cleanup_attempted=True,
+            cleanup_returncode=cleanup_returncode,
+            cleanup_stdout=cleanup_stdout,
+            cleanup_stderr=cleanup_stderr,
+            cleanup_error=cleanup_error,
         )
     return ContainerRunResult(
         completed.returncode,
         completed.stdout or "",
         completed.stderr or "",
+        container_name=container_name,
     )
