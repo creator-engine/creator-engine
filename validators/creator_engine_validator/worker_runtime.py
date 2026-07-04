@@ -53,6 +53,7 @@ from typing import Any, Sequence
 
 import yaml
 
+from . import container_launcher
 from . import side_effect_ledger_runtime
 from .checks.active_work_ledger_schema import validate_active_work_ledger_record
 from .checks.container_instance import validate_container_instance
@@ -165,6 +166,7 @@ class PodmanCommandRunner:
 
     def __init__(self, binary: str = "podman") -> None:
         self.binary = binary
+        self._command_runner = container_launcher.SubprocessCommandRunner()
 
     def available(self) -> bool:
         return shutil.which(self.binary) is not None
@@ -173,9 +175,8 @@ class PodmanCommandRunner:
         return None
 
     def run_detached(self, argv: Sequence[str]) -> RunResult:  # pragma: no cover - gated by available()
-        proc = subprocess.run(list(argv), capture_output=True, text=True, check=False)
-        container_id = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else None
-        return RunResult(proc.returncode, proc.stdout, proc.stderr, container_id)
+        result = container_launcher.run_detached_podman(argv, runner=self._command_runner)
+        return RunResult(result.returncode, result.stdout, result.stderr, result.container_id)
 
     def stop(self, container_ref: str, *, signal: str = "SIGTERM") -> RunResult:  # pragma: no cover
         proc = subprocess.run(
@@ -332,24 +333,15 @@ def build_podman_run_argv(
     no-new-privileges``. Secrets are referenced by NAME via ``--secret`` (the
     value never enters argv). The image is pinned by digest (``name@sha256:…``).
     """
-    argv: list[str] = [
-        "podman", "run", "--detach",
-        "--name", instance_id,
-        "--userns=keep-id",
-        "--security-opt", "no-new-privileges",
-        "--network", network_mode,
-    ]
-    for entry in mounts:
-        path = entry["path"]
-        mode = entry["mode"]
-        argv += ["-v", f"{path}:{path}:{mode}"]
-    for grant in secret_grants:
-        if grant.mode == "file":
-            argv += ["--secret", f"{grant.secret_name},type=mount,target=/run/secrets/{grant.secret_name}"]
-        else:
-            argv += ["--secret", f"{grant.secret_name},type=env,target={grant.secret_name}"]
-    argv.append(f"{image_name}@{image_sha}")
-    return argv
+    return container_launcher.build_podman_run_argv(
+        image_name=image_name,
+        image_sha=image_sha,
+        mode="detached",
+        instance_id=instance_id,
+        mounts=mounts,
+        secret_grants=secret_grants,
+        network_mode=network_mode,
+    )
 
 
 def load_policy(policy_path: Path | str) -> dict[str, Any]:
