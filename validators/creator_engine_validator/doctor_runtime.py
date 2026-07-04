@@ -23,6 +23,7 @@ from typing import Any, Sequence
 
 from . import bootstrap_runtime
 from . import environment_guard as guard
+from . import launch_runtime
 from . import resource_bound_spec
 from .packaging_runtime import interpreter_in_contract, verify_packaging_contract
 from .tmux_adapter import TmuxAdapter
@@ -310,6 +311,17 @@ def run_doctor(
         payload["refused_clauses"].append(seat_env_check["clause"])
     payload["ok"] = payload["ok"] and not (
         seat_env_check["applicable"] and not seat_env_check["ok"]
+    )
+    recall_status = launch_runtime.probe_controller_recall_endpoint(repo_root)
+    payload["checks"].append(
+        {
+            "clause": "CE-BRAIN-RECALL",
+            "name": "brain recall endpoint",
+            "applicable": recall_status.get("state") != "unconfigured",
+            "ok": recall_status.get("state") != "unavailable",
+            "detail": recall_status.get("line") or str(recall_status.get("reason", "")),
+            "status": recall_status,
+        }
     )
     # ce-ops#25: surface the derived CE version identity beside the packaging
     # health line (local preflight telemetry, Open-Q3 — never attestation).

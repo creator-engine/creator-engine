@@ -16,6 +16,16 @@ from creator_engine_validator import environment_guard as guard
 from creator_engine_validator.packaging_runtime import PackagingContractResult
 
 
+def _clear_recall_env(monkeypatch):
+    for name in (
+        doctor_runtime.launch_runtime.RECALL_EMBEDDER_ENV,
+        doctor_runtime.launch_runtime.RECALL_ENDPOINT_ENV,
+        doctor_runtime.launch_runtime.RECALL_ENDPOINT_MODEL_ID_ENV,
+        doctor_runtime.launch_runtime.RECALL_ENDPOINT_DIM_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _facts(**overrides) -> guard.EnvironmentFacts:
     base = dict(
         version_info=(3, 14, 5),
@@ -39,6 +49,7 @@ def _facts(**overrides) -> guard.EnvironmentFacts:
 
 @pytest.fixture()
 def inject_facts(monkeypatch, tmp_path):
+    _clear_recall_env(monkeypatch)
     missing_target_python = tmp_path / "missing-python"
     monkeypatch.setattr(
         doctor_runtime.bootstrap_runtime,
@@ -118,6 +129,36 @@ def test_doctor_refuses_source_checkout_when_installed_ce_required(inject_facts,
     assert guard.CLAUSE_INSTALLED_CE in payload["refused_clauses"]
     assert payload["prerequisites"]["ce_dogfood_invocation"] == "python_module"
     assert payload["prerequisites"]["ce_package_origin"] == "source_checkout"
+
+
+def test_doctor_surfaces_recall_endpoint_probe_without_refusing(
+    inject_facts, monkeypatch, capsys
+):
+    inject_facts()
+    monkeypatch.setattr(
+        doctor_runtime.launch_runtime,
+        "probe_controller_recall_endpoint",
+        lambda repo_root: {
+            "state": "unavailable",
+            "reason": "endpoint down",
+            "endpoint": "http://127.0.0.1:8989/v1/embeddings",
+            "line": (
+                "brain recall: UNAVAILABLE (endpoint down endpoint "
+                "http://127.0.0.1:8989/v1/embeddings) - semantic recall disabled "
+                "for this session; SSOT assertions unaffected"
+            ),
+        },
+    )
+
+    ret = ce_cli.main(["doctor", "--json", "--repo-root", "."])
+
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    check = next(c for c in payload["checks"] if c["clause"] == "CE-BRAIN-RECALL")
+    assert check["ok"] is False
+    assert check["status"]["state"] == "unavailable"
+    assert payload["ok"] is True
+    assert "CE-BRAIN-RECALL" not in payload["refused_clauses"]
 
 
 def test_doctor_accepts_installed_console_when_required(inject_facts, capsys):

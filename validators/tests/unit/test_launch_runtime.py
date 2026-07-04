@@ -50,6 +50,7 @@ def _isolate_seat_state(tmp_path, monkeypatch):
     Tests that pass an explicit absolute ``repo_root=tmp_path`` are unaffected.
     """
     monkeypatch.chdir(tmp_path)
+    _clear_recall_env(monkeypatch)
     _write_brain_ledger(tmp_path / ".ce" / "state")
 
 
@@ -69,6 +70,16 @@ def _brain_payload(result):
     ref = Path(result.plan.brain_bootstrap_ref)
     assert ref.is_file()
     return json.loads(ref.read_text(encoding="utf-8"))
+
+
+def _clear_recall_env(monkeypatch):
+    for name in (
+        launch_runtime.RECALL_EMBEDDER_ENV,
+        launch_runtime.RECALL_ENDPOINT_ENV,
+        launch_runtime.RECALL_ENDPOINT_MODEL_ID_ENV,
+        launch_runtime.RECALL_ENDPOINT_DIM_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _assert_foreman_charter_and_worker_spawn(payload):
@@ -402,7 +413,17 @@ def test_launch_injects_brain_bootstrap_payload_ref(tmp_path):
     assert f"export CE_BRAIN_BOOTSTRAP_SHA256={result.plan.brain_bootstrap_sha256}" in wrapper
 
 
-def test_controller_brain_bootstrap_adds_advisory_recall_when_available(tmp_path, monkeypatch):
+def test_controller_brain_bootstrap_adds_advisory_recall_when_endpoint_configured(
+    tmp_path, monkeypatch
+):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+    monkeypatch.setenv(
+        launch_runtime.RECALL_ENDPOINT_ENV,
+        "http://127.0.0.1:9999/v1/embeddings",
+    )
+    monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_MODEL_ID_ENV, "tenant-model")
+    monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_DIM_ENV, "768")
     calls: dict[str, dict] = {}
 
     class Hydration:
@@ -443,6 +464,9 @@ def test_controller_brain_bootstrap_adds_advisory_recall_when_available(tmp_path
     assert calls["open_surface"] == {
         "state_root": tmp_path / ".ce" / "state",
         "embedder_name": "vllm-openai",
+        "endpoint": "http://127.0.0.1:9999/v1/embeddings",
+        "endpoint_model_id": "tenant-model",
+        "endpoint_dim": 768,
     }
     assert calls["hydrate"]["top_k"] == 5
     assert calls["hydrate"]["allow_confidential_egress"] is False
@@ -455,11 +479,15 @@ def test_controller_brain_bootstrap_adds_advisory_recall_when_available(tmp_path
     assert payload["recall"]["embedder"] == "vllm-openai"
     assert payload["recall"]["allow_confidential_egress"] is False
     assert payload["recall"]["recall"][0]["tier"] == "recall"
+    assert payload["recall_status"]["state"] == "hydrated"
+    assert payload["recall_status"]["endpoint"] == "http://127.0.0.1:9999/v1/embeddings"
 
 
-def test_controller_brain_bootstrap_falls_back_to_deterministic_when_vllm_unavailable(
-    tmp_path, monkeypatch, caplog
+def test_controller_brain_bootstrap_hydrates_with_explicit_deterministic_embedder(
+    tmp_path, monkeypatch
 ):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "deterministic")
     real_open_surface = launch_runtime.brain_recall_surface.open_surface
     state_root = tmp_path / ".ce" / "state"
     chunks = [
@@ -496,12 +524,9 @@ def test_controller_brain_bootstrap_falls_back_to_deterministic_when_vllm_unavai
 
     def open_surface(**kwargs):
         calls.append(kwargs)
-        if kwargs.get("embedder_name") == "vllm-openai":
-            raise RuntimeError("vllm endpoint unavailable")
         return real_open_surface(**kwargs)
 
     monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
-    caplog.set_level("WARNING", logger=launch_runtime.__name__)
 
     payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
 
@@ -509,33 +534,72 @@ def test_controller_brain_bootstrap_falls_back_to_deterministic_when_vllm_unavai
     assert payload["recall"]["advisory"] is True
     assert payload["recall"]["embedder"] == "deterministic"
     assert payload["recall"]["recall"]
-    assert "vllm-openai" in caplog.text
-    assert calls == [
-        {"state_root": state_root, "embedder_name": "vllm-openai"},
-        {"state_root": state_root},
-    ]
+    assert payload["recall_status"]["state"] == "hydrated"
+    assert calls == [{"state_root": state_root, "embedder_name": "deterministic"}]
 
 
-def test_controller_brain_bootstrap_falls_back_to_ssot_when_recall_unavailable(
-    tmp_path, monkeypatch, caplog
-):
+def test_controller_brain_bootstrap_marks_unconfigured_when_env_absent(tmp_path, monkeypatch):
+    _clear_recall_env(monkeypatch)
     expected = brain_bootstrap.build_bootstrap_payload(
         state_root=tmp_path / ".ce" / "state",
         role=brain_bootstrap.DEFAULT_ROLE,
         seat_class=brain_bootstrap.DEFAULT_SEAT_CLASS,
     )
 
-    def open_surface(**_kwargs):
-        raise RuntimeError("vllm endpoint unavailable")
+    calls = []
+
+    def open_surface(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("unconfigured recall must not open a surface")
 
     monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
-    caplog.set_level("WARNING", logger=launch_runtime.__name__)
 
     payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
 
-    assert payload == expected
+    assert payload["kind"] == expected["kind"]
+    assert payload["knowledge_ssot"] == expected["knowledge_ssot"]
     assert "recall" not in payload
-    assert "semantic recall hydration skipped" in caplog.text
+    assert calls == []
+    assert payload["recall_status"]["state"] == "unconfigured"
+    assert launch_runtime.RECALL_EMBEDDER_ENV in payload["recall_status"]["reason"]
+
+
+def test_controller_brain_bootstrap_marks_unavailable_when_configured_recall_fails(
+    tmp_path, monkeypatch
+):
+    _clear_recall_env(monkeypatch)
+    monkeypatch.setenv(launch_runtime.RECALL_EMBEDDER_ENV, "vllm-openai")
+
+    def open_surface(**_kwargs):
+        raise launch_runtime.brain_recall_surface.BrainRecallInvalid(
+            "store model mismatch"
+        )
+
+    monkeypatch.setattr(launch_runtime.brain_recall_surface, "open_surface", open_surface)
+
+    payload = launch_runtime._build_controller_brain_bootstrap(tmp_path)
+
+    assert "recall" not in payload
+    assert payload["recall_status"]["state"] == "unavailable"
+    assert payload["recall_status"]["endpoint"].endswith("/v1/embeddings")
+    assert "store model mismatch" in payload["recall_status"]["reason"]
+
+
+def test_launch_result_and_log_surface_recall_status(tmp_path, monkeypatch, caplog):
+    _clear_recall_env(monkeypatch)
+    caplog.set_level("WARNING", logger=launch_runtime.__name__)
+
+    result = launch_runtime.launch(
+        harness="claude",
+        session="recall-status",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+    )
+
+    payload = _brain_payload(result)
+    assert payload["recall_status"]["state"] == "unconfigured"
+    assert result.plan.brain_recall_status == payload["recall_status"]
+    assert "brain recall: UNCONFIGURED" in caplog.text
 
 
 @pytest.mark.parametrize("harness", ["claude", "hermes", "openclaw"])
