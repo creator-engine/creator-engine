@@ -4210,6 +4210,74 @@ def _build_parser() -> argparse.ArgumentParser:
         help="durable awaiting-review inbox path "
              f"(default: {review_pickup_module.DEFAULT_AWAITING_REVIEW_INBOX_PATH})",
     )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-backend",
+        default=None,
+        help="SecretIdentityBackend registry key for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-mount",
+        default=None,
+        help="SecretRef mount for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-path",
+        default=None,
+        help="SecretRef path for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-field",
+        default=None,
+        help="SecretRef field for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-version",
+        type=int,
+        default=None,
+        help="optional SecretRef version for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-purpose",
+        default=None,
+        help="SecretRef purpose for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-owner-ref",
+        default=None,
+        help="SecretRef owner reference for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-ref-policy-sha",
+        default=None,
+        help="64-hex SecretRef policy sha for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-target-ref",
+        default=None,
+        help="file: materialization target ref read after SecretIdentityBackend delivery",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-run-id",
+        default="review-pickup-daemon",
+        help="run id for the SecretRequest used to materialize the review-pickup token",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-seat-id",
+        default="dev-2",
+        help="seat id for the SecretRequest used to materialize the review-pickup token",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-secret-ttl-seconds",
+        type=int,
+        default=secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_TTL_SECONDS,
+        help="SecretRequest TTL in seconds for the primary review-pickup token supplier",
+    )
+    p_review_pickup.add_argument(
+        "--pickup-token-max-consecutive-failures",
+        type=int,
+        default=review_pickup_module.DEFAULT_REVIEW_PICKUP_MAX_CONSECUTIVE_FAILURES,
+        help="token-supplied loop failures before exiting for supervisor restart",
+    )
     p_review_pickup.add_argument("--json", action="store_true", dest="json_output",
                                  help="emit machine-readable JSON")
 
@@ -5312,6 +5380,87 @@ def _review_pickup_gh_runner(identity: str, token: str):
     return pickup_search.make_gh_runner(token)
 
 
+def _review_pickup_token_supplier_from_args(
+    args: argparse.Namespace,
+) -> approval_capability.SecretSupplier | None:
+    from . import pickup_search
+
+    raw_backend_key = getattr(args, "pickup_token_secret_backend", None)
+    raw_mount = getattr(args, "pickup_token_secret_mount", None)
+    raw_path = getattr(args, "pickup_token_secret_path", None)
+    raw_field = getattr(args, "pickup_token_secret_field", None)
+    raw_purpose = getattr(args, "pickup_token_secret_purpose", None)
+    raw_owner_ref = getattr(args, "pickup_token_secret_owner_ref", None)
+    policy_sha = getattr(args, "pickup_token_secret_ref_policy_sha", None)
+    target_ref = getattr(args, "pickup_token_secret_target_ref", None)
+    ref_fields = (
+        raw_backend_key,
+        raw_mount,
+        raw_path,
+        raw_field,
+        raw_purpose,
+        raw_owner_ref,
+    )
+    if not any((*ref_fields, policy_sha, target_ref)):
+        return None
+    if not policy_sha or not target_ref:
+        raise pickup_search.PickupError(
+            "review pickup SecretIdentityBackend token configuration is partial"
+        )
+    if target_ref.startswith("env:"):
+        raise pickup_search.PickupError(
+            "review pickup SecretIdentityBackend target must use file:; env: targets are fork-unsafe"
+        )
+    if not target_ref.startswith("file:"):
+        raise pickup_search.PickupError(
+            "review pickup SecretIdentityBackend target must use file:"
+        )
+    repo = getattr(args, "repo", None)
+    if not repo:
+        raise pickup_search.PickupError(
+            "review pickup SecretIdentityBackend token configuration requires --repo"
+        )
+    backend_key = raw_backend_key or secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_BACKEND
+    secret_ref = secret_identity.SecretRef(
+        backend=backend_key,
+        mount=raw_mount or secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_MOUNT,
+        path=raw_path or secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_PATH,
+        field=raw_field or secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_FIELD,
+        version=getattr(args, "pickup_token_secret_version", None),
+        purpose=raw_purpose or secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_PURPOSE,
+        owner_ref=raw_owner_ref or secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_OWNER_REF,
+        policy_sha=policy_sha,
+    )
+    request = secret_identity.SecretRequest(
+        run_id=getattr(args, "pickup_token_secret_run_id", "review-pickup-daemon"),
+        seat_id=getattr(args, "pickup_token_secret_seat_id", "dev-2"),
+        repo=repo,
+        secret_ref=secret_ref,
+        ttl_seconds=getattr(
+            args,
+            "pickup_token_secret_ttl_seconds",
+            secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_TTL_SECONDS,
+        ),
+        delivery="file",
+        requested_capabilities=("read",),
+        audit_context={
+            "purpose": secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_PURPOSE,
+            "source": "ce review-pickup",
+        },
+    )
+
+    def supply() -> bytes | str | None:
+        backend_supplier = approval_capability.approval_wall_secret_supplier_from_secret_identity_backend(
+            backend=secret_identity.get_backend(backend_key),
+            request=request,
+            target_ref=target_ref,
+            value_reader=_approval_wall_materialized_value_reader,
+        )
+        return backend_supplier()
+
+    return supply
+
+
 def _cmd_review_pickup(args: argparse.Namespace) -> int:
     """ce-ops#188 controller review-pickup: route awaiting-review PRs to distinct
     non-author reviewer seats, reconciling objectively stale reviews fail-closed."""
@@ -5336,16 +5485,30 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
                      {"error": "review_pickup_input", "detail": "--loop requires --interval > 0", "mode": mode})
 
     try:
-        token = pickup_search.resolve_token(
-            keys_dir=getattr(args, "keys_dir", None),
-            identity=args.identity,
-            allow_ambient_gh=getattr(args, "allow_ambient_gh", False),
-        )
+        token_supplier = _review_pickup_token_supplier_from_args(args)
     except pickup_search.PickupError as exc:
         return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): {exc}"],
                      {"error": "review_pickup_token", "detail": str(exc)})
 
-    gh_runner = _review_pickup_gh_runner(args.identity, token)
+    gh_runner_factory = None
+    if token_supplier is None:
+        try:
+            token = pickup_search.resolve_token(
+                keys_dir=getattr(args, "keys_dir", None),
+                identity=args.identity,
+                allow_ambient_gh=getattr(args, "allow_ambient_gh", False),
+            )
+        except pickup_search.PickupError as exc:
+            return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): {exc}"],
+                         {"error": "review_pickup_token", "detail": str(exc)})
+        gh_runner = _review_pickup_gh_runner(args.identity, token)
+    else:
+        token = ""
+        gh_runner = _review_pickup_gh_runner(args.identity, token)
+
+        def gh_runner_factory(fresh_token: str):
+            return _review_pickup_gh_runner(args.identity, fresh_token)
+
     dry_run = bool(getattr(args, "dry_run", False))
     applied = bool(getattr(args, "apply", False) and not dry_run)
     logger = review_pickup.JsonLineLogger(sys.stderr)
@@ -5356,6 +5519,8 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
             token=token,
             reviewer_seats=getattr(args, "reviewer_seats", ()) or (),
             gh_runner=gh_runner,
+            token_supplier=token_supplier,
+            gh_runner_factory=gh_runner_factory,
             transport=_review_pickup_transport(),
             repo=getattr(args, "repo", None),
             org=getattr(args, "org", None),
@@ -5366,6 +5531,11 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
             interval=interval,
             log_sink=logger,
             inbox_path=inbox_path,
+            max_consecutive_failures=getattr(
+                args,
+                "pickup_token_max_consecutive_failures",
+                review_pickup.DEFAULT_REVIEW_PICKUP_MAX_CONSECUTIVE_FAILURES,
+            ),
         )
         result = loop_result.passes[-1] if loop_result.passes else review_pickup.ReviewPickupResult()
     except KeyboardInterrupt:

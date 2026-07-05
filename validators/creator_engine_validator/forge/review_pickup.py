@@ -50,10 +50,13 @@ from ..pickup_search import (
 
 DEFAULT_REVIEW_PICKUP_PER_PAGE = DEFAULT_SEARCH_PER_PAGE
 DEFAULT_REVIEW_PICKUP_INTERVAL_SECONDS = 300
+DEFAULT_REVIEW_PICKUP_MAX_CONSECUTIVE_FAILURES = 10
 DEFAULT_CONTROLLER_REVIEWER = "ce-dev-2"
 DEFAULT_AWAITING_REVIEW_INBOX_PATH = Path(".ce/state/controller-inbox/awaiting-review.json")
 
 LogSink = Callable[[Mapping[str, Any]], None]
+TokenSupplier = Callable[[], bytes | str | None]
+GhRunnerFactory = Callable[[str], GhRunner]
 
 _FAILED_CI_STATES = {
     "FAILURE",
@@ -347,6 +350,8 @@ def run_review_pickup_loop(
     token: str,
     reviewer_seats: Sequence[str],
     gh_runner: GhRunner,
+    token_supplier: TokenSupplier | None = None,
+    gh_runner_factory: GhRunnerFactory | None = None,
     transport: Transport | None = None,
     repo: str | None = None,
     org: str | None = None,
@@ -363,6 +368,7 @@ def run_review_pickup_loop(
     controller_reviewer: str = DEFAULT_CONTROLLER_REVIEWER,
     clock: Callable[[], datetime | str] | None = None,
     inbox_writer: Callable[[Path, str], None] | None = None,
+    max_consecutive_failures: int = DEFAULT_REVIEW_PICKUP_MAX_CONSECUTIVE_FAILURES,
 ) -> ReviewPickupLoopResult:
     """Run one or more bounded review-pickup passes.
 
@@ -373,37 +379,68 @@ def run_review_pickup_loop(
         raise PickupError("review pickup loop requires iterations >= 1")
     if iterations is None and interval <= 0:
         raise PickupError("review pickup loop requires interval > 0")
+    if token_supplier is not None:
+        if gh_runner_factory is None:
+            raise PickupError("review pickup token supplier requires gh_runner_factory")
+        if max_consecutive_failures < 1:
+            raise PickupError("review pickup max consecutive failures must be >= 1")
     passes: list[ReviewPickupResult] = []
     index = 0
+    consecutive_failures = 0
     while iterations is None or index < iterations:
         index += 1
         _log_event(log_sink, "review_pickup_pass_start", index=index, dry_run=dry_run)
         try:
-            result = poll_review_pickup(
-                token=token,
-                reviewer_seats=reviewer_seats,
-                gh_runner=gh_runner,
-                transport=transport,
-                repo=repo,
-                org=org,
-                per_page=per_page,
-                apply=apply,
-                apply_stale=apply_stale,
-                dry_run=dry_run,
-                log_sink=log_sink,
-                rate_limiter=rate_limiter,
-                sleep=sleep,
-                controller_reviewer=controller_reviewer,
-            )
-        except PickupRateLimited as exc:
-            _log_event(
+            pass_token = token
+            pass_gh_runner = gh_runner
+            if token_supplier is not None:
+                pass_token = _review_pickup_token_from_supplier(token_supplier)
+                pass_gh_runner = gh_runner_factory(pass_token)
+        except Exception as exc:
+            result = _incomplete_review_pickup_pass(
                 log_sink,
-                "review_pickup_rate_limited",
                 index=index,
                 dry_run=dry_run,
-                **exc.to_payload(),
+                reason="token_supplier_failed",
+                exc=exc,
             )
-            result = ReviewPickupResult(rate_limit=exc.to_payload(), incomplete=True)
+        else:
+            try:
+                result = poll_review_pickup(
+                    token=pass_token,
+                    reviewer_seats=reviewer_seats,
+                    gh_runner=pass_gh_runner,
+                    transport=transport,
+                    repo=repo,
+                    org=org,
+                    per_page=per_page,
+                    apply=apply,
+                    apply_stale=apply_stale,
+                    dry_run=dry_run,
+                    log_sink=log_sink,
+                    rate_limiter=rate_limiter,
+                    sleep=sleep,
+                    controller_reviewer=controller_reviewer,
+                )
+            except PickupRateLimited as exc:
+                _log_event(
+                    log_sink,
+                    "review_pickup_rate_limited",
+                    index=index,
+                    dry_run=dry_run,
+                    **exc.to_payload(),
+                )
+                result = ReviewPickupResult(rate_limit=exc.to_payload(), incomplete=True)
+            except PickupError as exc:
+                if token_supplier is None:
+                    raise
+                result = _incomplete_review_pickup_pass(
+                    log_sink,
+                    index=index,
+                    dry_run=dry_run,
+                    reason="pickup_error",
+                    exc=exc,
+                )
         passes.append(result)
         if inbox_path is not None and not result.incomplete:
             write_awaiting_review_inbox(
@@ -421,10 +458,55 @@ def run_review_pickup_loop(
             skipped=len(result.skipped),
             dry_run=dry_run,
         )
+        if token_supplier is not None and result.incomplete:
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                raise PickupError(
+                    "review pickup failed "
+                    f"{consecutive_failures} consecutive token-supplied pass(es); "
+                    "exiting for supervisor restart"
+                )
+        else:
+            consecutive_failures = 0
         if iterations is not None and index >= iterations:
             break
         sleep(interval)
     return ReviewPickupLoopResult(passes=tuple(passes))
+
+
+def _review_pickup_token_from_supplier(token_supplier: TokenSupplier) -> str:
+    supplied = token_supplier()
+    if isinstance(supplied, bytes):
+        token = supplied.decode("utf-8", "replace").strip()
+    elif isinstance(supplied, str):
+        token = supplied.strip()
+    elif supplied is None:
+        token = ""
+    else:
+        raise PickupError("review pickup token supplier returned an unsupported value")
+    if not token:
+        raise PickupError("review pickup token supplier returned an empty token")
+    return token
+
+
+def _incomplete_review_pickup_pass(
+    log_sink: LogSink | None,
+    *,
+    index: int,
+    dry_run: bool,
+    reason: str,
+    exc: BaseException,
+) -> ReviewPickupResult:
+    _log_event(
+        log_sink,
+        "review_pickup_pass_incomplete",
+        index=index,
+        dry_run=dry_run,
+        reason=reason,
+        error_type=type(exc).__name__,
+        note=str(exc),
+    )
+    return ReviewPickupResult(incomplete=True)
 
 
 def _normalize_reviewer_seats(seats: Sequence[str]) -> tuple[str, ...]:
