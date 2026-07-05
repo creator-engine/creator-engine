@@ -117,11 +117,13 @@ import sys
 import threading
 from pathlib import Path
 
-from creator_engine_validator.conveyor_daemon_runner import (
-    _lease_refusal_error,
-    main_with_existing_lease,
-)
+from creator_engine_validator.conveyor_daemon_runner import main_with_existing_lease
 from creator_engine_validator.daemon_lease import DaemonLeaseError, acquire
+
+try:
+    from creator_engine_validator.conveyor_daemon_runner import _lease_refusal_error
+except ImportError:
+    _lease_refusal_error = None
 
 
 def _float_env(name: str, default: float) -> float:
@@ -151,11 +153,13 @@ try:
         ttl_seconds=ttl_seconds,
     )
 except DaemonLeaseError as exc:
-    try:
-        from types import SimpleNamespace
-
-        message = _lease_refusal_error(SimpleNamespace(lease_root=lease_root), exc)
-    except Exception:
+    if _lease_refusal_error is not None:
+        try:
+            from types import SimpleNamespace
+            message = _lease_refusal_error(SimpleNamespace(lease_root=lease_root), exc)
+        except Exception:
+            message = f"conveyor-daemon singleton lease refused: {exc}"
+    else:
         message = f"conveyor-daemon singleton lease refused: {exc}"
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(73)

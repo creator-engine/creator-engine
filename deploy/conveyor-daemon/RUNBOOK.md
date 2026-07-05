@@ -11,12 +11,20 @@ cannot be safely replaced.
 The service repeatedly exits with status `73`, and `journalctl` shows a lease
 refusal such as:
 
+Stale lease (heartbeat-crash survivor — requires manual cleanup):
+
 ```text
 ERROR: conveyor-daemon singleton lease refused: stale conveyor-daemon lease requires explicit audited takeover; lease_path=/path/to/conveyor-daemon.lease; holder_pid=12345
 ```
 
-A live lease may report that the lease is held by another holder and pid. A
-stale lease reports that explicit audited takeover is required.
+Live lease (another instance is genuinely running):
+
+```text
+ERROR: conveyor-daemon singleton lease refused: live conveyor-daemon lease is held by conveyor-daemon:otherhost:12345 pid=12345 host=otherhost; lease_path=/path/to/conveyor-daemon.lease; holder_pid=12345
+```
+
+A stale lease reports that explicit audited takeover is required. A live lease
+reports that the lease is held by another holder and pid.
 
 ### Verify
 
