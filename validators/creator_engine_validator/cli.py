@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .check_profiles import CHECK_PROFILES, emit_profile_notices, omitted_checks_for_profile
 from .reporting import CheckResult
 from .work_sizing import WORK_CLASS_INPUTS
 
@@ -23,6 +24,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser("check", help="run all enabled checks")
     check.add_argument("paths", nargs="*", default=["."], help="paths to validate")
+    check.add_argument(
+        "--profile",
+        choices=CHECK_PROFILES,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
 
     check_examples = sub.add_parser("check-examples", help="validate bundled well-formed/malformed examples")
     check_examples.add_argument("examples_root", nargs="?", default="examples", help="examples root to validate (default: examples)")
@@ -504,10 +511,18 @@ def _emit_results(results: list[CheckResult], json_output: bool) -> int:
     return 1 if failed else 0
 
 
-def _check(paths: Sequence[str], json_output: bool) -> int:
+def _check(paths: Sequence[str], json_output: bool, profile: str | None = None) -> int:
     from .checks import run_registered
 
-    return _emit_results(run_registered([Path(p) for p in paths]), json_output)
+    omissions = omitted_checks_for_profile(profile)
+    if omissions and profile is not None:
+        emit_profile_notices(profile, omissions)
+    results = [
+        result
+        for result in run_registered([Path(p) for p in paths])
+        if result.name not in omissions
+    ]
+    return _emit_results(results, json_output)
 
 
 def _check_examples(json_output: bool) -> int:
@@ -644,7 +659,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     subcommand = args.subcommand or "check"
     if subcommand == "check":
-        return _check(getattr(args, "paths", ["."]), args.json_output)
+        return _check(getattr(args, "paths", ["."]), args.json_output, getattr(args, "profile", None))
     if subcommand == "check-examples":
         return _check_examples(args.json_output)
     if subcommand == "scan-no-limitless":
