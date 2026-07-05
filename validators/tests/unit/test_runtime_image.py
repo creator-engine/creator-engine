@@ -104,6 +104,8 @@ def test_runtime_dockerfile_installs_gate_daemon_runtime_dependencies_from_pinne
     assert "      git \\" in text
     assert "command -v gh" in text
     assert "command -v git" in text
+    assert text.index("command -v gh") < text.index("ce --help")
+    assert text.index("command -v git") < text.index("ce --help")
 
 
 def test_runtime_dockerfile_is_non_root_and_engine_agnostic() -> None:

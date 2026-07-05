@@ -99,11 +99,11 @@ RUN set -eux; \
     command -v ce; \
     command -v cev3; \
     command -v creator-engine-validator; \
+    command -v gh; \
+    command -v git; \
     ce --help >/tmp/ce-help.txt; \
     cev3 --help >/tmp/cev3-help.txt; \
-    creator-engine-validator --help >/tmp/creator-engine-validator-help.txt; \
-    command -v gh; \
-    command -v git
+    creator-engine-validator --help >/tmp/creator-engine-validator-help.txt
 
 USER ${CE_UID}:${CE_GID}
 WORKDIR /workspace/creator-engine

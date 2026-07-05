@@ -694,6 +694,28 @@ def test_container_runner_creates_missing_state_and_lease_roots(tmp_path: Path):
     assert oct(lease_root.stat().st_mode & 0o777) == "0o700"
 
 
+@pytest.mark.skipif(os.getuid() == 0, reason="non-root Docker creation branch is not exercised as root")
+def test_container_runner_creates_missing_docker_roots_for_non_root_caller_when_uid_matches(tmp_path: Path):
+    fake_docker = tmp_path / "docker"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_docker, argv_file)
+    env = _container_runner_env(tmp_path, fake_docker)
+    env["CE_DAEMON_IMAGE_UID"] = str(os.getuid())
+    state_root = tmp_path / "state"
+    lease_root = state_root / "daemon-leases"
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert state_root.is_dir()
+    assert lease_root.is_dir()
+    assert state_root.stat().st_uid == os.getuid()
+    assert lease_root.stat().st_uid == os.getuid()
+    assert oct(state_root.stat().st_mode & 0o777) == "0o700"
+    assert oct(lease_root.stat().st_mode & 0o777) == "0o700"
+    assert argv_file.exists()
+
+
 def test_container_runner_refuses_docker_state_root_with_wrong_owner(tmp_path: Path):
     fake_docker = tmp_path / "docker"
     argv_file = tmp_path / "engine-argv.txt"

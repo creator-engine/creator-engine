@@ -104,6 +104,8 @@ def test_oci_dockerfile_installs_gate_daemon_runtime_dependencies_from_pinned_re
     assert "      git \\" in text
     assert "command -v gh" in text
     assert "command -v git" in text
+    assert text.index("command -v gh") < text.index("ce --help")
+    assert text.index("command -v git") < text.index("ce --help")
 
 
 def test_oci_dockerfile_is_non_root_and_multi_arch_friendly() -> None:

@@ -26,6 +26,30 @@ default host lease root is `<state root>/daemon-leases`, which maps to
 `/ce/state/daemon-leases`. Use `CE_DAEMON_CONTAINER_LEASE_ROOT` only when an
 explicit in-container path is required.
 
+## UID And Ownership Contract
+
+Daemon containers run as the canonical runtime image uid/gid. Set
+`CE_DAEMON_IMAGE_UID` only when the runtime image declares a different uid/gid;
+the default is `10001`.
+
+For Docker, host-mounted daemon state must be owned by that image uid because the
+container process is non-root. On first boot the runner creates missing state
+roots when it can, but an existing root owned by another uid is refused with a
+copy-pasteable remediation:
+
+```sh
+chown -R <uid>:<uid> <state_root>
+```
+
+For the default image this is:
+
+```sh
+chown -R 10001:10001 <state_root>
+```
+
+The runner verifies mode `0700` and does not chmod or chown existing state
+directories implicitly.
+
 Lease mutation is serialized by adjacent `.lease.op.lock` files. If a host
 crashes while holding an operation lock, verify no launcher or daemon process is
 still running for that lease, then remove only the orphaned `.lease.op.lock`
