@@ -3601,18 +3601,18 @@ records:
     details: Local brain drift can be caused by stale ignored runtime state; reconcile
       local state from the canonical tracked ledger before treating it as repository
       breakage.
-    evidence_sha256: ff79f218e5591a6b3fa9f31062d6669743268a038116c3a5d736011379550e91
+    evidence_sha256: 8e5e22ea2dbbd12462759254395c1ad017aa875330d808935606b179c8b32505
     item: 19
     object: brain-drift-state-reconcile
     predicate: asserts
     refs:
     - validators/creator_engine_validator/pr_preflight.py
     subject: doctrine-item
-  content_hash: 235c327139b2a1f6cf33883f89e16bec7c0f9635b95472c6546b10ede6253329
+  content_hash: 76ee9d2f94504c577e1a581ea3549d1dca01a951835bb4cb70d9893d45b45817
   evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
-  id: brain-assertion-d1b-19-brain-drift-state-reconcile-v3
+  id: brain-assertion-d1b-19-brain-drift-state-reconcile-v2
   kind: brain-assertion
-  prev_hash: 6125064508e4b5c725d3b6f830654d39e4411a8252db92ea4aa7f7d676ffcefd
+  prev_hash: 4eb04ce081be682c673e6e0861dc1612ab14e613bdfcd42c43efe43fdd3d32c1
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3621,7 +3621,7 @@ records:
     local state from the canonical tracked ledger before treating it as repository
     breakage.
   status: superseded
-  superseded_by: brain-assertion-d1b-19-brain-drift-state-reconcile-v4
+  superseded_by: brain-assertion-d1b-19-brain-drift-state-reconcile-v3
   type: convention
   verification_method:
     evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
@@ -3637,11 +3637,11 @@ records:
     refs:
     - validators/creator_engine_validator/pr_preflight.py
     subject: doctrine-item
-  content_hash: c9f77f85d7dd180bc3cf187cdea8f917b0e2679a518ff772b299b2056afdd2d0
+  content_hash: 8dc901e0f63bc6f67b7573ecc92f2797769f3fdb22370f9acaf5196033674b0f
   evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
-  id: brain-assertion-d1b-19-brain-drift-state-reconcile-v4
+  id: brain-assertion-d1b-19-brain-drift-state-reconcile-v3
   kind: brain-assertion
-  prev_hash: 235c327139b2a1f6cf33883f89e16bec7c0f9635b95472c6546b10ede6253329
+  prev_hash: 76ee9d2f94504c577e1a581ea3549d1dca01a951835bb4cb70d9893d45b45817
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1

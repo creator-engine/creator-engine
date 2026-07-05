@@ -974,7 +974,7 @@ def test_authoritative_migrated_assertions_validate_and_probe():
         for error in errors
         if not (
             isinstance(error, ce_brain_drift.DriftFinding)
-            and error.assertion_id == "brain-assertion-d1b-19-brain-drift-state-reconcile-v4"
+            and error.assertion_id == "brain-assertion-d1b-19-brain-drift-state-reconcile-v3"
             and error.evidence_ref == "validators/creator_engine_validator/checks/ce_brain_drift.py"
         )
     ]
