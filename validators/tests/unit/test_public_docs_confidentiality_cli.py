@@ -540,6 +540,63 @@ def test_push_guard_blocks_leaking_pre_push_ref_before_push(tmp_path: Path):
     assert guard.REMINDER in rendered
 
 
+def test_push_guard_passes_clean_pre_receive_ref(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"{guard.ZERO_OID} {head} refs/heads/feature"],
+        repo_root=repo,
+    )
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_push_guard_blocks_leaking_pre_receive_ref(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#888.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"{guard.ZERO_OID} {head} refs/heads/feature"],
+        repo_root=repo,
+    )
+
+    assert not result.ok
+    rendered = "\n".join(e.format() for e in result.errors)
+    assert "push guard refs/heads/feature@" in rendered
+    assert "docs/leak.md" in rendered
+    assert "ce-ops#888" in rendered
+    assert guard.REMINDER in rendered
+
+
+def test_push_guard_skips_pre_receive_zero_oid_deletion(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#444.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"{head} {guard.ZERO_OID} refs/heads/feature"],
+        repo_root=repo,
+    )
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_push_guard_fails_closed_on_malformed_ref_update(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
+    _commit(repo)
+
+    result = guard.run_push_guard(["malformed update"], repo_root=repo)
+
+    assert not result.ok
+    rendered = "\n".join(e.format() for e in result.errors)
+    assert "CE-CONFIDENTIALITY-PUSH-SCAN" in rendered
+    assert "malformed update" in rendered
+
+
 def test_push_guard_cli_blocks_explicit_leaking_object(tmp_path: Path, capsys):
     repo = _make_repo(tmp_path)
     _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#777.\n")
