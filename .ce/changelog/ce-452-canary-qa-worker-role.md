@@ -14,3 +14,7 @@ issue: creator-engine/ce-ops#452
   mutation needs, signing needs, and invalid signature/gate evidence.
 - Updates the worker role roster so controllers can dispatch the new role
   without broadening runtime wiring.
+- Supersedes `brain-assertion-d1b-20-canonical-worker-role-files-v2` → `-v3`
+  to name `canary_qa` as the fifth canonical role and re-pin `evidence_sha256`
+  to this branch's own `.claude/agents/README.md`, preserving the ad-hoc-role
+  invention guard clause (ce-ops#452).
