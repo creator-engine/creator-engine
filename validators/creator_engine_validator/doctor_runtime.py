@@ -273,6 +273,8 @@ def run_doctor(
     hidden_continuation: bool = False,
     mem_total_bytes: int | None = None,
     argv0: str | None = None,
+    harness: str = launch_runtime.DEFAULT_HARNESS,
+    which: Any | None = None,
 ) -> DoctorReport:
     """Evaluate the guard and assemble a deterministic, JSON-safe report."""
     if facts is None:
@@ -324,6 +326,21 @@ def run_doctor(
             "status": recall_status,
         }
     )
+    harness_check = launch_runtime.harness_binary_check(harness, which=which)
+    if not require_visible_launch:
+        harness_check = {
+            **harness_check,
+            "applicable": False,
+            "ok": True,
+            "detail": (
+                f"configured {harness} harness binary check skipped "
+                "because visible launch was not requested"
+            ),
+        }
+    payload["checks"].append(harness_check)
+    if harness_check["applicable"] and not harness_check["ok"]:
+        payload["refused_clauses"].append(harness_check["clause"])
+        payload["ok"] = False
     # ce-ops#25: surface the derived CE version identity beside the packaging
     # health line (local preflight telemetry, Open-Q3 — never attestation).
     payload["ce_version"] = ce_version(repo_root)
@@ -375,6 +392,9 @@ def run_doctor(
         "controller_seat_app_installed": (
             bool(seat_env_check["ok"]) if seat_env_check["applicable"] else None
         ),
+        "configured_harness": harness,
+        "configured_harness_binary": harness_check["binary"],
+        "configured_harness_binary_resolved": harness_check["resolved"],
     }
     payload["requested"] = {
         "require_visible_launch": require_visible_launch,
@@ -383,6 +403,7 @@ def run_doctor(
         "require_installed_ce": require_installed_ce,
         "check_seat_env": check_seat_env,
         "target_python": str(resolved_target_python),
+        "harness": harness,
     }
     # ce-ops#197 PR-4: the onboard phase-1 probes. Advisory-only (never refuse on
     # their own) — `ce onboard` reads these to surface friction #3 (low /tmp) and

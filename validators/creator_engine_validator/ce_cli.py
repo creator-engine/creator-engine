@@ -1404,6 +1404,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="refuse unless doctor is running via an installed ce/cev3 console script",
     )
+    doctor.add_argument(
+        "--harness",
+        default=launch_runtime.DEFAULT_HARNESS,
+        choices=sorted(launch_runtime.SUPPORTED_HARNESSES),
+        help="Controller-seat harness binary to preflight when visible launch is required",
+    )
 
     # ce containment-probe — ce-ops#221 Fix-1. Containment is PROBED from the
     # live kernel runtime (/proc/<pid>), never self-reported. Fail-closed:
@@ -4008,6 +4014,7 @@ def _doctor(args) -> int:
         target_python=target_python,
         check_seat_env=args.check_seat_env,
         argv0=sys.argv[0],
+        harness=getattr(args, "harness", launch_runtime.DEFAULT_HARNESS),
     )
     if getattr(args, "json_output", False):
         print(json.dumps(report.payload, indent=2, sort_keys=True))

@@ -496,6 +496,7 @@ Options:
 | `--require-worker` | no |  | treat missing rootless Podman (or rootful Podman) as a refusal (PCO-045) |
 | `--no-check-packaging` | no |  | skip the dependency wheelhouse contract clause (RED-G-6) |
 | `--require-installed-ce` | no |  | refuse unless doctor is running via an installed ce/cev3 console script |
+| `--harness` | no | `claude, codex, hermes, openclaw` | Controller-seat harness binary to preflight when visible launch is required |
 
 ### `drive`
 

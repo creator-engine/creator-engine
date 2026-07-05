@@ -406,6 +406,63 @@ def test_launch_spawns_visible_controller_seat():
     assert result.plan.visibility == "operator_visible"
 
 
+def test_launch_archives_dead_launched_surface_and_proceeds(tmp_path):
+    adapter = FakeAdapter()
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / "stale-seat--controller"
+    seat_dir.mkdir(parents=True)
+    events = seat_dir / "events.jsonl"
+    original_events = (
+        json.dumps({"event": "launched", "seat_id": "stale-seat--controller", "pid": 999999}) + "\n"
+        + json.dumps({"event": "exited", "seat_id": "stale-seat--controller", "exit_code": 127}) + "\n"
+    )
+    events.write_text(original_events, encoding="utf-8")
+    (seat_dir / "state.txt").write_text("preserved\n", encoding="utf-8")
+
+    result = launch_runtime.launch(
+        harness="claude",
+        backend="host",
+        session="stale-seat",
+        window="controller",
+        repo_root=tmp_path,
+        tmux_adapter=adapter,
+    )
+
+    assert result.spawned is True
+    assert result.stale_surface_archive is not None
+    archive = Path(result.stale_surface_archive["archive_path"])
+    assert archive.name.startswith("stale-seat--controller.archived-")
+    assert (archive / "events.jsonl").read_text(encoding="utf-8") == original_events
+    assert (archive / "state.txt").read_text(encoding="utf-8") == "preserved\n"
+    assert Path(result.events_ref).parent == seat_dir
+    assert adapter.spawned, "new seat launch should proceed after archive"
+
+
+def test_launch_refuses_ambiguous_launched_surface_with_recovery_command(tmp_path):
+    adapter = FakeAdapter()
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / "ambiguous-seat--controller"
+    seat_dir.mkdir(parents=True)
+    seat_dir.joinpath("events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": "ambiguous-seat--controller"}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="ambiguous-seat",
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    message = str(exc.value)
+    assert "liveness is ambiguous" in message
+    assert "ce reap once" in message
+    assert seat_dir.is_dir()
+    assert adapter.spawned == []
+
+
 def test_launch_pins_cwd_and_env_at_tmux_boundary(tmp_path):
     adapter = PinningAdapter(pane_cwd=str(tmp_path))
     result = launch_runtime.launch(

@@ -254,6 +254,8 @@ class LaunchLegResult:
     live_controllers: int
     seat_record_ref: str | None = None
     detail: str = ""
+    events_ref: str | None = None
+    command: list[str] = field(default_factory=list)
 
 
 # --- install-mode selection (DESIGN_197 §A.5) --------------------------------
@@ -293,12 +295,18 @@ def detect_agent_present(*, which: Callable[[str], str | None] = shutil.which) -
 
 
 # --- injectable legs ---------------------------------------------------------
-def _default_doctor_leg(repo_root: str, *, require_visible_launch: bool) -> DoctorLegResult:
+def _default_doctor_leg(
+    repo_root: str,
+    *,
+    require_visible_launch: bool,
+    harness: str = "claude",
+) -> DoctorLegResult:
     from . import doctor_runtime
 
     report = doctor_runtime.run_doctor(
         repo_root,
         require_visible_launch=require_visible_launch,
+        harness=harness,
     )
     payload = report.payload
     probes = payload.get("onboard_probes", {})
@@ -385,6 +393,8 @@ def _default_launch_leg(
         live_controllers=live,
         seat_record_ref=result.seat_record_ref,
         detail="launched governed controller",
+        events_ref=getattr(result, "events_ref", None),
+        command=list(getattr(getattr(result, "plan", None), "command", [])),
     )
 
 
@@ -505,6 +515,24 @@ def _run_install_detect(
     return _run_leg("install", func, repo_root)
 
 
+def _run_doctor_leg(
+    func: Callable[..., DoctorLegResult],
+    repo_root: str,
+    *,
+    require_visible_launch: bool,
+    harness: str,
+) -> DoctorLegResult:
+    kwargs = {"require_visible_launch": require_visible_launch, "harness": harness}
+    try:
+        params = signature(func).parameters
+    except (TypeError, ValueError):
+        return _run_leg("doctor", func, repo_root, **kwargs)
+    accepts_var_kwargs = any(param.kind == Parameter.VAR_KEYWORD for param in params.values())
+    if "harness" in params or accepts_var_kwargs:
+        return _run_leg("doctor", func, repo_root, **kwargs)
+    return _run_leg("doctor", func, repo_root, require_visible_launch=require_visible_launch)
+
+
 def _state_path_guidance(repo_root: str) -> dict[str, Any]:
     return {
         "guidance": STATE_PATH_GUIDANCE.format(repo_root=repo_root),
@@ -548,7 +576,12 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
     # mutation. We require the visible-launch clause only when we will launch.
     require_visible = not config.no_launch
     try:
-        doctor = _run_leg("doctor", legs.doctor, config.repo_root, require_visible_launch=require_visible)
+        doctor = _run_doctor_leg(
+            legs.doctor,
+            config.repo_root,
+            require_visible_launch=require_visible,
+            harness=config.harness,
+        )
     except OnboardError as exc:
         return _fail_result(result, exc)
     if not doctor.ok:
@@ -708,10 +741,24 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
     # The #212 single-controller assertion: exactly ONE live controller after a
     # first launch. More than one => stale/double-spawn; refuse rather than mask.
     if launch.live_controllers != 1:
+        from . import launch_runtime
+
+        tail = launch_runtime.tail_event_diagnosis(
+            launch.events_ref,
+            command=launch.command,
+            harness=config.harness,
+        )
+        tail_detail = launch_runtime.format_tail_event_diagnosis(tail)
+        detail = f"single-controller assertion failed: {launch.live_controllers} live controller(s)"
+        if tail_detail:
+            detail = f"{detail}; {tail_detail}"
+        verify = {"live_controllers": launch.live_controllers}
+        if tail:
+            verify["tail_event"] = tail
         result.phases.append(_record(
             "launch", status=STATUS_REFUSED,
-            detail=f"single-controller assertion failed: {launch.live_controllers} live controller(s)",
-            verify={"live_controllers": launch.live_controllers},
+            detail=detail,
+            verify=verify,
         ))
         result.ok = False
         result.reason = "single-controller-assertion-failed"

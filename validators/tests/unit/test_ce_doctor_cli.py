@@ -56,6 +56,11 @@ def inject_facts(monkeypatch, tmp_path):
         "default_target_python",
         lambda repo_root: missing_target_python,
     )
+    monkeypatch.setattr(
+        doctor_runtime.launch_runtime.shutil,
+        "which",
+        lambda binary: f"/fake/bin/{binary}",
+    )
 
     def _install(**overrides):
         facts = _facts(**overrides)
@@ -107,6 +112,35 @@ def test_doctor_refuses_missing_tmux_with_require_visible_launch(inject_facts, c
     assert ret != 0
     payload = json.loads(capsys.readouterr().out)
     assert guard.CLAUSE_TMUX in payload["refused_clauses"]
+
+
+def test_doctor_harness_binary_check_passes_when_resolvable(inject_facts, capsys):
+    inject_facts()
+    ret = ce_cli.main(
+        ["doctor", "--json", "--repo-root", ".", "--require-visible-launch", "--harness", "codex"]
+    )
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    check = next(c for c in payload["checks"] if c["clause"] == "RED-G-HARNESS-PATH")
+    assert check["ok"] is True
+    assert check["binary"] == "codex"
+    assert payload["prerequisites"]["configured_harness_binary_resolved"] == "/fake/bin/codex"
+
+
+def test_doctor_harness_binary_check_refuses_when_missing(inject_facts, monkeypatch, capsys):
+    inject_facts()
+    monkeypatch.setattr(doctor_runtime.launch_runtime.shutil, "which", lambda _binary: None)
+
+    ret = ce_cli.main(
+        ["doctor", "--json", "--repo-root", ".", "--require-visible-launch", "--harness", "claude"]
+    )
+
+    assert ret != 0
+    payload = json.loads(capsys.readouterr().out)
+    check = next(c for c in payload["checks"] if c["clause"] == "RED-G-HARNESS-PATH")
+    assert check["ok"] is False
+    assert "install claude CLI or fix PATH" in check["detail"]
+    assert "RED-G-HARNESS-PATH" in payload["refused_clauses"]
 
 
 def test_doctor_refuses_rootful_podman_with_require_worker(inject_facts, capsys):
