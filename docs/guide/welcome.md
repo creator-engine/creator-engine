@@ -32,12 +32,12 @@ friendly companion to everything below.
 The most important thing to know up front: **Creator Engine is invisible until
 it gates something.**
 
-There is **no CE dashboard, no CE chat window, and no CE editor.** When you run
-`ce launch`, CE opens **your own coding agent in its normal terminal UI** — the
-exact Claude Code or Codex session you already know — inside a visible terminal
-pane. CE is the governance wrapper *around* that session, not a replacement for
-it. (`ce hud` is just another name for the same launcher; it is not a separate
-app.)
+There is **no CE dashboard, no CE chat window, and no CE editor.** After the
+first `ce onboard` run, `ce launch` opens **your own coding agent in its normal
+terminal UI** — the exact Claude Code or Codex session you already know —
+inside a visible terminal pane. CE is the governance wrapper *around* that
+session, not a replacement for it. (`ce hud` is just another name for the same
+launcher; it is not a separate app.)
 
 So a CE session *feels* like an ordinary coding-agent session:
 
@@ -61,6 +61,21 @@ means in practice, and it is what you will feel the first time you use CE.
 ---
 
 ## Day One as a new user: install, launch, use it
+
+### 0. Prepare
+
+Before the first run:
+
+- Install a supported coding-agent CLI such as Claude Code or Codex and confirm
+  it is available from your shell.
+- Make sure your repository ignores CE's local Hermes state before onboarding:
+
+  ```gitignore
+  .hermes/
+  ```
+
+CE refuses to create tracked local runtime state, so add the `.hermes/` ignore
+rule before `ce onboard`.
 
 ### 1. Install
 
@@ -96,9 +111,11 @@ ce onboard
 `ce onboard` walks the setup end to end in order — it checks your host is
 healthy, confirms (and if needed acquires) the install, verifies the install is
 genuine, puts CE on your `PATH`, initializes local state — and then **drops you
-straight into a governed agent pane** so your first session is ready to go. It
-is idempotent: if something is already done, it skips it; if it is interrupted,
-you can re-run it.
+straight into a governed agent pane** so your first session is ready to go.
+If onboarding refuses, fix the named prerequisite and try again. Re-run support
+for partially reused onboarding state is still being tightened, so do not treat
+`ce onboard` as a general recovery command unless the refusal text says it is
+safe.
 
 > **Two onboarding rails — don't mix them up.** `ce onboard` is the quick
 > kernel one-shot that gets you to a working governed session on your machine.
@@ -125,6 +142,9 @@ Review → Ship** — and surfaces only when it needs to:
 You do not have to memorize any of this on day one. Type prompts; let CE narrate
 the stage and ask only what it must. When you want the full picture of the loop
 and the Scope card, read [`understanding-ce.md`](./understanding-ce.md).
+
+After onboarding, use `ce launch` as the daily entry point for returning to the
+governed agent pane.
 
 ---
 

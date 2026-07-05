@@ -2,24 +2,24 @@
 
 > **Not the same as joining an already-CE repo.** Brownfield *adoption* takes a
 > **non-CE** project into CE via a governance **join PR** (the E3 adoption-apply
-> layer, ce-ops#85) — gated default-OFF behind a dual ENV escalation (see *Apply*
+> layer) — gated default-OFF behind a dual ENV escalation (see *Apply*
 > below); unauthorized, it stays deferred. A new dev joining a repo that is
 > **already** CE-governed is a *plain-join* (E2, auto-detected) — see
-> `plain-join.md` (ce-ops#85). `onboard --apply` auto-detects already-CE and
+> `plain-join.md`. `install --apply` auto-detects already-CE and
 > routes to plain-join; only an existing repo that is **not** already-CE reaches
 > the brownfield adoption path described here.
 
 ## Purpose
 
-Brownfield adoption lets `ce onboard` connect CE to an existing project without
+Brownfield adoption lets `ce install` connect CE to an existing project without
 forking the installer engine or adding a second apply path. The same loop stays
 load-bearing:
 
 ```bash
-ce onboard --spec llms-install.md --inventory
+ce install --spec llms-install.md --inventory
 # prepare ce-install.answers.yaml with the operator
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --plan
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --apply
+ce install --spec llms-install.md --answers ce-install.answers.yaml --plan
+ce install --spec llms-install.md --answers ce-install.answers.yaml --apply
 ```
 
 `--inventory` and `--plan` are read-only. They inspect source-controlled project
@@ -51,7 +51,7 @@ operator resolves it.
 
 ## Plan
 
-`ce onboard --plan` adds `brownfield_adoption` to the JSON payload. It includes:
+`ce install --plan` adds `brownfield_adoption` to the JSON payload. It includes:
 
 - a canonical value-free `inventory_sha256`;
 - existing workflows and checks to preserve;
@@ -88,7 +88,7 @@ No synthetic history is generated. History rewrite, force push, branch deletion,
 workflow deletion, check removal, raw secret persistence, and branch-protection
 weakening are outside this gate.
 
-## Apply — the governance join PR (ce-ops#85 E3 adoption-apply)
+## Apply — the governance join PR (E3 adoption-apply)
 
 Brownfield apply is the **join-PR layer**: it extends E2's `onboard_apply` leg
 pipeline (it is **not** a second executor) with seven mode-gated adoption legs
@@ -122,7 +122,7 @@ The adoption **write** path is a real authority escalation beyond the zero-write
 plain-join posture, so it is gated behind **two** explicit, default-OFF, host
 ENV flags (not answers-schema keys — no ce-root-v1 re-sign cascade):
 `CE_FORGE_LIVE_FORGE=1` **and** `CE_FORGE_ADOPTION_WRITE=1`. With either absent,
-`onboard --apply` keeps today's `e2_brownfield_seam_unavailable` refuse byte for
+`install --apply` keeps today's `e2_brownfield_seam_unavailable` refuse byte for
 byte (status quo). No auto-merge: the PR is opened and the run stops (a human
 merges). Live runs are the VPS Mode-A rehearsal only.
 

@@ -12,16 +12,15 @@ The distinction is not cosmetic: adoption mutates a fresh project into CE shape
 (installs the validate workflow, sets up protections, captures a baseline);
 plain-join finds those governance artifacts already present and simply
 **verifies and reconciles** them so the joining dev's local governance is wired
-up. Mis-classifying a join as adoption is what blocked the `ce-dev-3` install
-rehearsal (ce-ops#85): `onboard --apply` refused `e2_brownfield_seam_unavailable`
-for a repo that was already fully CE-governed.
+up. Mis-classifying a join as adoption can make install apply refuse a repo that
+is already fully CE-governed.
 
 The same single loop stays load-bearing — there is no second installer engine and
 no new user knob; the path is **auto-detected**:
 
 ```bash
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --plan
-ce onboard --spec llms-install.md --answers ce-install.answers.yaml --apply
+ce install --spec llms-install.md --answers ce-install.answers.yaml --plan
+ce install --spec llms-install.md --answers ce-install.answers.yaml --apply
 ```
 
 ## Detection (FAIL-CLOSED)
@@ -68,4 +67,4 @@ never claims plain-join for a repo it cannot verify. When the dry-run has no liv
 forge driver, the already-CE verdict is honestly reported as deferred to the
 live apply read (`detection: deferred_to_apply_live_forge_read`).
 
-Refs: ce-ops#85 · `brownfield-adoption.md` · `onboard_apply.repo_is_already_ce_governed`.
+Refs: `brownfield-adoption.md` · `onboard_apply.repo_is_already_ce_governed`.
