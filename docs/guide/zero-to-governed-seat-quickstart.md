@@ -11,7 +11,7 @@ Before you start:
   CE's local Hermes state can never become tracked project content.
 - Have `curl` and `git` available on the host.
 
-## 0. Host Bootstrap
+## 1. Host Bootstrap
 
 Run the installer first. If the host is missing stock bootstrap tools, it refuses
 before fetching artifacts and prints the exact package command for your distro.
@@ -28,7 +28,7 @@ Python 3.14 and `uv` do not need to be installed ahead of time. After the signed
 spec is verified with `ssh-keygen`, E1 downloads the manifest-pinned `uv`
 tarball, verifies its hash, and installs CPython 3.14 in user space if needed.
 
-## 1. First CE Command: Onboard
+## 2. First CE Command: Onboard
 
 After the installer, run the one-shot onboarder from the repository you want to
 use with CE:
@@ -48,7 +48,7 @@ below and do not want to open the pane yet, run:
 ce onboard --no-launch
 ```
 
-## 2. E1 Inventory
+## 3. E1 Inventory
 
 A successful E1 run installs `ce` into a user-local verified venv,
 adds user-local CLI shims, and runs authenticated inventory. Save the verified
@@ -65,7 +65,7 @@ Prepare `ce-install.answers.yaml` with your host, provider, GitHub, and project
 answers. Keep secrets as refs such as `env://GITHUB_TOKEN`, `file://...`,
 `prompt://...`, or `keychain://...`; never put raw secrets in the file.
 
-## 3. Plan Then Apply
+## 4. Plan Then Apply
 
 Run the plan first. It shows the exact remaining asks and the privileged changes
 that still need human approval.
@@ -96,7 +96,7 @@ ce install \
 list instead of guessing. The GitHub App authorization click and any sudo-scoped
 host changes remain human-approved apply seams.
 
-## 4. Governed Seat
+## 5. Governed Seat
 
 After onboarding and apply converge, open or return to the governed session in
 the target repo:
