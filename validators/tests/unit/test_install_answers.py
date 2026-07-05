@@ -110,6 +110,38 @@ def test_custom_cost_profile_with_acked_binding_passes(tmp_path):
     assert _codes(tmp_path) == []
 
 
+def test_custom_cost_profile_with_approver_ref_provenance_passes(tmp_path):
+    content = GOOD.replace(
+        "cost:\n  profile: default",
+        "cost:\n  profile: custom\n  optout:\n"
+        f"    ratified_prompt_sha: {HEX_A}\n"
+        f"    approver_ref: {HEX_B}\n"
+        "    approver_ref_provenance:\n"
+        "      identity_ref: tenants/mythos/operator.identity.yml\n"
+        "      method: client-interactive\n"
+        "    educate_acknowledged: true",
+    )
+    _write(tmp_path, content)
+    assert _codes(tmp_path) == []
+
+
+def test_malformed_approver_ref_provenance_is_refused(tmp_path):
+    content = GOOD.replace(
+        "cost:\n  profile: default",
+        "cost:\n  profile: custom\n  optout:\n"
+        f"    ratified_prompt_sha: {HEX_A}\n"
+        f"    approver_ref: {HEX_B}\n"
+        "    approver_ref_provenance:\n"
+        "      identity_ref: ''\n"
+        "      method: client-interactive\n"
+        "    educate_acknowledged: true",
+    )
+    _write(tmp_path, content)
+    codes = _codes(tmp_path)
+    assert ia.CODE_SCHEMA in codes
+    assert ia.CODE_OPTOUT_UNRATIFIED in codes
+
+
 def test_weakened_protections_without_binding_are_refused(tmp_path):
     _write(tmp_path, GOOD.replace(
         "protections: reference",

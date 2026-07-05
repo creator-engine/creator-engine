@@ -149,13 +149,25 @@ def _lookup(mapping: Any, dotted: str) -> tuple[bool, Any]:
 def _valid_binding(binding: Any) -> bool:
     """The answers-file ratification-binding shape (educate acknowledged
     in-band — the file cannot skip the educate-first step)."""
-    return (
+    if not (
         isinstance(binding, dict)
         and isinstance(binding.get("ratified_prompt_sha"), str)
         and bool(_HEX64_RE.match(binding["ratified_prompt_sha"]))
         and isinstance(binding.get("approver_ref"), str)
         and bool(_HEX64_RE.match(binding["approver_ref"]))
         and binding.get("educate_acknowledged") is True
+    ):
+        return False
+    provenance = binding.get("approver_ref_provenance")
+    if provenance is None:
+        return True
+    return (
+        isinstance(provenance, dict)
+        and set(provenance) == {"identity_ref", "method"}
+        and isinstance(provenance.get("identity_ref"), str)
+        and bool(provenance["identity_ref"])
+        and isinstance(provenance.get("method"), str)
+        and bool(provenance["method"])
     )
 
 

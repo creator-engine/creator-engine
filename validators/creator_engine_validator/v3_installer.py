@@ -1394,12 +1394,14 @@ def valid_ratification(binding: Any, *, require_ack: bool = False) -> bool:
     cost opt-out into an installer-wide invariant, v3.5-E.3 §2.2).
 
     A valid binding is ``{ratified_prompt_sha, approver_ref}`` — both 64-hex
-    opaque digests, ratified-HUMAN-only. With ``require_ack=True`` (the
-    answers-file form) the binding must ALSO carry
-    ``educate_acknowledged: True`` — the file cannot skip the educate-first
-    step. Every governance-WEAKENING answer (cost opt-out; branch protections
-    below the CE reference floor) takes this same shape: an agent can
-    configure anything except a weaker grader.
+    opaque digests, ratified-HUMAN-only — and may carry optional
+    ``approver_ref_provenance {identity_ref, method}`` so client-side
+    approver gestures can be distinguished from CE-controller-side gestures.
+    With ``require_ack=True`` (the answers-file form) the binding must ALSO
+    carry ``educate_acknowledged: True`` — the file cannot skip the
+    educate-first step. Every governance-WEAKENING answer (cost opt-out;
+    branch protections below the CE reference floor) takes this same shape:
+    an agent can configure anything except a weaker grader.
     """
     if not (
         isinstance(binding, dict)
@@ -1411,7 +1413,47 @@ def valid_ratification(binding: Any, *, require_ack: bool = False) -> bool:
         return False
     if require_ack and binding.get("educate_acknowledged") is not True:
         return False
+    provenance = binding.get("approver_ref_provenance")
+    if provenance is not None and not valid_approver_ref_provenance(provenance):
+        return False
     return True
+
+
+def valid_approver_ref_provenance(provenance: Any) -> bool:
+    """The optional value-free provenance attached to ``approver_ref``.
+
+    ``identity_ref`` names who generated or holds the digest; ``method`` names
+    how it was minted. The closed shape prevents typo'd provenance from looking
+    recorded while preserving backward compatibility when the field is absent.
+    """
+    return (
+        isinstance(provenance, dict)
+        and set(provenance) == {"identity_ref", "method"}
+        and isinstance(provenance.get("identity_ref"), str)
+        and bool(provenance["identity_ref"])
+        and isinstance(provenance.get("method"), str)
+        and bool(provenance["method"])
+    )
+
+
+def ratification_binding_with_provenance(
+    binding: Mapping[str, Any],
+    *,
+    identity_ref: str,
+    method: str,
+) -> dict[str, Any]:
+    """Stamp a newly generated ratification binding with approver provenance."""
+    stamped = dict(binding)
+    stamped["approver_ref_provenance"] = {
+        "identity_ref": identity_ref,
+        "method": method,
+    }
+    if not valid_ratification(stamped, require_ack=stamped.get("educate_acknowledged") is True):
+        raise InstallRefused(
+            "ratification binding provenance requires a valid binding plus "
+            "non-empty identity_ref and method"
+        )
+    return stamped
 
 
 def _valid_optout(ratification: Any) -> bool:
@@ -1797,9 +1839,9 @@ def optout_binding_from_answers(answers: dict[str, Any]) -> dict[str, str] | Non
     """The answers→profile bridge. A ``custom`` cost profile yields the
     validated opt-out binding STRIPPED to the two digest keys — the
     runtime-policy ``spend_cap_optout`` fragment is
-    ``unevaluatedProperties: false``, so ``educate_acknowledged`` (an
-    answers-file-only attestation) must not ride through. ``None`` for the
-    default profile."""
+    ``unevaluatedProperties: false``, so ``educate_acknowledged`` and
+    ``approver_ref_provenance`` (answers-file-only attestations) must not ride
+    through. ``None`` for the default profile."""
     cost = answers.get("cost")
     if not isinstance(cost, dict) or cost.get("profile") != "custom":
         return None

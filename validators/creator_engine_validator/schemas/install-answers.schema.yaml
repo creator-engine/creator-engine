@@ -619,6 +619,29 @@ $defs:
         type: string
         pattern: "^[0-9a-f]{64}$"
         description: Opaque digest standing in for the ratifying human.
+      approver_ref_provenance:
+        type: object
+        required: [identity_ref, method]
+        additionalProperties: false
+        description: |
+          Optional value-free provenance for who minted the approver_ref and
+          by what method. This distinguishes a client-held ratification
+          gesture from a CE-controller-side gesture without making the digest
+          itself a secret.
+        properties:
+          identity_ref:
+            type: string
+            minLength: 1
+            description: |
+              Stable reference to the identity that generated or holds the
+              approver_ref, such as a tenant/operator identity record or a
+              source-host identity URI.
+          method:
+            type: string
+            minLength: 1
+            description: |
+              Value-free description of the minting method, for example
+              client-interactive, ce-controller-interactive, or imported.
       educate_acknowledged:
         type: boolean
         const: true

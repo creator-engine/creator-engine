@@ -1124,10 +1124,47 @@ def test_valid_ratification_generalizes_the_optout_shape():
     assert inst.valid_ratification(binding) is True
     assert inst.valid_ratification(binding, require_ack=True) is False
     assert inst.valid_ratification({**binding, "educate_acknowledged": True}, require_ack=True)
+    with_provenance = {
+        **binding,
+        "approver_ref_provenance": {
+            "identity_ref": "tenants/mythos/operator.identity.yml",
+            "method": "client-interactive",
+        },
+    }
+    assert inst.valid_ratification(with_provenance) is True
+    assert inst.valid_ratification({
+        **binding,
+        "approver_ref_provenance": {"identity_ref": "", "method": "client-interactive"},
+    }) is False
     assert inst.valid_ratification(None) is False
     assert inst.valid_ratification({"ratified_prompt_sha": "short", "approver_ref": HEX}) is False
     # the legacy alias build_profile uses is the same predicate
     assert inst._valid_optout(binding) is True
+
+
+def test_ratification_binding_with_provenance_records_generating_identity():
+    binding = {
+        "ratified_prompt_sha": HEX,
+        "approver_ref": "b" * 64,
+        "educate_acknowledged": True,
+    }
+    stamped = inst.ratification_binding_with_provenance(
+        binding,
+        identity_ref="tenants/mythos/operator.identity.yml",
+        method="client-interactive",
+    )
+    assert stamped == {
+        **binding,
+        "approver_ref_provenance": {
+            "identity_ref": "tenants/mythos/operator.identity.yml",
+            "method": "client-interactive",
+        },
+    }
+    assert inst.valid_ratification(stamped, require_ack=True) is True
+    with pytest.raises(inst.InstallRefused):
+        inst.ratification_binding_with_provenance(
+            binding, identity_ref="", method="client-interactive"
+        )
 
 
 def test_custom_cost_profile_requires_acked_binding():
@@ -1146,7 +1183,11 @@ def test_optout_binding_bridge_strips_ack_for_the_g5_fragment():
     doc = _answers(**{
         "cost.profile": "custom",
         "cost.optout": {"ratified_prompt_sha": HEX, "approver_ref": "b" * 64,
-                        "educate_acknowledged": True},
+                        "educate_acknowledged": True,
+                        "approver_ref_provenance": {
+                            "identity_ref": "tenants/mythos/operator.identity.yml",
+                            "method": "client-interactive",
+                        }},
     })
     binding = inst.optout_binding_from_answers(doc)
     assert binding == {"ratified_prompt_sha": HEX, "approver_ref": "b" * 64}

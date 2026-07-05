@@ -130,8 +130,11 @@ file validation all derive from it (never hand-maintained). Mode is just
   and any `github.protections` below the CE reference floor take the SAME
   ratified-HUMAN-only binding `{ratified_prompt_sha, approver_ref,
   educate_acknowledged: true}` (`valid_ratification`, generalizing the G-5
-  opt-out into an installer-wide invariant). *An agent preparing an answers
-  file can configure anything except a weaker grader.*
+  opt-out into an installer-wide invariant). The binding may also carry
+  `approver_ref_provenance {identity_ref, method}` so a client-held
+  approver gesture is distinguishable from a CE-controller-side gesture
+  without exposing any secret. *An agent preparing an answers file can
+  configure anything except a weaker grader.*
 - **The scoped sudo pre-grant:** `host.sudo_grant` is an explicit package
   allowlist (a bare `sudo: true` is schema-invalid by construction);
   `sudo_grant_diff` stops on any planned privileged install OUTSIDE the
@@ -404,7 +407,9 @@ perform the privileged fix; missing `runsc`/`proxy` surface as inventory facts.
   opt-out is **ratified-HUMAN-only** — `build_profile` raises `InstallRefused`
   without a valid binding (an agent can never opt out). The emitted fragment is
   exactly what `ce_spend_envelope` accepts (`VAL-SPEND-OPTOUT-UNRATIFIED`
-  otherwise).
+  otherwise). Answers-file provenance for the generating identity remains on
+  the installer attestation and is stripped before the runtime-policy fragment
+  because the spend envelope accepts only the two digest fields.
 - **Educate-at-opt-out (verbatim):** *"Turning this off won't speed up your runs;
   it only removes per-run / per-fleet budget friction. The runaway-detection net
   (global ceiling + anomaly → escalate) stays on."*
