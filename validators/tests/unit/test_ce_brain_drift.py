@@ -981,7 +981,7 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert unexpected_errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 90
+    assert len(active) == 91
     assert {
         brain_probe.record_probe_name(record)
         for record in active

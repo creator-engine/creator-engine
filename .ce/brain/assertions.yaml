@@ -3655,4 +3655,69 @@ records:
   verification_method:
     evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
     type: static
+- claim:
+    details: The checked-in worker role definitions are the canonical governed worker
+      roles and must not be broadened by ad hoc role invention.
+    evidence_sha256: 42cce4f44c389029cdb22462d19740bf2a971fb979054cf3abbd0f9ba241d124
+    item: 20
+    object: canonical-worker-role-files
+    predicate: asserts
+    refs:
+    - .claude/agents/architect_research.md
+    - .claude/agents/implementer.md
+    - .claude/agents/verification.md
+    - .claude/agents/reviewer.md
+    subject: doctrine-item
+  content_hash: d3b9fa7d913097f5ba03191f46d33431fd2db7c3adbae336d57606a22a7fb9ef
+  evidence_ref: .claude/agents/README.md
+  id: brain-assertion-d1b-20-canonical-worker-role-files-v2
+  kind: brain-assertion
+  prev_hash: 8dc901e0f63bc6f67b7573ecc92f2797769f3fdb22370f9acaf5196033674b0f
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 140
+  statement: The checked-in worker role definitions are the canonical governed worker
+    roles and must not be broadened by ad hoc role invention.
+  status: superseded
+  superseded_by: brain-assertion-d1b-20-canonical-worker-role-files-v3
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/README.md
+    type: static
+- claim:
+    details: The checked-in worker role definitions (architect_research, implementer,
+      verification, reviewer, and canary_qa) are the canonical governed worker roles
+      and must not be broadened by ad hoc role invention.
+    evidence_sha256: 95b69543f4710ba8704d477856b2d063797dd38b6c28b948c7138d3b539553d6
+    item: 20
+    note: Deliberate, controller-authorized broadening to name canary_qa as the fifth
+      canonical role - not the ad hoc role invention this assertion guards against.
+    object: canonical-worker-role-files
+    predicate: asserts
+    refs:
+    - .claude/agents/architect_research.md
+    - .claude/agents/implementer.md
+    - .claude/agents/verification.md
+    - .claude/agents/reviewer.md
+    - .claude/agents/canary_qa.md
+    subject: doctrine-item
+  content_hash: 58887a2a9df77c8eb3313718b666622f3398c6eace32b0047485712216aacecf
+  evidence_ref: .claude/agents/README.md
+  id: brain-assertion-d1b-20-canonical-worker-role-files-v3
+  kind: brain-assertion
+  prev_hash: d3b9fa7d913097f5ba03191f46d33431fd2db7c3adbae336d57606a22a7fb9ef
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 141
+  statement: The checked-in worker role definitions (architect_research, implementer,
+    verification, reviewer, and canary_qa) are the canonical governed worker roles
+    and must not be broadened by ad hoc role invention.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/README.md
+    type: static
 schema_version: '1'
