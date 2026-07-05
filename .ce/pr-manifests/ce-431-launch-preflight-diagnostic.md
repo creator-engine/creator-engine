@@ -1,4 +1,4 @@
-# PR path manifest — ce-ops#431 · ce launch --preflight gate-diagnostic mode
+# PR path manifest — 431 · ce launch --preflight gate-diagnostic mode
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-431-launch-preflight-diagnostic` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 

@@ -1994,7 +1994,13 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--preflight",
             action="store_true",
-            help="diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state",
+            help=(
+                "diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state; "
+                "exit 0 = all evaluable gates pass and no critical gates skipped; "
+                "exit 1 = at least one gate WOULD-REFUSE; "
+                "exit 3 = all evaluable gates pass but one or more critical gates "
+                "(e.g. containment provisioning) could not be evaluated without a live launch"
+            ),
         )
         p.add_argument(
             "--no-tmux",

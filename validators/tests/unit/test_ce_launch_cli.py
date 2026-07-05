@@ -344,6 +344,11 @@ def test_launch_preflight_passes_without_claim_acquisition(
         "_make_gh_runner",
         lambda: (_ for _ in ()).throw(AssertionError("preflight must not acquire claims")),
     )
+    # Stub the codex harness resolution so the harness-binary gate evaluates
+    # PASS deterministically on any host (including CI runners where codex is
+    # not installed). CE_CODEX_HARNESS is the exclusive override used by
+    # resolve_codex_harness_binary; _fake_codex sets it to a real executable.
+    _fake_codex(tmp_path, monkeypatch)
 
     ret = ce_cli.main(
         [

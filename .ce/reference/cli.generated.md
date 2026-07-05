@@ -649,7 +649,7 @@ Options:
 | `--window` | no |  | tmux window name |
 | `--resume` | no |  | attach an existing launcher session |
 | `--dry-run` | no |  | plan only; no tmux spawn, no provider login |
-| `--preflight` | no |  | diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state |
+| `--preflight` | no |  | diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state; exit 0 = all evaluable gates pass and no critical gates skipped; exit 1 = at least one gate WOULD-REFUSE; exit 3 = all evaluable gates pass but one or more critical gates (e.g. containment provisioning) could not be evaluated without a live launch |
 | `--no-tmux` | no |  | refuse-only flag: request a non-visible/headless seat (always refused) |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |
@@ -792,7 +792,7 @@ Options:
 | `--window` | no |  | tmux window name |
 | `--resume` | no |  | attach an existing launcher session |
 | `--dry-run` | no |  | plan only; no tmux spawn, no provider login |
-| `--preflight` | no |  | diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state |
+| `--preflight` | no |  | diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state; exit 0 = all evaluable gates pass and no critical gates skipped; exit 1 = at least one gate WOULD-REFUSE; exit 3 = all evaluable gates pass but one or more critical gates (e.g. containment provisioning) could not be evaluated without a live launch |
 | `--no-tmux` | no |  | refuse-only flag: request a non-visible/headless seat (always refused) |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |

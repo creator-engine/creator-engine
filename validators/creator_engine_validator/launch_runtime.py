@@ -288,6 +288,7 @@ class LaunchPreflightGate:
     status: str
     detail: str | None = None
     code: str | None = None
+    critical: bool = False  # gate cannot be fully evaluated without a live launch
 
     def format_line(self) -> str:
         if self.status == "PASS":
@@ -305,7 +306,16 @@ class LaunchPreflightGate:
             payload["detail"] = self.detail
         if self.code is not None:
             payload["code"] = self.code
+        if self.critical:
+            payload["critical"] = True
         return payload
+
+
+# Exit code returned by preflight when all evaluable gates PASS but one or
+# more CRITICAL gates were SKIPPED because they require a live launch to
+# evaluate (e.g. containment provisioning). Exit 0 means no critical skips;
+# exit 3 means a distinct "passed-but-critical-gates-skipped" signal.
+PREFLIGHT_EXIT_CRITICAL_SKIP = 3
 
 
 @dataclass(frozen=True)
@@ -317,15 +327,36 @@ class LaunchPreflightReport:
         return all(gate.status != "WOULD-REFUSE" for gate in self.gates)
 
     @property
+    def has_critical_skips(self) -> bool:
+        return any(
+            gate.critical and gate.status == "SKIPPED" for gate in self.gates
+        )
+
+    @property
     def exit_code(self) -> int:
-        return 0 if self.ok else 1
+        if not self.ok:
+            return 1
+        if self.has_critical_skips:
+            return PREFLIGHT_EXIT_CRITICAL_SKIP
+        return 0
 
     def format_lines(self) -> list[str]:
-        return [gate.format_line() for gate in self.gates]
+        lines = [gate.format_line() for gate in self.gates]
+        critical_skipped = [
+            gate for gate in self.gates if gate.critical and gate.status == "SKIPPED"
+        ]
+        if critical_skipped:
+            names = ", ".join(g.name for g in critical_skipped)
+            lines.append(
+                f"{len(critical_skipped)} gate(s) require live launch to evaluate "
+                f"({names}) — preflight PASS does not verify these gates"
+            )
+        return lines
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
+            "has_critical_skips": self.has_critical_skips,
             "exit_code": self.exit_code,
             "gates": [gate.to_dict() for gate in self.gates],
         }
@@ -740,6 +771,68 @@ class SeatSurfaceArchiveResult:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class _StaleDecision:
+    """Outcome of a pure stale-surface liveness decision (no side effects)."""
+
+    action: str  # "exit_event" | "all_pids_dead"
+    reason: str
+
+
+def _decide_stale_surface(
+    *,
+    seat_dir: Path,
+    session: str,
+    tmux_adapter: Any,
+    launched: list[dict[str, Any]],
+) -> "_StaleDecision":
+    """Pure decision step shared by the live archive path and the preflight
+    diagnostic.  Raises :exc:`SeatSurfaceReuseRefused` on any refusal;
+    otherwise returns a :class:`_StaleDecision` describing what the archive
+    step would do.  No filesystem mutations occur here.
+
+    ``launched`` must be a non-empty list of already-validated launched events
+    (all pids confirmed parseable by the strict scanner or by the caller).
+    """
+    if _session_exists(tmux_adapter, session):
+        raise SeatSurfaceReuseRefused(
+            _refuse_reuse_message(seat_dir, "live tmux session still exists")
+        )
+
+    latest = _latest_event(seat_dir)
+    if latest and latest.get("event") == seat_sentinel.EVENT_EXITED:
+        return _StaleDecision(
+            action="exit_event",
+            reason="sentinel exit event observed and no live tmux session exists",
+        )
+
+    pids: list[int] = []
+    for event in launched:
+        pid = _parse_positive_pid(event.get("pid"))
+        if pid is not None:
+            pids.append(pid)
+    if not pids:
+        raise SeatSurfaceReuseRefused(
+            _refuse_reuse_message(seat_dir, "ambiguous (no sentinel pid recorded)")
+        )
+
+    for pid in pids:
+        alive = _pid_is_alive(pid)
+        if alive is True:
+            raise SeatSurfaceReuseRefused(
+                _refuse_reuse_message(seat_dir, f"live pid {pid} still exists")
+            )
+        if alive is None:
+            raise SeatSurfaceReuseRefused(
+                _refuse_reuse_message(seat_dir, f"ambiguous for pid {pid}")
+            )
+
+    return _StaleDecision(
+        action="all_pids_dead",
+        reason="sentinel pid is dead and no live tmux session exists",
+    )
+
+
 def _pid_is_alive(pid: int) -> bool | None:
     if pid <= 0:
         return None
@@ -796,44 +889,19 @@ def _archive_stale_launched_surface(
     session: str,
     tmux_adapter: Any,
 ) -> SeatSurfaceArchiveResult:
+    """Mutating path: decide + rename.  Both steps delegate to shared helpers."""
     launched = _launched_events(seat_dir)
     if not launched:
         return SeatSurfaceArchiveResult(False, reason="no launched event")
-    if _session_exists(tmux_adapter, session):
-        raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, "live tmux session still exists"))
-
-    latest = _latest_event(seat_dir)
-    if latest and latest.get("event") == seat_sentinel.EVENT_EXITED:
-        archive_path = _archive_path_for(seat_dir)
-        seat_dir.rename(archive_path)
-        return SeatSurfaceArchiveResult(
-            True,
-            archive_path=str(archive_path),
-            reason="sentinel exit event observed and no live tmux session exists",
-        )
-
-    pids: list[int] = []
-    for event in launched:
-        pid = _parse_positive_pid(event.get("pid"))
-        if pid is not None:
-            pids.append(pid)
-    if not pids:
-        raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, "ambiguous (no sentinel pid recorded)"))
-
-    for pid in pids:
-        alive = _pid_is_alive(pid)
-        if alive is True:
-            raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"live pid {pid} still exists"))
-        if alive is None:
-            raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"ambiguous for pid {pid}"))
-
+    decision = _decide_stale_surface(
+        seat_dir=seat_dir,
+        session=session,
+        tmux_adapter=tmux_adapter,
+        launched=launched,
+    )
     archive_path = _archive_path_for(seat_dir)
     seat_dir.rename(archive_path)
-    return SeatSurfaceArchiveResult(
-        True,
-        archive_path=str(archive_path),
-        reason="sentinel pid is dead and no live tmux session exists",
-    )
+    return SeatSurfaceArchiveResult(True, archive_path=str(archive_path), reason=decision.reason)
 
 
 def configured_harness_binary(harness: str) -> str:
@@ -1150,32 +1218,24 @@ def _evaluate_seat_surface_reuse(
                 _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
             )
     if not mutate:
-        if _session_exists(tmux_adapter, session):
-            raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, "live tmux session still exists"))
-        latest = _latest_event(seat_dir)
-        if latest and latest.get("event") == seat_sentinel.EVENT_EXITED:
-            return _SeatSurfaceGateResult(
-                seat_dir=seat_dir,
-                seat_id=seat_id,
-                seat_run_id=seat_run_id,
-                skipped_reason="stale launched surface would be archived during live launch",
-            )
-        pids = [_parse_positive_pid(event.get("pid")) for event in strict_launched_events]
-        for pid in pids:
-            if pid is None:
-                raise SeatSurfaceReuseRefused(
-                    _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
-                )
-            alive = _pid_is_alive(pid)
-            if alive is True:
-                raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"live pid {pid} still exists"))
-            if alive is None:
-                raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"ambiguous for pid {pid}"))
+        # Diagnostic (no-mutation) path: share the pure decision step with the
+        # live archive path so the two branches cannot desync.
+        decision = _decide_stale_surface(
+            seat_dir=seat_dir,
+            session=session,
+            tmux_adapter=tmux_adapter,
+            launched=strict_launched_events,
+        )
+        skip_label = (
+            "stale launched surface would be archived during live launch"
+            if decision.action == "exit_event"
+            else "dead launched surface would be archived during live launch"
+        )
         return _SeatSurfaceGateResult(
             seat_dir=seat_dir,
             seat_id=seat_id,
             seat_run_id=seat_run_id,
-            skipped_reason="dead launched surface would be archived during live launch",
+            skipped_reason=skip_label,
         )
     stale_surface_archive = _archive_stale_launched_surface(
         seat_dir=seat_dir,
@@ -1755,6 +1815,11 @@ def _gate_skip(name: str, reason: str) -> LaunchPreflightGate:
     return LaunchPreflightGate(name=name, status="SKIPPED", detail=reason)
 
 
+def _gate_critical_skip(name: str, reason: str) -> LaunchPreflightGate:
+    """A SKIPPED gate that cannot be evaluated without a live launch; exit 3."""
+    return LaunchPreflightGate(name=name, status="SKIPPED", detail=reason, critical=True)
+
+
 def _gate_refusal(name: str, exc: LaunchError) -> LaunchPreflightGate:
     return LaunchPreflightGate(
         name=name,
@@ -1864,6 +1929,22 @@ def preflight_launch(
             plan = runtime_gate.plan
             gates.append(_gate_pass("runtime-policy"))
 
+    # Gate: --resume + --backend/--runtime-policy combination is unconditionally
+    # refused by launch() before any side effect; the diagnostic must surface it
+    # rather than silently omit it (which would make preflight report all-PASS
+    # for an invocation live launch unconditionally refuses).
+    if resume and plan is not None:
+        if plan.runtime_policy is not None:
+            try:
+                raise RuntimePolicyRefused(
+                    "--backend/--runtime-policy cannot be combined with --resume until the "
+                    "runtime backend exposes attach semantics; refusing raw fallback"
+                )
+            except LaunchError as exc:
+                gates.append(_gate_refusal("resume-runtime-policy", exc))
+        else:
+            gates.append(_gate_skip("resume-runtime-policy", "no runtime-policy requested"))
+
     if tmux_adapter is None:
         from .tmux_adapter import TmuxAdapter
 
@@ -1889,7 +1970,7 @@ def preflight_launch(
             gates.append(_gate_refusal("resume-target", exc))
         else:
             gates.append(_gate_pass("resume-target"))
-        gates.append(_gate_skip("seat-surface-reuse", "resume attaches an existing live session"))
+        gates.append(_gate_critical_skip("seat-surface-reuse", "resume attaches an existing live session"))
     elif runtime_gate is None:
         gates.append(_gate_skip("seat-surface-reuse", "requires runtime-policy resolution"))
     elif not tmux_ready:
@@ -1944,7 +2025,7 @@ def preflight_launch(
 
     if runtime_gate is not None and plan is not None and plan.runtime_policy is not None:
         gates.append(
-            _gate_skip(
+            _gate_critical_skip(
                 "visible-runtime-backend",
                 "requires live launch to provision the contained visible runtime",
             )
