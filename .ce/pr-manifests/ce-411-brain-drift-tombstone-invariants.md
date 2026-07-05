@@ -4,13 +4,12 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** story
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_COUNT=4
-
-AUTHORIZED_PATHS_SHA256=b0694ec6807f475f5749f1bd6d9bffa7c27002da43c48886ac028259a01d3bd6
+AUTHORIZED_PATHS_SHA256=b74255b152ac7696bf1fd7228b60180210de16e5225fa1844d7a92bb9d21a998
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-411-brain-drift-tombstone-invariants.md
 .ce/pr-manifests/ce-411-brain-drift-tombstone-invariants.md
 validators/creator_engine_validator/checks/ce_brain_drift.py
