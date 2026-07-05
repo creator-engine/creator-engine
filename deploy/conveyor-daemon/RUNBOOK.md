@@ -65,3 +65,14 @@ lease takeover could allow two daemon instances to run concurrently after clock
 skew, filesystem delay, or an unobserved crash. The daemon therefore fails
 closed: an operator must verify that the recorded holder process is dead before
 removing the lease and restarting.
+
+Stale leases are a real, expected outcome of the launcher's own crash-safety
+design, not just a theoretical edge case. The launcher runs a background
+heartbeat thread alongside the daemon's main loop. If a heartbeat write fails,
+that thread exits the whole process immediately via `os._exit(74)` rather than
+returning normally. `os._exit` skips Python's normal cleanup path, so the main
+loop's `finally: lease.release()` never runs and the lease file is left on
+disk exactly as it was before the crash. The next launch attempt then finds a
+lease that looks live but whose recorded pid is gone, which is reported as a
+stale lease (`DaemonLeaseStale`) and refused fail-closed rather than silently
+replaced.
