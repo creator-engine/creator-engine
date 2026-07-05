@@ -103,6 +103,8 @@ TMPDIR=/var/tmp ce validate-pr
 > **Running from an isolated worktree?** Set
 > `CE_VALIDATOR_PYTHON` to the dependency interpreter. See [`../../validators/README.md`](../../validators/README.md).
 
+If `ce validate-pr` or `ce brain verify`, `ce brain correct`, or `ce brain sync` refuses because the installed `creator-engine-validator` wheel is older than the source checkout, reinstall or update the wheel before treating the result as durable. For a deliberate one-off override, set `CE_ALLOW_STALE_WHEEL=1`; the literal value `1` is required, and CE logs that the command is proceeding by explicit override.
+
 ## 4. The Governed Cycle
 
 The user-facing cycle is:
