@@ -4807,6 +4807,13 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
     lease: daemon_lease.DaemonLease | None = None
     try:
         lease = _acquire_queue_daemon_lease(args)
+        # ``lease`` may legitimately be ``None`` here: the CLI deferred to a
+        # live launcher-supervisor lease (see
+        # ``_acquire_queue_daemon_lease``/``_deferred_supervisor_lease``).
+        # Every downstream consumer of ``lease`` (the log sink's heartbeat
+        # and this function's ``finally`` release) already tolerates ``None``
+        # by construction — the CLI must never heartbeat or release a lease
+        # it did not itself acquire.
         token = integrator_belt.token_from_env(args.token_env)
         logger = integrator_belt.JsonLineLogger(sys.stderr)
         wall = _approval_wall_runtime_from_args(args)
@@ -4870,25 +4877,117 @@ def _queue_daemon_holder_id() -> str:
     return f"queue-daemon:{socket.gethostname()}:{os.getpid()}"
 
 
-def _acquire_queue_daemon_lease(args: argparse.Namespace) -> daemon_lease.DaemonLease:
+def _acquire_queue_daemon_lease(args: argparse.Namespace) -> daemon_lease.DaemonLease | None:
+    """Acquire the queue-daemon singleton lease, or defer to a supervisor.
+
+    The canonical launcher (``deploy/queue-daemon/launch-queue-daemon.sh``,
+    both the host and containerized form) acquires this SAME lease name in a
+    long-lived supervisor process, exports the same lease root, and then
+    spawns this CLI as its child — so under normal launcher-driven startup
+    the lease is already held by our own ancestor. Returning ``None`` tells
+    the caller "the singleton is already enforced upstream; proceed without
+    acquiring (or later releasing) a second lease of your own." Any other
+    live holder is refused exactly as before (fail-closed, exit 73).
+    """
     lease_root = _queue_daemon_lease_root_from_args(args)
     lease_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     lease_root.chmod(0o700)
-    return daemon_lease.acquire(
-        "queue-daemon",
-        _queue_daemon_holder_id(),
-        state_root=lease_root,
-        allow_takeover=False,
-    )
+    try:
+        return daemon_lease.acquire(
+            "queue-daemon",
+            _queue_daemon_holder_id(),
+            state_root=lease_root,
+            allow_takeover=False,
+        )
+    except daemon_lease.DaemonLeaseHeld:
+        if _defer_to_supervisor_lease(lease_root / "queue-daemon.lease"):
+            return None
+        raise
 
 
-def _queue_daemon_lease_payload(args: argparse.Namespace) -> dict[str, Any]:
-    lease_path = _queue_daemon_lease_root_from_args(args) / "queue-daemon.lease"
+def _read_lease_json(lease_path: Path) -> dict[str, Any]:
     try:
         data = json.loads(lease_path.read_text(encoding="utf-8"))
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _defer_to_supervisor_lease(lease_path: Path) -> bool:
+    """Return True (and log) iff the live lease holder is our own ancestor.
+
+    Fail-closed: any ambiguity (missing/malformed lease file, non-integer
+    pid, or a holder pid that is not a verified live ancestor of THIS
+    process) returns False, and the caller refuses the startup exactly as it
+    did before this deferral existed. We deliberately re-read the lease file
+    from disk here rather than trust any argument or environment claim —
+    the ancestry check is only meaningful against the actual recorded
+    holder.
+    """
+    payload = _read_lease_json(lease_path)
+    holder_pid = payload.get("pid")
+    if not isinstance(holder_pid, int) or holder_pid <= 0:
+        return False
+    if not _pid_is_live_ancestor_of_current_process(holder_pid):
+        return False
+    holder_id = payload.get("holder_id", "unknown")
+    print(
+        f"{CE_CMD} queue-daemon: deferring to launcher supervisor's singleton "
+        f"lease (holder pid={holder_pid} holder_id={holder_id} "
+        f"lease_path={lease_path})",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _pid_is_live_ancestor_of_current_process(candidate_pid: int) -> bool:
+    """Verify ``candidate_pid`` is a live process in our own ppid chain.
+
+    Walks ``/proc/<pid>/stat`` from the current process up to (but not
+    including) pid 1. This is Linux-specific and intentionally fails closed
+    (returns False) when ``/proc`` is unavailable or any hop cannot be read
+    — a supervisor deferral is only ever granted on a positively-verified
+    ancestry match, never assumed.
+    """
+    try:
+        pid = os.getpid()
+        seen: set[int] = set()
+        while pid > 1 and pid not in seen:
+            seen.add(pid)
+            ppid = _read_ppid(pid)
+            if ppid is None:
+                return False
+            if ppid == candidate_pid:
+                return True
+            pid = ppid
+        return False
+    except Exception:
+        return False
+
+
+def _read_ppid(pid: int) -> int | None:
+    """Read the parent pid of ``pid`` from ``/proc/<pid>/stat``, or None."""
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # Format: "pid (comm) state ppid ...". comm may itself contain spaces or
+    # parentheses, so split on the LAST ')' before doing field-based parsing.
+    close_paren = raw.rfind(")")
+    if close_paren == -1:
+        return None
+    fields = raw[close_paren + 1 :].split()
+    if len(fields) < 2:
+        return None
+    try:
+        return int(fields[1])
+    except ValueError:
+        return None
+
+
+def _queue_daemon_lease_payload(args: argparse.Namespace) -> dict[str, Any]:
+    lease_path = _queue_daemon_lease_root_from_args(args) / "queue-daemon.lease"
+    return _read_lease_json(lease_path)
 
 
 def _queue_daemon_lease_refusal(args: argparse.Namespace, *, stale: bool, detail: str) -> str:
@@ -4903,9 +5002,13 @@ def _queue_daemon_lease_refusal(args: argparse.Namespace, *, stale: bool, detail
     )
 
 
-def _queue_daemon_lease_log_sink(log_sink: Any, lease: daemon_lease.DaemonLease):
+def _queue_daemon_lease_log_sink(log_sink: Any, lease: daemon_lease.DaemonLease | None):
     def emit(record: Mapping[str, Any]) -> None:
-        if record.get("action") == "daemon_pass_start":
+        # ``lease`` is None when the CLI deferred to a live launcher
+        # supervisor's lease (see ``_acquire_queue_daemon_lease``); the
+        # supervisor owns heartbeating in that case, so this CLI must not
+        # touch a lease object it never acquired.
+        if lease is not None and record.get("action") == "daemon_pass_start":
             lease.heartbeat()
         log_sink(record)
 

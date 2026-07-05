@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 from creator_engine_validator import ce_cli, daemon_lease, v3_cli
 from creator_engine_validator.search_rate_limiter import SearchRateLimiter
@@ -2171,6 +2172,174 @@ def test_ce_queue_daemon_heartbeats_each_pass_and_releases_cleanly(
     assert acquire_calls[0][1]["allow_takeover"] is False
     assert lease.heartbeats == 2
     assert lease.released is True
+
+
+def _write_supervisor_lease(lease_root: Path, *, holder_id: str, pid: int) -> Path:
+    lease_path = lease_root / "queue-daemon.lease"
+    now = time.time()
+    lease_path.write_text(
+        json.dumps(
+            {
+                "holder_id": holder_id,
+                "pid": pid,
+                "host": v3_cli.socket.gethostname(),
+                "acquired_at": now,
+                "heartbeat_at": now,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return lease_path
+
+
+def test_ce_queue_daemon_defers_to_live_ancestor_supervisor_lease(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A launcher supervisor (a live ANCESTOR of this process) already holds
+    the singleton lease — per the required fix, the CLI must defer to it
+    (proceed without acquiring/releasing its own lease) instead of deadlocking
+    with DaemonLeaseHeld, exactly the ce-ops#444 startup deadlock this rework
+    closes."""
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    supervisor_pid = os.getppid()  # a real, live ancestor of this test process
+    lease_path = _write_supervisor_lease(
+        lease_root, holder_id=f"queue-daemon:test-supervisor:{supervisor_pid}", pid=supervisor_pid
+    )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "daemon-secret")
+
+    def fake_loop(**kwargs):
+        kwargs["log_sink"]({"action": "daemon_pass_start", "index": 1})
+        return belt.DaemonLoopResult(
+            ticks=(
+                belt.DaemonLoopTick(
+                    index=1,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    err = capsys.readouterr().err
+    assert ret == 0
+    assert "deferring to launcher supervisor" in err
+    assert f"holder pid={supervisor_pid}" in err
+    # The supervisor's own lease file must be untouched: same holder, still
+    # present (never released, never overwritten by the CLI's own acquire).
+    assert lease_path.exists()
+    reread = json.loads(lease_path.read_text(encoding="utf-8"))
+    assert reread["pid"] == supervisor_pid
+
+
+def test_ce_queue_daemon_refuses_live_non_ancestor_holder(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A live lease holder that is NOT an ancestor of this process (e.g. some
+    other unrelated live daemon instance) must still refuse with the
+    pre-existing exit-73 behavior — the ancestry deferral must not become an
+    unverified bypass."""
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        _write_supervisor_lease(
+            lease_root, holder_id=f"queue-daemon:unrelated:{other.pid}", pid=other.pid
+        )
+
+        monkeypatch.setattr(
+            v3_cli.integrator_belt,
+            "token_from_env",
+            lambda _name: (_ for _ in ()).throw(AssertionError("token must not be read")),
+        )
+        monkeypatch.setattr(
+            v3_cli.integrator_belt,
+            "run_daemon_loop",
+            lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+        )
+
+        ret = v3_cli.main([
+            "queue-daemon",
+            "--repo", REPO,
+            "--once",
+            "--daemon-lease-root", str(lease_root),
+            "--root", str(tmp_path),
+        ])
+    finally:
+        other.terminate()
+        other.wait(timeout=5)
+
+    err = capsys.readouterr().err
+    assert ret == 73
+    assert "queue-daemon singleton lease refused" in err
+    assert f"pid={other.pid}" in err
+    assert "deferring to launcher supervisor" not in err
+
+
+def test_ce_queue_daemon_stale_lease_not_deferred_even_with_ancestor_pid(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A STALE lease (TTL-expired remote-host record) must never be deferred
+    to, even in the degenerate case where its recorded pid numerically
+    collides with a real ancestor pid of this process — deferral is only
+    ever reachable from the ``DaemonLeaseHeld`` (live) path, never from
+    ``DaemonLeaseStale``, so stale takeover stays fully gated on the
+    pre-existing explicit-audited-takeover path, unchanged by this rework."""
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    ancestor_pid = os.getppid()
+    (lease_root / "queue-daemon.lease").write_text(
+        json.dumps(
+            {
+                "holder_id": "old-holder",
+                "pid": ancestor_pid,
+                "host": "some-other-unrelated-host",
+                "acquired_at": 1.0,
+                "heartbeat_at": 1.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    err = capsys.readouterr().err
+    assert ret == 73
+    assert "queue-daemon singleton lease refused" in err
+    assert "verify-dead-then-remove" in err
+    assert "deferring to launcher supervisor" not in err
 
 
 def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(

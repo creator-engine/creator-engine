@@ -99,6 +99,23 @@ container runtime own the daemon process.
    operation-lock file. Never remove a live lease to start a second queue
    daemon.
 
+   The lease has two cooperating levels, not two competing ones. The launcher
+   (`launch-queue-daemon.sh`, in both the host and container form) is itself a
+   long-lived supervisor process: it acquires the `queue-daemon` lease first,
+   then starts the daemon process as its own child and heartbeats the lease
+   for as long as that child is alive. The daemon process, when it finds the
+   lease already held by a live process that is verifiably its own ancestor,
+   defers to the supervisor's lease instead of trying to acquire a second one
+   — the supervisor's held lease already is the singleton enforcement, so the
+   daemon proceeds straight into its normal startup. If the daemon is instead
+   invoked directly (no supervisor in its process ancestry — for example a
+   manual foreground run for debugging), it acquires the lease itself exactly
+   as it always has. Only a lease held by some other, unrelated live process
+   (not an ancestor of the daemon) is refused, and a lease found stale
+   (holder process dead, or TTL-expired for a remote host) is refused exactly
+   as before regardless of any ancestry — deferral only ever applies to a
+   live, verified ancestor holder.
+
 4. Verify and start:
 
    ```bash
