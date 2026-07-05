@@ -89,6 +89,10 @@ def test_ce_check_client_repo_profile_omits_only_ce_resident_checks(
     from creator_engine_validator.checks import v3_naming_hygiene
 
     client = _client_repo_fixture(tmp_path, repo_root)
+    # v3_naming_hygiene.evaluate() is self-referential to the installed package
+    # location via v3_naming_hygiene.py:70-72, so this in-process client-tree
+    # test cannot fixture it by changing cwd. Omitting it is justified because it
+    # is a CE-self check with no meaningful signal against an adopted client tree.
     monkeypatch.setattr(
         v3_naming_hygiene,
         "evaluate",
