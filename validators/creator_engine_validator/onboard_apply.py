@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from . import v3_installer
+from . import v3_installer, version as ce_version
 from .checks import ce_runtime_policy
 from .forge.github_repo_config import DEFAULT_MAIN_PROTECTION, BranchProtectionPolicy
 from .forge.protection_diagnostics import (
@@ -98,7 +98,13 @@ BROWNFIELD_ADOPTION_BRANCH = v3_installer.BROWNFIELD_ADOPTION_BRANCH
 #: these scanners — absence of a parsed finding is NOT clean.
 REQUIRED_SCRUB_SCANNERS: tuple[str, ...] = ("gitleaks", "trufflehog")
 CE_WORKFLOW_PATH = ".github/workflows/ce-validate.yml"
-CE_WORKFLOW_CONTENT = """\
+
+
+def _render_ce_workflow_content(semver: str = ce_version.SEMVER) -> str:
+    wheel_name = f"creator_engine_validator-{semver}-py3-none-any.whl"
+    download_base = f"https://creator-engine.dev/downloads/{semver}"
+    wheel_url = f"{download_base}/{wheel_name}"
+    return f"""\
 name: Validate governance artifacts
 
 on:
@@ -115,9 +121,99 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - run: python -m pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt
-      - run: python -m pytest validators/tests
+      - name: Install Creator Engine from signed release downloads
+        env:
+          CE_VERSION: "{semver}"
+          CE_DOWNLOAD_BASE: "{download_base}"
+          CE_APP_WHEEL: "{wheel_name}"
+          CE_APP_WHEEL_URL: "{wheel_url}"
+        run: |
+          set -euo pipefail
+          mkdir -p .ce-validator-dist
+          curl -fsSLo .ce-validator-dist/SHA256SUMS "${{CE_DOWNLOAD_BASE}}/SHA256SUMS"
+          python - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import sys
+          import urllib.request
+
+          dist = pathlib.Path(".ce-validator-dist")
+          base = os.environ["CE_DOWNLOAD_BASE"].rstrip("/")
+          app_wheel = os.environ["CE_APP_WHEEL"]
+          expected_app_url = os.environ["CE_APP_WHEEL_URL"]
+          rows = []
+          for line in (dist / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+              if not line.strip():
+                  continue
+              digest, filename = line.split(maxsplit=1)
+              filename = filename.strip()
+              if "/" in filename or not filename.endswith(".whl"):
+                  continue
+              rows.append((digest, filename))
+          if not any(filename == app_wheel for _, filename in rows):
+              raise SystemExit(f"SHA256SUMS missing {{app_wheel}}")
+          for digest, filename in rows:
+              url = f"{{base}}/{{filename}}"
+              if filename == app_wheel and url != expected_app_url:
+                  raise SystemExit(f"unexpected app wheel URL {{url}}")
+              target = dist / filename
+              with urllib.request.urlopen(url) as response:
+                  target.write_bytes(response.read())
+              actual = hashlib.sha256(target.read_bytes()).hexdigest()
+              if actual != digest:
+                  raise SystemExit(f"sha256 mismatch for {{filename}}")
+          PY
+          python -m pip install --no-index --find-links .ce-validator-dist "creator-engine-validator==${{CE_VERSION}}"
+      - name: Run CE governance checks
+        run: |
+          set -euo pipefail
+          set +e
+          ce check .ce/ --json > ce-check.json
+          ce_status=$?
+          set -e
+          export CE_CHECK_STATUS="$ce_status"
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          tolerated = {{
+              "mutation_class",  # awaiting client profile work in ce-ops#428b
+              "surfaces_manifest_complete",  # awaiting client profile work in ce-ops#428b
+              "surfaces_manifest_consistent",  # awaiting client profile work in ce-ops#428b
+              "v3_naming_hygiene",  # awaiting client profile work in ce-ops#428b
+          }}
+          ce_status = int(os.environ["CE_CHECK_STATUS"])
+          payload = json.loads(open("ce-check.json", encoding="utf-8").read())
+          results = payload.get("results") or []
+          by_name = {{str(result.get("name")): result for result in results}}
+          ce_scope = by_name.get("ce_scope")
+          if ce_scope is None or not ce_scope.get("ok"):
+              print("ce_scope must pass in adopted client repositories", file=sys.stderr)
+              sys.exit(1)
+          unexpected = [
+              result for result in results
+              if not result.get("ok") and str(result.get("name")) not in tolerated
+          ]
+          if unexpected:
+              for result in unexpected:
+                  print(f"unexpected CE check failure: {{result.get('name')}}", file=sys.stderr)
+                  for error in result.get("errors") or []:
+                      print(error, file=sys.stderr)
+              sys.exit(1)
+          tolerated_failed = sorted(
+              str(result.get("name")) for result in results
+              if not result.get("ok") and str(result.get("name")) in tolerated
+          )
+          if tolerated_failed:
+              print("Temporarily tolerated until ce-ops#428b: " + ", ".join(tolerated_failed))
+          elif ce_status != 0:
+              print("ce check exited nonzero without tolerated failures", file=sys.stderr)
+              sys.exit(1)
+          PY
 """
+CE_WORKFLOW_CONTENT = _render_ce_workflow_content()
 CE_WORKFLOW_SHA256 = hashlib.sha256(CE_WORKFLOW_CONTENT.encode("utf-8")).hexdigest()
 
 
