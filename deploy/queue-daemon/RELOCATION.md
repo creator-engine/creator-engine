@@ -72,7 +72,7 @@ container runtime own the daemon process.
 
    ```text
    CE_CONTAINER_ENGINE=docker
-   CE_DAEMON_IMAGE=creator-engine/ce-validator:0.3.1
+   CE_DAEMON_IMAGE=creator-engine/ce-validator:0.3.2
    CE_DAEMON_LEASE_ROOT=/var/lib/ce-queue-daemon/daemon-leases
    CE_DAEMON_TOKEN_FILE=/approved/runtime/token-file
    ```
