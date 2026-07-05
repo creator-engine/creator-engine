@@ -48,7 +48,14 @@ def _schema() -> dict[str, Any]:
 
 
 def _fx(name: str) -> str:
-    return (_FX / name).read_text(encoding="utf-8")
+    text = (_FX / name).read_text(encoding="utf-8")
+    if name == "contents_ce_validate_yml_already_ce.json":
+        envelope = json.loads(text)
+        raw = onboard_apply.CE_WORKFLOW_CONTENT.encode("utf-8")
+        envelope["content"] = base64.b64encode(raw).decode("ascii")
+        envelope["size"] = len(raw)
+        return json.dumps(envelope)
+    return text
 
 
 def _scanner_mirror_dir() -> Path:

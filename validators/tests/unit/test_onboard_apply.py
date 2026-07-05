@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from creator_engine_validator import onboard_apply, v3_installer
+from creator_engine_validator import onboard_apply, v3_installer, version as ce_version
 from creator_engine_validator.checks import ce_runtime_policy
 
 
@@ -1228,6 +1229,55 @@ def test_adoption_scaffold_workflow_digest_pinned(tmp_path):
     leg = _leg(summary, "brownfield_build_scaffold")
     assert leg["status"] == "failed"
     assert leg["verification"]["code"] == "brownfield_scaffold_verify_failed"
+
+
+def test_ce_workflow_template_is_client_repo_shaped():
+    workflow = onboard_apply.CE_WORKFLOW_CONTENT
+
+    assert "ce check .ce/ --json" in workflow
+    assert "validators/wheelhouse" not in workflow
+    assert "validators/requirements.txt" not in workflow
+    assert "pytest validators/tests" not in workflow
+
+
+def test_ce_workflow_tolerates_exact_ce_resident_checks_inline():
+    workflow = onboard_apply.CE_WORKFLOW_CONTENT
+    tolerated = set(
+        re.findall(
+            r'"([^"]+)",  # awaiting client profile work in ce-ops#428b',
+            workflow,
+        )
+    )
+
+    assert tolerated == {
+        "mutation_class",
+        "surfaces_manifest_complete",
+        "surfaces_manifest_consistent",
+        "v3_naming_hygiene",
+    }
+    assert 'by_name.get("ce_scope")' in workflow
+
+
+def test_ce_workflow_uses_signed_download_wheel_url_shape():
+    semver = ce_version.SEMVER
+    wheel = f"creator_engine_validator-{semver}-py3-none-any.whl"
+    base = f"https://creator-engine.dev/downloads/{semver}"
+    workflow = onboard_apply.CE_WORKFLOW_CONTENT
+
+    assert f'CE_DOWNLOAD_BASE: "{base}"' in workflow
+    assert f'CE_APP_WHEEL: "{wheel}"' in workflow
+    assert f'CE_APP_WHEEL_URL: "{base}/{wheel}"' in workflow
+    assert 'curl -fsSLo .ce-validator-dist/SHA256SUMS "${CE_DOWNLOAD_BASE}/SHA256SUMS"' in workflow
+    assert "hashlib.sha256(target.read_bytes()).hexdigest()" in workflow
+
+
+def test_ce_workflow_version_is_parameterized_from_ce_version():
+    workflow = onboard_apply._render_ce_workflow_content("9.8.7")
+
+    assert "https://creator-engine.dev/downloads/9.8.7" in workflow
+    assert "creator_engine_validator-9.8.7-py3-none-any.whl" in workflow
+    assert "https://creator-engine.dev/downloads/0.3.1" not in workflow
+    assert onboard_apply.CE_WORKFLOW_CONTENT == onboard_apply._render_ce_workflow_content(ce_version.SEMVER)
 
 
 def test_adoption_scaffold_is_value_free(tmp_path):
