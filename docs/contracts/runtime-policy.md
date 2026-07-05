@@ -197,7 +197,13 @@ the record exists, it is loaded, validated by `ce_runtime_policy`, stamped
 into the launch plan, and sent through the existing runtime backend bridge.
 For the onboarded default this composes the plain-Docker backend. If the
 record is missing, the launcher fails closed with remediation to re-run
-onboarding and with the explicit host opt-out below.
+onboarding and with the explicit host opt-out below. If the file exists but
+does not parse to a clean `kind: runtime-policy-record` mapping (missing or
+mismatched `kind`, or content that is not a mapping at all — e.g. a
+truncated write, hand-edit, or foreign schema), the launcher fails closed
+with a distinct remediation message rather than silently falling through to
+an ungoverned raw launch; the tenant can tell "never onboarded" apart from
+"onboarded but the file is invalid".
 
 `ce launch --backend host` is the explicit raw-host opt-out. It preserves
 the historical host tmux behavior for operators that intentionally choose

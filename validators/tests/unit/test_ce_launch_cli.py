@@ -468,6 +468,69 @@ def test_launch_missing_default_runtime_policy_refuses_with_remediation(tmp_path
     assert adapter.spawned == []
 
 
+def test_launch_default_runtime_policy_kind_mismatch_refuses_distinctly(tmp_path):
+    adapter = FakeAdapter()
+    policy = _write_default_runtime_policy(tmp_path)
+    record = yaml.safe_load(policy.read_text(encoding="utf-8"))
+    record["kind"] = "some-other-record-kind"
+    policy.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+
+    missing_message = ce_cli.launch_runtime._missing_default_runtime_policy_message(
+        ce_cli.launch_runtime._default_runtime_policy_path(tmp_path)
+    )
+
+    with pytest.raises(ce_cli.launch_runtime.RuntimePolicyRefused) as exc:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    message = str(exc.value)
+    assert "runtime-policy-record" in message
+    assert "ce onboard --apply" in message
+    # Corrupt-onboarded-record refusal must be distinguishable from the
+    # absent-record refusal so the tenant can tell "never onboarded" apart
+    # from "onboarded but the file is invalid".
+    assert message != missing_message
+    assert adapter.spawned == []
+
+
+def test_launch_default_runtime_policy_missing_kind_key_refuses_distinctly(tmp_path):
+    adapter = FakeAdapter()
+    policy = _write_default_runtime_policy(tmp_path)
+    record = yaml.safe_load(policy.read_text(encoding="utf-8"))
+    del record["kind"]
+    policy.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(ce_cli.launch_runtime.RuntimePolicyRefused, match="runtime-policy-record"):
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert adapter.spawned == []
+
+
+def test_launch_default_runtime_policy_not_a_mapping_refuses(tmp_path):
+    adapter = FakeAdapter()
+    path = tmp_path / ".ce" / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(["not", "a", "mapping"]), encoding="utf-8")
+
+    with pytest.raises(
+        ce_cli.launch_runtime.RuntimePolicyRefused, match="must be a YAML mapping"
+    ):
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert adapter.spawned == []
+
+
 def test_launch_backend_host_opt_out_preserves_raw_tmux(tmp_path):
     adapter = FakeAdapter()
 

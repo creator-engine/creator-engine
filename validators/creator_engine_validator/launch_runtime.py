@@ -190,6 +190,15 @@ def _missing_default_runtime_policy_message(path: Path) -> str:
     )
 
 
+def _corrupt_default_runtime_policy_message(path: Path) -> str:
+    return (
+        f"the onboarded runtime policy record at {str(path)!r} is present but is not a "
+        f"clean {ce_runtime_policy.KIND_VALUE!r} record (missing/mismatched 'kind'); "
+        "re-run `ce onboard --apply` to re-emit it, or repair/replace the file, or "
+        "explicitly opt out of contained launch with `ce launch --backend host`"
+    )
+
+
 @dataclass(frozen=True)
 class LaunchPlan:
     mode: str  # "launch" | "resume"
@@ -842,6 +851,7 @@ def launch(
             "(harness exit/crash/auth-loss must not continue headless)"
         )
 
+    runtime_policy_auto_resolved = False
     if (
         resolved_runtime_policy is None
         and not dry_run
@@ -851,6 +861,7 @@ def launch(
         default_runtime_policy = _default_runtime_policy_path(repo_root)
         if default_runtime_policy.is_file():
             resolved_runtime_policy = default_runtime_policy
+            runtime_policy_auto_resolved = True
         else:
             raise RuntimePolicyRefused(
                 _missing_default_runtime_policy_message(default_runtime_policy)
@@ -876,6 +887,16 @@ def launch(
                 f"runtime policy {str(resolved_runtime_policy)!r} must be a YAML mapping"
             )
         is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
+        # Corrupt/foreign onboarded default: a bare `ce launch` must not fall
+        # through to the raw (ungoverned) tmux path just because `kind` is
+        # missing/wrong on an auto-resolved file — refuse loudly with a
+        # message distinct from the absent-record case above, before any
+        # side effect. Explicitly-passed --runtime-policy files are untouched
+        # (their existing --backend semantics are out of scope here).
+        if runtime_policy_auto_resolved and not is_runtime_policy_record:
+            raise RuntimePolicyRefused(
+                _corrupt_default_runtime_policy_message(Path(resolved_runtime_policy))
+            )
         if runtime_backend is not None or is_runtime_policy_record:
             if not is_runtime_policy_record:
                 raise RuntimePolicyRefused(
