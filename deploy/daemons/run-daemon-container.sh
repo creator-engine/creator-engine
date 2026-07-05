@@ -17,6 +17,7 @@ Required for queue-daemon runtime:
 Optional container variables:
   CE_CONTAINER_ENGINE              docker or podman executable; default docker
   CE_DAEMON_IMAGE                  canonical runtime image; default creator-engine/ce-validator:0.3.1
+  CE_DAEMON_IMAGE_UID              canonical image uid/gid contract; default 10001
   CE_DAEMON_CONTAINER_NAME         default ce-<daemon>
   CE_DAEMON_REPO_ROOT              host checkout; default repository root
   CE_DAEMON_REPO_CONTAINER_PATH    default /workspace/creator-engine
@@ -60,6 +61,51 @@ add_env_if_present() {
 file_mode() {
   local path="$1"
   stat -c '%a' -- "$path" 2>/dev/null || stat -f '%Lp' -- "$path"
+}
+
+file_uid() {
+  local path="$1"
+  stat -c '%u' -- "$path" 2>/dev/null || stat -f '%u' -- "$path"
+}
+
+is_unsigned_int() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+engine_requires_host_uid_match() {
+  local engine="$1"
+  [[ "$(basename -- "$engine")" == "docker" ]]
+}
+
+prepare_state_root_dir() {
+  local label="$1"
+  local path="$2"
+  local state_root="$3"
+  local image_uid="$4"
+  local require_host_uid_match="$5"
+
+  if [[ -e "$path" && ! -d "$path" ]]; then
+    die "$label exists but is not a directory: $path"
+  fi
+
+  if [[ ! -e "$path" ]]; then
+    if [[ "$require_host_uid_match" == "1" ]]; then
+      install -d -m 0700 -o "$image_uid" -g "$image_uid" "$path" 2>/dev/null || \
+        install -d -m 0700 "$path" || die "cannot create $label: $path"
+    else
+      install -d -m 0700 "$path" || die "cannot create $label: $path"
+    fi
+  fi
+
+  local mode
+  mode="$(file_mode "$path")" || die "cannot stat $label: $path"
+  [[ "$mode" == "700" ]] || die "$label must be mode 0700: $path (mode $mode). Run: chmod 0700 $path"
+
+  if [[ "$require_host_uid_match" == "1" ]]; then
+    local owner_uid
+    owner_uid="$(file_uid "$path")" || die "cannot stat $label owner: $path"
+    [[ "$owner_uid" == "$image_uid" ]] || die "$label owner uid $owner_uid does not match canonical container uid $image_uid: $path. Run: chown -R $image_uid:$image_uid $state_root"
+  fi
 }
 
 require_mode_0600() {
@@ -112,6 +158,9 @@ main() {
     esac
   fi
   local image="${CE_DAEMON_IMAGE:-creator-engine/ce-validator:0.3.1}"
+  # Canonical daemon image contract: the runtime user is uid/gid 10001 (`ce`).
+  local image_uid="${CE_DAEMON_IMAGE_UID:-10001}"
+  is_unsigned_int "$image_uid" || die "CE_DAEMON_IMAGE_UID must be a numeric uid/gid: $image_uid"
   local container_name="${CE_DAEMON_CONTAINER_NAME:-ce-$daemon}"
   local queue_secret_container_dir="$state_container/queue-daemon-secret"
   local queue_secret_target="$state_container/queue-daemon/approval-wall-secret"
@@ -121,14 +170,19 @@ main() {
     queue_secret_uses_tmpfs=1
   fi
 
-  install -d -m 0700 "$state_root"
-  install -d -m 0700 "$host_lease_root"
+  local require_host_uid_match=0
+  if engine_requires_host_uid_match "$engine"; then
+    require_host_uid_match=1
+  fi
+  prepare_state_root_dir CE_DAEMON_STATE_ROOT "$state_root" "$state_root" "$image_uid" "$require_host_uid_match"
+  prepare_state_root_dir CE_DAEMON_LEASE_ROOT "$host_lease_root" "$state_root" "$image_uid" "$require_host_uid_match"
 
   local -a container_args=(
     run
     --rm
     --name "$container_name"
     --workdir "$repo_container"
+    --user "$image_uid:$image_uid"
     --volume "$root:$repo_container:ro"
     --volume "$state_root:$state_container"
     --env "CE_DAEMON_UNCONTAINED=1"
@@ -142,7 +196,7 @@ main() {
   )
 
   if [[ "$queue_secret_uses_tmpfs" == "1" ]]; then
-    container_args+=(--tmpfs "$queue_secret_container_dir:rw,size=1m,mode=0700")
+    container_args+=(--tmpfs "$queue_secret_container_dir:rw,size=1m,mode=0700,uid=$image_uid,gid=$image_uid")
   fi
 
   if [[ -n "${CE_DAEMON_ENV_FILE:-}" ]]; then
@@ -219,7 +273,7 @@ main() {
         [[ -f "$CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE" ]] || die "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE does not name a file: $CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE"
         local conveyor_secret_container_dir="/run/creator-engine/conveyor-daemon-secret"
         local conveyor_secret_container="$conveyor_secret_container_dir/signing-secret"
-        container_args+=(--tmpfs "$conveyor_secret_container_dir:rw,size=1m,mode=0700")
+        container_args+=(--tmpfs "$conveyor_secret_container_dir:rw,size=1m,mode=0700,uid=$image_uid,gid=$image_uid")
         container_args+=(--volume "$CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE:$conveyor_secret_container:ro")
         container_args+=(--env "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE=$conveyor_secret_container")
       fi
