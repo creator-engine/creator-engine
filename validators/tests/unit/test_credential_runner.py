@@ -193,4 +193,4 @@ def test_purity_unchanged():
     from creator_engine_validator.runner.backend import available_backends
 
     assert "credential_runner" not in registered_checks()
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a)
+    assert available_backends() == ("docker", "gvisor-proxy", "local-noop", "openshell", "os-native")  # +docker

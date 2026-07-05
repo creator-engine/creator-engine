@@ -299,4 +299,4 @@ def test_zero_live_filesystem_write(monkeypatch):
 
 def test_purity_unchanged():
     assert "evidence_sink" not in registered_checks()
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a)
+    assert available_backends() == ("docker", "gvisor-proxy", "local-noop", "openshell", "os-native")  # +docker

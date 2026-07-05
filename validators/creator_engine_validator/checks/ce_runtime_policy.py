@@ -76,8 +76,9 @@ CODE_SECRET_NAMES_ONLY = "runtime_policy_secret_names_only_violation"
 CODE_EGRESS_NOT_DENY_BY_DEFAULT = "runtime_policy_egress_not_deny_by_default"
 
 DEFAULT_ISOLATION_BACKEND = "gvisor-proxy"
-CLI_BACKEND_CHOICES = ("gvisor", "openshell", "local-noop")
+CLI_BACKEND_CHOICES = ("gvisor", "docker", "openshell", "local-noop")
 _BACKEND_ALIASES = {
+    "docker": "docker",
     "gvisor": "gvisor-proxy",
     "gvisor-proxy": "gvisor-proxy",
     "openshell": "openshell",

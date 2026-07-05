@@ -55,7 +55,9 @@ runtime wiring, and **keep-and-translate** the v2
 - **Dropped** (adopt-and-drop): the v2 `runtime_engine`
   `[podman-rootless, docker-rootless]` axis is not carried.
 - **Added** (v3 plane-C): the `isolation_backend`
-  `[gvisor-proxy, openshell, os-native]` selector (`os-native` is the
+  `[gvisor-proxy, docker, openshell, os-native]` selector (`docker` is
+  the plain-Docker contained backend for tenant hosts without the DGX
+  runsc runtime; `os-native` is the
   ce-ops#71 Tranche-1 unprivileged-default DIRECTION, shipped as a
   fail-closed scaffold; `default:` stays `gvisor-proxy`), and the
   per-endpoint egress
@@ -74,7 +76,7 @@ All required fields MUST be present. Stricter type rules below apply.
 | `schema_version` | enum | `"1"` for G-1.0. |
 | `policy_id` | string | slug `^[a-z][a-z0-9-]{2,63}$`. |
 | `policy_sha` | string | 64 lowercase hex characters. |
-| `role` | enum | one of `architect_research`, `implementer`, `verification`. |
+| `role` | enum | one of `architect_research`, `implementer`, `verification`, `controller`. The `controller` addition is an additive governance-contract change for launch-default policy records. |
 | `image_ref` | object | `name` required; `sha` (`sha256:<hex64>`) enforced as a digest pin by the check. |
 | `mount_manifest` | array<object> | each entry `{path, mode}` with `write_justification` required when `mode: rw`. |
 | `egress_allowlist` | array<object> | each entry `{host, ...}`; an empty array declares no egress (the safe floor). |
@@ -86,9 +88,11 @@ All required fields MUST be present. Stricter type rules below apply.
 not listed in the schema is a contract violation.
 
 `isolation_backend` is **optional** (ce-ops#71 MINOR-A): one of
-`gvisor-proxy` (the conservative default), `openshell`, `local-noop`
+`gvisor-proxy` (the conservative default), `docker`, `openshell`, `local-noop`
 (the inert registered backend for dry-run/foundation wiring), or
-`os-native` (the unprivileged-default scaffold, fail-closed). A Draft 2020-12
+`os-native` (the unprivileged-default scaffold, fail-closed). `docker`
+uses the policy's digest-pinned `image_ref`, adds no Docker `--runtime=`
+flag, and only bind-mounts paths from `mount_manifest`. A Draft 2020-12
 validator does not inject the schema `default`, so the field is *not*
 required — an omitted field validates clean and
 the runtime resolver supplies the fail-closed default (`gvisor-proxy`),

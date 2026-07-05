@@ -147,6 +147,24 @@ def _default_gvisor_plan_kwargs() -> dict[str, Any]:
     }
 
 
+def _default_docker_plan_kwargs() -> dict[str, Any]:
+    return {
+        "uid": os.getuid(),
+        "gid": os.getgid(),
+    }
+
+
+_DOCKER_PLAN_KWARGS = {
+    "uid",
+    "gid",
+    "container_home",
+    "container_codex_home",
+    "container_workdir",
+    "tmpfs_mounts",
+    "tty_flags",
+}
+
+
 def run_visible_runtime(
     *,
     resolved_backend: str,
@@ -166,25 +184,38 @@ def run_visible_runtime(
 ) -> VisibleRunnerExecution:
     """Provision and run ``command`` through a visible runtime backend.
 
-    Only the gVisor Docker/runsc backend is currently honorably composable with a
-    v1 visibility surface. Other registered backends fail closed here rather than
+    Only contained Docker-shaped backends are honorably composable with a v1
+    visibility surface. Other registered backends fail closed here rather than
     silently falling back to raw tmux.
     """
 
     runner_pkg = _runner_package()
-    if resolved_backend != runner_pkg.GVISOR_PROXY_BACKEND_KEY:
+    if resolved_backend not in {runner_pkg.GVISOR_PROXY_BACKEND_KEY, runner_pkg.DOCKER_BACKEND_KEY}:
         raise RuntimeBackendBridgeError(
             f"runtime backend {resolved_backend!r} cannot yet be composed with "
             "the v1 visibility surface; refusing raw fallback"
         )
 
-    plan_kwargs = dict(gvisor_plan_kwargs or {})
-    if not {"uid", "gid", "host_codex_home", "host_codex_bin"}.issubset(plan_kwargs):
-        defaults = _default_gvisor_plan_kwargs()
-        defaults.update(plan_kwargs)
+    if resolved_backend == runner_pkg.GVISOR_PROXY_BACKEND_KEY:
+        plan_kwargs = dict(gvisor_plan_kwargs or {})
+        if not {"uid", "gid", "host_codex_home", "host_codex_bin"}.issubset(plan_kwargs):
+            defaults = _default_gvisor_plan_kwargs()
+            defaults.update(plan_kwargs)
+            plan_kwargs = defaults
+        delegate = container_runner if container_runner is not None else runner_pkg.SubprocessContainerRunner()
+        backend_factory = runner_pkg.GvisorProxyBackend
+    else:
+        supplied = {
+            key: value
+            for key, value in dict(gvisor_plan_kwargs or {}).items()
+            if key in _DOCKER_PLAN_KWARGS
+        }
+        defaults = _default_docker_plan_kwargs()
+        defaults.update(supplied)
         plan_kwargs = defaults
+        delegate = container_runner if container_runner is not None else runner_pkg.SubprocessDockerRunner()
+        backend_factory = runner_pkg.DockerBackend
 
-    delegate = container_runner if container_runner is not None else runner_pkg.SubprocessContainerRunner()
     surface_runner = _SurfaceBoundContainerRunner(
         delegate=delegate,
         visibility_backend=visibility_backend,
@@ -195,7 +226,7 @@ def run_visible_runtime(
         env=env,
         seat_dir=seat_dir,
     )
-    backend = runner_pkg.GvisorProxyBackend(runner=surface_runner, **plan_kwargs)
+    backend = backend_factory(runner=surface_runner, **plan_kwargs)
     try:
         handle = backend.provision(
             runner_pkg.ProvisionRequest(runtime_policy=runtime_policy, run_id=run_id)
