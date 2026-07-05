@@ -185,6 +185,35 @@ def test_single_controller_assertion_refuses_zero_controllers():
     assert result.reason == "single-controller-assertion-failed"
 
 
+def test_single_controller_refusal_surfaces_exit_127_tail_event(tmp_path):
+    events = tmp_path / "events.jsonl"
+    events.write_text(
+        json.dumps({"event": "launched", "seat_id": "exec-fail--controller", "pid": 123}) + "\n"
+        + json.dumps({"event": "exited", "seat_id": "exec-fail--controller", "exit_code": 127}) + "\n",
+        encoding="utf-8",
+    )
+    legs = _ok_legs(
+        launch=lambda *, harness, repo_root, ledger_root: ce_onboard.LaunchLegResult(
+            ok=False,
+            live_controllers=0,
+            seat_record_ref=None,
+            detail="no seat",
+            events_ref=str(events),
+            command=["claude", "--print"],
+        ),
+    )
+
+    result = ce_onboard.run_onboard(_config(install_mode="skip", harness="claude"), legs=legs)
+
+    assert not result.ok
+    launch = next(p for p in result.phases if p.id == "launch")
+    assert "exit_code=127" in launch.detail
+    assert "command=['claude', '--print']" in launch.detail
+    assert "claude CLI not found on PATH" in launch.detail
+    assert launch.verify["tail_event"]["exit_code"] == 127
+    assert launch.verify["tail_event"]["command"] == ["claude", "--print"]
+
+
 def test_default_launch_counts_single_controller_in_default_ledger(tmp_path, monkeypatch):
     def fake_launch(*, harness, repo_root, ledger_root, tmux_adapter):
         del harness, tmux_adapter

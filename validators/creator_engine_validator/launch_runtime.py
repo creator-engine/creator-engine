@@ -22,13 +22,16 @@ adapter; no secrets or environment values are printed.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import urllib.error
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -262,6 +265,7 @@ class LaunchResult:
     seat_record_ref: str | None = None
     seat_lifecycle_state: str | None = None
     runner_runtime: dict | None = None
+    stale_surface_archive: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -274,6 +278,7 @@ class LaunchResult:
             "seat_record_ref": self.seat_record_ref,
             "seat_lifecycle_state": self.seat_lifecycle_state,
             "runner_runtime": self.runner_runtime,
+            "stale_surface_archive": self.stale_surface_archive,
         }
 
 
@@ -563,12 +568,296 @@ def probe_controller_recall_endpoint(repo_root: Path | str | None = None) -> dic
     )
 
 
-def _has_launched_event(seat_dir: Path | str) -> bool:
+def _parse_positive_pid(raw_pid: Any) -> int | None:
+    """Strict pid parse: a positive int, excluding ``bool`` (``isinstance(True,
+    int)`` is ``True`` in Python) and excluding non-integral/negative/zero
+    values. Returns ``None`` when ``raw_pid`` is not a confirmable live-pid
+    candidate.
+    """
+    if isinstance(raw_pid, bool):
+        return None
+    if isinstance(raw_pid, int):
+        return raw_pid if raw_pid > 0 else None
+    if isinstance(raw_pid, str):
+        stripped = raw_pid.strip()
+        if stripped.isdigit():
+            value = int(stripped)
+            return value if value > 0 else None
+        return None
+    return None
+
+
+def _strict_events_file_scan(seat_dir: Path | str) -> tuple[bool, list[dict[str, Any]]]:
+    """Strictly scan ``events.jsonl`` for the launch-gate reuse check ONLY.
+
+    This is deliberately stricter than :func:`seat_sentinel.iter_events_file`
+    (which is tolerant read-side observability code that must keep skipping
+    malformed lines for other consumers). The launch gate must fail closed:
+
+    * missing file (is_file() False) -> ``(False, [])`` — proceed as today,
+      no launched-event history to reconcile.
+    * file exists but is unreadable (OSError on read_text) -> ``(True, [])``
+      — ambiguous; caller must refuse.  The file could have been locked,
+      permission-flipped, or deleted in the is_file/read_text window — any
+      of those shapes is indistinguishable from a sentinel we cannot verify.
+    * any non-blank line that isn't a parseable JSON object -> ``(True, [])``
+      — ambiguous, caller must refuse.
+    * otherwise -> ``(False, <parsed event dicts>)``.
+    """
     events_path = Path(seat_dir) / seat_sentinel.EVENTS_FILENAME
-    return any(
-        event.get("event") == seat_sentinel.EVENT_LAUNCHED
+    if not events_path.is_file():
+        return False, []
+    try:
+        text = events_path.read_text(encoding="utf-8")
+    except OSError:
+        # File exists (is_file() passed) but is unreadable — ambiguous.
+        return True, []
+    if not text.strip():
+        return False, []
+    events: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except ValueError:
+            return True, []
+        if not isinstance(obj, dict):
+            return True, []
+        events.append(obj)
+    return False, events
+
+
+STALE_SURFACE_RECOVERY_COMMAND = "ce reap once"
+HARNESS_BINARY_BY_HARNESS = {
+    "claude": "claude",
+    "codex": "codex",
+    "hermes": "hermes",
+    "openclaw": "openclaw",
+}
+
+
+@dataclass(frozen=True)
+class SeatSurfaceArchiveResult:
+    archived: bool
+    archive_path: str | None = None
+    reason: str = ""
+
+
+def _pid_is_alive(pid: int) -> bool | None:
+    if pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return None
+    except OSError:
+        return None
+    return True
+
+
+def _latest_event(seat_dir: Path | str) -> dict[str, Any] | None:
+    events_path = Path(seat_dir) / seat_sentinel.EVENTS_FILENAME
+    latest = None
+    for event in seat_sentinel.iter_events_file(events_path):
+        latest = event
+    return latest
+
+
+def _launched_events(seat_dir: Path | str) -> list[dict[str, Any]]:
+    events_path = Path(seat_dir) / seat_sentinel.EVENTS_FILENAME
+    return [
+        event
         for event in seat_sentinel.iter_events_file(events_path)
+        if event.get("event") == seat_sentinel.EVENT_LAUNCHED
+    ]
+
+
+def _archive_path_for(seat_dir: Path) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    candidate = seat_dir.with_name(f"{seat_dir.name}.archived-{stamp}")
+    suffix = 1
+    while candidate.exists():
+        candidate = seat_dir.with_name(f"{seat_dir.name}.archived-{stamp}-{suffix}")
+        suffix += 1
+    return candidate
+
+
+def _refuse_reuse_message(seat_dir: Path, reason: str) -> str:
+    return (
+        f"seat surface {str(seat_dir)!r} already has a launched sentinel event; "
+        f"refusing to reuse it before spawn because liveness is {reason}. "
+        f"Supported recovery command: `{STALE_SURFACE_RECOVERY_COMMAND}` "
+        f"--repo-root <repo-root> --root <state-root>."
     )
+
+
+def _archive_stale_launched_surface(
+    *,
+    seat_dir: Path,
+    session: str,
+    tmux_adapter: Any,
+) -> SeatSurfaceArchiveResult:
+    launched = _launched_events(seat_dir)
+    if not launched:
+        return SeatSurfaceArchiveResult(False, reason="no launched event")
+    if _session_exists(tmux_adapter, session):
+        raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, "live tmux session still exists"))
+
+    latest = _latest_event(seat_dir)
+    if latest and latest.get("event") == seat_sentinel.EVENT_EXITED:
+        archive_path = _archive_path_for(seat_dir)
+        seat_dir.rename(archive_path)
+        return SeatSurfaceArchiveResult(
+            True,
+            archive_path=str(archive_path),
+            reason="sentinel exit event observed and no live tmux session exists",
+        )
+
+    pids: list[int] = []
+    for event in launched:
+        pid = _parse_positive_pid(event.get("pid"))
+        if pid is not None:
+            pids.append(pid)
+    if not pids:
+        raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, "ambiguous (no sentinel pid recorded)"))
+
+    for pid in pids:
+        alive = _pid_is_alive(pid)
+        if alive is True:
+            raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"live pid {pid} still exists"))
+        if alive is None:
+            raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"ambiguous for pid {pid}"))
+
+    archive_path = _archive_path_for(seat_dir)
+    seat_dir.rename(archive_path)
+    return SeatSurfaceArchiveResult(
+        True,
+        archive_path=str(archive_path),
+        reason="sentinel pid is dead and no live tmux session exists",
+    )
+
+
+def configured_harness_binary(harness: str) -> str:
+    return HARNESS_BINARY_BY_HARNESS.get(harness, harness)
+
+
+def harness_binary_check(
+    harness: str = DEFAULT_HARNESS,
+    *,
+    which: Any | None = None,
+) -> dict[str, Any]:
+    binary = configured_harness_binary(harness)
+    if harness == "codex":
+        # Desync guard: delegate to the SAME resolution the real launcher uses
+        # (codex_launch_spec.resolve_codex_harness_binary) rather than a
+        # bare shutil.which(binary) — that seam honors CE_CODEX_HARNESS
+        # (used EXCLUSIVELY when set) and the composed PATH (live PATH merged
+        # with KNOWN_GOOD_PATH), so doctor never reports green for a harness
+        # the launcher would actually refuse to resolve.
+        try:
+            resolved = codex_launch_spec.resolve_codex_harness_binary()
+        except codex_launch_spec.GovernedCommandError as exc:
+            detail = (
+                f"configured codex harness binary could not be resolved: {exc}; "
+                f"tried the {codex_launch_spec.CODEX_HARNESS_ENV} override path and the "
+                "composed launch PATH (live PATH + known-good sbin/bin dirs); set "
+                f"{codex_launch_spec.CODEX_HARNESS_ENV} to an absolute executable path "
+                "or install codex on PATH before running `ce launch --harness codex`"
+            )
+            return {
+                "clause": "RED-G-HARNESS-PATH",
+                "name": "configured harness binary on PATH",
+                "applicable": True,
+                "ok": False,
+                "detail": detail,
+                "harness": harness,
+                "binary": binary,
+                "resolved": None,
+            }
+        return {
+            "clause": "RED-G-HARNESS-PATH",
+            "name": "configured harness binary on PATH",
+            "applicable": True,
+            "ok": True,
+            "detail": (
+                f"configured codex harness binary {binary!r} resolves via the "
+                f"launcher's codex resolution (override/composed-PATH) at {resolved}"
+            ),
+            "harness": harness,
+            "binary": binary,
+            "resolved": resolved,
+        }
+
+    resolver = which or shutil.which
+    resolved = resolver(binary)
+    ok = resolved is not None
+    if ok:
+        detail = (
+            f"configured {harness} harness binary {binary!r} resolves on PATH at {resolved}"
+        )
+    else:
+        detail = (
+            f"configured {harness} harness binary {binary!r} is not on PATH; "
+            f"install {harness} CLI or fix PATH before running `ce launch --harness {harness}`"
+        )
+    return {
+        "clause": "RED-G-HARNESS-PATH",
+        "name": "configured harness binary on PATH",
+        "applicable": True,
+        "ok": ok,
+        "detail": detail,
+        "harness": harness,
+        "binary": binary,
+        "resolved": resolved,
+    }
+
+
+def tail_event_diagnosis(
+    events_ref: str | Path | None,
+    *,
+    command: Sequence[str] | None = None,
+    harness: str | None = None,
+) -> dict[str, Any] | None:
+    if events_ref is None:
+        return None
+    latest = None
+    for event in seat_sentinel.iter_events_file(events_ref):
+        latest = event
+    if latest is None:
+        return None
+    payload: dict[str, Any] = {"event": latest.get("event"), "events_ref": str(events_ref)}
+    if "exit_code" in latest:
+        payload["exit_code"] = latest.get("exit_code")
+    if command is not None:
+        payload["command"] = list(command)
+        if command:
+            payload["harness_binary"] = str(command[0])
+    elif harness is not None:
+        payload["harness_binary"] = configured_harness_binary(harness)
+    if payload.get("exit_code") == 127:
+        binary = payload.get("harness_binary") or (configured_harness_binary(harness) if harness else "harness")
+        payload["remediation"] = (
+            f"{binary} CLI not found on PATH - install Claude Code/Codex or fix PATH, "
+            f"then re-run `ce onboard --harness {harness or DEFAULT_HARNESS}`"
+        )
+    return payload
+
+
+def format_tail_event_diagnosis(diagnosis: Mapping[str, Any] | None) -> str:
+    if not diagnosis:
+        return ""
+    parts = [f"tail_event={diagnosis.get('event')}"]
+    if "exit_code" in diagnosis:
+        parts.append(f"exit_code={diagnosis.get('exit_code')}")
+    if diagnosis.get("command"):
+        parts.append(f"command={diagnosis.get('command')!r}")
+    if diagnosis.get("remediation"):
+        parts.append(f"remediation: {diagnosis.get('remediation')}")
+    return "; ".join(parts)
 
 
 def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str, Any]:
@@ -985,10 +1274,25 @@ def launch(
         window=window,
         runtime_policy=resolved_runtime_policy,
     )
-    if _has_launched_event(seat_dir):
+    stale_surface_archive: SeatSurfaceArchiveResult | None = None
+    ambiguous_events, strict_events = _strict_events_file_scan(seat_dir)
+    if ambiguous_events:
         raise SeatSurfaceReuseRefused(
-            f"seat surface {str(seat_dir)!r} already has a launched sentinel event; "
-            "refusing to reuse it before spawn"
+            _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
+        )
+    strict_launched_events = [
+        event for event in strict_events if event.get("event") == seat_sentinel.EVENT_LAUNCHED
+    ]
+    if strict_launched_events:
+        for event in strict_launched_events:
+            if _parse_positive_pid(event.get("pid")) is None:
+                raise SeatSurfaceReuseRefused(
+                    _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
+                )
+        stale_surface_archive = _archive_stale_launched_surface(
+            seat_dir=seat_dir,
+            session=session,
+            tmux_adapter=tmux_adapter,
         )
 
     # v3.5-F live bounding — still BEFORE any side effect: refuse loudly when
@@ -1211,4 +1515,13 @@ def launch(
         seat_record_ref=seat_record_ref,
         seat_lifecycle_state=seat_lifecycle_state,
         runner_runtime=runner_runtime,
+        stale_surface_archive=(
+            {
+                "archived": stale_surface_archive.archived,
+                "archive_path": stale_surface_archive.archive_path,
+                "reason": stale_surface_archive.reason,
+            }
+            if stale_surface_archive is not None
+            else None
+        ),
     )

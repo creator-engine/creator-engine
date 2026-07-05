@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shlex
 import socket
 from pathlib import Path
@@ -404,6 +405,278 @@ def test_launch_spawns_visible_controller_seat():
     assert result.spawned is True
     assert adapter.spawned, "controller seat should be spawned in a visible tmux pane"
     assert result.plan.visibility == "operator_visible"
+
+
+def test_launch_archives_dead_launched_surface_and_proceeds(tmp_path):
+    adapter = FakeAdapter()
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / "stale-seat--controller"
+    seat_dir.mkdir(parents=True)
+    events = seat_dir / "events.jsonl"
+    original_events = (
+        json.dumps({"event": "launched", "seat_id": "stale-seat--controller", "pid": 999999}) + "\n"
+        + json.dumps({"event": "exited", "seat_id": "stale-seat--controller", "exit_code": 127}) + "\n"
+    )
+    events.write_text(original_events, encoding="utf-8")
+    (seat_dir / "state.txt").write_text("preserved\n", encoding="utf-8")
+
+    result = launch_runtime.launch(
+        harness="claude",
+        backend="host",
+        session="stale-seat",
+        window="controller",
+        repo_root=tmp_path,
+        tmux_adapter=adapter,
+    )
+
+    assert result.spawned is True
+    assert result.stale_surface_archive is not None
+    archive = Path(result.stale_surface_archive["archive_path"])
+    assert archive.name.startswith("stale-seat--controller.archived-")
+    assert (archive / "events.jsonl").read_text(encoding="utf-8") == original_events
+    assert (archive / "state.txt").read_text(encoding="utf-8") == "preserved\n"
+    assert Path(result.events_ref).parent == seat_dir
+    assert adapter.spawned, "new seat launch should proceed after archive"
+
+
+def test_launch_refuses_ambiguous_launched_surface_with_recovery_command(tmp_path):
+    adapter = FakeAdapter()
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / "ambiguous-seat--controller"
+    seat_dir.mkdir(parents=True)
+    seat_dir.joinpath("events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": "ambiguous-seat--controller"}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="ambiguous-seat",
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    message = str(exc.value)
+    assert "liveness is ambiguous" in message
+    assert "ce reap once" in message
+    assert seat_dir.is_dir()
+    assert adapter.spawned == []
+
+
+def _make_seat_dir(tmp_path: Path, name: str) -> Path:
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / name
+    seat_dir.mkdir(parents=True)
+    return seat_dir
+
+
+def test_launch_refuses_mixed_dead_pid_and_missing_pid_launched_events(tmp_path):
+    # Regression for review finding (a): a mixed shape (one launched event with
+    # a confirmed-dead pid, another launched event with NO pid at all) must be
+    # treated as ambiguous overall, not silently archived because the *known*
+    # pid happens to be dead.
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, "mixed-missing--controller")
+    events = (
+        json.dumps({"event": "launched", "seat_id": "mixed-missing--controller", "pid": 999999})
+        + "\n"
+        + json.dumps({"event": "launched", "seat_id": "mixed-missing--controller"})
+        + "\n"
+    )
+    seat_dir.joinpath("events.jsonl").write_text(events, encoding="utf-8")
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="mixed-missing",
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    message = str(exc.value)
+    assert "liveness is ambiguous" in message
+    assert "ce reap once" in message
+    assert seat_dir.is_dir()
+    assert adapter.spawned == []
+
+
+@pytest.mark.parametrize("bad_pid", ["abc", "12.5"])
+def test_launch_refuses_mixed_dead_pid_and_unparseable_pid_string(tmp_path, bad_pid):
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, f"mixed-bad-pid-{bad_pid.replace('.', '')}--controller")
+    events = (
+        json.dumps(
+            {
+                "event": "launched",
+                "seat_id": seat_dir.name,
+                "pid": 999999,
+            }
+        )
+        + "\n"
+        + json.dumps({"event": "launched", "seat_id": seat_dir.name, "pid": bad_pid})
+        + "\n"
+    )
+    seat_dir.joinpath("events.jsonl").write_text(events, encoding="utf-8")
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session=seat_dir.name.removesuffix("--controller"),
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert "liveness is ambiguous" in str(exc.value)
+    assert seat_dir.is_dir()
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_corrupt_line_among_otherwise_valid_events(tmp_path):
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, "corrupt-line--controller")
+    events = (
+        json.dumps({"event": "launched", "seat_id": "corrupt-line--controller", "pid": 999999})
+        + "\n"
+        + '{"event": "launched", "seat_id": "corrupt-line--controller", "pid": \n'  # truncated/garbage
+    )
+    seat_dir.joinpath("events.jsonl").write_text(events, encoding="utf-8")
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="corrupt-line",
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert "liveness is ambiguous" in str(exc.value)
+    assert seat_dir.is_dir()
+    assert adapter.spawned == []
+
+
+def test_launch_refuses_wholly_unparseable_events_file(tmp_path):
+    # Gate-skip regression pin: seat_sentinel.iter_events_file/parse_event_line
+    # tolerantly skip every garbage line here, so a wholly-corrupt (but
+    # non-empty) events.jsonl yields ZERO tolerantly-parsed events. Before the
+    # fix, that meant `_has_launched_event` returned False and the entire
+    # archive-or-refuse gate was skipped, letting launch proceed with no
+    # tmux/pid check at all (second live seat possible). The strict gate must
+    # still refuse here.
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, "wholly-garbage--controller")
+    seat_dir.joinpath("events.jsonl").write_text(
+        "not json at all\n{{{ also not json\n", encoding="utf-8"
+    )
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="wholly-garbage",
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert "liveness is ambiguous" in str(exc.value)
+    assert seat_dir.is_dir()
+    assert adapter.spawned == []
+
+
+@pytest.mark.parametrize("bad_pid", [0, -5, True])
+def test_launch_refuses_non_positive_or_bool_pid(tmp_path, bad_pid):
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, f"bad-pid-value-{str(bad_pid).lower()}--controller")
+    seat_dir.joinpath("events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": seat_dir.name, "pid": bad_pid}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session=seat_dir.name.removesuffix("--controller"),
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    assert "liveness is ambiguous" in str(exc.value)
+    assert seat_dir.is_dir()
+    assert adapter.spawned == []
+
+
+def test_launch_archives_multiple_dead_launched_events_with_exit_and_proceeds(tmp_path):
+    # Regression (clean shape must still work): several launched events, all
+    # with confirmed-dead parseable positive pids, followed by a terminal
+    # exited event and no live tmux session -> still archives and proceeds.
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, "clean-multi--controller")
+    events = (
+        json.dumps({"event": "launched", "seat_id": "clean-multi--controller", "pid": 999999})
+        + "\n"
+        + json.dumps({"event": "launched", "seat_id": "clean-multi--controller", "pid": "999998"})
+        + "\n"
+        + json.dumps({"event": "exited", "seat_id": "clean-multi--controller", "exit_code": 0})
+        + "\n"
+    )
+    seat_dir.joinpath("events.jsonl").write_text(events, encoding="utf-8")
+
+    result = launch_runtime.launch(
+        harness="claude",
+        backend="host",
+        session="clean-multi",
+        window="controller",
+        repo_root=tmp_path,
+        tmux_adapter=adapter,
+    )
+
+    assert result.spawned is True
+    assert result.stale_surface_archive is not None
+    archive = Path(result.stale_surface_archive["archive_path"])
+    assert archive.name.startswith("clean-multi--controller.archived-")
+    assert adapter.spawned, "new seat launch should proceed after archive"
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="chmod 0o000 has no effect when running as root")
+def test_launch_refuses_unreadable_events_file(tmp_path):
+    # Round-2 regression pin: the existing events.jsonl is present (is_file()
+    # True) but unreadable. Before this fix, the OSError handler in
+    # _strict_events_file_scan returned (False, []) — "no history" — silently
+    # skipping the reuse gate and potentially spawning a second live seat.
+    # After the fix, an OSError on read_text of an existing file is treated
+    # as ambiguous and refuses with the standard SeatSurfaceReuseRefused.
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, "unreadable--controller")
+    events_path = seat_dir / "events.jsonl"
+    events_path.write_text(
+        json.dumps({"event": "launched", "seat_id": "unreadable--controller", "pid": 999999})
+        + "\n",
+        encoding="utf-8",
+    )
+    events_path.chmod(0o000)
+    try:
+        with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+            launch_runtime.launch(
+                harness="claude",
+                backend="host",
+                session="unreadable",
+                window="controller",
+                repo_root=tmp_path,
+                tmux_adapter=adapter,
+            )
+        assert "liveness is ambiguous" in str(exc.value)
+        assert "ce reap once" in str(exc.value)
+        assert adapter.spawned == []
+    finally:
+        events_path.chmod(0o644)
 
 
 def test_launch_pins_cwd_and_env_at_tmux_boundary(tmp_path):
