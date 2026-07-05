@@ -45,6 +45,20 @@ and trust anchor are verified, the installer uses the signature-covered
 and install CPython 3.14 in user space when no compatible interpreter is already
 present.
 
+Default one-liner installs require outbound access to:
+
+- `creator-engine.dev` for the signed spec, trust root, answers schema, and
+  wheelhouse artifacts.
+- `https://dns.google` for the default out-of-band trust-anchor assertion used by
+  `CE_TRUST_ANCHOR_URL`.
+- `github.com` for the `astral-sh/uv` releases that provide the
+  manifest-pinned `uv` tarball and CPython 3.14 acquisition when the host has no
+  local Python `>=3.14`.
+
+Egress-restricted environments must allow all three destinations before running
+the default one-liner; blocking any one of them can make installation fail
+non-obviously during trust verification or Python acquisition.
+
 ## E1 real bootstrap
 
 `docs/install.sh` is the shell I/O edge. Its ordered contract is:
@@ -57,8 +71,8 @@ present.
    match the fetched trust-root key fingerprint, and refuse before persistent
    mutation on any failure.
 3. Parse the signature-covered artifact manifest from `llms-install.md`.
-4. Fetch `downloads/0.3.0/SHA256SUMS`, verify its signed-manifest hash, and
-   fetch/hash-check every required wheel and the answers schema.
+4. Fetch `downloads/<current-release>/SHA256SUMS`, verify its signed-manifest
+   hash, and fetch/hash-check every required wheel and the answers schema.
 5. If CPython `>=3.14` is absent, fetch the manifest-pinned uv 0.11.21 tarball,
    hash-check it before extraction/execution, and run `uv python install 3.14`
    in user space.
@@ -77,9 +91,10 @@ the later governed-seat path: prepare/confirm the host and GitHub answers, run
 `ce onboard --plan`, have the operator review the plan, and only then run the
 explicit governed `ce onboard --apply`.
 
-The Pages mirror lives under `docs/downloads/0.3.0/`. Its `SHA256SUMS` publishes
-the wheel hashes and the `install.sh` hash; the signed spec pins the
-`SHA256SUMS` hash and the answers-schema hash.
+The Pages mirror lives under `docs/downloads/<current-release>/`; the signed
+spec manifest is authoritative for the concrete release path and hashes. Its
+`SHA256SUMS` publishes the wheel hashes and the `install.sh` hash; the signed
+spec pins the `SHA256SUMS` hash and the answers-schema hash.
 
 ## One engine, two modes — the answers file + the input inventory (v3.5-E.3)
 
@@ -143,7 +158,7 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
 - **Bootstrap-token VERIFICATION** (`bootstrap_scope_table` /
   `bootstrap_required_scopes`): the installer's one-time credential is
   *checked, not asked*, and the requirement is **right-sized to the operation**
-  (ce-ops#94). A **plain-join** (joining an already-CE repo) writes nothing with
+  being performed. A **plain-join** (joining an already-CE repo) writes nothing with
   this PAT — every forge op rides the App's JIT scoped token and protection is
   verify-only — so the requirement is **identity-only** (a valid login distinct
   from the App bot). A **greenfield** create needs `contents:write ·
@@ -357,7 +372,8 @@ after the Operator offline-key signing act.
 `llms-install.md` §0.5 states the supported acquisition paths for `ce` itself —
 the served **one-liner** (`curl …/install.sh | bash`) and **clone + offline
 wheelhouse** — each with an **honest** integrity note: transport integrity is TLS
-(+ the published hash for `install.sh` in `docs/downloads/0.3.0/SHA256SUMS`);
+(+ the published hash for `install.sh` in
+`docs/downloads/<current-release>/SHA256SUMS`);
 the cryptographically **verified** trust anchor for the install *procedure* is
 this signed spec (§0), not the one-liner. `install.sh`'s own posture is stated,
 not overstated — it asserts no signature over its own body beyond TLS + the
