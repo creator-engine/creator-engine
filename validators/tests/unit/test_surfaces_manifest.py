@@ -10,6 +10,9 @@ from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks import surfaces_manifest as chk
 
 
+MIXED_SHA256 = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+
+
 def _surface(name: str, *, version: str | None = "1.0.0", commit_or_digest: object = "a" * 64) -> dict[str, object]:
     return {
         "name": name,
@@ -353,6 +356,36 @@ def test_consistent_manifest_pinnable_unset_digest_fails(tmp_path: Path):
     assert any("herdr.commit_or_digest" in error.path for error in result.errors)
 
 
+def test_consistent_manifest_placeholder_sha256_digest_fails(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"].append(  # type: ignore[union-attr]
+        _surface("CE seat image", commit_or_digest="sha256:" + "0" * 64)
+    )
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST in _codes(result)
+    assert any(
+        "CE seat image.commit_or_digest" in error.path
+        and "placeholder sha256 digest" in error.message
+        and "replace it with the real pulled artifact digest" in error.message
+        for error in result.errors
+    )
+
+
+def test_consistent_manifest_mixed_sha256_digest_passes(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"].append(  # type: ignore[union-attr]
+        _surface("CE seat image", commit_or_digest="sha256:" + MIXED_SHA256)
+    )
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
 def test_consistent_manifest_allowlisted_unset_digest_passes(tmp_path: Path):
     doc = _consistent_doc()
     doc["surfaces"].append(  # type: ignore[union-attr]
@@ -397,7 +430,7 @@ def test_consistent_manifest_allowlisted_unset_digest_ratchet_only_shrinks(tmp_p
 def test_consistent_manifest_ce_alias_does_not_substring_match_from_token(tmp_path: Path):
     doc = _consistent_doc()
     doc["surfaces"].append(  # type: ignore[union-attr]
-        _surface("CE seat image", version="1.0.0", commit_or_digest="e" * 64)
+        _surface("CE seat image", version="1.0.0", commit_or_digest=MIXED_SHA256)
     )
     _write_consistent_repo(tmp_path, doc)
     dockerfile = tmp_path / "deploy" / "seat-image" / "Dockerfile"

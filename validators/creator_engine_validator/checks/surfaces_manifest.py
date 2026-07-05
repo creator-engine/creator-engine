@@ -304,8 +304,13 @@ def _is_allowlisted_unset_digest(key: str, surface: dict[str, Any]) -> bool:
     return _unset_digest_allowlist_key(key, surface) in UNSET_DIGEST_ALLOWLIST
 
 
+def _is_placeholder_sha256_digest(value: object) -> bool:
+    digest = _normal_sha256(value)
+    return digest is not None and len(set(digest)) == 1
+
+
 def _is_unpinned_digest(value: object) -> bool:
-    return value is None or value == UNSET_DIGEST
+    return value is None or value == UNSET_DIGEST or _is_placeholder_sha256_digest(value)
 
 
 def _is_host_only(surface: dict[str, Any]) -> bool:
@@ -334,12 +339,19 @@ def _pinnable_null_digest_errors(path: Path, by_name: dict[str, dict[str, Any]])
         if commit_or_digest == UNSET_DIGEST and _is_allowlisted_unset_digest(key, surface):
             continue
         name = surface.get("name", key)
+        if _is_placeholder_sha256_digest(commit_or_digest):
+            message = (
+                f"pinnable non-host-only surface {name!r} uses a placeholder sha256 digest; "
+                "replace it with the real pulled artifact digest"
+            )
+        else:
+            message = f"pinnable non-host-only surface {name!r} must carry a digest or commit"
         errors.append(
             make_error(
                 CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST,
                 path,
                 f"{name}.commit_or_digest",
-                f"pinnable non-host-only surface {name!r} must carry a digest or commit",
+                message,
                 CONSISTENT_CONTRACT,
             )
         )
