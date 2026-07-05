@@ -90,6 +90,22 @@ def test_oci_dockerfile_installs_wheelhouse_offline_and_exposes_cli() -> None:
     assert "creator-engine-validator --help" in text
 
 
+def test_oci_dockerfile_installs_gate_daemon_runtime_dependencies_from_pinned_repos() -> None:
+    text = _dockerfile()
+
+    assert 'urlopen("https://cli.github.com/packages/githubcli-archive-keyring.gpg", timeout=30)' in text
+    assert "chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg" in text
+    assert (
+        "deb [arch=$(dpkg --print-architecture) "
+        "signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] "
+        "https://cli.github.com/packages stable main"
+    ) in text
+    assert "      gh \\" in text
+    assert "      git \\" in text
+    assert "command -v gh" in text
+    assert "command -v git" in text
+
+
 def test_oci_dockerfile_is_non_root_and_multi_arch_friendly() -> None:
     text = _dockerfile()
 
