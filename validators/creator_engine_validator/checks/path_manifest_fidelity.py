@@ -750,6 +750,8 @@ def _run_with_base_per_pr(
             expected_carrier = f"{prefix}{expected_stem}.md"
             errors.append(
                 make_error(
+                    # Contained-seat preflight matches this exact code as a singleton bypass;
+                    # change both ends together, and format drift fails closed.
                     "path_manifest_carrier_required",
                     expected_carrier,
                     "",

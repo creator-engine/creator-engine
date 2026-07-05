@@ -652,6 +652,8 @@ def _run_path_manifest_gate(
 
     error_codes = _path_manifest_error_codes(result)
     if config.profile == CONTAINED_SEAT_PROFILE and error_codes == {PATH_MANIFEST_CARRIER_REQUIRED_CODE}:
+        # This matches the gate's exact singleton error code; change both ends
+        # together, and format drift fails closed.
         print(CONTAINED_SEAT_CARRIER_NOTICE, file=out)
         return "passed; omitted path_manifest_carrier_required (harvest-side carrier)"
 
