@@ -52,6 +52,7 @@ def build_path_block(*, npm_global_bin: str | None = None) -> str:
         BEGIN_MARKER,
         "# Added by Creator Engine. Delete this whole marked block to undo.",
         "_ce_path_prepend() {",
+        '  [ -d "$1" ] || return 0',
         '  case ":${PATH:-}:" in',
         '    *":$1:"*) ;;',
         '    *) PATH="$1${PATH:+:$PATH}" ;;',
@@ -65,13 +66,13 @@ def build_path_block(*, npm_global_bin: str | None = None) -> str:
         lines.extend(
             [
                 '_ce_npm_bin=""',
+                '_ce_npm_prefix=""',
                 "if command -v npm >/dev/null 2>&1; then",
-                '  _ce_npm_bin="$(npm bin -g 2>/dev/null || true)"',
-                '  if [ -z "$_ce_npm_bin" ]; then',
-                '    _ce_npm_prefix="$(npm prefix -g 2>/dev/null || true)"',
-                '    [ -z "$_ce_npm_prefix" ] || _ce_npm_bin="${_ce_npm_prefix%/}/bin"',
+                '  _ce_npm_prefix="$(npm prefix -g 2>/dev/null || true)"',
+                '  if [ -n "$_ce_npm_prefix" ]; then',
+                '    _ce_npm_bin="${_ce_npm_prefix%/}/bin"',
+                '    _ce_path_prepend "$_ce_npm_bin"',
                 "  fi",
-                '  [ -z "$_ce_npm_bin" ] || _ce_path_prepend "$_ce_npm_bin"',
                 "fi",
                 "unset _ce_npm_bin _ce_npm_prefix",
             ]
