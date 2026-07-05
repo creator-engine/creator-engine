@@ -33,6 +33,8 @@ AUTHORITATIVE_LEDGER_RELATIVE_PATH = Path(".ce") / "brain" / "assertions.yaml"
 CODE_DRIFT = "brain_assertion_drift"
 CODE_UNVERIFIABLE = "brain_assertion_unverifiable"
 CODE_AUTHORITATIVE_MISMATCH = "brain_assertion_authoritative_mismatch"
+CODE_DUPLICATE_ACTIVE_ID = "brain_assertion_duplicate_active_id"
+CODE_TOMBSTONE_ORDER = "brain_assertion_tombstone_order"
 
 _HASH_RE = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
 _HASH_CLAIM_KEYS = (
@@ -169,6 +171,80 @@ def _active_record_indexes(records: list[Any]) -> list[int]:
         for idx in latest.values()
         if isinstance(records[idx], dict) and records[idx].get("status") == "active"
     )
+
+
+def _duplicate_id_tombstone_invariant_errors(records: Sequence[Any], path: Path) -> list[ValidationError]:
+    errors: list[ValidationError] = []
+    indexes_by_id: dict[str, list[int]] = {}
+    for idx, record in enumerate(records):
+        if isinstance(record, Mapping) and isinstance(record.get("id"), str):
+            indexes_by_id.setdefault(record["id"], []).append(idx)
+
+    for assertion_id, indexes in sorted(indexes_by_id.items()):
+        if len(indexes) < 2:
+            continue
+        active_indexes = [
+            idx
+            for idx in indexes
+            if isinstance(records[idx], Mapping) and records[idx].get("status") == "active"
+        ]
+        if len(active_indexes) > 1:
+            errors.append(
+                _error(
+                    CODE_DUPLICATE_ACTIVE_ID,
+                    path,
+                    ("records", active_indexes[1]),
+                    "id",
+                    (
+                        f"duplicated assertion id {assertion_id!r} has multiple active entries; "
+                        "a duplicated id may have one earlier active record closed by one later tombstone"
+                    ),
+                )
+            )
+
+        seen_active = False
+        seen_superseded = False
+        for idx in indexes:
+            record = records[idx]
+            if not isinstance(record, Mapping):
+                continue
+            if record.get("status") == "active":
+                seen_active = True
+                continue
+            if record.get("status") == "superseded":
+                if not seen_active:
+                    errors.append(
+                        _error(
+                            CODE_TOMBSTONE_ORDER,
+                            path,
+                            ("records", idx),
+                            "status",
+                            (
+                                f"tombstone for duplicated assertion id {assertion_id!r} appears before "
+                                "the active record it closes"
+                            ),
+                        )
+                    )
+                elif seen_superseded:
+                    errors.append(
+                        _error(
+                            CODE_TOMBSTONE_ORDER,
+                            path,
+                            ("records", idx),
+                            "status",
+                            (
+                                f"duplicate tombstone for assertion id {assertion_id!r}; "
+                                "only one superseded row is permitted per id"
+                            ),
+                        )
+                    )
+                else:
+                    seen_superseded = True
+    return errors
+
+
+def _tombstone_invariant_errors(records: Sequence[Any], path: Path) -> list[ValidationError]:
+    return _duplicate_id_tombstone_invariant_errors(records, path)
 
 
 def _normalize_claimed_hash(value: Any) -> str | None:
@@ -846,6 +922,7 @@ def validate_file(path: Path, *, context: DriftContext | None = None) -> list[Va
             "records": [data["brain_assertion"]],
         }
         errors = brain_runtime.validate_ledger_doc(doc, path)
+        errors.extend(_tombstone_invariant_errors(doc["records"], path))
         if errors:
             return errors
         record = data["brain_assertion"]
@@ -854,9 +931,11 @@ def validate_file(path: Path, *, context: DriftContext | None = None) -> list[Va
         return []
 
     errors = brain_runtime.validate_ledger_doc(data, path)
+    records = data.get("records")
+    if isinstance(records, list):
+        errors.extend(_tombstone_invariant_errors(records, path))
     if errors:
         return errors
-    records = data.get("records")
     if not isinstance(records, list):
         return []
     findings: list[ValidationError] = []
@@ -903,7 +982,16 @@ def verify_state_root(state_root: Path | str, *, context: DriftContext | None = 
     )
 
 
-@register(CHECK_NAME, [CODE_DRIFT, CODE_UNVERIFIABLE, CODE_AUTHORITATIVE_MISMATCH])
+@register(
+    CHECK_NAME,
+    [
+        CODE_DRIFT,
+        CODE_UNVERIFIABLE,
+        CODE_AUTHORITATIVE_MISMATCH,
+        CODE_DUPLICATE_ACTIVE_ID,
+        CODE_TOMBSTONE_ORDER,
+    ],
+)
 def run(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []
     for path in iter_brain_assertion_files(paths):

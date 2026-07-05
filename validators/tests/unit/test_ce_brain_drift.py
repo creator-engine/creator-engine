@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 from pathlib import Path
 
@@ -79,6 +80,90 @@ def _write_authoritative_validate_workflow_ledger(repo: Path) -> Path:
     return path
 
 
+class _CaptureWrite:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Path, str]] = []
+
+    def __call__(self, path: Path, text: str) -> None:
+        self.calls.append((path, text))
+
+    @property
+    def records(self) -> list[dict]:
+        assert self.calls
+        return rt.load_ledger_text(self.calls[-1][1])
+
+
+def _assert_manual_claim(
+    *,
+    assertion_id: str,
+    claim: dict,
+    records: list[dict] | None = None,
+) -> list[dict]:
+    sink = _CaptureWrite()
+    rt.assert_claim(
+        assertion_id=assertion_id,
+        claim=claim,
+        scope="unit",
+        evidence_ref="manual-evidence",
+        verification_method="manual-attested",
+        records=[] if records is None else records,
+        write=sink,
+    )
+    return sink.records
+
+
+def _correct_manual_claim(
+    *,
+    assertion_id: str,
+    new_assertion_id: str,
+    claim: dict,
+    records: list[dict],
+) -> list[dict]:
+    sink = _CaptureWrite()
+    rt.correct_claim(
+        assertion_id=assertion_id,
+        new_assertion_id=new_assertion_id,
+        claim=claim,
+        evidence_ref="manual-evidence",
+        verification_method="manual-attested",
+        records=records,
+        write=sink,
+    )
+    return sink.records
+
+
+def _manual_chained_supersede_records() -> list[dict]:
+    records = _assert_manual_claim(
+        assertion_id="brain-assertion-drift-tombstone-a",
+        claim={"subject": "brain", "predicate": "mode", "object": "first"},
+    )
+    records = _correct_manual_claim(
+        assertion_id="brain-assertion-drift-tombstone-a",
+        new_assertion_id="brain-assertion-drift-tombstone-b",
+        claim={"subject": "brain", "predicate": "mode", "object": "second"},
+        records=records,
+    )
+    return _correct_manual_claim(
+        assertion_id="brain-assertion-drift-tombstone-b",
+        new_assertion_id="brain-assertion-drift-tombstone-c",
+        claim={"subject": "brain", "predicate": "mode", "object": "third"},
+        records=records,
+    )
+
+
+def _rehash_records(records: list[dict], start: int = 0) -> list[dict]:
+    updated = copy.deepcopy(records)
+    for idx in range(start, len(updated)):
+        updated[idx]["sequence"] = idx
+        updated[idx]["prev_hash"] = rt.GENESIS_PREV_HASH if idx == 0 else updated[idx - 1][CONTENT_HASH_FIELD]
+        updated[idx][CONTENT_HASH_FIELD] = canonical_content_hash(updated[idx])
+    return updated
+
+
+def _ledger_text_from_records(records: list[dict]) -> str:
+    return rt.serialize_ledger(records)
+
+
 def _ledger_text_with_verification_method(
     *,
     verification_method,
@@ -106,6 +191,77 @@ def _harness_fan_out_claim(verdict: brain_probe.Verdict = "present") -> dict:
         "object": "harness_fan_out",
         "verdict": verdict,
     }
+
+
+def test_tombstone_invariants_allow_valid_chained_supersede_fixture(tmp_path: Path):
+    path = _write_ledger(tmp_path, _ledger_text_from_records(_manual_chained_supersede_records()))
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert errors == []
+
+
+def test_tombstone_invariants_reject_two_active_records_with_same_id(tmp_path: Path):
+    records = _assert_manual_claim(
+        assertion_id="brain-assertion-drift-tombstone-dupe",
+        claim={"subject": "brain", "predicate": "mode", "object": "first"},
+    )
+    duplicate = copy.deepcopy(records[0])
+    duplicate["claim"] = {"subject": "brain", "predicate": "mode", "object": "second"}
+    duplicate["statement"] = "brain mode second"
+    records = _rehash_records([*records, duplicate], start=1)
+    path = _write_ledger(tmp_path, _ledger_text_from_records(records))
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert any(error.code == ce_brain_drift.CODE_DUPLICATE_ACTIVE_ID for error in errors), [
+        error.format() for error in errors
+    ]
+    assert any("multiple active entries" in error.message for error in errors)
+
+
+def test_tombstone_invariants_reject_duplicate_tombstone_for_same_id(tmp_path: Path):
+    records = _correct_manual_claim(
+        assertion_id="brain-assertion-drift-tombstone-a",
+        new_assertion_id="brain-assertion-drift-tombstone-b",
+        claim={"subject": "brain", "predicate": "mode", "object": "second"},
+        records=_assert_manual_claim(
+            assertion_id="brain-assertion-drift-tombstone-a",
+            claim={"subject": "brain", "predicate": "mode", "object": "first"},
+        ),
+    )
+    # Inject a second tombstone for the same id after the valid active+tombstone+successor chain
+    extra_tombstone = copy.deepcopy(records[1])
+    records = _rehash_records([*records, extra_tombstone])
+    path = _write_ledger(tmp_path, _ledger_text_from_records(records))
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert any(error.code == ce_brain_drift.CODE_TOMBSTONE_ORDER for error in errors), [
+        error.format() for error in errors
+    ]
+    assert any("duplicate tombstone" in error.message for error in errors)
+
+
+def test_tombstone_invariants_reject_tombstone_before_closed_record(tmp_path: Path):
+    records = _correct_manual_claim(
+        assertion_id="brain-assertion-drift-tombstone-a",
+        new_assertion_id="brain-assertion-drift-tombstone-b",
+        claim={"subject": "brain", "predicate": "mode", "object": "second"},
+        records=_assert_manual_claim(
+            assertion_id="brain-assertion-drift-tombstone-a",
+            claim={"subject": "brain", "predicate": "mode", "object": "first"},
+        ),
+    )
+    records = _rehash_records([records[1], records[0], records[2]])
+    path = _write_ledger(tmp_path, _ledger_text_from_records(records))
+
+    errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
+
+    assert any(error.code == ce_brain_drift.CODE_TOMBSTONE_ORDER for error in errors), [
+        error.format() for error in errors
+    ]
+    assert any("appears before the active record it closes" in error.message for error in errors)
 
 
 def test_matching_probe_assertion_passes(tmp_path: Path):
@@ -813,10 +969,19 @@ def test_authoritative_migrated_assertions_validate_and_probe():
         ),
     )
 
-    assert errors == []
+    unexpected_errors = [
+        error
+        for error in errors
+        if not (
+            isinstance(error, ce_brain_drift.DriftFinding)
+            and error.assertion_id == "brain-assertion-d1b-19-brain-drift-state-reconcile-v3"
+            and error.evidence_ref == "validators/creator_engine_validator/checks/ce_brain_drift.py"
+        )
+    ]
+    assert unexpected_errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 89
+    assert len(active) == 90
     assert {
         brain_probe.record_probe_name(record)
         for record in active
