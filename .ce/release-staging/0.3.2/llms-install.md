@@ -14,7 +14,7 @@ signature:
   algo: ssh-ed25519
   namespace: ce-spec-v1
   value: <RESIGN-REQUIRED-ce-root-v1>
-  content_sha256: 5c46be4887793ce768e824942efa5d5933a06cf6e69ce4cc081828234bf2d2b9
+  content_sha256: ddfbc963e95e350deccf0e3f4e9dbd3f1c3e1f3451c97f91fc251ab4acd1c738
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -23,7 +23,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.3.2
   sha256s_url: https://creator-engine.dev/downloads/0.3.2/SHA256SUMS
-  sha256s_sha256: 3c17ea8ca8e52683a9721f0c40f9eab827c225160e4001f360f402bc167d0fdc
+  sha256s_sha256: 8a08cd8593a31e51e283f27092ae2c4cef6f55bb214458dcf94e7db4ecb5c2b2
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -36,7 +36,7 @@ artifact_manifest:
       platforms: all
     - filename: creator_engine_validator-0.3.2-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.3.2/creator_engine_validator-0.3.2-py3-none-any.whl
-      sha256: cb1caa8560469f7096ddae277724d2ebc3c0a07ecb268e404bb7c977350d0243
+      sha256: 9597f2b6a7d2cb0b8233c809485c18f88eb498d49f024771a3e4e5a240f5777c
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.3.2/jsonschema-4.26.0-py3-none-any.whl
@@ -181,7 +181,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
 
 - **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`.
   Transport integrity for the script body is **TLS** plus the published
-  `install.sh` hash in `https://creator-engine.dev/downloads/0.3.1/SHA256SUMS`.
+  `install.sh` hash in `https://creator-engine.dev/downloads/0.3.2/SHA256SUMS`.
   The script's first authority step is still this signed spec: it fetches
   `llms-install.md`, fetches the trust root, binds that root to an out-of-band
   anchor for the signature key, reconstructs the canonical bytes, verifies the
@@ -189,7 +189,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   refusal. Only after that does it fetch the signed-manifest wheelhouse,
   `SHA256SUMS`, and answers schema, hash-verify every artifact, acquire CPython
   3.14 through the pinned uv artifact if needed, create/reuse a user-local venv,
-  install `creator-engine-validator==0.3.1` offline, and run authenticated
+  install `creator-engine-validator==0.3.2` offline, and run authenticated
   inventory:
 
   ```text

@@ -1,11 +1,11 @@
 kind: ce-release-stage-manifest
 schema_version: "1"
 package_version: 0.3.2
-build_git_sha: 43b165c466dcd1fd7590dd8c258d90654770a2df
+build_git_sha: 0a8b938ba9cf0df2a577c7677144b0da106f3df0
 app_wheel: creator_engine_validator-0.3.2-py3-none-any.whl
-app_wheel_sha256: cb1caa8560469f7096ddae277724d2ebc3c0a07ecb268e404bb7c977350d0243
-sha256s_sha256: 3c17ea8ca8e52683a9721f0c40f9eab827c225160e4001f360f402bc167d0fdc
-canonical_spec_sha256: 5c46be4887793ce768e824942efa5d5933a06cf6e69ce4cc081828234bf2d2b9
+app_wheel_sha256: 9597f2b6a7d2cb0b8233c809485c18f88eb498d49f024771a3e4e5a240f5777c
+sha256s_sha256: 8a08cd8593a31e51e283f27092ae2c4cef6f55bb214458dcf94e7db4ecb5c2b2
+canonical_spec_sha256: ddfbc963e95e350deccf0e3f4e9dbd3f1c3e1f3451c97f91fc251ab4acd1c738
 signature_placeholder: <RESIGN-REQUIRED-ce-root-v1>
 signing_key_id: ce-root-v1
 signing_namespace: ce-spec-v1
@@ -15,14 +15,14 @@ artifacts:
     sha256: b02f7878a8cfc2ed995bfaae0b50428e08f400358dbbbd967685815b59283c82
     size: 546
   - path: downloads/0.3.2/SHA256SUMS
-    sha256: 3c17ea8ca8e52683a9721f0c40f9eab827c225160e4001f360f402bc167d0fdc
+    sha256: 8a08cd8593a31e51e283f27092ae2c4cef6f55bb214458dcf94e7db4ecb5c2b2
     size: 1503
   - path: downloads/0.3.2/attrs-26.1.0-py3-none-any.whl
     sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
     size: 67548
   - path: downloads/0.3.2/creator_engine_validator-0.3.2-py3-none-any.whl
-    sha256: cb1caa8560469f7096ddae277724d2ebc3c0a07ecb268e404bb7c977350d0243
-    size: 1663765
+    sha256: 9597f2b6a7d2cb0b8233c809485c18f88eb498d49f024771a3e4e5a240f5777c
+    size: 1663763
   - path: downloads/0.3.2/install.sh
     sha256: 9060c2130137ea22e2cfab6c4814c6ea731664f75d5ec97b2714d47207e1ca8b
     size: 43947
@@ -60,10 +60,10 @@ artifacts:
     sha256: c89abc4e5ca1b5526e7e7eb6fa30e97e43b9e5cf505d3ef0140f0bcb01601523
     size: 1402
   - path: llms-install.canonical
-    sha256: 5c46be4887793ce768e824942efa5d5933a06cf6e69ce4cc081828234bf2d2b9
+    sha256: ddfbc963e95e350deccf0e3f4e9dbd3f1c3e1f3451c97f91fc251ab4acd1c738
     size: 21019
   - path: llms-install.md
-    sha256: 096e8587d6993145032d84ca6d56085e3a07a9333275986926743a4668ca8434
+    sha256: f73b0586802ba6ba1b51b321c252b408820ff6a7a3693e4b7992ff4388c41b8c
     size: 21059
   - path: schemas/install-answers.schema.yaml
     sha256: be67d554691a0c84db16e12511dcdaf9c17bd78a4c659d93a188922b4b8dbb3c
