@@ -19,6 +19,7 @@ def test_ce_validate_pr_dispatches_to_preflight(monkeypatch):
         captured["test_command"] = args.test_command
         captured["pr_body_file"] = args.pr_body_file
         captured["pr_body"] = args.pr_body
+        captured["profile"] = args.profile
         return 17
 
     monkeypatch.setattr(ce_cli.pr_preflight, "run_cli", fake_run_cli)
@@ -34,6 +35,8 @@ def test_ce_validate_pr_dispatches_to_preflight(monkeypatch):
             "feature",
             "--head-ref",
             "dev4-night-lane0-pr-preflight",
+            "--profile",
+            "contained-seat",
             "--allow-dirty",
         ]
     )
@@ -48,6 +51,7 @@ def test_ce_validate_pr_dispatches_to_preflight(monkeypatch):
         "test_command": ce_cli.pr_preflight.DEFAULT_TEST_COMMAND,
         "pr_body_file": None,
         "pr_body": None,
+        "profile": "contained-seat",
     }
 
 
@@ -69,6 +73,28 @@ def test_ce_validate_pr_accepts_canonical_and_legacy_work_class_inputs(monkeypat
 def test_ce_validate_pr_still_rejects_bogus_work_class():
     with pytest.raises(SystemExit) as exc_info:
         ce_cli.main(["validate-pr", "--declared-work-class", "Z"])
+
+    assert exc_info.value.code == 2
+
+
+def test_ce_validate_pr_rejects_unknown_profile():
+    with pytest.raises(SystemExit) as exc_info:
+        ce_cli.main(["validate-pr", "--profile", "bogus"])
+
+    assert exc_info.value.code == 2
+
+
+def test_ce_validate_pr_profile_is_hidden_from_help(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        ce_cli.main(["validate-pr", "--help"])
+
+    assert exc_info.value.code == 0
+    assert "--profile" not in capsys.readouterr().out
+
+
+def test_ce_validate_pr_has_no_general_skip_check_flag():
+    with pytest.raises(SystemExit) as exc_info:
+        ce_cli.main(["validate-pr", "--skip-check", "path_manifest_carrier"])
 
     assert exc_info.value.code == 2
 
