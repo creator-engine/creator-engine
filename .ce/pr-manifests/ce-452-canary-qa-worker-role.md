@@ -4,15 +4,15 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** tiny
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_COUNT=4
-
-AUTHORIZED_PATHS_SHA256=20814eba1dd0a6ddb62622f1bc45e3fb56fe840f3266ee2cd5621860946aee00
+AUTHORIZED_PATHS_SHA256=5f6eecbda17c027a85780e42c9da19b7426ff3f218e76643e4423c05ad004cc2
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-452-canary-qa-worker-role.md
 .ce/pr-manifests/ce-452-canary-qa-worker-role.md
 .claude/agents/README.md
 .claude/agents/canary_qa.md
+validators/tests/unit/test_ce_brain_drift.py
 ```
