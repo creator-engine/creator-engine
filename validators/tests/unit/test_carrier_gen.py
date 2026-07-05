@@ -43,6 +43,34 @@ def test_compute_path_set_manifest_self_inclusion_is_deterministic(tmp_path: Pat
     assert first[1] == len(first[0])
 
 
+def test_compute_path_set_excludes_generated_build_artifacts(tmp_path: Path, recwarn):
+    def fake_git(argv, cwd):
+        return (
+            0,
+            "\n".join(
+                [
+                    "build/lib/generated.py",
+                    "creator_engine_validator.egg-info/PKG-INFO",
+                    "validators/build/lib/generated.py",
+                    "validators/x.egg-info/SOURCES.txt",
+                    "validators/tests/unit/test_carrier_gen.py",
+                ]
+            )
+            + "\n",
+            "",
+        )
+
+    paths, count, sha = compute_path_set(tmp_path, "ce-test", git_runner=fake_git)
+
+    assert paths == (f"{MANIFEST_DIR}/ce-test.md", "validators/tests/unit/test_carrier_gen.py")
+    assert count == 2
+    assert sha == _sha(paths)
+    warning = recwarn.pop(RuntimeWarning)
+    assert "excluded generated build artifact path(s) from carrier manifest" in str(warning.message)
+    assert "build/lib/generated.py" in str(warning.message)
+    assert "validators/x.egg-info/SOURCES.txt" in str(warning.message)
+
+
 def test_render_manifest_round_trips_through_verifier_parser():
     paths = ("b.py", f"{MANIFEST_DIR}/ce-test.md", "a.py")
     count = len(set(paths))
@@ -188,3 +216,48 @@ def test_write_carriers_writes_changelog_before_manifest_and_uses_diff_paths(tmp
     assert identity.consistent is True
     assert identity.paths == written.paths
     assert written.manifest_path.read_text(encoding="utf-8").count("- **Declared work class:** S") == 1
+
+
+def test_write_carriers_excludes_stale_artifacts_from_manifest(tmp_path: Path, recwarn):
+    spec = CarrierSpec(
+        head_ref="ce-test-artifacts",
+        issue="ce-ops#456",
+        title="Carrier artifact self-clean",
+        kind="fixed",
+        scope="validator tooling",
+        body="- Exclude stale build artifacts from generated path manifests.",
+        date="2026-07-05",
+        base="origin/main",
+        declared_work_class="story",
+    )
+
+    def fake_git(argv, cwd):
+        return (
+            0,
+            "\n".join(
+                [
+                    "validators/build/lib/creator_engine_validator/carrier_gen.py",
+                    "validators/creator_engine_validator.egg-info/PKG-INFO",
+                    "validators/creator_engine_validator/carrier_gen.py",
+                    "validators/tests/unit/test_carrier_gen.py",
+                ]
+            )
+            + "\n",
+            "",
+        )
+
+    written = write_carriers(tmp_path, spec, git_runner=fake_git)
+
+    assert "validators/build/lib/creator_engine_validator/carrier_gen.py" not in written.paths
+    assert "validators/creator_engine_validator.egg-info/PKG-INFO" not in written.paths
+    assert written.paths == (
+        ".ce/changelog/ce-test-artifacts.md",
+        f"{MANIFEST_DIR}/ce-test-artifacts.md",
+        "validators/creator_engine_validator/carrier_gen.py",
+        "validators/tests/unit/test_carrier_gen.py",
+    )
+    warning = recwarn.pop(RuntimeWarning)
+    assert "validators/build/lib/creator_engine_validator/carrier_gen.py" in str(warning.message)
+    identity = parse_carrier(written.manifest_path.read_text(encoding="utf-8"))
+    assert identity is not None
+    assert identity.paths == written.paths

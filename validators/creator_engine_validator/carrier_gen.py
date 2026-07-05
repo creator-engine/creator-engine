@@ -8,6 +8,7 @@ the same contract the gate enforces.
 from __future__ import annotations
 
 import subprocess
+import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,8 @@ from .checks.path_manifest_fidelity import (
 )
 
 GitRunner = Callable[[Sequence[str], Path], tuple[int, str, str]]
+
+GENERATED_ARTIFACT_DIR_NAMES: frozenset[str] = frozenset({"build"})
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,30 @@ def _normalise_paths(paths: Sequence[str]) -> tuple[tuple[str, ...], int, str]:
     return tuple(sorted({p.strip() for p in paths if p.strip()})), count, sha256
 
 
+def _is_generated_artifact_path(path: str) -> bool:
+    return any(part in GENERATED_ARTIFACT_DIR_NAMES or part.endswith(".egg-info") for part in path.split("/"))
+
+
+def _drop_generated_artifact_paths(paths: Sequence[str]) -> tuple[str, ...]:
+    kept: list[str] = []
+    dropped: list[str] = []
+    for raw_path in paths:
+        path = raw_path.strip()
+        if not path:
+            continue
+        if _is_generated_artifact_path(path):
+            dropped.append(path)
+            continue
+        kept.append(path)
+    if dropped:
+        warnings.warn(
+            "excluded generated build artifact path(s) from carrier manifest: " + ", ".join(sorted(set(dropped))),
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return tuple(kept)
+
+
 def compute_path_set(
     repo_root: str | Path,
     slug: str,
@@ -94,7 +121,7 @@ def compute_path_set(
         raise RuntimeError(f"git diff --name-only --find-renames {base}..HEAD failed: {detail}")
 
     manifest_path = f"{MANIFEST_DIR}/{slug}.md"
-    raw_paths = list(stdout.splitlines()) + [manifest_path]
+    raw_paths = [*_drop_generated_artifact_paths(stdout.splitlines()), manifest_path]
     return _normalise_paths(raw_paths)
 
 
