@@ -8,8 +8,10 @@ before the target seat starts.
 
 Every dispatch brief must carry this line: run the FULL local validator
 preflight (`ce validate-pr`, CI-parity) before every self-push or
-commit-for-harvest; contained seats whose carrier is generated harvest-side run
-`ce validate-pr --profile contained-seat`, which omits only the carrier-required
-gate. Do not discover gates via CI. Fast iteration once ce-ops#11 (test-tier
-split) lands on main: `pytest -m "not slow"` — iteration only, the validator
-still gates the push.
+commit-for-harvest. Contained seats whose carrier is generated harvest-side run
+`ce validate-pr --profile contained-seat`; this is the full suite minus the
+harvest-side carrier gate and prints the contained-seat carrier notice.
+Non-contained seats and harvest/controller runs remain full `ce validate-pr`.
+Do not discover gates via CI. Fast iteration once ce-ops#11 (test-tier split)
+lands on main: `pytest -m "not slow"` — iteration only, the validator still
+gates the push.
