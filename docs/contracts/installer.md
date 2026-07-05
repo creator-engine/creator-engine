@@ -169,7 +169,10 @@ App-JWT — `gh` cannot App-JWT auth; the protection PUT shape lives in
   greenfield write-capability is enforced **fail-closed at the write legs**
   (each refuses on a 403) rather than at the probe. Unprobed / unknown-and-
   unverifiable = fail-closed. Never stored: runtime forge access is the App's
-  JIT scoped token, never this one.
+  JIT scoped token, never this one. For brownfield live apply, branch-protection
+  reads require `administration:read`, but that permission is requested on the
+  GitHub App installation token minted by the live driver; it is not a bootstrap
+  PAT scope.
 - **App plan** (`plan_github_app`): `shared` (the CE-published App — the
   solo-pilot default) vs `own` (`app_id` / `client_id` / PEM **SecretRef,
   tmpfs custody**); **click-or-detect** — the click is the contract's
