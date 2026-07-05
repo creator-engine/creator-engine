@@ -96,6 +96,35 @@ those come later, after you supply a few answers and explicitly approve them
 > install spec and let it verify and run the signed steps. Both paths end in the
 > same place; the one-liner is simply the quickest.
 
+### If you arrived through an install handoff
+
+Your handoff may give you either of two equivalent install paths:
+
+- **Signed one-liner install:** run the published `curl ... | bash` command
+  above from the repo host after you have checked the shell and repository
+  prerequisites.
+- **Agent playbook install:** ask your coding agent to follow
+  [`llms-install.md`](../llms-install.md), the signed agent-readable install
+  playbook that verifies the install material before running it.
+
+Both paths produce the same Creator Engine installation. The difference is only
+who drives the steps: you drive the one-liner directly, or your agent follows
+the playbook under the same verification ceremony.
+
+Once the repo is onboarded, CE governs work there by keeping changes on pull
+requests, running gates before privileged actions, and launching coding agents
+inside the contained session path selected for that repo. Your first governed
+session should use the
+[`Zero to Governed Seat Quickstart`](./zero-to-governed-seat-quickstart.md) for
+the shortest command path, then the [Pilot Runbook](./pilot-runbook.md) when you
+are ready to walk a real change through Frame -> Shape -> Build -> Review ->
+Ship.
+
+If something does not match the handoff, report it in the issue tracker or
+support channel named with your install materials. Include the command you ran,
+the full refusal or error text, your platform, and the pull request or session
+link if one exists.
+
 For the full first-host walkthrough, including how to prepare your answers
 upfront, follow the
 [`Zero to Governed Seat Quickstart`](./zero-to-governed-seat-quickstart.md).
