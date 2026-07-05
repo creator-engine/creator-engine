@@ -1667,6 +1667,13 @@ def _brownfield_answers_for(repo: str) -> str:
     )
 
 
+def _assert_brownfield_refusal_copy_is_tenant_lens(text: str) -> None:
+    assert "E3" not in text
+    assert "onboard_apply" not in text
+    assert "e2_brownfield_seam_unavailable" not in text
+    assert "adoption write escalation" not in text
+
+
 def test_onboard_inventory_emits_the_awareness_artifact(tmp_path, capsys):
     code = v3_cli.main(["install", "--spec", str(_spec(tmp_path)), "--inventory", "--json"])
     assert code == 0
@@ -2209,8 +2216,74 @@ def test_onboard_apply_existing_brownfield_refuses_without_e2_extension(tmp_path
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["code"] == "e2_brownfield_seam_unavailable"
+    assert payload["detail"] == (
+        "Brownfield adoption needs explicit write authorization "
+        "(CE_FORGE_ADOPTION_WRITE=1); without it, CE only emits the handoff plan."
+    )
+    _assert_brownfield_refusal_copy_is_tenant_lens(payload["detail"])
     assert payload["brownfield_adoption"]["apply_steps"]
     assert payload["brownfield_blockers"] == []
+
+
+def test_onboard_apply_existing_brownfield_human_refusal_uses_tenant_lens_copy(
+    tmp_path, capsys, monkeypatch
+):
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("brownfield apply must refuse before the greenfield E2 executor runs")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "install",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--apply",
+    ])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "Brownfield adoption is ready, but this command was started without write authorization." in out
+    assert "CE_FORGE_LIVE_FORGE=1 and CE_FORGE_ADOPTION_WRITE=1" in out
+    _assert_brownfield_refusal_copy_is_tenant_lens(out)
+
+
+def test_onboard_apply_existing_brownfield_credential_refusal_is_tenant_lens(
+    tmp_path, capsys, monkeypatch
+):
+    project = _init_brownfield_project(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool in ("git", "python", "uv", "runsc", "proxy", "claude"))
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setenv("CE_FORGE_LIVE_FORGE", "1")
+    monkeypatch.setenv("CE_FORGE_ADOPTION_WRITE", "1")
+
+    def should_not_apply(*_args, **_kwargs):
+        raise AssertionError("brownfield apply must refuse before the greenfield E2 executor runs")
+
+    monkeypatch.setattr(onboard_apply, "apply_onboard", should_not_apply)
+    answers = _answers_file(tmp_path, _brownfield_answers_for("acme/app"))
+    code = v3_cli.main([
+        "install",
+        "--spec", str(_signed_spec(tmp_path)),
+        "--answers", str(answers),
+        "--answers-schema", str(_REPO_ROOT / v3_installer.ANSWERS_SCHEMA_PATH),
+        "--apply",
+        "--json",
+    ])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == "e2_brownfield_seam_unavailable"
+    assert payload["detail"] == (
+        "Brownfield adoption needs a GitHub App credential before CE can open "
+        "the governance PR; configure a local PEM for kind: own, or a broker "
+        "for kind: shared."
+    )
+    _assert_brownfield_refusal_copy_is_tenant_lens(payload["detail"])
 
 
 def test_onboard_apply_authorized_brownfield_routes_to_adoption(tmp_path, capsys, monkeypatch):

@@ -3418,9 +3418,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                     args,
                     1,
                     [
-                        f"{_BRAND} · onboard apply REFUSED "
-                        f"({onboard_apply.PROTECTION_FLOOR_UNENFORCEABLE_CODE}): "
-                        f"{refusal['detail']}"
+                        f"{_BRAND} · onboard apply REFUSED: {refusal['detail']}"
                     ],
                     refusal,
                 )
@@ -3432,7 +3430,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 return _emit(
                     args,
                     1,
-                    [f"{_BRAND} · onboard apply REFUSED ({blocker['code']}): {blocker['detail']}"],
+                    [f"{_BRAND} · onboard apply REFUSED: {blocker['detail']}"],
                     {
                         "error": "refused",
                         "code": blocker["code"],
@@ -3462,26 +3460,27 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 )
                 if dual_escalation_requested:
                     refusal_message = (
-                        f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
-                        "E3 brownfield adoption is planned, but this onboard_apply run cannot "
-                        "resolve the App credential for the adoption write escalation. Configure "
-                        "the App credential per the brownfield adoption contract: local PEM for "
-                        "kind: own or broker for kind: shared"
+                        f"{_BRAND} · onboard apply REFUSED: "
+                        "Brownfield adoption is ready, but CE could not load the GitHub App "
+                        "credential needed to open the governance PR. Configure a local PEM "
+                        "for kind: own, or a broker for kind: shared."
                     )
                     refusal_detail = (
-                        "E3 brownfield apply requires App credential resolution for the adoption "
-                        "write escalation; configure the App credential per the brownfield "
-                        "adoption contract: local PEM for kind: own or broker for kind: shared"
+                        "Brownfield adoption needs a GitHub App credential before CE can open "
+                        "the governance PR; configure a local PEM for kind: own, or a broker "
+                        "for kind: shared."
                     )
                 else:
                     refusal_message = (
-                        f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
-                        "E3 brownfield adoption is planned, but this onboard_apply run is not authorized "
-                        "for the adoption write escalation (set CE_FORGE_LIVE_FORGE + CE_FORGE_ADOPTION_WRITE)"
+                        f"{_BRAND} · onboard apply REFUSED: "
+                        "Brownfield adoption is ready, but this command was started without "
+                        "write authorization. Re-run with CE_FORGE_LIVE_FORGE=1 and "
+                        "CE_FORGE_ADOPTION_WRITE=1, or use the generated handoff plan."
                     )
                     refusal_detail = (
-                        "E3 brownfield apply requires the adoption write escalation "
-                        "(CE_FORGE_ADOPTION_WRITE); this run only emits the handoff plan"
+                        "Brownfield adoption needs explicit write authorization "
+                        "(CE_FORGE_ADOPTION_WRITE=1); without it, CE only emits the "
+                        "handoff plan."
                     )
                 return _emit(
                     args,
@@ -3540,7 +3539,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             return _emit(
                 args,
                 1,
-                [f"{_BRAND} · onboard apply REFUSED ({exc.code}): {exc.detail}"],
+                [f"{_BRAND} · onboard apply REFUSED: {exc.detail}"],
                 refused_payload,
             )
         except onboard_apply.ApplyFailed as exc:
