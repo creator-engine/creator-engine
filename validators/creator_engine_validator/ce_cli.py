@@ -2034,9 +2034,13 @@ def _build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument(
             "--backend",
-            choices=ce_runtime_policy.CLI_BACKEND_CHOICES,
+            choices=(*ce_runtime_policy.CLI_BACKEND_CHOICES, launch_runtime.HOST_BACKEND_OPT_OUT),
             default=None,
-            help="runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy)",
+            help=(
+                "runtime backend selector carried by --runtime-policy "
+                "(gvisor aliases to gvisor-proxy); host explicitly opts out of "
+                "contained launch"
+            ),
         )
         p.add_argument(
             "--claim-ticket",

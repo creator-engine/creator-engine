@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import v3_installer
+from .checks import ce_runtime_policy
 from .forge.github_repo_config import DEFAULT_MAIN_PROTECTION, BranchProtectionPolicy
 from .forge.protection_diagnostics import (
     PROTECTION_FLOOR_REMEDIATION,
@@ -162,6 +163,92 @@ KNOWN_SHARED_OR_FOREIGN_APP_IDS: Mapping[str, str] = {
     "4025879": "known CE dev-2 App",
     "4085526": "known CE dev-4 App",
 }
+RUNTIME_POLICY_BASENAME = "runtime-policy.yaml"
+CANONICAL_SEAT_IMAGE_NAME = "ghcr.io/creator-engine/creator-engine/ce-seat"
+CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA = "sha256:" + ("0" * 64)
+DEFAULT_CONTROLLER_POLICY_ID = "default-controller-docker"
+_RUNTIME_POLICY_HASH_PLACEHOLDER = "0" * 64
+_SURFACES_MANIFEST = Path(__file__).resolve().parents[2] / "surfaces" / "manifest.yaml"
+_AGENT_CONFIG_DIRS: tuple[tuple[str, ...], ...] = (
+    (".claude",),
+    (".config", "claude"),
+    (".codex",),
+    (".config", "codex"),
+)
+
+
+def _runtime_policy_sha(record: Mapping[str, Any]) -> str:
+    canonical = dict(record)
+    canonical["policy_sha"] = _RUNTIME_POLICY_HASH_PLACEHOLDER
+    payload = yaml.safe_dump(canonical, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _canonical_seat_image_ref() -> dict[str, str]:
+    image_ref = {
+        "name": CANONICAL_SEAT_IMAGE_NAME,
+        "sha": CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA,
+    }
+    try:
+        manifest = yaml.safe_load(_SURFACES_MANIFEST.read_text(encoding="utf-8"))
+    except OSError:
+        return image_ref
+    surfaces = manifest.get("surfaces") if isinstance(manifest, Mapping) else None
+    if not isinstance(surfaces, list):
+        return image_ref
+    seat = next(
+        (
+            surface
+            for surface in surfaces
+            if isinstance(surface, Mapping) and surface.get("name") == "CE seat image"
+        ),
+        None,
+    )
+    if not isinstance(seat, Mapping):
+        return image_ref
+    source = seat.get("source")
+    digest = seat.get("commit_or_digest")
+    if isinstance(source, str) and source.strip():
+        image_ref["name"] = source.strip()
+    if (
+        isinstance(digest, str)
+        and digest.startswith("sha256:")
+        and len(digest) == len(CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA)
+    ):
+        image_ref["sha"] = digest
+    return image_ref
+
+
+def _default_controller_runtime_policy(*, workspace_root: Path) -> dict[str, Any]:
+    workspace = str(workspace_root.resolve())
+    home = Path.home()
+    mount_manifest: list[dict[str, Any]] = [
+        {
+            "path": workspace,
+            "mode": "rw",
+            "write_justification": "tenant workspace for the controller seat",
+        }
+    ]
+    for parts in _AGENT_CONFIG_DIRS:
+        mount_manifest.append({"path": str(home.joinpath(*parts)), "mode": "ro"})
+
+    record: dict[str, Any] = {
+        "kind": ce_runtime_policy.KIND_VALUE,
+        "record_type": "runtime_policy",
+        "schema_version": "1",
+        "policy_id": DEFAULT_CONTROLLER_POLICY_ID,
+        "policy_sha": _RUNTIME_POLICY_HASH_PLACEHOLDER,
+        "role": "controller",
+        "isolation_backend": "docker",
+        "image_ref": _canonical_seat_image_ref(),
+        "mount_manifest": mount_manifest,
+        "egress_allowlist": [],
+        "secret_allowlist": [],
+        "grant_extensible": False,
+        "grant_authority": "controller",
+    }
+    record["policy_sha"] = _runtime_policy_sha(record)
+    return record
 
 
 class ApplyRefused(Exception):
@@ -318,17 +405,27 @@ class ApplyDriver:
         # ``os-native``, no privileged runtime). The posture records the selection.
         runtime_dir = state_root / ONBOARD_SUBDIR / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
+        runtime_policy_path = runtime_dir / RUNTIME_POLICY_BASENAME
+        runtime_policy = _default_controller_runtime_policy(workspace_root=workspace_root)
         config = {
             "isolation_backend": backend,
             "egress": "deny-by-default",
             "provider": provider,
             "workspace_root": str(workspace_root),
+            "runtime_policy": str(runtime_policy_path),
         }
+        runtime_policy_path.write_text(
+            yaml.safe_dump(runtime_policy, sort_keys=True),
+            encoding="utf-8",
+        )
         (runtime_dir / "posture.json").write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        return {"ok": True, "created": [str(runtime_dir / "posture.json")]}
+        return {
+            "ok": True,
+            "created": [str(runtime_policy_path), str(runtime_dir / "posture.json")],
+        }
 
     def verify_runtime(
         self,

@@ -310,6 +310,7 @@ def test_raw_launch_probe_fails_closed_on_uncontained_host_process(tmp_path, mon
 
     result = ce_cli.launch_runtime.launch(
         harness="hermes",
+        backend="host",
         session="raw-proof",
         window="seat",
         repo_root=tmp_path,

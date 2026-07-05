@@ -170,6 +170,45 @@ and applies the safety predicates above. Records carrying any other
 `scan-runtime-policy` CLI subcommand and runs as part of the full
 `check` sweep.
 
+## Onboarded controller launch default
+
+`ce onboard --apply` materializes the controller launch default at the
+well-known tenant-local path:
+
+`<repo>/.ce/state/onboard/runtime/runtime-policy.yaml`
+
+The file is a full `kind: runtime-policy-record`, not a posture note. The
+onboarded default declares `isolation_backend: docker`, `role:
+controller`, the canonical CE seat image by digest-pinned `image_ref`, a
+default-deny `egress_allowlist`, no injected secrets, and a sealed
+`mount_manifest` containing only:
+
+- the tenant workspace as `rw` with a write justification;
+- explicitly enumerated Claude configuration/auth directories; and
+- explicitly enumerated Codex configuration/auth directories.
+
+The legacy posture marker
+`<repo>/.ce/state/onboard/runtime/posture.json` remains for back-compat,
+but `ce launch` does not treat it as an executable runtime policy.
+
+For a live `ce launch` with no `--runtime-policy`, the launcher resolves
+the well-known runtime-policy record above before opening a tmux pane. If
+the record exists, it is loaded, validated by `ce_runtime_policy`, stamped
+into the launch plan, and sent through the existing runtime backend bridge.
+For the onboarded default this composes the plain-Docker backend. If the
+record is missing, the launcher fails closed with remediation to re-run
+onboarding and with the explicit host opt-out below.
+
+`ce launch --backend host` is the explicit raw-host opt-out. It preserves
+the historical host tmux behavior for operators that intentionally choose
+it, and it cannot be combined with `--runtime-policy`. A backend selector
+other than `host` still requires a full runtime-policy record unless the
+well-known default is present.
+
+`ce launch --dry-run` remains a pure planner and does not require the
+well-known onboarded record unless an explicit `--runtime-policy` is
+provided.
+
 ## v3 G-4 — agent-action gate fields (additive, optional)
 
 G-4 adds two OPTIONAL plane-C fields the audit-overlay

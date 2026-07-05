@@ -218,6 +218,19 @@ def _write_runtime_policy(
     return path
 
 
+def _write_default_runtime_policy(tmp_path: Path) -> Path:
+    source = _write_runtime_policy(tmp_path, backend="docker")
+    record = yaml.safe_load(source.read_text(encoding="utf-8"))
+    record["policy_id"] = "default-controller-docker"
+    record["role"] = "controller"
+    record["egress_allowlist"] = []
+    record["secret_allowlist"] = []
+    path = tmp_path / ".ce" / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+    return path
+
+
 class FakeContainerRunner:
     def __init__(
         self,
@@ -412,6 +425,65 @@ def test_launch_backend_gvisor_spawns_visible_docker_runsc_path(tmp_path):
     assert adapter.spawned[0][2] == argv
 
 
+def test_launch_uses_default_runtime_policy_for_docker_backend(tmp_path):
+    proc_root = tmp_path / "proc"
+    _contained_proc(proc_root, "4242")
+    adapter = FakeAdapter(pane_pid=4242)
+    policy = _write_default_runtime_policy(tmp_path)
+
+    result = ce_cli.launch_runtime.launch(
+        harness="hermes",
+        repo_root=tmp_path,
+        tmux_adapter=adapter,
+        container_runner=FakeContainerRunner(runtime_probe_pid=4242),
+        containment_proc_root=proc_root,
+    )
+
+    assert result.spawned is True
+    assert result.plan.runtime_policy["policy_ref"] == str(policy)
+    assert result.plan.runtime_policy["requested_backend"] is None
+    assert result.plan.runtime_policy["resolved_backend"] == "docker"
+    assert result.runner_runtime["backend_key"] == "docker"
+    argv = result.runner_runtime["argv"]
+    assert argv[:3] == ["docker", "run", "--rm"]
+    assert "--runtime=runsc-gvproxy-ptrace" not in argv
+    assert adapter.spawned
+    assert adapter.spawned[0][2] == argv
+
+
+def test_launch_missing_default_runtime_policy_refuses_with_remediation(tmp_path):
+    adapter = FakeAdapter()
+
+    with pytest.raises(ce_cli.launch_runtime.RuntimePolicyRefused) as exc:
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    message = str(exc.value)
+    assert ".ce/state/onboard/runtime/runtime-policy.yaml" in message
+    assert "ce onboard --apply" in message
+    assert "ce launch --backend host" in message
+    assert adapter.spawned == []
+
+
+def test_launch_backend_host_opt_out_preserves_raw_tmux(tmp_path):
+    adapter = FakeAdapter()
+
+    result = ce_cli.launch_runtime.launch(
+        harness="hermes",
+        repo_root=tmp_path,
+        backend="host",
+        tmux_adapter=adapter,
+    )
+
+    assert result.spawned is True
+    assert result.plan.runtime_policy is None
+    assert result.runner_runtime is None
+    assert adapter.spawned
+
+
 def test_launch_backend_unavailable_refuses_without_raw_tmux(tmp_path):
     adapter = FakeAdapter()
     policy = _write_runtime_policy(tmp_path)
@@ -540,7 +612,7 @@ def test_launch_refuses_no_tmux_flag(use_fake_tmux, capsys):
 def test_launch_spawns_visible_seat(use_fake_tmux):
     adapter = FakeAdapter()
     use_fake_tmux(adapter)
-    ret = ce_cli.main(["launch", "--session", "ce-controller"])
+    ret = ce_cli.main(["launch", "--backend", "host", "--session", "ce-controller"])
     assert ret == 0
     assert adapter.spawned
 
@@ -559,6 +631,7 @@ def test_launch_claim_ticket_binding_is_persisted_in_seat_lifecycle(
 
     ret = ce_cli.main([
         "launch",
+        "--backend", "host",
         "--session", "ce95",
         "--repo-root", str(tmp_path),
         "--ledger-root", str(ledger),
@@ -665,7 +738,12 @@ def test_cli_launch_pins_governed_command(use_fake_tmux, monkeypatch):
     use_fake_tmux(adapter)
     monkeypatch.setattr(ce_cli.launch_runtime, "_confirm_pack", lambda r: True)
     ret = ce_cli.main(
-        ["launch", "--harness", "claude", "--mcp-config", ".ce/state/launch/s/mcp/ce-mcp.json"]
+        [
+            "launch",
+            "--backend", "host",
+            "--harness", "claude",
+            "--mcp-config", ".ce/state/launch/s/mcp/ce-mcp.json",
+        ]
     )
     assert ret == 0
     (_sess, _win, cmd) = adapter.spawned[-1]

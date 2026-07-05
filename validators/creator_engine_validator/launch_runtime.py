@@ -62,6 +62,10 @@ RECALL_ENDPOINT_MODEL_ID_ENV = "CE_BRAIN_RECALL_ENDPOINT_MODEL_ID"
 RECALL_ENDPOINT_DIM_ENV = "CE_BRAIN_RECALL_ENDPOINT_DIM"
 _RECALL_ENDPOINT_EMBEDDERS = {"vllm-openai", "openai-endpoint", "openai"}
 LAUNCH_RECALL_ENDPOINT_TIMEOUT_SECONDS = 5
+DEFAULT_RUNTIME_POLICY_RELATIVE = (
+    Path(_versions.V3_LOCAL_STATE_ROOT) / "onboard" / "runtime" / "runtime-policy.yaml"
+)
+HOST_BACKEND_OPT_OUT = "host"
 
 
 class LaunchError(Exception):
@@ -171,6 +175,19 @@ def _confirm_codex_managed_pack(repo_root: Path | str | None) -> bool:
 def _default_mcp_config_path(session: str) -> str:
     """CE-owned, repo-relative MCP config path for a Controller-seat launch."""
     return f"{_versions.V3_LOCAL_STATE_ROOT}/launch/{session}/mcp/ce-mcp.json"
+
+
+def _default_runtime_policy_path(repo_root: Path | str | None) -> Path:
+    return Path(repo_root or ".") / DEFAULT_RUNTIME_POLICY_RELATIVE
+
+
+def _missing_default_runtime_policy_message(path: Path) -> str:
+    return (
+        f"bare ce launch requires the onboarded runtime policy record at {str(path)!r}; "
+        "re-run `ce onboard --apply` for this tenant so it emits "
+        f"{DEFAULT_RUNTIME_POLICY_RELATIVE.as_posix()}, or explicitly opt out of "
+        "contained launch with `ce launch --backend host`"
+    )
 
 
 @dataclass(frozen=True)
@@ -710,6 +727,14 @@ def launch(
     # The CE-owned strict MCP config path for the claude harness, resolved in the
     # Ring-0 branch below and provisioned just before the tmux spawn (defect-a).
     resolved_mcp: str | None = None
+    host_backend_opt_out = backend == HOST_BACKEND_OPT_OUT
+    runtime_backend = None if host_backend_opt_out else backend
+    resolved_runtime_policy: Path | str | None = runtime_policy
+    if host_backend_opt_out and runtime_policy is not None:
+        raise RuntimePolicyRefused(
+            "--backend host is the explicit raw-host opt-out and cannot be combined "
+            "with --runtime-policy"
+        )
 
     # CC-G-D Ring 0: refuse prohibited Claude surfaces and pin the governed
     # command BEFORE any side effect (hidden/dry-run/tmux branches below).
@@ -810,6 +835,27 @@ def launch(
             command=hermes_launch_spec.build_governed_hermes_command(base_argv=requested),
         )
 
+    # No hidden fallback — a non-visible / detached continuation is refused.
+    if allow_hidden or not visible:
+        raise HiddenContinuationRefused(
+            "refusing hidden/detached Controller-seat continuation; there is no hidden fallback "
+            "(harness exit/crash/auth-loss must not continue headless)"
+        )
+
+    if (
+        resolved_runtime_policy is None
+        and not dry_run
+        and not resume
+        and not host_backend_opt_out
+    ):
+        default_runtime_policy = _default_runtime_policy_path(repo_root)
+        if default_runtime_policy.is_file():
+            resolved_runtime_policy = default_runtime_policy
+        else:
+            raise RuntimePolicyRefused(
+                _missing_default_runtime_policy_message(default_runtime_policy)
+            )
+
     # v3.5-F Ring-0-adjacent: read the resource policy fragment (pure,
     # fail-closed) BEFORE any side effect, through the existing policy-read
     # seam (load_yaml). The bounding wrap is applied to the OUTPUT of the
@@ -818,39 +864,39 @@ def launch(
     resource_policy: resource_bound_spec.ResourcePolicy | None = None
     policy_data: Any | None = None
     runtime_policy_record: dict[str, Any] | None = None
-    if runtime_policy is not None:
+    if resolved_runtime_policy is not None:
         try:
-            policy_data = load_yaml(Path(runtime_policy))
+            policy_data = load_yaml(Path(resolved_runtime_policy))
         except LoaderError as exc:
             raise ResourceBoundRefused(
-                f"runtime policy {str(runtime_policy)!r} is unreadable: {exc}"
+                f"runtime policy {str(resolved_runtime_policy)!r} is unreadable: {exc}"
             ) from exc
         if not isinstance(policy_data, dict):
             raise RuntimePolicyRefused(
-                f"runtime policy {str(runtime_policy)!r} must be a YAML mapping"
+                f"runtime policy {str(resolved_runtime_policy)!r} must be a YAML mapping"
             )
         is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
-        if backend is not None or is_runtime_policy_record:
+        if runtime_backend is not None or is_runtime_policy_record:
             if not is_runtime_policy_record:
                 raise RuntimePolicyRefused(
                     "--backend requires --runtime-policy to point at a full "
                     "runtime-policy-record"
                 )
             policy_errors = ce_runtime_policy.validate_runtime_policy(
-                policy_data, Path(runtime_policy)
+                policy_data, Path(resolved_runtime_policy)
             )
             if policy_errors:
                 detail = "; ".join(error.format() for error in policy_errors[:3])
                 raise RuntimePolicyRefused(
-                    f"runtime policy {str(runtime_policy)!r} did not validate clean: {detail}"
+                    f"runtime policy {str(resolved_runtime_policy)!r} did not validate clean: {detail}"
                 )
             try:
                 plan = replace(
                     plan,
                     runtime_policy=ce_runtime_policy.runtime_policy_launch_stamp(
                         policy_data,
-                        policy_ref=runtime_policy,
-                        requested_backend=backend,
+                        policy_ref=resolved_runtime_policy,
+                        requested_backend=runtime_backend,
                     ),
                 )
             except ce_runtime_policy.RuntimePolicyResolutionError as exc:
@@ -868,17 +914,10 @@ def launch(
         and resource_policy.governed
         and not resource_policy.opted_down
     )
-    if backend is not None and runtime_policy is None:
+    if runtime_backend is not None and resolved_runtime_policy is None:
         raise RuntimePolicyRefused(
             "--backend requires --runtime-policy so the launch carries the "
             "digest-pinned image, mount manifest, and egress allowlist"
-        )
-
-    # No hidden fallback — a non-visible / detached continuation is refused.
-    if allow_hidden or not visible:
-        raise HiddenContinuationRefused(
-            "refusing hidden/detached Controller-seat continuation; there is no hidden fallback "
-            "(harness exit/crash/auth-loss must not continue headless)"
         )
 
     # Dry-run is pure: deterministic plan, no tmux, no provider login, and no
@@ -920,7 +959,10 @@ def launch(
         return LaunchResult(plan=plan, spawned=False, attached=True)
 
     seat_dir, seat_id, seat_run_id = _resolve_seat_surface(
-        repo_root=repo_root, session=session, window=window, runtime_policy=runtime_policy
+        repo_root=repo_root,
+        session=session,
+        window=window,
+        runtime_policy=resolved_runtime_policy,
     )
     if _has_launched_event(seat_dir):
         raise SeatSurfaceReuseRefused(
@@ -1112,7 +1154,9 @@ def launch(
             events_ref=str(sentinel.events_path),
             sentinel_wrapper_ref=str(sentinel.wrapper_path),
             run_id=seat_run_id,
-            runtime_policy_ref=str(runtime_policy) if runtime_policy is not None else None,
+            runtime_policy_ref=(
+                str(resolved_runtime_policy) if resolved_runtime_policy is not None else None
+            ),
             resource_bound=plan.resource_bound,
             resource_confirm=resource_confirm,
         )

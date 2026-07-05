@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import onboard_apply, v3_installer
+from creator_engine_validator.checks import ce_runtime_policy
 
 
 def _schema() -> dict[str, Any]:
@@ -540,6 +541,38 @@ def test_absent_profile_defaults_to_os_native_posture(tmp_path):
         (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
     )
     assert posture_json["isolation_backend"] == "os-native"
+
+
+def test_runtime_posture_emits_valid_default_docker_runtime_policy(tmp_path):
+    driver = FakeDriver()
+    summary = _apply(tmp_path, driver)
+    assert summary["failed"] == 0
+
+    policy_path = tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
+    record = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    errors = ce_runtime_policy.validate_runtime_policy(record, policy_path)
+
+    assert errors == []
+    assert record["kind"] == ce_runtime_policy.KIND_VALUE
+    assert record["isolation_backend"] == "docker"
+    assert record["role"] == "controller"
+    assert record["image_ref"] == {
+        "name": onboard_apply.CANONICAL_SEAT_IMAGE_NAME,
+        "sha": onboard_apply.CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA,
+    }
+    mounts = record["mount_manifest"]
+    assert mounts[0]["path"] == str((tmp_path / "workspaces").resolve())
+    assert mounts[0]["mode"] == "rw"
+    mounted_paths = {entry["path"] for entry in mounts[1:]}
+    home = Path.home()
+    assert mounted_paths == {
+        str(home / ".claude"),
+        str(home / ".config" / "claude"),
+        str(home / ".codex"),
+        str(home / ".config" / "codex"),
+    }
+    assert record["egress_allowlist"] == []
+    assert record["secret_allowlist"] == []
 
 
 def test_cli_exposure_records_owned_rollback(tmp_path):

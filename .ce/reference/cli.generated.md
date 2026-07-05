@@ -655,7 +655,7 @@ Options:
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |
-| `--backend` | no | `docker, gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
+| `--backend` | no | `docker, gvisor, host, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy); host explicitly opts out of contained launch |
 | `--claim-ticket` | no |  | ce-ops#38: acquire + verify a work-claim lock on this ticket (owner/name#N, an issue URL, or N inside the slug) BEFORE any launch side effect; a foreign active claim refuses the launch |
 | `--repo-root` | no |  | repo root for lifecycle registration |
 | `--ledger-root` | no |  | path to .ce/state/active-work-ledger for lifecycle registration |
@@ -797,7 +797,7 @@ Options:
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |
-| `--backend` | no | `docker, gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
+| `--backend` | no | `docker, gvisor, host, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy); host explicitly opts out of contained launch |
 | `--claim-ticket` | no |  | ce-ops#38: acquire + verify a work-claim lock on this ticket (owner/name#N, an issue URL, or N inside the slug) BEFORE any launch side effect; a foreign active claim refuses the launch |
 | `--repo-root` | no |  | repo root for lifecycle registration |
 | `--ledger-root` | no |  | path to .ce/state/active-work-ledger for lifecycle registration |
