@@ -48,6 +48,29 @@ missing or empty config fails closed. Review pickup first uses
 reviewer seats' local credential files unless ambient `gh` auth is explicitly
 enabled.
 
+To source the review-pickup token through OpenBao, add the OpenBao client
+environment and the review-pickup SecretRef to the same env file:
+
+```sh
+BAO_ADDR=<openbao-url>
+BAO_TOKEN=<openbao-token>
+BAO_CACERT=<optional-ca-cert-path>
+CE_OPENBAO_ALLOWED_REFS=path=forge/ce-dev-2/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+CE_PICKUP_TOKEN_SECRET_BACKEND=openbao
+CE_PICKUP_TOKEN_SECRET_MOUNT=ce-kv
+CE_PICKUP_TOKEN_SECRET_PATH=forge/ce-dev-2/gh-token
+CE_PICKUP_TOKEN_SECRET_FIELD=token
+CE_PICKUP_TOKEN_SECRET_PURPOSE=review-pickup-token
+CE_PICKUP_TOKEN_SECRET_OWNER_REF=controller:reviewer
+CE_PICKUP_TOKEN_SECRET_REF_POLICY_SHA=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+CE_PICKUP_TOKEN_SECRET_TARGET_REF=file:/run/user/<uid>/creator-engine/review-pickup-token
+```
+
+The unit keeps the static `CE_PICKUP_TOKEN` path active by default. Its template
+includes a commented OpenBao-ready `ExecStart` replacement with the
+`--pickup-token-secret-*` flags wired to env-file values; switch to that command
+only after the OpenBao delivery path has been verified live.
+
 The belt daemon requires `CE_BELT_IDENTITY` because `ce pickup poll` resolves
 credentials from `CE_PICKUP_TOKEN` or `~/.ce-keys/<identity>.pat` by default.
 It runs a simple systemd-supervised loop around the one-shot poll command and
