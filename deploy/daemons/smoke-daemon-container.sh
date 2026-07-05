@@ -2,6 +2,14 @@
 set -euo pipefail
 
 SMOKE_TMPDIR=""
+SMOKE_SECRET_VALUE="daemon-container-smoke-signing-secret"
+
+# Tracks the in-flight pass's container/runner so the EXIT trap can stop them
+# on ANY exit path (including an early die() such as a wait_for_file
+# timeout), without ever touching a container this script did not start.
+CURRENT_ENGINE=""
+CURRENT_CONTAINER_NAME=""
+CURRENT_RUNNER_PID=""
 
 usage() {
   cat <<'USAGE'
@@ -78,6 +86,20 @@ assert_absent() {
   [[ ! -e "$path" ]] || die "tmpfs-backed secret path leaked onto host state: $path"
 }
 
+assert_secret_content_absent_from_state() {
+  # Recursively scan the ENTIRE host state root for the smoke's placeholder
+  # secret content, rather than checking only specific known tmpfs mount
+  # points. A content scan catches leakage via any persistence path (a future
+  # config change, a bind mount, a symlink) instead of just the mount points
+  # this script happens to know about today.
+  local state_root="$1"
+  local hit
+  # grep exits 1 on the expected/good "no match" outcome; under pipefail that
+  # would otherwise abort the script via set -e before the check below runs.
+  hit="$(grep -rlI -- "$SMOKE_SECRET_VALUE" "$state_root" 2>/dev/null | head -n1)" || true
+  [[ -z "$hit" ]] || die "smoke secret content leaked onto host state: $hit"
+}
+
 assert_docker_state_owned_by_image_uid() {
   local engine="$1"
   local state_root="$2"
@@ -93,8 +115,39 @@ assert_docker_state_owned_by_image_uid() {
 write_secret_file() {
   local path="$1"
   umask 077
-  printf 'daemon-container-smoke-signing-secret\n' > "$path"
+  printf '%s\n' "$SMOKE_SECRET_VALUE" > "$path"
   chmod 0600 "$path"
+}
+
+# Best-effort stop of the currently tracked pass's container/runner. Invoked
+# from the EXIT trap so a die() anywhere after the container starts (e.g. a
+# wait_for_file timeout) cannot leak a running container or an orphaned
+# backgrounded runner process. Only ever targets the container name this
+# script derived and started itself.
+stop_current_container() {
+  if [[ -n "$CURRENT_ENGINE" && -n "$CURRENT_CONTAINER_NAME" ]]; then
+    "$CURRENT_ENGINE" stop --time 5 "$CURRENT_CONTAINER_NAME" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$CURRENT_RUNNER_PID" ]]; then
+    # Bound the wait: a healthy engine stop lets the backgrounded runner exit
+    # promptly, but never block cleanup indefinitely on a runner that outlives
+    # the engine stop (e.g. an unreachable engine at trap time).
+    local deadline=$((SECONDS + 10))
+    while (( SECONDS < deadline )) && kill -0 "$CURRENT_RUNNER_PID" 2>/dev/null; do
+      sleep 0.2
+    done
+    pkill -KILL -P "$CURRENT_RUNNER_PID" 2>/dev/null || true
+    kill -KILL "$CURRENT_RUNNER_PID" 2>/dev/null || true
+    wait "$CURRENT_RUNNER_PID" 2>/dev/null || true
+  fi
+  CURRENT_ENGINE=""
+  CURRENT_CONTAINER_NAME=""
+  CURRENT_RUNNER_PID=""
+}
+
+cleanup() {
+  stop_current_container
+  [[ -z "$SMOKE_TMPDIR" ]] || rm -rf -- "$SMOKE_TMPDIR"
 }
 
 run_pass() {
@@ -124,6 +177,9 @@ run_pass() {
     "$root/deploy/daemons/run-daemon-container.sh" conveyor-daemon --one-shot
   ) >"$log_path" 2>&1 &
   local runner_pid=$!
+  CURRENT_ENGINE="$engine"
+  CURRENT_CONTAINER_NAME="$container_name"
+  CURRENT_RUNNER_PID="$runner_pid"
 
   wait_for_file "$lease_path" "pass $pass conveyor lease"
   printf 'pass %s acquired lease: %s\n' "$pass" "$lease_path"
@@ -134,11 +190,13 @@ run_pass() {
     sed -n '1,220p' "$log_path" >&2 || true
     die "daemon container smoke pass $pass failed"
   fi
+  CURRENT_ENGINE=""
+  CURRENT_CONTAINER_NAME=""
+  CURRENT_RUNNER_PID=""
 
   wait_for_absent "$lease_path" "pass $pass conveyor lease"
   assert_docker_state_owned_by_image_uid "$engine" "$state_root" "$image_uid"
-  assert_absent "$state_root/queue-daemon-secret/approval-wall-secret"
-  assert_absent "$state_root/run/creator-engine/conveyor-daemon-secret/signing-secret"
+  assert_secret_content_absent_from_state "$state_root"
   assert_absent "$state_root/conveyor-daemon-secret/signing-secret"
   printf 'pass %s released lease and left host secret paths absent\n' "$pass"
 }
@@ -155,6 +213,11 @@ main() {
     exit 2
   }
 
+  # Armed before anything that could start a container so that ANY exit path
+  # (including an early die()) stops the smoke's own container/runner and
+  # cleans up scratch state; see stop_current_container/cleanup.
+  trap cleanup EXIT
+
   local state_root="$1"
   [[ -e "$state_root" && ! -d "$state_root" ]] && die "state root exists but is not a directory: $state_root"
 
@@ -168,7 +231,6 @@ main() {
   is_unsigned_int "$image_uid" || die "CE_DAEMON_IMAGE_UID must be numeric: $image_uid"
 
   SMOKE_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/ce-daemon-smoke.XXXXXX")"
-  trap 'rm -rf -- "$SMOKE_TMPDIR"' EXIT
   local secret_file="$SMOKE_TMPDIR/signing-secret"
   write_secret_file "$secret_file"
 

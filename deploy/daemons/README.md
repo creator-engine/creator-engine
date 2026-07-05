@@ -59,3 +59,9 @@ takeover path with `CE_DAEMON_LEASE_TAKEOVER_REASON`.
 `Dockerfile` is only a thin label layer over the canonical runtime image. Release
 automation should set `CE_CANONICAL_RUNTIME_IMAGE` or `CE_DAEMON_IMAGE` to the
 digest-pinned image reference governed by the release manifest.
+
+`smoke-daemon-container.sh <scratch-state-root>` is a host-operator smoke that
+runs the conveyor-daemon container twice against one scratch state root and
+verifies lease release/reacquisition, Docker uid ownership, and that no
+signing-secret content persists onto host state after stop; run it before
+cutting over a host from the uncontained daemon to the containerized adapter.

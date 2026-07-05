@@ -11,8 +11,10 @@ work_class: story
 
 - Added a host-operator smoke script that runs the canonical daemon container
   adapter twice against one scratch state root and asserts lease release,
-  reacquisition, Docker uid ownership, and absence of tmpfs-backed secret paths
-  on host state after stop.
+  reacquisition, Docker uid ownership, and (via a full recursive content scan
+  of the scratch state root, not just known mount points) absence of the
+  smoke's signing-secret content on host state after stop, with best-effort
+  container/runner cleanup on any exit path.
 - Documented the daemon image uid ownership contract and first-boot Docker
   remediation in the daemon container README.
 - Aligned canonical image Dockerfile runtime dependency check order and added
