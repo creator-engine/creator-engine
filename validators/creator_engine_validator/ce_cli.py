@@ -106,6 +106,7 @@ from . import (
     brain_recall,
     brain_recall_surface,
     bootstrap_runtime,
+    check_profiles,
     ce_ops_triage_queue,
     ce_event_runtime,
     ce_onboard,
@@ -1365,6 +1366,12 @@ def _build_parser() -> argparse.ArgumentParser:
     check.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
     check.add_argument("--tenant", default=None, help="restrict cross-artifact checks to one tenant")
     check.add_argument("--list-checks", action="store_true", help="list enabled checks and their FRs")
+    check.add_argument(
+        "--profile",
+        choices=check_profiles.CHECK_PROFILES,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
 
     # ce doctor — governed-environment guard preflight (DP-3 = B, RV1-061).
     doctor = groups.add_parser(
@@ -3882,7 +3889,10 @@ def _check(args) -> int:
     if getattr(args, "list_checks", False):
         return validator_cli.main([*prefix, "--list-checks"])
     paths = list(args.paths) if args.paths else ["."]
-    return validator_cli.main([*prefix, "check", *paths])
+    profile: list[str] = []
+    if getattr(args, "profile", None):
+        profile.extend(["--profile", args.profile])
+    return validator_cli.main([*prefix, "check", *profile, *paths])
 
 
 def _init(args) -> int:
