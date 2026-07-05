@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shlex
 import socket
 from pathlib import Path
@@ -642,6 +643,40 @@ def test_launch_archives_multiple_dead_launched_events_with_exit_and_proceeds(tm
     archive = Path(result.stale_surface_archive["archive_path"])
     assert archive.name.startswith("clean-multi--controller.archived-")
     assert adapter.spawned, "new seat launch should proceed after archive"
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="chmod 0o000 has no effect when running as root")
+def test_launch_refuses_unreadable_events_file(tmp_path):
+    # Round-2 regression pin: the existing events.jsonl is present (is_file()
+    # True) but unreadable. Before this fix, the OSError handler in
+    # _strict_events_file_scan returned (False, []) — "no history" — silently
+    # skipping the reuse gate and potentially spawning a second live seat.
+    # After the fix, an OSError on read_text of an existing file is treated
+    # as ambiguous and refuses with the standard SeatSurfaceReuseRefused.
+    adapter = FakeAdapter()
+    seat_dir = _make_seat_dir(tmp_path, "unreadable--controller")
+    events_path = seat_dir / "events.jsonl"
+    events_path.write_text(
+        json.dumps({"event": "launched", "seat_id": "unreadable--controller", "pid": 999999})
+        + "\n",
+        encoding="utf-8",
+    )
+    events_path.chmod(0o000)
+    try:
+        with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+            launch_runtime.launch(
+                harness="claude",
+                backend="host",
+                session="unreadable",
+                window="controller",
+                repo_root=tmp_path,
+                tmux_adapter=adapter,
+            )
+        assert "liveness is ambiguous" in str(exc.value)
+        assert "ce reap once" in str(exc.value)
+        assert adapter.spawned == []
+    finally:
+        events_path.chmod(0o644)
 
 
 def test_launch_pins_cwd_and_env_at_tmux_boundary(tmp_path):

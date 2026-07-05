@@ -594,8 +594,12 @@ def _strict_events_file_scan(seat_dir: Path | str) -> tuple[bool, list[dict[str,
     (which is tolerant read-side observability code that must keep skipping
     malformed lines for other consumers). The launch gate must fail closed:
 
-    * missing file / empty (whitespace-only) file -> ``(False, [])`` — proceed
-      as today, no launched-event history to reconcile.
+    * missing file (is_file() False) -> ``(False, [])`` — proceed as today,
+      no launched-event history to reconcile.
+    * file exists but is unreadable (OSError on read_text) -> ``(True, [])``
+      — ambiguous; caller must refuse.  The file could have been locked,
+      permission-flipped, or deleted in the is_file/read_text window — any
+      of those shapes is indistinguishable from a sentinel we cannot verify.
     * any non-blank line that isn't a parseable JSON object -> ``(True, [])``
       — ambiguous, caller must refuse.
     * otherwise -> ``(False, <parsed event dicts>)``.
@@ -606,7 +610,8 @@ def _strict_events_file_scan(seat_dir: Path | str) -> tuple[bool, list[dict[str,
     try:
         text = events_path.read_text(encoding="utf-8")
     except OSError:
-        return False, []
+        # File exists (is_file() passed) but is unreadable — ambiguous.
+        return True, []
     if not text.strip():
         return False, []
     events: list[dict[str, Any]] = []
@@ -714,11 +719,9 @@ def _archive_stale_launched_surface(
 
     pids: list[int] = []
     for event in launched:
-        raw_pid = event.get("pid")
-        if isinstance(raw_pid, int):
-            pids.append(raw_pid)
-        elif isinstance(raw_pid, str) and raw_pid.isdigit():
-            pids.append(int(raw_pid))
+        pid = _parse_positive_pid(event.get("pid"))
+        if pid is not None:
+            pids.append(pid)
     if not pids:
         raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, "ambiguous (no sentinel pid recorded)"))
 
