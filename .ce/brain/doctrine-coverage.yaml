@@ -11,6 +11,7 @@ exceptions:
   - docs/contracts/computer-use-worker-harness.md
   - docs/contracts/decision-record.md
   - docs/contracts/definition-of-ready.md
+  - docs/contracts/dependency-unlock.md
   - docs/contracts/devops-privileged-action-broker.md
   - docs/contracts/forge-claim.md
   - docs/contracts/forge-trigger-taxonomy.md
