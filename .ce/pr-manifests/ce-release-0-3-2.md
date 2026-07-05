@@ -6,15 +6,14 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** epic
 
-AUTHORIZED_PATHS_COUNT=57
+AUTHORIZED_PATHS_COUNT=56
 
-AUTHORIZED_PATHS_SHA256=243585d17c0430683b3edadf1c3ba18322081f71497c0871bd649de63b42e8a3
+AUTHORIZED_PATHS_SHA256=98fc437be5269c68fdf30959cbb0e3322283b9774be3cbffbaeb637bac3d150e
 
 ```text
 .ce/brain/assertions.yaml
 .ce/changelog/ce-415-followup-tinies.md
 .ce/changelog/ce-release-0-3-2.md
-.ce/pr-manifests/ce-415-followup-tinies.md
 .ce/pr-manifests/ce-release-0-3-2.md
 .ce/release-staging/0.3.2/INSTALL_SPEC_TO_SIGN
 .ce/release-staging/0.3.2/SIGNING-INSTRUCTIONS.md
