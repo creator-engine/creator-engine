@@ -1027,7 +1027,9 @@ def test_controller_brain_bootstrap_marks_unavailable_when_configured_recall_fai
     assert "store model mismatch" in payload["recall_status"]["reason"]
 
 
-def test_launch_result_and_log_surface_recall_status(tmp_path, monkeypatch, caplog):
+def test_launch_result_surfaces_recall_status_without_unconfigured_warning(
+    tmp_path, monkeypatch, caplog
+):
     _clear_recall_env(monkeypatch)
     caplog.set_level(logging.INFO, logger=launch_runtime.__name__)
 
@@ -1042,8 +1044,40 @@ def test_launch_result_and_log_surface_recall_status(tmp_path, monkeypatch, capl
     payload = _brain_payload(result)
     assert payload["recall_status"]["state"] == "unconfigured"
     assert result.plan.brain_recall_status == payload["recall_status"]
-    assert "brain recall: UNCONFIGURED" in caplog.text
+    assert "brain recall: UNCONFIGURED" not in caplog.text
+    assert "hydration skipped" not in caplog.text
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_launch_warns_with_remediation_for_configured_unreachable_recall_endpoint(
+    tmp_path, monkeypatch, caplog
+):
+    _clear_recall_env(monkeypatch)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        host, port = probe.getsockname()
+    endpoint = f"http://{host}:{port}/v1/embeddings"
+    monkeypatch.setenv(launch_runtime.RECALL_ENDPOINT_ENV, endpoint)
+    caplog.set_level(logging.WARNING, logger=launch_runtime.__name__)
+
+    result = launch_runtime.launch(
+        harness="claude",
+        backend="host",
+        session="configured-recall-status",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+    )
+
+    payload = _brain_payload(result)
+    assert payload["recall_status"]["state"] == "unavailable"
+    assert payload["recall_status"]["endpoint"] == endpoint
+    assert payload["recall_status"]["endpoint_configured"] is True
+    assert result.plan.brain_recall_status == payload["recall_status"]
+    assert result.spawned is True
+    assert "Semantic recall hydration skipped" in caplog.text
+    assert f"configured embedding endpoint unreachable at {endpoint}" in caplog.text
+    assert "launch proceeds, but recall quality is reduced" in caplog.text
+    assert f"unset {launch_runtime.RECALL_ENDPOINT_ENV}" in caplog.text
 
 
 @pytest.mark.parametrize("harness", ["claude", "hermes", "openclaw"])
