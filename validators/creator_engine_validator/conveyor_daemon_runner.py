@@ -23,6 +23,7 @@ from .conveyor_daemon import (
 )
 from .conveyor_discovery import ConveyorSeatDiscoveryRunner, SeatProbeSpec
 from .daemon_lease import DEFAULT_LEASE_TTL_SECONDS, DaemonLease, acquire
+from .daemon_lease import DaemonLeaseError
 from .forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
 from .validation_sandbox_receipt import ValidationSandboxReceiptIssuer
 
@@ -81,6 +82,23 @@ class SanitizedSubprocessCommandRunner:
 
 def _error(message: str) -> None:
     print(f"ERROR: {message}", file=sys.stderr)
+
+
+def _lease_refusal_error(config: ConveyorDaemonConfig, exc: DaemonLeaseError) -> str:
+    lease_path = config.lease_root / "conveyor-daemon.lease"
+    holder_pid = "unknown"
+    try:
+        payload = json.loads(lease_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict):
+        raw_pid = payload.get("pid")
+        if raw_pid is not None:
+            holder_pid = str(raw_pid)
+    return (
+        "conveyor-daemon singleton lease refused: "
+        f"{exc}; lease_path={lease_path}; holder_pid={holder_pid}"
+    )
 
 
 def _require_env(env: Mapping[str, str], name: str) -> str:
@@ -380,12 +398,16 @@ def main(env: Mapping[str, str] | None = None) -> int:
         return 2
 
     _ensure_private_dir(config.lease_root)
-    lease = acquire(
-        "conveyor-daemon",
-        _holder_id(config),
-        state_root=config.lease_root,
-        ttl_seconds=config.lease_ttl_seconds,
-    )
+    try:
+        lease = acquire(
+            "conveyor-daemon",
+            _holder_id(config),
+            state_root=config.lease_root,
+            ttl_seconds=config.lease_ttl_seconds,
+        )
+    except DaemonLeaseError as exc:
+        _error(_lease_refusal_error(config, exc))
+        return 73
     return _run_loop(config, lease)
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import conveyor_daemon_runner as runner
+from creator_engine_validator.daemon_lease import DaemonLeaseHeld, DaemonLeaseStale
 
 
 class FakeLease:
@@ -97,6 +98,52 @@ def test_refuses_missing_required_env_before_daemon_construction(
     assert runner.main(env) == 2
     assert constructed is False
     assert expected in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("lease_error", "expected_reason"),
+    [
+        (
+            DaemonLeaseHeld("live conveyor-daemon lease is held by holder-a pid=4321 host=host-a"),
+            "live conveyor-daemon lease is held by holder-a pid=4321 host=host-a",
+        ),
+        (
+            DaemonLeaseStale("stale conveyor-daemon lease requires explicit audited takeover"),
+            "stale conveyor-daemon lease requires explicit audited takeover",
+        ),
+    ],
+)
+def test_main_reports_clean_lease_refusal_and_exit_73(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    lease_error: Exception,
+    expected_reason: str,
+):
+    env = _base_env(tmp_path)
+    lease_path = Path(env["CE_DAEMON_LEASE_ROOT"]) / "conveyor-daemon.lease"
+
+    def fake_acquire(*args, **kwargs):
+        lease_path.write_text(
+            (
+                '{"acquired_at":1.0,"heartbeat_at":2.0,"holder_id":"holder-a",'
+                '"host":"host-a","pid":4321}\n'
+            ),
+            encoding="utf-8",
+        )
+        raise lease_error
+
+    monkeypatch.setattr(runner, "acquire", fake_acquire)
+
+    assert runner.main(env) == 73
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1
+    assert captured.err == (
+        "ERROR: conveyor-daemon singleton lease refused: "
+        f"{expected_reason}; lease_path={lease_path}; holder_pid=4321\n"
+    )
 
 
 def test_existing_lease_entrypoint_reports_config_error_and_releases_lease(
