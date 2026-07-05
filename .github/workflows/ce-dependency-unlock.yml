@@ -1,0 +1,105 @@
+name: CE Dependency Unlock
+
+# Merge-triggered dependency-unlock executor (ce-ops#454 slice 1, SHADOW-first).
+#
+# When a pull request merges into main, this workflow searches
+# creator-engine/ce-ops for open issues that declare the merged PR as a
+# blocker, re-reads each candidate fresh, and recomputes every declared
+# blocker's live completion state. All decision logic lives in
+# creator_engine_validator.dependency_unlock (validator module + `ce`
+# subcommand); this file is thin glue only.
+#
+# SHADOW is the only mode this workflow ships enabled: it writes a JSON audit
+# artifact and never makes a GitHub write call. LIVE mode (removing a fully
+# resolved dependency-hold label) is dormant, gated by two repo variables:
+#   CE_DEP_UNLOCK_RUN_MODE      == 'live' enables apply; anything else stays shadow.
+#   CE_DEP_UNLOCK_KILL_SWITCH   truthy FORCES shadow regardless of run mode.
+# Neither variable is set by this PR; provisioning them is a later ops action.
+#
+# Required repository secret:
+#   CE_CROSS_REPO_TOKEN: fine-grained PAT or GitHub App installation token
+#   with issues:read/write on creator-engine/ce-ops ONLY. Never substitute
+#   GITHUB_TOKEN — it is scoped to this repository.
+#
+# Fail-open: if the secret is absent/empty the step logs a warning and exits 0
+# (mirrors ce-ops-autoclose.yml), so this workflow never blocks a merge.
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Reserved for future manual live-mode testing; this slice always runs SHADOW regardless of this input."
+        type: boolean
+        default: false
+        required: false
+
+concurrency:
+  group: ce-dependency-unlock-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-unlock:
+    name: Merge-triggered dependency-unlock scan
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator
+        continue-on-error: true
+        run: python -m pip install -e validators
+
+      - name: Scan for resolved dependency blockers
+        continue-on-error: true
+        env:
+          CE_CROSS_REPO_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.CE_CROSS_REPO_TOKEN }}
+          CE_DEP_UNLOCK_RUN_MODE: ${{ vars.CE_DEP_UNLOCK_RUN_MODE }}
+          CE_DEP_UNLOCK_KILL_SWITCH: ${{ vars.CE_DEP_UNLOCK_KILL_SWITCH }}
+        run: |
+          set +e
+          audit_root="${RUNNER_TEMP}/ce-dependency-unlock-audit"
+          mkdir -p "${audit_root}"
+
+          if [[ -z "${CE_CROSS_REPO_TOKEN}" ]]; then
+            echo "::warning::CE_CROSS_REPO_TOKEN is not configured; skipping dependency-unlock scan. Provision a fine-grained token with issues:read/write on creator-engine/ce-ops."
+            printf '{"kind": "ce-dependency-unlock-scan", "status": "skipped", "reason": "cross_repo_token_absent"}\n' > "${audit_root}/ce-dependency-unlock-no-token.json"
+            exit 0
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "workflow_dispatch has no pull_request context this slice; nothing to evaluate"
+            printf '{"kind": "ce-dependency-unlock-scan", "status": "skipped", "reason": "workflow_dispatch_no_pr_context"}\n' > "${audit_root}/ce-dependency-unlock-no-context.json"
+            exit 0
+          fi
+
+          ce dependency-unlock scan \
+            --event-path "${GITHUB_EVENT_PATH}" \
+            --search-repo creator-engine/ce-ops \
+            --audit-root "${audit_root}" \
+            --json | tee "${audit_root}/latest.json"
+          exit 0
+
+      - name: Upload dependency-unlock audit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        continue-on-error: true
+        with:
+          name: ce-dependency-unlock-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ce-dependency-unlock-audit
+          if-no-files-found: warn
