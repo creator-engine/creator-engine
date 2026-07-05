@@ -374,7 +374,7 @@ def test_launch_refuses_non_visible_terminal():
 def test_launch_refuses_when_tmux_unavailable():
     adapter = FakeAdapter(available=False)
     with pytest.raises(launch_runtime.TmuxUnavailableError):
-        launch_runtime.launch(harness="claude", tmux_adapter=adapter)
+        launch_runtime.launch(harness="claude", backend="host", tmux_adapter=adapter)
     assert adapter.spawned == []
 
 
@@ -398,7 +398,9 @@ def test_resume_attaches_existing_session():
 
 def test_launch_spawns_visible_controller_seat():
     adapter = FakeAdapter()
-    result = launch_runtime.launch(harness="claude", session="ce-controller", tmux_adapter=adapter)
+    result = launch_runtime.launch(
+        harness="claude", backend="host", session="ce-controller", tmux_adapter=adapter
+    )
     assert result.spawned is True
     assert adapter.spawned, "controller seat should be spawned in a visible tmux pane"
     assert result.plan.visibility == "operator_visible"
@@ -408,6 +410,7 @@ def test_launch_pins_cwd_and_env_at_tmux_boundary(tmp_path):
     adapter = PinningAdapter(pane_cwd=str(tmp_path))
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="pinned-seat",
         repo_root=tmp_path,
         tmux_adapter=adapter,
@@ -430,6 +433,7 @@ def test_launch_refuses_when_pinned_cwd_is_not_verified(tmp_path):
     with pytest.raises(launch_runtime.TmuxPanePinningRefused):
         launch_runtime.launch(
             harness="claude",
+            backend="host",
             session="unpinned-seat",
             repo_root=tmp_path,
             tmux_adapter=adapter,
@@ -444,7 +448,7 @@ def test_launch_refuses_missing_brain_ledger_before_spawn(tmp_path):
     adapter = FakeAdapter()
 
     with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused):
-        launch_runtime.launch(harness="claude", repo_root=repo, tmux_adapter=adapter)
+        launch_runtime.launch(harness="claude", backend="host", repo_root=repo, tmux_adapter=adapter)
 
     assert adapter.spawned == []
     assert not (repo / ".ce" / "state" / "dispatches").exists()
@@ -459,7 +463,7 @@ def test_launch_refuses_tampered_brain_ledger_before_spawn(tmp_path):
     adapter = FakeAdapter()
 
     with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused):
-        launch_runtime.launch(harness="claude", repo_root=repo, tmux_adapter=adapter)
+        launch_runtime.launch(harness="claude", backend="host", repo_root=repo, tmux_adapter=adapter)
 
     assert adapter.spawned == []
     assert not (repo / ".ce" / "state" / "dispatches").exists()
@@ -472,6 +476,7 @@ def test_launch_refuses_missing_foreman_dispatch_contract_before_spawn(monkeypat
     with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused) as ei:
         launch_runtime.launch(
             harness="claude",
+            backend="host",
             session="missing-foreman-contract",
             repo_root=tmp_path,
             tmux_adapter=adapter,
@@ -491,6 +496,7 @@ def test_launch_refuses_malformed_foreman_dispatch_contract_before_spawn(monkeyp
     with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused) as ei:
         launch_runtime.launch(
             harness="claude",
+            backend="host",
             session="malformed-foreman-contract",
             repo_root=tmp_path,
             tmux_adapter=adapter,
@@ -505,6 +511,7 @@ def test_launch_injects_brain_bootstrap_payload_ref(tmp_path):
     adapter = FakeAdapter()
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="brain-seat",
         repo_root=tmp_path,
         tmux_adapter=adapter,
@@ -753,6 +760,7 @@ def test_launch_result_and_log_surface_recall_status(tmp_path, monkeypatch, capl
 
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="recall-status",
         repo_root=tmp_path,
         tmux_adapter=FakeAdapter(),
@@ -771,6 +779,7 @@ def test_spawned_launch_injects_foreman_charter_and_worker_spawn_for_harnesses(
 ):
     result = launch_runtime.launch(
         harness=harness,
+        backend="host",
         session=f"charter-{harness}",
         repo_root=tmp_path,
         tmux_adapter=FakeAdapter(),
@@ -790,6 +799,7 @@ def test_codex_spawned_launch_injects_foreman_charter_and_worker_spawn(
 
     result = launch_runtime.launch(
         harness="codex",
+        backend="host",
         session="charter-codex",
         repo_root=tmp_path,
         tmux_adapter=FakeAdapter(),
@@ -803,6 +813,7 @@ def test_launch_writes_seat_lifecycle_record_and_event(tmp_path):
     ledger = tmp_path / ".hermes" / "active-work-ledger"
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="ce-controller",
         window="controller",
         repo_root=tmp_path,
@@ -846,6 +857,7 @@ def test_launch_defaults_lifecycle_ledger_to_ce_state(tmp_path):
     adapter = FakeAdapter()
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="ce-controller",
         window="controller",
         repo_root=tmp_path,
@@ -875,6 +887,7 @@ def test_launch_registration_failure_warns_escalates_and_returns_ungoverned(
     monkeypatch.setattr(launch_runtime.seat_lifecycle, "SEAT_LIFECYCLE_FAIL_CLOSED", False)
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="fault-seat",
         window="controller",
         repo_root=tmp_path,
@@ -938,6 +951,7 @@ def test_claude_launch_pins_setting_sources_and_strict_mcp(monkeypatch):
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="s",
         tmux_adapter=adapter,
         mcp_config_path=".ce/state/launch/s/mcp/ce-mcp.json",
@@ -955,6 +969,7 @@ def test_claude_launch_allows_skip_perms_with_confirmed_pack(monkeypatch):
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="s",
         extra_args=["--dangerously-skip-permissions"],
         tmux_adapter=adapter,
@@ -976,6 +991,7 @@ def test_codex_launch_builds_governed_env_scrubbed_command(tmp_path, monkeypatch
     codex = _fake_codex(tmp_path, monkeypatch)
     result = launch_runtime.launch(
         harness="codex",
+        backend="host",
         session="s",
         extra_args=["--model", "gpt-5"],
         tmux_adapter=adapter,
@@ -1049,6 +1065,7 @@ def test_launch_reconciles_exit_127_sentinel_to_dead_record(tmp_path, monkeypatc
 
     result = launch_runtime.launch(
         harness="codex",
+        backend="host",
         session="exec-fail",
         repo_root=tmp_path,
         ledger_root=tmp_path / ".ce" / "state" / "active-work-ledger",
@@ -1074,6 +1091,7 @@ def test_launch_refuses_existing_launched_events_before_reuse(tmp_path, monkeypa
     with pytest.raises(launch_runtime.SeatSurfaceReuseRefused):
         launch_runtime.launch(
             harness="claude",
+            backend="host",
             session="reuse",
             repo_root=tmp_path,
             tmux_adapter=adapter,
@@ -1090,7 +1108,9 @@ def test_claude_args_do_not_affect_codex_cli_route(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     _fake_codex(tmp_path, monkeypatch)
-    result = launch_runtime.launch(harness="codex", session="s", tmux_adapter=adapter)
+    result = launch_runtime.launch(
+        harness="codex", backend="host", session="s", tmux_adapter=adapter
+    )
     assert "--dangerously-skip-permissions" not in _inner_argv(result)
 
 
@@ -1160,6 +1180,7 @@ def test_claude_launch_provisions_mcp_config_before_spawn(tmp_path, monkeypatch)
     assert not mcp_abs.exists()
     launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="ce-controller",
         tmux_adapter=adapter,
         repo_root=str(tmp_path),
@@ -1181,6 +1202,7 @@ def test_claude_launch_does_not_overwrite_existing_mcp_config(tmp_path, monkeypa
     mcp_abs.write_text(preexisting, encoding="utf-8")
     launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="s",
         tmux_adapter=FakeAdapter(),
         mcp_config_path=mcp_rel,
@@ -1198,6 +1220,7 @@ def test_claude_launch_refuses_nonfile_mcp_target_before_spawn(tmp_path, monkeyp
     with pytest.raises(launch_runtime.LaunchRefused):
         launch_runtime.launch(
             harness="claude",
+            backend="host",
             session="s",
             tmux_adapter=adapter,
             mcp_config_path=mcp_rel,
@@ -1236,6 +1259,7 @@ def test_unattended_skip_perms_carries_flag_when_hook_pack_confirmed(tmp_path, m
     adapter = FakeAdapter()
     result = launch_runtime.launch(
         harness="claude",
+        backend="host",
         session="drive-seat",
         extra_args=["--dangerously-skip-permissions"],
         tmux_adapter=adapter,
