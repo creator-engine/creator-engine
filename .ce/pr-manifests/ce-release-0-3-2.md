@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** epic
 
-AUTHORIZED_PATHS_COUNT=55
+AUTHORIZED_PATHS_COUNT=57
 
-AUTHORIZED_PATHS_SHA256=4e0b626fdc6973d9880fad0aa5810c919e4731d349c17a798959dafe7e7b621a
+AUTHORIZED_PATHS_SHA256=243585d17c0430683b3edadf1c3ba18322081f71497c0871bd649de63b42e8a3
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-415-followup-tinies.md
 .ce/changelog/ce-release-0-3-2.md
 .ce/pr-manifests/ce-415-followup-tinies.md
@@ -63,6 +64,7 @@ validators/creator_engine_validator/onboard_apply_live.py
 validators/creator_engine_validator/schemas/install-answers.schema.yaml
 validators/creator_engine_validator/version.py
 validators/pyproject.toml
+validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_onboard_apply_live.py
 validators/tests/unit/test_surfaces_manifest.py
 validators/tests/unit/test_v3_cli.py
