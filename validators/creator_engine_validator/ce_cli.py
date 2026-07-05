@@ -85,11 +85,14 @@ from __future__ import annotations
 
 import argparse
 import importlib
+from importlib import metadata as importlib_metadata
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Sequence
 
@@ -5008,6 +5011,156 @@ _HERDR_DISPATCH = {
     "remote-attach": _herdr_remote_attach,
 }
 
+_STALE_WHEEL_OVERRIDE_ENV = "CE_ALLOW_STALE_WHEEL"
+_STALE_WHEEL_PACKAGE = "creator-engine-validator"
+_STALE_WHEEL_GATE_COMMANDS = {
+    ("validate-pr", None),
+    ("brain", "correct"),
+    ("brain", "sync"),
+    ("brain", "verify"),
+}
+
+
+def _version_core(value: str) -> tuple[int, int, int] | None:
+    match = re.match(r"^\s*(\d+)\.(\d+)\.(\d+)", value)
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _is_newer_version(left: str, right: str) -> bool:
+    left_core = _version_core(left)
+    right_core = _version_core(right)
+    if left_core is None or right_core is None:
+        return False
+    return left_core > right_core
+
+
+def _read_source_declared_version(repo_root: Path) -> str | None:
+    pyproject = repo_root / "validators" / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            return None
+        project = data.get("project", {})
+        declared = project.get("version")
+        if isinstance(declared, str) and declared:
+            return declared
+
+    version_py = repo_root / "validators" / "creator_engine_validator" / "version.py"
+    if version_py.is_file():
+        try:
+            match = re.search(
+                r'^__version__\s*=\s*"([^"]+)"',
+                version_py.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+        except OSError:
+            return None
+        if match:
+            return match.group(1)
+    return None
+
+
+def _running_package_version() -> str:
+    try:
+        return importlib_metadata.version(_STALE_WHEEL_PACKAGE)
+    except importlib_metadata.PackageNotFoundError:
+        return version.__version__
+
+
+def _find_creator_engine_checkout(start: str | Path | None) -> Path | None:
+    if start is None:
+        return None
+    try:
+        path = Path(start).expanduser().resolve()
+    except OSError:
+        return None
+    if path.is_file():
+        path = path.parent
+    for candidate in (path, *path.parents):
+        if (
+            (candidate / "validators" / "pyproject.toml").is_file()
+            and (candidate / "validators" / "creator_engine_validator" / "ce_cli.py").is_file()
+        ):
+            return candidate
+    return None
+
+
+def _running_from_checkout(repo_root: Path) -> bool:
+    try:
+        module_file = Path(__file__).resolve()
+    except OSError:
+        return False
+    source_root = repo_root / "validators" / "creator_engine_validator"
+    try:
+        module_file.relative_to(source_root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _command_label(args) -> str:
+    if args.group == "brain":
+        brain_cmd = getattr(args, "brain_cmd", None)
+        return f"brain {brain_cmd}" if brain_cmd else "brain"
+    return str(args.group)
+
+
+def _skew_candidate_roots(args) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for raw in (getattr(args, "repo_root", None), Path.cwd()):
+        checkout = _find_creator_engine_checkout(raw)
+        if checkout is not None and checkout not in roots:
+            roots.append(checkout)
+    return tuple(roots)
+
+
+def _maybe_guard_stale_wheel_skew(args) -> int | None:
+    if args.group is None:
+        return None
+
+    for repo_root in _skew_candidate_roots(args):
+        if _running_from_checkout(repo_root):
+            continue
+        source_version = _read_source_declared_version(repo_root)
+        if source_version is None:
+            continue
+        running_version = _running_package_version()
+        if not _is_newer_version(source_version, running_version):
+            continue
+
+        label = _command_label(args)
+        detail = (
+            "CE stale-wheel/source-version skew detected: "
+            f"checkout {repo_root} declares validators version {source_version}, "
+            f"but the running package {_STALE_WHEEL_PACKAGE} is {running_version}."
+        )
+        if os.environ.get(_STALE_WHEEL_OVERRIDE_ENV) == "1":
+            print(f"{detail} {_STALE_WHEEL_OVERRIDE_ENV}=1 set; proceeding by explicit override.", file=sys.stderr)
+            return None
+
+        command_key = (args.group, getattr(args, "brain_cmd", None) if args.group == "brain" else None)
+        if command_key in _STALE_WHEEL_GATE_COMMANDS:
+            print(
+                f"ERROR: {detail} Refusing gate-relevant `ce {label}` under stale-wheel skew. "
+                f"Use `PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli {label}` "
+                f"from the checkout, or set `{_STALE_WHEEL_OVERRIDE_ENV}=1` to proceed explicitly.",
+                file=sys.stderr,
+            )
+            return 2
+
+        print(
+            f"WARNING: {detail} Non-gate `ce {label}` will proceed. "
+            f"Prefer `PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli {label}` "
+            f"from the checkout, or set `{_STALE_WHEEL_OVERRIDE_ENV}=1` to acknowledge the skew.",
+            file=sys.stderr,
+        )
+        return None
+
+    return None
+
 
 def _maybe_print_startup_update_notice(args) -> None:
     if getattr(args, "json_output", False):
@@ -5038,6 +5191,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _forward_v3_argv(argv[0], argv[1:])
     parser = _build_parser()
     args = parser.parse_args(argv)
+    skew_result = _maybe_guard_stale_wheel_skew(args)
+    if skew_result is not None:
+        return skew_result
     _maybe_print_startup_update_notice(args)
 
     if args.group == "dequeue":
