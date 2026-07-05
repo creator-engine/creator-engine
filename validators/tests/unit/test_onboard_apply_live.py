@@ -16,6 +16,7 @@ import base64
 import hashlib
 import io
 import json
+import re
 import subprocess
 import tarfile
 from dataclasses import replace
@@ -1196,7 +1197,13 @@ def test_uv_pin_matches_served_mirror_wheel_and_signed_manifest():
     sums = (_MIRROR_DIR / "SHA256SUMS").read_text(encoding="utf-8")
     assert f"{_UV_PIN.sha256}  {_UV_PIN.filename}" in sums
     llms = (repo_root / "docs" / "llms-install.md").read_text(encoding="utf-8")
-    assert _UV_PIN.filename in llms and _UV_PIN.sha256 in llms and _UV_PIN.url in llms
+    assert _UV_PIN.filename in llms and _UV_PIN.sha256 in llms
+    # The URL's CE_SEMVER path segment is only guaranteed to match the LIVE
+    # signed spec post-publish (the mirror URL updates at publish, not at
+    # staging — same rationale as the CDN-host-only check above). Match the
+    # URL shape instead of the exact in-flight version.
+    url_pattern = re.escape(_UV_PIN.url).replace(re.escape(CE_SEMVER), r"[0-9]+\.[0-9]+\.[0-9]+")
+    assert re.search(url_pattern, llms), f"no download URL for {_UV_PIN.filename!r} found in llms-install.md"
 
 
 # -- wait_for_app_installation: detect + fail-closed -------------------------
