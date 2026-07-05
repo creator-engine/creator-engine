@@ -1,4 +1,4 @@
-"""Merge-triggered dependency-unlock evaluator (ce-ops#454 slice 1, SHADOW-first).
+"""Merge-triggered dependency-unlock evaluator (slice 1, SHADOW-first).
 
 This module implements the vocabulary of ``docs/contracts/dependency-unlock.md``
 for exactly one re-evaluation event family: a pull request merging into
@@ -21,7 +21,7 @@ primitives already ratified for this purpose:
   supply the actual ref-matching regexes; this module only ever hands them
   text to match, never duplicates their patterns.
 
-CLOSED-WITHOUT-MERGE RULE (verbatim, ce-ops#454 review-banked): closed-without-
+CLOSED-WITHOUT-MERGE RULE (verbatim, review-banked): closed-without-
 merge is NOT completion; the blocker stays blocking unless a completed
 successor is declared or the dependency is explicitly removed. Implemented as:
 a pull-request blocker resolves iff ``merged is True``; an issue blocker

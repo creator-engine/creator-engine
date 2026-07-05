@@ -253,7 +253,7 @@ def test_ambiguous_blocker_ref_token_stays_blocked():
     issue = _issue(
         111,
         labels=["blocked:creator-engine/creator-engine#900"],
-        extra={"blocked_by": "creator-engine/ce-ops#123 creator-engine/ce-ops#456"},
+        extra={"blocked_by": "#123 #456"},
     )
     runner = FakeGhRunner(search_issues=[issue], issues={("creator-engine/ce-ops", 111): issue})
     result = du.evaluate_pr_merge(MERGED, gh_runner=runner, now="2026-07-05T00:00:00Z")
@@ -268,7 +268,7 @@ def test_multiple_blockers_all_must_resolve_union_rule():
         170,
         labels=[
             "blocked:creator-engine/creator-engine#900",
-            "blocked:creator-engine/ce-ops#999",
+            "blocked:#999",
         ],
     )
     runner = FakeGhRunner(

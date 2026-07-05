@@ -1626,9 +1626,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_triage_queue_args(tq_inspect)
 
     # INTERNAL command (see INTERNAL_COMMAND_GROUPS): merge-triggered
-    # dependency-unlock evaluator (ce-ops#454 slice 1). Ships SHADOW-only: no
-    # repo variable enables live mode in this PR, so `ce dependency-unlock
-    # scan` never makes a GitHub write call by default. It never ratifies,
+    # dependency-unlock evaluator (slice 1). Ships SHADOW-only: no repo
+    # variable enables live mode in this PR, so `ce dependency-unlock scan`
+    # never makes a GitHub write call by default. It never ratifies,
     # approves, merges, dispatches, or bypasses a required check.
     dependency_unlock_group = groups.add_parser("dependency-unlock", help=argparse.SUPPRESS)
     dependency_unlock_sub = dependency_unlock_group.add_subparsers(dest="dependency_unlock_cmd")

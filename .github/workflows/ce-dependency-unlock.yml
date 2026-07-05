@@ -1,6 +1,6 @@
 name: CE Dependency Unlock
 
-# Merge-triggered dependency-unlock executor (ce-ops#454 slice 1, SHADOW-first).
+# Merge-triggered dependency-unlock executor (slice 1, SHADOW-first).
 #
 # When a pull request merges into main, this workflow searches
 # creator-engine/ce-ops for open issues that declare the merged PR as a
