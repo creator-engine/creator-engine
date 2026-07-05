@@ -104,17 +104,22 @@ container runtime own the daemon process.
    long-lived supervisor process: it acquires the `queue-daemon` lease first,
    then starts the daemon process as its own child and heartbeats the lease
    for as long as that child is alive. The daemon process, when it finds the
-   lease already held by a live process that is verifiably its own ancestor,
-   defers to the supervisor's lease instead of trying to acquire a second one
-   — the supervisor's held lease already is the singleton enforcement, so the
-   daemon proceeds straight into its normal startup. If the daemon is instead
-   invoked directly (no supervisor in its process ancestry — for example a
-   manual foreground run for debugging), it acquires the lease itself exactly
-   as it always has. Only a lease held by some other, unrelated live process
-   (not an ancestor of the daemon) is refused, and a lease found stale
-   (holder process dead, or TTL-expired for a remote host) is refused exactly
-   as before regardless of any ancestry — deferral only ever applies to a
-   live, verified ancestor holder.
+   lease already held by a live process that is verifiably recorded on this
+   same host AND is an ancestor of the current process, defers to the
+   supervisor's lease instead of trying to acquire a second one — the
+   supervisor's held lease already is the singleton enforcement, so the
+   daemon proceeds straight into its normal startup. The host-equality check
+   is a strict precondition of the ancestry walk: pid namespaces are
+   host-local, so a remote-host lease record (even one with a pid that
+   numerically collides with a real local ancestor such as the container init
+   process at pid 1) is never eligible for deferral and is refused exactly as
+   any other unrelated live holder. If the daemon is instead invoked directly
+   (no supervisor in its process ancestry — for example a manual foreground
+   run for debugging), it acquires the lease itself exactly as it always has.
+   Any lease held by a process that is not a same-host verified ancestor is
+   refused, and a stale lease (holder process dead, or TTL-expired for a
+   remote host) is refused exactly as before regardless of any ancestry —
+   deferral only ever applies to a live, same-host, verified ancestor holder.
 
 4. Verify and start:
 

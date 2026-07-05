@@ -2342,6 +2342,69 @@ def test_ce_queue_daemon_stale_lease_not_deferred_even_with_ancestor_pid(
     assert "deferring to launcher supervisor" not in err
 
 
+def test_ce_queue_daemon_refuses_live_remote_host_lease_even_with_ancestor_pid(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A LIVE lease from a DIFFERENT host must be refused (exit 73) even when
+    its recorded pid numerically collides with a real local ancestor pid of
+    this process.  The realistic failure mode is pid=1 (container init), but
+    we use os.getppid() as the local ancestor to test the host-equality gate
+    in isolation without depending on any particular pid value.
+
+    This test exercises the finding that _defer_to_supervisor_lease must
+    verify host equality as a precondition of the ancestry walk: pid
+    namespaces are host-local, so a foreign-host record with a matching pid
+    number must never be treated as a local ancestor.
+    """
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    ancestor_pid = os.getppid()
+    # A fresh, live heartbeat so _lease_is_live evaluates by pid-existence,
+    # not TTL — this reaches DaemonLeaseHeld, which is what activates the
+    # deferral path.  The host is deliberately different from this machine.
+    lease_path = lease_root / "queue-daemon.lease"
+    now = time.time()
+    lease_path.write_text(
+        json.dumps(
+            {
+                "holder_id": f"queue-daemon:remote-host:{ancestor_pid}",
+                "pid": ancestor_pid,
+                "host": "some-other-remote-host-xyz",
+                "acquired_at": now,
+                "heartbeat_at": now,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "token_from_env",
+        lambda _name: (_ for _ in ()).throw(AssertionError("token must not be read")),
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    err = capsys.readouterr().err
+    assert ret == 73
+    assert "queue-daemon singleton lease refused" in err
+    assert "deferring to launcher supervisor" not in err
+
+
 def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
     monkeypatch,
     capsys,

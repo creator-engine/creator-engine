@@ -4914,17 +4914,25 @@ def _read_lease_json(lease_path: Path) -> dict[str, Any]:
 
 
 def _defer_to_supervisor_lease(lease_path: Path) -> bool:
-    """Return True (and log) iff the live lease holder is our own ancestor.
+    """Return True (and log) iff the live lease holder is our own same-host ancestor.
 
     Fail-closed: any ambiguity (missing/malformed lease file, non-integer
-    pid, or a holder pid that is not a verified live ancestor of THIS
-    process) returns False, and the caller refuses the startup exactly as it
-    did before this deferral existed. We deliberately re-read the lease file
-    from disk here rather than trust any argument or environment claim —
-    the ancestry check is only meaningful against the actual recorded
-    holder.
+    pid, host mismatch, or a holder pid that is not a verified live ancestor
+    of THIS process) returns False, and the caller refuses the startup
+    exactly as it did before this deferral existed. We deliberately re-read
+    the lease file from disk here rather than trust any argument or
+    environment claim — the ancestry check is only meaningful against the
+    actual recorded holder.
+
+    The host field MUST match the local hostname before we attempt the
+    ancestry walk. Pid namespaces are host-local; a numerically matching pid
+    from a remote-host lease record (for example pid=1, the container init
+    process) must never be treated as a local ancestor.
     """
     payload = _read_lease_json(lease_path)
+    holder_host = payload.get("host")
+    if holder_host != socket.gethostname():
+        return False
     holder_pid = payload.get("pid")
     if not isinstance(holder_pid, int) or holder_pid <= 0:
         return False
