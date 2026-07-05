@@ -1,4 +1,4 @@
-# PR path manifest - ce-onboard-relaunch-ux - onboard relaunch UX
+# PR path manifest — ce-ops#447 · onboard relaunch UX
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-onboard-relaunch-ux` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
