@@ -342,6 +342,73 @@ def test_consistent_manifest_pinnable_null_digest_fails(tmp_path: Path):
     assert any("herdr.commit_or_digest" in error.path for error in result.errors)
 
 
+def test_consistent_manifest_pinnable_unset_digest_fails(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"][1]["commit_or_digest"] = "UNSET"  # type: ignore[index]
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST in _codes(result)
+    assert any("herdr.commit_or_digest" in error.path for error in result.errors)
+
+
+def test_consistent_manifest_allowlisted_unset_digest_passes(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"].append(  # type: ignore[union-attr]
+        {
+            "name": "CE seat image",
+            "version": "UNSET",
+            "commit_or_digest": "UNSET",
+            "source": "ghcr.io/creator-engine/creator-engine/ce-seat",
+            "custody": "creator-engine image",
+            "update_policy": "manifest-list digest required before tenant launch use; UNSET until published",
+            "last_evaluated": "2026-07-05",
+        }
+    )
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_consistent_manifest_allowlisted_unset_digest_ratchet_only_shrinks(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"].append(  # type: ignore[union-attr]
+        {
+            "name": "CE seat image",
+            "version": "UNSET",
+            "commit_or_digest": "e" * 64,
+            "source": "ghcr.io/creator-engine/creator-engine/ce-seat",
+            "custody": "creator-engine image",
+            "update_policy": "manifest-list digest required before tenant launch use; UNSET until published",
+            "last_evaluated": "2026-07-05",
+        }
+    )
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST in _codes(result)
+    assert any("CE seat image.commit_or_digest" in error.path for error in result.errors)
+
+
+def test_consistent_manifest_ce_alias_does_not_substring_match_from_token(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"].append(  # type: ignore[union-attr]
+        _surface("CE seat image", version="1.0.0", commit_or_digest="e" * 64)
+    )
+    _write_consistent_repo(tmp_path, doc)
+    dockerfile = tmp_path / "deploy" / "seat-image" / "Dockerfile"
+    dockerfile.parent.mkdir(parents=True, exist_ok=True)
+    dockerfile.write_text("FROM service.example/runtime:1.0\n", encoding="utf-8")
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
 def test_consistent_manifest_phase1_pending_null_digests_pass(tmp_path: Path):
     doc = _consistent_doc()
     for surface in doc["surfaces"]:  # type: ignore[index]
