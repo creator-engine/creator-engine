@@ -358,11 +358,31 @@ def _pinnable_null_digest_errors(path: Path, by_name: dict[str, dict[str, Any]])
     return errors
 
 
+def _is_in_nested_worktree(path: Path, repo_root: Path) -> bool:
+    """Return True if *path* lives inside a nested git worktree.
+
+    Git worktrees contain a ``.git`` FILE (not directory) at their root which
+    links back to the main repository.  We walk up from *path* until we reach
+    *repo_root* (or its parent), checking for such a file.  This prevents the
+    consistency check from scanning Dockerfiles inside worktree checkouts that
+    may pre-date the pinned-digest requirement.
+    """
+    parent = path.parent
+    while parent != repo_root and parent != parent.parent:
+        git_node = parent / ".git"
+        if git_node.is_file():
+            return True
+        parent = parent.parent
+    return False
+
+
 def _iter_dockerfiles(repo_root: Path) -> Iterable[Path]:
     seen: set[Path] = set()
     for pattern in ("Dockerfile", "Dockerfile.*", "*.Dockerfile"):
         for path in repo_root.rglob(pattern):
             if not path.is_file() or ".git" in path.parts:
+                continue
+            if _is_in_nested_worktree(path, repo_root):
                 continue
             resolved = path.resolve(strict=False)
             if resolved in seen:

@@ -460,3 +460,19 @@ def test_current_repo_surfaces_manifest_consistent_passes():
     result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([repo_root])
 
     assert result.ok, [error.format() for error in result.errors]
+
+
+def test_iter_dockerfiles_skips_nested_git_worktree(tmp_path: Path):
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+
+    nested = tmp_path / ".ce" / "wt-example"
+    nested.mkdir(parents=True)
+    # A git worktree root has a `.git` FILE (not directory) pointing back at
+    # the main repository's gitdir.
+    (nested / ".git").write_text("gitdir: /somewhere/.git/worktrees/wt-example\n", encoding="utf-8")
+    (nested / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+
+    found = {path.resolve(strict=False) for path in chk._iter_dockerfiles(tmp_path)}
+
+    assert (tmp_path / "Dockerfile").resolve(strict=False) in found
+    assert (nested / "Dockerfile").resolve(strict=False) not in found

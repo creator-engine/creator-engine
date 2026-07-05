@@ -983,7 +983,12 @@ def test_install_dependencies_fetches_uv_from_mirror_and_installs_offline():
     assert result == {"ok": True, "installed": ["uv"]}
     # fetched the pinned wheel from CE's mirror (NOT astral/PyPI) ...
     assert calls["fetch"] == [_UV_PIN.url]
-    assert _CE_DOWNLOADS_URL_PREFIX in _UV_PIN.url
+    # The URL must use CE's own CDN, not astral/PyPI.  We intentionally do not
+    # assert an exact version prefix here: during the staging window the URL
+    # points to the previously-published downloads/ tree (updated at publish,
+    # not at staging), so a strict CE_SEMVER-prefix check would fail on every
+    # staging PR.
+    assert "creator-engine.dev/downloads/" in _UV_PIN.url
     assert "astral" not in _UV_PIN.url
     # ... and installed it OFFLINE from a local find-links dir.
     assert len(calls["pip"]) == 1
