@@ -282,6 +282,79 @@ class LaunchResult:
         }
 
 
+@dataclass(frozen=True)
+class LaunchPreflightGate:
+    name: str
+    status: str
+    detail: str | None = None
+    code: str | None = None
+
+    def format_line(self) -> str:
+        if self.status == "PASS":
+            return f"{self.name}: PASS" if not self.detail else f"{self.name}: PASS {self.detail}"
+        if self.status == "WOULD-REFUSE":
+            code = f" [{self.code}]" if self.code else ""
+            return f"{self.name}: WOULD-REFUSE{code}: {self.detail or ''}"
+        if self.status == "SKIPPED":
+            return f"{self.name}: SKIPPED: {self.detail or 'requires live launch'}"
+        return f"{self.name}: {self.status}: {self.detail or ''}"
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = {"name": self.name, "status": self.status}
+        if self.detail is not None:
+            payload["detail"] = self.detail
+        if self.code is not None:
+            payload["code"] = self.code
+        return payload
+
+
+@dataclass(frozen=True)
+class LaunchPreflightReport:
+    gates: tuple[LaunchPreflightGate, ...]
+
+    @property
+    def ok(self) -> bool:
+        return all(gate.status != "WOULD-REFUSE" for gate in self.gates)
+
+    @property
+    def exit_code(self) -> int:
+        return 0 if self.ok else 1
+
+    def format_lines(self) -> list[str]:
+        return [gate.format_line() for gate in self.gates]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "exit_code": self.exit_code,
+            "gates": [gate.to_dict() for gate in self.gates],
+        }
+
+
+@dataclass(frozen=True)
+class _HarnessGateResult:
+    plan: LaunchPlan
+    resolved_mcp: str | None = None
+
+
+@dataclass(frozen=True)
+class _RuntimePolicyGateResult:
+    plan: LaunchPlan
+    resolved_runtime_policy: Path | str | None
+    runtime_policy_record: dict[str, Any] | None
+    resource_policy: resource_bound_spec.ResourcePolicy | None
+    bounding: bool
+
+
+@dataclass(frozen=True)
+class _SeatSurfaceGateResult:
+    seat_dir: Path
+    seat_id: str
+    seat_run_id: str | None
+    stale_surface_archive: SeatSurfaceArchiveResult | None = None
+    skipped_reason: str | None = None
+
+
 def plan_launch(
     *,
     harness: str = DEFAULT_HARNESS,
@@ -838,6 +911,319 @@ def harness_binary_check(
     }
 
 
+def _evaluate_harness_governance(
+    *,
+    plan: LaunchPlan,
+    harness: str,
+    session: str,
+    extra_args: Sequence[str] | None,
+    repo_root: Path | str | None,
+    mcp_config_path: str | None,
+    closeout_file: str | None,
+    completion_report_ref: str | None,
+) -> _HarnessGateResult:
+    resolved_mcp: str | None = None
+    if harness == "claude":
+        requested = list(extra_args) if extra_args else []
+        spec = claude_launch_spec.parse_claude_argv(requested)
+        # The pack confirmation only changes the decision when skip-permissions is
+        # requested, so the (possibly I/O-bound) probe is invoked only then.
+        confirmed = _confirm_pack(repo_root) if spec.skip_permissions else False
+        spec_result = claude_launch_spec.evaluate_claude_launch(
+            spec, hook_pack_confirmed=confirmed
+        )
+        if not spec_result.ok:
+            codes = ", ".join(r.clause for r in spec_result.refusals)
+            surfaces = ", ".join(r.surface for r in spec_result.refusals)
+            raise LaunchRefused(
+                f"refusing governed Claude launch: {codes} ({surfaces}) — "
+                "Ring 0 refuses before any side effect"
+            )
+        resolved_mcp = mcp_config_path or _default_mcp_config_path(session)
+        try:
+            governed = claude_launch_spec.build_governed_claude_command(
+                base_argv=requested,
+                mcp_config_path=resolved_mcp,
+                closeout_file=closeout_file,
+                completion_report_ref=completion_report_ref,
+            )
+        except claude_launch_spec.GovernedCommandError as exc:
+            clause = (
+                claude_launch_spec.CLAUSE_MCP
+                if "MCP config" in str(exc)
+                else claude_launch_spec.CLAUSE_LOCAL_SETTINGS
+            )
+            raise LaunchRefused(
+                f"refusing governed Claude launch: {clause} — {exc}"
+            ) from exc
+        plan = replace(plan, command=governed)
+
+    elif harness == "codex":
+        requested = list(extra_args) if extra_args else []
+        if not _confirm_codex_managed_pack(repo_root):
+            raise CodexLaunchRefused(
+                f"refusing governed Codex launch: {codex_launch_spec.CLAUSE_MANAGED_HOOK_PACK} "
+                "(managed-hook-pack) — Ring 0 refuses before any side effect"
+            )
+        spec = codex_launch_spec.parse_codex_argv(requested)
+        config_bypass = (
+            None if spec.explicit_bypass else codex_launch_spec.detect_config_bypass_mode()
+        )
+        spec_result = codex_launch_spec.evaluate_codex_launch(
+            spec,
+            allowed_root=Path(repo_root or "."),
+            config_bypass_mode=config_bypass,
+        )
+        if not spec_result.ok:
+            codes = ", ".join(r.clause for r in spec_result.refusals)
+            surfaces = ", ".join(r.surface for r in spec_result.refusals)
+            raise CodexLaunchRefused(
+                f"refusing governed Codex launch: {codes} ({surfaces}) — "
+                "Ring 0 refuses before any side effect"
+            )
+        try:
+            codex_bin = codex_launch_spec.resolve_codex_harness_binary()
+        except codex_launch_spec.GovernedCommandError as exc:
+            raise CodexLaunchRefused(
+                f"refusing governed Codex launch: {exc} — "
+                "Ring 0 refuses before any side effect"
+            ) from exc
+        plan = replace(
+            plan,
+            command=codex_launch_spec.build_governed_codex_command(
+                base_argv=requested, codex_bin=codex_bin
+            ),
+            codex_bypass_mode=spec_result.bypass_mode,
+        )
+
+    elif harness == "hermes":
+        requested = list(extra_args) if extra_args else []
+        spec_result = hermes_launch_spec.evaluate_hermes_launch(
+            hermes_launch_spec.parse_hermes_argv(requested)
+        )
+        if not spec_result.ok:
+            codes = ", ".join(r.clause for r in spec_result.refusals)
+            surfaces = ", ".join(r.surface for r in spec_result.refusals)
+            raise HermesLaunchRefused(
+                f"refusing governed Hermes launch: {codes} ({surfaces}) — "
+                "Ring 0 refuses before any side effect"
+            )
+        plan = replace(
+            plan,
+            command=hermes_launch_spec.build_governed_hermes_command(base_argv=requested),
+        )
+    return _HarnessGateResult(plan=plan, resolved_mcp=resolved_mcp)
+
+
+def _evaluate_runtime_policy_gates(
+    *,
+    plan: LaunchPlan,
+    repo_root: Path | str | None,
+    runtime_policy: Path | str | None,
+    backend: str | None,
+    dry_run: bool,
+    resume: bool,
+) -> _RuntimePolicyGateResult:
+    host_backend_opt_out = backend == HOST_BACKEND_OPT_OUT
+    runtime_backend = None if host_backend_opt_out else backend
+    resolved_runtime_policy: Path | str | None = runtime_policy
+    if host_backend_opt_out and runtime_policy is not None:
+        raise RuntimePolicyRefused(
+            "--backend host is the explicit raw-host opt-out and cannot be combined "
+            "with --runtime-policy"
+        )
+
+    runtime_policy_auto_resolved = False
+    if (
+        resolved_runtime_policy is None
+        and not dry_run
+        and not resume
+        and not host_backend_opt_out
+    ):
+        default_runtime_policy = _default_runtime_policy_path(repo_root)
+        if default_runtime_policy.is_file():
+            resolved_runtime_policy = default_runtime_policy
+            runtime_policy_auto_resolved = True
+        else:
+            raise RuntimePolicyRefused(
+                _missing_default_runtime_policy_message(default_runtime_policy)
+            )
+
+    resource_policy: resource_bound_spec.ResourcePolicy | None = None
+    policy_data: Any | None = None
+    runtime_policy_record: dict[str, Any] | None = None
+    if resolved_runtime_policy is not None:
+        try:
+            policy_data = load_yaml(Path(resolved_runtime_policy))
+        except LoaderError as exc:
+            raise ResourceBoundRefused(
+                f"runtime policy {str(resolved_runtime_policy)!r} is unreadable: {exc}"
+            ) from exc
+        if not isinstance(policy_data, dict):
+            raise RuntimePolicyRefused(
+                f"runtime policy {str(resolved_runtime_policy)!r} must be a YAML mapping"
+            )
+        is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
+        if runtime_policy_auto_resolved and not is_runtime_policy_record:
+            raise RuntimePolicyRefused(
+                _corrupt_default_runtime_policy_message(Path(resolved_runtime_policy))
+            )
+        if runtime_backend is not None or is_runtime_policy_record:
+            if not is_runtime_policy_record:
+                raise RuntimePolicyRefused(
+                    "--backend requires --runtime-policy to point at a full "
+                    "runtime-policy-record"
+                )
+            policy_errors = ce_runtime_policy.validate_runtime_policy(
+                policy_data, Path(resolved_runtime_policy)
+            )
+            if policy_errors:
+                detail = "; ".join(error.format() for error in policy_errors[:3])
+                raise RuntimePolicyRefused(
+                    f"runtime policy {str(resolved_runtime_policy)!r} did not validate clean: {detail}"
+                )
+            try:
+                plan = replace(
+                    plan,
+                    runtime_policy=ce_runtime_policy.runtime_policy_launch_stamp(
+                        policy_data,
+                        policy_ref=resolved_runtime_policy,
+                        requested_backend=runtime_backend,
+                    ),
+                )
+            except ce_runtime_policy.RuntimePolicyResolutionError as exc:
+                raise RuntimePolicyRefused(str(exc)) from exc
+            runtime_policy_record = dict(policy_data)
+        try:
+            resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
+        except resource_bound_spec.ResourcePolicyError as exc:
+            raise ResourceBoundRefused(str(exc)) from exc
+        if resource_policy.opted_down:
+            plan = replace(plan, resource_bound=f"none ({resource_policy.enforcement})")
+    bounding = (
+        resource_policy is not None
+        and resource_policy.governed
+        and not resource_policy.opted_down
+    )
+    if runtime_backend is not None and resolved_runtime_policy is None:
+        raise RuntimePolicyRefused(
+            "--backend requires --runtime-policy so the launch carries the "
+            "digest-pinned image, mount manifest, and egress allowlist"
+        )
+    return _RuntimePolicyGateResult(
+        plan=plan,
+        resolved_runtime_policy=resolved_runtime_policy,
+        runtime_policy_record=runtime_policy_record,
+        resource_policy=resource_policy,
+        bounding=bounding,
+    )
+
+
+def _evaluate_seat_surface_reuse(
+    *,
+    repo_root: Path | str | None,
+    session: str,
+    window: str,
+    runtime_policy: Path | str | None,
+    tmux_adapter: Any,
+    mutate: bool,
+) -> _SeatSurfaceGateResult:
+    seat_dir, seat_id, seat_run_id = _resolve_seat_surface(
+        repo_root=repo_root,
+        session=session,
+        window=window,
+        runtime_policy=runtime_policy,
+    )
+    ambiguous_events, strict_events = _strict_events_file_scan(seat_dir)
+    if ambiguous_events:
+        raise SeatSurfaceReuseRefused(
+            _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
+        )
+    strict_launched_events = [
+        event for event in strict_events if event.get("event") == seat_sentinel.EVENT_LAUNCHED
+    ]
+    if not strict_launched_events:
+        return _SeatSurfaceGateResult(seat_dir=seat_dir, seat_id=seat_id, seat_run_id=seat_run_id)
+    for event in strict_launched_events:
+        if _parse_positive_pid(event.get("pid")) is None:
+            raise SeatSurfaceReuseRefused(
+                _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
+            )
+    if not mutate:
+        if _session_exists(tmux_adapter, session):
+            raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, "live tmux session still exists"))
+        latest = _latest_event(seat_dir)
+        if latest and latest.get("event") == seat_sentinel.EVENT_EXITED:
+            return _SeatSurfaceGateResult(
+                seat_dir=seat_dir,
+                seat_id=seat_id,
+                seat_run_id=seat_run_id,
+                skipped_reason="stale launched surface would be archived during live launch",
+            )
+        pids = [_parse_positive_pid(event.get("pid")) for event in strict_launched_events]
+        for pid in pids:
+            if pid is None:
+                raise SeatSurfaceReuseRefused(
+                    _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
+                )
+            alive = _pid_is_alive(pid)
+            if alive is True:
+                raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"live pid {pid} still exists"))
+            if alive is None:
+                raise SeatSurfaceReuseRefused(_refuse_reuse_message(seat_dir, f"ambiguous for pid {pid}"))
+        return _SeatSurfaceGateResult(
+            seat_dir=seat_dir,
+            seat_id=seat_id,
+            seat_run_id=seat_run_id,
+            skipped_reason="dead launched surface would be archived during live launch",
+        )
+    stale_surface_archive = _archive_stale_launched_surface(
+        seat_dir=seat_dir,
+        session=session,
+        tmux_adapter=tmux_adapter,
+    )
+    return _SeatSurfaceGateResult(
+        seat_dir=seat_dir,
+        seat_id=seat_id,
+        seat_run_id=seat_run_id,
+        stale_surface_archive=stale_surface_archive,
+    )
+
+
+def _apply_resource_bounding_gate(
+    *,
+    plan: LaunchPlan,
+    bounding: bool,
+    resource_policy: resource_bound_spec.ResourcePolicy | None,
+    session: str,
+    systemctl_runner: Any | None,
+    support_probe: Any | None,
+) -> tuple[LaunchPlan, resource_bound_spec.ResourceBound | None]:
+    bound = None
+    if bounding:
+        if resource_policy is None:
+            raise ResourceBoundRefused("resource policy was not resolved for bounded launch")
+        probe = support_probe or resource_bound_spec.probe_user_bounding
+        ok, reason = probe(systemctl_runner)
+        if not ok:
+            raise ResourceBoundRefused(
+                f"resource_enforcement is 'enforce' but user-level systemd bounding "
+                f"is unavailable: {reason}; the ratified opt-down is "
+                "resource_enforcement: advisory with a resource_optout binding"
+            )
+        try:
+            unit = resource_bound_spec.resolve_unit_name(session, systemctl_runner)
+        except resource_bound_spec.ResourceBoundError as exc:
+            raise ResourceBoundRefused(str(exc)) from exc
+        bound = resource_policy.seat_bound(unit)
+        plan = replace(
+            plan,
+            command=resource_bound_spec.build_bounded_command(plan.command, bound),
+            resource_bound=_resource_stamp(bound, resource_policy),
+        )
+    return plan, bound
+
+
 def tail_event_diagnosis(
     events_ref: str | Path | None,
     *,
@@ -1051,114 +1437,18 @@ def launch(
 
     # The CE-owned strict MCP config path for the claude harness, resolved in the
     # Ring-0 branch below and provisioned just before the tmux spawn (defect-a).
-    resolved_mcp: str | None = None
-    host_backend_opt_out = backend == HOST_BACKEND_OPT_OUT
-    runtime_backend = None if host_backend_opt_out else backend
-    resolved_runtime_policy: Path | str | None = runtime_policy
-    if host_backend_opt_out and runtime_policy is not None:
-        raise RuntimePolicyRefused(
-            "--backend host is the explicit raw-host opt-out and cannot be combined "
-            "with --runtime-policy"
-        )
-
-    # CC-G-D Ring 0: refuse prohibited Claude surfaces and pin the governed
-    # command BEFORE any side effect (hidden/dry-run/tmux branches below).
-    if harness == "claude":
-        requested = list(extra_args) if extra_args else []
-        spec = claude_launch_spec.parse_claude_argv(requested)
-        # The pack confirmation only changes the decision when skip-permissions is
-        # requested, so the (possibly I/O-bound) probe is invoked only then.
-        confirmed = _confirm_pack(repo_root) if spec.skip_permissions else False
-        spec_result = claude_launch_spec.evaluate_claude_launch(
-            spec, hook_pack_confirmed=confirmed
-        )
-        if not spec_result.ok:
-            codes = ", ".join(r.clause for r in spec_result.refusals)
-            surfaces = ", ".join(r.surface for r in spec_result.refusals)
-            raise LaunchRefused(
-                f"refusing governed Claude launch: {codes} ({surfaces}) — "
-                "Ring 0 refuses before any side effect"
-            )
-        resolved_mcp = mcp_config_path or _default_mcp_config_path(session)
-        try:
-            governed = claude_launch_spec.build_governed_claude_command(
-                base_argv=requested,
-                mcp_config_path=resolved_mcp,
-                closeout_file=closeout_file,
-                completion_report_ref=completion_report_ref,
-            )
-        except claude_launch_spec.GovernedCommandError as exc:
-            clause = (
-                claude_launch_spec.CLAUSE_MCP
-                if "MCP config" in str(exc)
-                else claude_launch_spec.CLAUSE_LOCAL_SETTINGS
-            )
-            raise LaunchRefused(
-                f"refusing governed Claude launch: {clause} — {exc}"
-            ) from exc
-        plan = replace(plan, command=governed)
-
-    # CDX-D Ring 0: Codex launches require the repo-shipped managed PreToolUse
-    # hook-pack to be confirmed before spawn, then refuse unsafe launch surfaces
-    # and wrap the command with an ambient repo-write credential scrub before any
-    # tmux/resource-bound side effect.
-    elif harness == "codex":
-        requested = list(extra_args) if extra_args else []
-        if not _confirm_codex_managed_pack(repo_root):
-            raise CodexLaunchRefused(
-                f"refusing governed Codex launch: {codex_launch_spec.CLAUSE_MANAGED_HOOK_PACK} "
-                "(managed-hook-pack) — Ring 0 refuses before any side effect"
-            )
-        spec = codex_launch_spec.parse_codex_argv(requested)
-        config_bypass = (
-            None if spec.explicit_bypass else codex_launch_spec.detect_config_bypass_mode()
-        )
-        spec_result = codex_launch_spec.evaluate_codex_launch(
-            spec,
-            allowed_root=Path(repo_root or "."),
-            config_bypass_mode=config_bypass,
-        )
-        if not spec_result.ok:
-            codes = ", ".join(r.clause for r in spec_result.refusals)
-            surfaces = ", ".join(r.surface for r in spec_result.refusals)
-            raise CodexLaunchRefused(
-                f"refusing governed Codex launch: {codes} ({surfaces}) — "
-                "Ring 0 refuses before any side effect"
-            )
-        try:
-            codex_bin = codex_launch_spec.resolve_codex_harness_binary()
-        except codex_launch_spec.GovernedCommandError as exc:
-            raise CodexLaunchRefused(
-                f"refusing governed Codex launch: {exc} — "
-                "Ring 0 refuses before any side effect"
-            ) from exc
-        plan = replace(
-            plan,
-            command=codex_launch_spec.build_governed_codex_command(
-                base_argv=requested, codex_bin=codex_bin
-            ),
-            codex_bypass_mode=spec_result.bypass_mode,
-        )
-
-    # CE Ring 0 Hermes governance: pin the creator-engine profile and refuse
-    # prohibited Hermes surfaces BEFORE any side effect. (Hermes has no
-    # --strict-mcp-config equivalent; none is invented — see the gate closeout.)
-    elif harness == "hermes":
-        requested = list(extra_args) if extra_args else []
-        spec_result = hermes_launch_spec.evaluate_hermes_launch(
-            hermes_launch_spec.parse_hermes_argv(requested)
-        )
-        if not spec_result.ok:
-            codes = ", ".join(r.clause for r in spec_result.refusals)
-            surfaces = ", ".join(r.surface for r in spec_result.refusals)
-            raise HermesLaunchRefused(
-                f"refusing governed Hermes launch: {codes} ({surfaces}) — "
-                "Ring 0 refuses before any side effect"
-            )
-        plan = replace(
-            plan,
-            command=hermes_launch_spec.build_governed_hermes_command(base_argv=requested),
-        )
+    harness_gate = _evaluate_harness_governance(
+        plan=plan,
+        harness=harness,
+        session=session,
+        extra_args=extra_args,
+        repo_root=repo_root,
+        mcp_config_path=mcp_config_path,
+        closeout_file=closeout_file,
+        completion_report_ref=completion_report_ref,
+    )
+    plan = harness_gate.plan
+    resolved_mcp = harness_gate.resolved_mcp
 
     # No hidden fallback — a non-visible / detached continuation is refused.
     if allow_hidden or not visible:
@@ -1167,95 +1457,24 @@ def launch(
             "(harness exit/crash/auth-loss must not continue headless)"
         )
 
-    runtime_policy_auto_resolved = False
-    if (
-        resolved_runtime_policy is None
-        and not dry_run
-        and not resume
-        and not host_backend_opt_out
-    ):
-        default_runtime_policy = _default_runtime_policy_path(repo_root)
-        if default_runtime_policy.is_file():
-            resolved_runtime_policy = default_runtime_policy
-            runtime_policy_auto_resolved = True
-        else:
-            raise RuntimePolicyRefused(
-                _missing_default_runtime_policy_message(default_runtime_policy)
-            )
-
     # v3.5-F Ring-0-adjacent: read the resource policy fragment (pure,
     # fail-closed) BEFORE any side effect, through the existing policy-read
     # seam (load_yaml). The bounding wrap is applied to the OUTPUT of the
     # Ring 0 builders above — never their input — so the governed tokens stay
     # byte-identical for every harness.
-    resource_policy: resource_bound_spec.ResourcePolicy | None = None
-    policy_data: Any | None = None
-    runtime_policy_record: dict[str, Any] | None = None
-    if resolved_runtime_policy is not None:
-        try:
-            policy_data = load_yaml(Path(resolved_runtime_policy))
-        except LoaderError as exc:
-            raise ResourceBoundRefused(
-                f"runtime policy {str(resolved_runtime_policy)!r} is unreadable: {exc}"
-            ) from exc
-        if not isinstance(policy_data, dict):
-            raise RuntimePolicyRefused(
-                f"runtime policy {str(resolved_runtime_policy)!r} must be a YAML mapping"
-            )
-        is_runtime_policy_record = policy_data.get("kind") == ce_runtime_policy.KIND_VALUE
-        # Corrupt/foreign onboarded default: a bare `ce launch` must not fall
-        # through to the raw (ungoverned) tmux path just because `kind` is
-        # missing/wrong on an auto-resolved file — refuse loudly with a
-        # message distinct from the absent-record case above, before any
-        # side effect. Explicitly-passed --runtime-policy files are untouched
-        # (their existing --backend semantics are out of scope here).
-        if runtime_policy_auto_resolved and not is_runtime_policy_record:
-            raise RuntimePolicyRefused(
-                _corrupt_default_runtime_policy_message(Path(resolved_runtime_policy))
-            )
-        if runtime_backend is not None or is_runtime_policy_record:
-            if not is_runtime_policy_record:
-                raise RuntimePolicyRefused(
-                    "--backend requires --runtime-policy to point at a full "
-                    "runtime-policy-record"
-                )
-            policy_errors = ce_runtime_policy.validate_runtime_policy(
-                policy_data, Path(resolved_runtime_policy)
-            )
-            if policy_errors:
-                detail = "; ".join(error.format() for error in policy_errors[:3])
-                raise RuntimePolicyRefused(
-                    f"runtime policy {str(resolved_runtime_policy)!r} did not validate clean: {detail}"
-                )
-            try:
-                plan = replace(
-                    plan,
-                    runtime_policy=ce_runtime_policy.runtime_policy_launch_stamp(
-                        policy_data,
-                        policy_ref=resolved_runtime_policy,
-                        requested_backend=runtime_backend,
-                    ),
-                )
-            except ce_runtime_policy.RuntimePolicyResolutionError as exc:
-                raise RuntimePolicyRefused(str(exc)) from exc
-            runtime_policy_record = dict(policy_data)
-        try:
-            resource_policy = resource_bound_spec.parse_resource_policy(policy_data)
-        except resource_bound_spec.ResourcePolicyError as exc:
-            raise ResourceBoundRefused(str(exc)) from exc
-        if resource_policy.opted_down:
-            # Explicit ratified opt-down: launch unbounded, stamp the evidence.
-            plan = replace(plan, resource_bound=f"none ({resource_policy.enforcement})")
-    bounding = (
-        resource_policy is not None
-        and resource_policy.governed
-        and not resource_policy.opted_down
+    runtime_gate = _evaluate_runtime_policy_gates(
+        plan=plan,
+        repo_root=repo_root,
+        runtime_policy=runtime_policy,
+        backend=backend,
+        dry_run=dry_run,
+        resume=resume,
     )
-    if runtime_backend is not None and resolved_runtime_policy is None:
-        raise RuntimePolicyRefused(
-            "--backend requires --runtime-policy so the launch carries the "
-            "digest-pinned image, mount manifest, and egress allowlist"
-        )
+    plan = runtime_gate.plan
+    resolved_runtime_policy = runtime_gate.resolved_runtime_policy
+    runtime_policy_record = runtime_gate.runtime_policy_record
+    resource_policy = runtime_gate.resource_policy
+    bounding = runtime_gate.bounding
 
     # Dry-run is pure: deterministic plan, no tmux, no provider login, and no
     # systemd probe — the bounding posture is rendered offline (the plan JSON
@@ -1295,56 +1514,30 @@ def launch(
             )
         return LaunchResult(plan=plan, spawned=False, attached=True)
 
-    seat_dir, seat_id, seat_run_id = _resolve_seat_surface(
+    seat_surface_gate = _evaluate_seat_surface_reuse(
         repo_root=repo_root,
         session=session,
         window=window,
         runtime_policy=resolved_runtime_policy,
+        tmux_adapter=tmux_adapter,
+        mutate=True,
     )
-    stale_surface_archive: SeatSurfaceArchiveResult | None = None
-    ambiguous_events, strict_events = _strict_events_file_scan(seat_dir)
-    if ambiguous_events:
-        raise SeatSurfaceReuseRefused(
-            _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
-        )
-    strict_launched_events = [
-        event for event in strict_events if event.get("event") == seat_sentinel.EVENT_LAUNCHED
-    ]
-    if strict_launched_events:
-        for event in strict_launched_events:
-            if _parse_positive_pid(event.get("pid")) is None:
-                raise SeatSurfaceReuseRefused(
-                    _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
-                )
-        stale_surface_archive = _archive_stale_launched_surface(
-            seat_dir=seat_dir,
-            session=session,
-            tmux_adapter=tmux_adapter,
-        )
+    seat_dir = seat_surface_gate.seat_dir
+    seat_id = seat_surface_gate.seat_id
+    seat_run_id = seat_surface_gate.seat_run_id
+    stale_surface_archive = seat_surface_gate.stale_surface_archive
 
     # v3.5-F live bounding — still BEFORE any side effect: refuse loudly when
     # user-level bounding is unavailable under `enforce` (Fork F-2), resolve a
     # collision-free unit name, then wrap the governed command.
-    bound = None
-    if bounding:
-        probe = support_probe or resource_bound_spec.probe_user_bounding
-        ok, reason = probe(systemctl_runner)
-        if not ok:
-            raise ResourceBoundRefused(
-                f"resource_enforcement is 'enforce' but user-level systemd bounding "
-                f"is unavailable: {reason}; the ratified opt-down is "
-                "resource_enforcement: advisory with a resource_optout binding"
-            )
-        try:
-            unit = resource_bound_spec.resolve_unit_name(session, systemctl_runner)
-        except resource_bound_spec.ResourceBoundError as exc:
-            raise ResourceBoundRefused(str(exc)) from exc
-        bound = resource_policy.seat_bound(unit)
-        plan = replace(
-            plan,
-            command=resource_bound_spec.build_bounded_command(plan.command, bound),
-            resource_bound=_resource_stamp(bound, resource_policy),
-        )
+    plan, bound = _apply_resource_bounding_gate(
+        plan=plan,
+        bounding=bounding,
+        resource_policy=resource_policy,
+        session=session,
+        systemctl_runner=systemctl_runner,
+        support_probe=support_probe,
+    )
 
     brain_payload = _build_controller_brain_bootstrap(repo_root)
     recall_status = (
@@ -1552,3 +1745,219 @@ def launch(
             else None
         ),
     )
+
+
+def _gate_pass(name: str, detail: str | None = None) -> LaunchPreflightGate:
+    return LaunchPreflightGate(name=name, status="PASS", detail=detail)
+
+
+def _gate_skip(name: str, reason: str) -> LaunchPreflightGate:
+    return LaunchPreflightGate(name=name, status="SKIPPED", detail=reason)
+
+
+def _gate_refusal(name: str, exc: LaunchError) -> LaunchPreflightGate:
+    return LaunchPreflightGate(
+        name=name,
+        status="WOULD-REFUSE",
+        detail=str(exc),
+        code=getattr(exc, "code", None),
+    )
+
+
+def preflight_launch(
+    *,
+    harness: str = DEFAULT_HARNESS,
+    session: str = DEFAULT_SESSION,
+    window: str = DEFAULT_WINDOW,
+    invoked_as: str = "launch",
+    resume: bool = False,
+    visible: bool = True,
+    allow_hidden: bool = False,
+    extra_args: Sequence[str] | None = None,
+    tmux_adapter: Any | None = None,
+    repo_root: Path | str | None = None,
+    runtime_policy: Path | str | None = None,
+    backend: str | None = None,
+    mcp_config_path: str | None = None,
+    closeout_file: str | None = None,
+    completion_report_ref: str | None = None,
+    systemctl_runner: Any | None = None,
+    support_probe: Any | None = None,
+    which: Any | None = None,
+) -> LaunchPreflightReport:
+    """Evaluate the live ``ce launch`` pre-spawn gates without side effects."""
+    gates: list[LaunchPreflightGate] = []
+    plan: LaunchPlan | None = None
+    resolved_mcp: str | None = None
+    runtime_gate: _RuntimePolicyGateResult | None = None
+    tmux_ready = False
+
+    try:
+        plan = plan_launch(
+            harness=harness,
+            session=session,
+            window=window,
+            invoked_as=invoked_as,
+            resume=resume,
+            dry_run=False,
+            extra_args=extra_args,
+        )
+    except LaunchError as exc:
+        gates.append(_gate_refusal("plan", exc))
+    else:
+        gates.append(_gate_pass("plan"))
+
+    try:
+        _require_launch_pinned_foreman_contract()
+    except LaunchError as exc:
+        gates.append(_gate_refusal("foreman-dispatch-contract", exc))
+    else:
+        gates.append(_gate_pass("foreman-dispatch-contract"))
+
+    if plan is None:
+        gates.append(_gate_skip("harness-governance", "requires a valid launch plan"))
+    else:
+        try:
+            harness_gate = _evaluate_harness_governance(
+                plan=plan,
+                harness=harness,
+                session=session,
+                extra_args=extra_args,
+                repo_root=repo_root,
+                mcp_config_path=mcp_config_path,
+                closeout_file=closeout_file,
+                completion_report_ref=completion_report_ref,
+            )
+        except LaunchError as exc:
+            gates.append(_gate_refusal("harness-governance", exc))
+        else:
+            plan = harness_gate.plan
+            resolved_mcp = harness_gate.resolved_mcp
+            gates.append(_gate_pass("harness-governance"))
+
+    try:
+        if allow_hidden or not visible:
+            raise HiddenContinuationRefused(
+                "refusing hidden/detached Controller-seat continuation; there is no hidden fallback "
+                "(harness exit/crash/auth-loss must not continue headless)"
+            )
+    except LaunchError as exc:
+        gates.append(_gate_refusal("visibility", exc))
+    else:
+        gates.append(_gate_pass("visibility"))
+
+    if plan is None:
+        gates.append(_gate_skip("runtime-policy", "requires a valid launch plan"))
+    else:
+        try:
+            runtime_gate = _evaluate_runtime_policy_gates(
+                plan=plan,
+                repo_root=repo_root,
+                runtime_policy=runtime_policy,
+                backend=backend,
+                dry_run=False,
+                resume=resume,
+            )
+        except LaunchError as exc:
+            gates.append(_gate_refusal("runtime-policy", exc))
+        else:
+            plan = runtime_gate.plan
+            gates.append(_gate_pass("runtime-policy"))
+
+    if tmux_adapter is None:
+        from .tmux_adapter import TmuxAdapter
+
+        tmux_adapter = TmuxAdapter()
+    try:
+        if not tmux_adapter.is_available():
+            raise TmuxUnavailableError(
+                "tmux is unavailable; refusing visible Controller-seat launch before any side effect"
+            )
+    except LaunchError as exc:
+        gates.append(_gate_refusal("tmux-availability", exc))
+    else:
+        tmux_ready = True
+        gates.append(_gate_pass("tmux-availability"))
+
+    if resume:
+        try:
+            if not _session_exists(tmux_adapter, session):
+                raise ResumeTargetMissing(
+                    f"no live launcher session {session!r} to resume; refusing to spawn a hidden seat"
+                )
+        except LaunchError as exc:
+            gates.append(_gate_refusal("resume-target", exc))
+        else:
+            gates.append(_gate_pass("resume-target"))
+        gates.append(_gate_skip("seat-surface-reuse", "resume attaches an existing live session"))
+    elif runtime_gate is None:
+        gates.append(_gate_skip("seat-surface-reuse", "requires runtime-policy resolution"))
+    elif not tmux_ready:
+        gates.append(_gate_skip("seat-surface-reuse", "requires tmux session liveness probe"))
+    else:
+        try:
+            seat_surface = _evaluate_seat_surface_reuse(
+                repo_root=repo_root,
+                session=session,
+                window=window,
+                runtime_policy=runtime_gate.resolved_runtime_policy,
+                tmux_adapter=tmux_adapter,
+                mutate=False,
+            )
+        except LaunchError as exc:
+            gates.append(_gate_refusal("seat-surface-reuse", exc))
+        else:
+            if seat_surface.skipped_reason:
+                gates.append(_gate_skip("seat-surface-reuse", seat_surface.skipped_reason))
+            else:
+                gates.append(_gate_pass("seat-surface-reuse"))
+
+    binary = harness_binary_check(harness, which=which)
+    if binary["ok"]:
+        gates.append(_gate_pass("harness-binary", str(binary["detail"])))
+    else:
+        gates.append(
+            LaunchPreflightGate(
+                name="harness-binary",
+                status="WOULD-REFUSE",
+                detail=str(binary["detail"]),
+                code="RED-G-HARNESS-PATH",
+            )
+        )
+
+    if runtime_gate is None or plan is None:
+        gates.append(_gate_skip("resource-bounding", "requires runtime-policy resolution"))
+    else:
+        try:
+            plan, _bound = _apply_resource_bounding_gate(
+                plan=plan,
+                bounding=runtime_gate.bounding,
+                resource_policy=runtime_gate.resource_policy,
+                session=session,
+                systemctl_runner=systemctl_runner,
+                support_probe=support_probe,
+            )
+        except LaunchError as exc:
+            gates.append(_gate_refusal("resource-bounding", exc))
+        else:
+            gates.append(_gate_pass("resource-bounding"))
+
+    if runtime_gate is not None and plan is not None and plan.runtime_policy is not None:
+        gates.append(
+            _gate_skip(
+                "visible-runtime-backend",
+                "requires live launch to provision the contained visible runtime",
+            )
+        )
+    else:
+        gates.append(_gate_pass("visible-runtime-backend", "not requested"))
+
+    gates.append(
+        _gate_skip(
+            "brain-bootstrap-materialization",
+            "requires live launch to avoid bootstrap sync/hydration and payload writes",
+        )
+    )
+    if resolved_mcp is not None:
+        gates.append(_gate_skip("mcp-config-materialization", "requires live launch"))
+    return LaunchPreflightReport(gates=tuple(gates))

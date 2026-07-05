@@ -69,6 +69,28 @@ def _inner_argv(result):
     return shlex.split(lines[idx - 1])
 
 
+def _preflight_gate(report: launch_runtime.LaunchPreflightReport, name: str):
+    return next(gate for gate in report.gates if gate.name == name)
+
+
+def _tree_fingerprint(root: Path) -> list[tuple[str, str, str]]:
+    return [
+        (
+            str(path.relative_to(root)),
+            oct(path.stat().st_mode),
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    ]
+
+
+def _make_seat_dir(tmp_path: Path, name: str) -> Path:
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / name
+    seat_dir.mkdir(parents=True)
+    return seat_dir
+
+
 def _brain_payload(result):
     ref = Path(result.plan.brain_bootstrap_ref)
     assert ref.is_file()
@@ -348,6 +370,88 @@ def test_dry_run_works_without_tmux_available():
     assert adapter.spawned == []
 
 
+def test_preflight_missing_default_runtime_policy_matches_live_refusal(tmp_path):
+    adapter = FakeAdapter()
+    with pytest.raises(launch_runtime.RuntimePolicyRefused) as exc:
+        launch_runtime.launch(
+            harness="hermes",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    report = launch_runtime.preflight_launch(
+        harness="hermes",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "runtime-policy")
+    assert gate.status == "WOULD-REFUSE"
+    assert gate.detail == str(exc.value)
+    assert report.exit_code == 1
+
+
+def test_preflight_ambiguous_seat_surface_matches_live_refusal(tmp_path):
+    seat_dir = _make_seat_dir(tmp_path, "ambiguous-preflight--controller")
+    seat_dir.joinpath("events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": "ambiguous-preflight--controller"}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="ambiguous-preflight",
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=FakeAdapter(),
+        )
+
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        backend="host",
+        session="ambiguous-preflight",
+        window="controller",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "seat-surface-reuse")
+    assert gate.status == "WOULD-REFUSE"
+    assert gate.detail == str(exc.value)
+
+
+def test_preflight_leaves_stale_seat_dir_byte_identical(tmp_path):
+    seat_dir = _make_seat_dir(tmp_path, "preflight-stale--controller")
+    seat_dir.joinpath("events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": "preflight-stale--controller", "pid": 999999})
+        + "\n"
+        + json.dumps({"event": "exited", "seat_id": "preflight-stale--controller", "exit_code": 0})
+        + "\n",
+        encoding="utf-8",
+    )
+    seat_dir.joinpath("state.txt").write_text("preserved\n", encoding="utf-8")
+    before = _tree_fingerprint(seat_dir)
+
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        backend="host",
+        session="preflight-stale",
+        window="controller",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "seat-surface-reuse")
+    assert gate.status == "SKIPPED"
+    assert "would be archived during live launch" in (gate.detail or "")
+    assert seat_dir.is_dir()
+    assert _tree_fingerprint(seat_dir) == before
+
+
 # ---------------------------------------------------------------------------
 # Hidden-continuation refusal (no hidden fallback)
 # ---------------------------------------------------------------------------
@@ -462,12 +566,6 @@ def test_launch_refuses_ambiguous_launched_surface_with_recovery_command(tmp_pat
     assert "ce reap once" in message
     assert seat_dir.is_dir()
     assert adapter.spawned == []
-
-
-def _make_seat_dir(tmp_path: Path, name: str) -> Path:
-    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / name
-    seat_dir.mkdir(parents=True)
-    return seat_dir
 
 
 def test_launch_refuses_mixed_dead_pid_and_missing_pid_launched_events(tmp_path):
