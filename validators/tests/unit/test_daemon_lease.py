@@ -672,9 +672,46 @@ def test_container_runner_uses_tmpfs_for_queue_secret_target_when_host_sets_targ
     assert proc.returncode == 0, proc.stderr
     argv = argv_file.read_text(encoding="utf-8").splitlines()
     assert "--tmpfs" in argv
-    assert "/ce/state/queue-daemon-secret:rw,size=1m,mode=0700" in argv
+    assert "/ce/state/queue-daemon-secret:rw,size=1m,mode=0700,uid=10001,gid=10001" in argv
     assert "CE_APPROVAL_WALL_SECRET_TARGET_FILE=/ce/state/queue-daemon-secret/approval-wall-secret" in argv
     assert str(host_secret_target) not in argv
+
+
+def test_container_runner_creates_missing_state_and_lease_roots(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    env = _container_runner_env(tmp_path, fake_engine)
+    state_root = tmp_path / "state"
+    lease_root = state_root / "daemon-leases"
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert state_root.is_dir()
+    assert lease_root.is_dir()
+    assert oct(state_root.stat().st_mode & 0o777) == "0o700"
+    assert oct(lease_root.stat().st_mode & 0o777) == "0o700"
+
+
+def test_container_runner_refuses_docker_state_root_with_wrong_owner(tmp_path: Path):
+    fake_docker = tmp_path / "docker"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_docker, argv_file)
+    state_root = tmp_path / "state"
+    state_root.mkdir(mode=0o700)
+    state_root.chmod(0o700)
+    wrong_uid = os.getuid() + 1
+    env = _container_runner_env(tmp_path, fake_docker)
+    env["CE_DAEMON_IMAGE_UID"] = str(wrong_uid)
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    assert "CE_DAEMON_STATE_ROOT owner uid" in proc.stderr
+    assert f"Run: chown -R {wrong_uid}:{wrong_uid} {state_root}" in proc.stderr
+    assert not argv_file.exists()
 
 
 def test_container_runner_keeps_queue_default_invocation_byte_identical(tmp_path: Path):
@@ -696,6 +733,8 @@ def test_container_runner_keeps_queue_default_invocation_byte_identical(tmp_path
             "ce-queue-daemon",
             "--workdir",
             "/workspace/creator-engine",
+            "--user",
+            "10001:10001",
             "--volume",
             f"{repo_root}:/workspace/creator-engine:ro",
             "--volume",
@@ -742,6 +781,8 @@ def test_container_runner_keeps_conveyor_default_invocation_byte_identical(tmp_p
             "ce-conveyor-daemon",
             "--workdir",
             "/workspace/creator-engine",
+            "--user",
+            "10001:10001",
             "--volume",
             f"{repo_root}:/workspace/creator-engine:ro",
             "--volume",
@@ -794,7 +835,7 @@ def test_container_runner_uses_tmpfs_for_conveyor_secret_file_mount(tmp_path: Pa
 
     assert proc.returncode == 0, proc.stderr
     argv = argv_file.read_text(encoding="utf-8").splitlines()
-    assert "/run/creator-engine/conveyor-daemon-secret:rw,size=1m,mode=0700" in argv
+    assert "/run/creator-engine/conveyor-daemon-secret:rw,size=1m,mode=0700,uid=10001,gid=10001" in argv
     assert f"{signing_secret_file}:/run/creator-engine/conveyor-daemon-secret/signing-secret:ro" in argv
     assert "CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE=/run/creator-engine/conveyor-daemon-secret/signing-secret" in argv
 
