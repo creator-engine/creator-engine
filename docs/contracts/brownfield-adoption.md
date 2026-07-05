@@ -17,9 +17,19 @@ load-bearing:
 
 ```bash
 ce install --spec llms-install.md --inventory
-# prepare ce-install.answers.yaml with the operator
 ce install --spec llms-install.md --answers ce-install.answers.yaml --plan
 ce install --spec llms-install.md --answers ce-install.answers.yaml --apply
+```
+
+Prepare `ce-install.answers.yaml` with the operator before `--plan`. A minimal
+brownfield answers fragment starts with the schema version:
+
+```yaml
+answers_version: 1
+brownfield:
+  enabled: true
+  project_root: "."
+  inventory_depth: bounded
 ```
 
 `--inventory` and `--plan` are read-only. They inspect source-controlled project
