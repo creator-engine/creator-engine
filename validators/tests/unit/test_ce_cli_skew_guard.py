@@ -79,6 +79,23 @@ def test_stale_wheel_warns_for_non_gate_command(monkeypatch, tmp_path, capsys):
     err = capsys.readouterr().err
     assert err.count("stale-wheel/source-version skew detected") == 1
     assert "Non-gate `ce doctor` will proceed" in err
+    version_idx = err.index("validators version 0.3.2")
+    running_idx = err.index("running package creator-engine-validator is 0.3.1")
+    pythonpath_idx = err.index("PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli doctor")
+    override_idx = err.index("CE_ALLOW_STALE_WHEEL=1")
+    assert version_idx < running_idx < pythonpath_idx < override_idx
+
+
+def test_matching_installed_wheel_version_is_silent_and_proceeds(monkeypatch, tmp_path, capsys):
+    repo = _write_checkout(tmp_path, "0.3.1")
+    _as_installed_wheel(monkeypatch, tmp_path, running_version="0.3.1")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ce_cli.pr_preflight, "run_cli", lambda args: 0)
+
+    ret = ce_cli.main(["validate-pr", "--repo-root", str(repo)])
+
+    assert ret == 0
+    assert capsys.readouterr().err == ""
 
 
 def test_source_module_invocation_does_not_guard(monkeypatch, tmp_path, capsys):

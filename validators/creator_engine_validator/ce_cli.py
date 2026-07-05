@@ -5184,8 +5184,8 @@ def _maybe_guard_stale_wheel_skew(args) -> int | None:
 
         print(
             f"WARNING: {detail} Non-gate `ce {label}` will proceed. "
-            f"Prefer `PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli {label}` "
-            f"from the checkout, or set `{_STALE_WHEEL_OVERRIDE_ENV}=1` to acknowledge the skew.",
+            f"Use `PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli {label}` "
+            f"from the checkout, or set `{_STALE_WHEEL_OVERRIDE_ENV}=1` to proceed explicitly.",
             file=sys.stderr,
         )
         return None
