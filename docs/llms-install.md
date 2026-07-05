@@ -236,7 +236,7 @@ Work the loop:
      copy.
    - A pre-granted sudo is **scoped**: `host.sudo_grant: [runsc, proxy]`
      (an explicit package list; a bare `true` is invalid).
-3. **`ce onboard --spec <this-spec> --answers ce-install.answers.yaml --plan`**
+3. **`ce install --spec <this-spec> --answers ce-install.answers.yaml --plan`**
    — the terraform-plan analog: validates the file (fail-closed on unknown
    keys), merges `interactive > answers > detected > default`, and prints the
    full plan including the EXACT remaining asks and the decomposed GitHub
