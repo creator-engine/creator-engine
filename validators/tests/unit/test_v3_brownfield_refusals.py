@@ -140,16 +140,22 @@ def _run_brownfield_apply_refusal(tmp_path: Path, capsys, monkeypatch) -> tuple[
     return code, capsys.readouterr().out
 
 
-def test_brownfield_apply_vars_never_set_keeps_existing_refusal_message(
+def _assert_tenant_lens_refusal_copy(out: str) -> None:
+    assert "E3" not in out
+    assert "onboard_apply" not in out
+    assert "e2_brownfield_seam_unavailable" not in out
+    assert "adoption write escalation" not in out
+
+
+def test_brownfield_apply_vars_never_set_uses_tenant_lens_refusal_message(
     tmp_path, capsys, monkeypatch
 ):
     code, out = _run_brownfield_apply_refusal(tmp_path, capsys, monkeypatch)
 
     assert code == 1
-    assert (
-        "E3 brownfield adoption is planned, but this onboard_apply run is not authorized "
-        "for the adoption write escalation (set CE_FORGE_LIVE_FORGE + CE_FORGE_ADOPTION_WRITE)"
-    ) in out
+    assert "Brownfield adoption is ready, but this command was started without write authorization." in out
+    assert "CE_FORGE_LIVE_FORGE=1 and CE_FORGE_ADOPTION_WRITE=1" in out
+    _assert_tenant_lens_refusal_copy(out)
 
 
 def test_brownfield_apply_vars_set_but_credentials_unresolved_names_credential_blocker(
@@ -161,6 +167,7 @@ def test_brownfield_apply_vars_set_but_credentials_unresolved_names_credential_b
     code, out = _run_brownfield_apply_refusal(tmp_path, capsys, monkeypatch)
 
     assert code == 1
-    assert "cannot resolve the App credential for the adoption write escalation" in out
-    assert "local PEM for kind: own or broker for kind: shared" in out
-    assert "set CE_FORGE_LIVE_FORGE + CE_FORGE_ADOPTION_WRITE" not in out
+    assert "CE could not load the GitHub App credential needed to open the governance PR" in out
+    assert "local PEM for kind: own, or a broker for kind: shared" in out
+    assert "CE_FORGE_LIVE_FORGE=1 and CE_FORGE_ADOPTION_WRITE=1" not in out
+    _assert_tenant_lens_refusal_copy(out)
