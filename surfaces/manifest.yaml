@@ -7,6 +7,14 @@ surfaces:
     update_policy: downstream digest capture pending
     last_evaluated: "2026-06-30"
 
+  - name: claude-code
+    version: "2.1.201"
+    commit_or_digest: UNSET
+    source: npm:@anthropic-ai/claude-code
+    custody: rented
+    update_policy: downstream digest capture pending
+    last_evaluated: "2026-07-05"
+
   - name: VPS runsc image
     version: "x86_64"
     commit_or_digest: sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639
@@ -14,6 +22,14 @@ surfaces:
     custody: rented
     update_policy: digest pin required before default VPS launch use
     last_evaluated: "2026-06-26"
+
+  - name: CE seat image
+    version: "UNSET"
+    commit_or_digest: UNSET
+    source: ghcr.io/creator-engine/creator-engine/ce-seat
+    custody: creator-engine image
+    update_policy: manifest-list digest required before tenant launch use; UNSET until published
+    last_evaluated: "2026-07-05"
 
   - name: herdr
     version: null
