@@ -17,4 +17,4 @@ issue: creator-engine/ce-ops#452
 - Supersedes `brain-assertion-d1b-20-canonical-worker-role-files-v2` -> `-v3`
   to name `canary_qa` as the fifth canonical role and re-pin `evidence_sha256`
   to this branch's own `.claude/agents/README.md`, preserving the ad-hoc-role
-  invention guard clause (ce-ops#452).
+  invention guard clause.
