@@ -62,7 +62,25 @@ KNOWN_SURFACES = frozenset(
     }
 )
 PYTHON_DEP_SURFACES = frozenset({"pyyaml", "jsonschema", "textual"})
-PHASE1_PENDING_DIGEST_SURFACES = frozenset({"codex", *PYTHON_DEP_SURFACES})
+PHASE1_PENDING_DIGEST_SURFACES = frozenset({"codex", "claude-code", *PYTHON_DEP_SURFACES})
+UNSET_DIGEST = "UNSET"
+UNSET_DIGEST_ALLOWLIST = frozenset(
+    {
+        (
+            "ce-seat-image",
+            "UNSET",
+            "ghcr.io/creator-engine/creator-engine/ce-seat",
+            "creator-engine image",
+            "manifest-list digest required before tenant launch use; UNSET until published",
+            "2026-07-05",
+        )
+    }
+)
+EXPLICIT_IMAGE_ALIASES_BY_SURFACE = {
+    "ce-seat-image": frozenset({"ce-seat"}),
+    "codex": frozenset({"codex-runsc"}),
+    "gvisor/runsc": frozenset({"runsc"}),
+}
 ZIG_ARCHES = frozenset({"linux-aarch64", "linux-x86_64"})
 DUAL_ARCH_BASE_IMAGE_ARCHES = frozenset({"amd64", "arm64"})
 ARCH_ALIASES = {
@@ -226,6 +244,70 @@ def _normal_arch(value: object) -> str | None:
     return ARCH_ALIASES.get(str(value).strip().lower())
 
 
+def _image_alias_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(value).strip().lower()).strip("-")
+
+
+def _first_component_alias(value: str) -> str | None:
+    first = value.split("-", 1)[0]
+    if len(first) < 3:
+        return None
+    return first
+
+
+def _surface_image_aliases(key: str) -> set[str]:
+    normalized = _image_alias_key(key)
+    aliases = {normalized}
+    first = _first_component_alias(normalized)
+    if first is not None:
+        aliases.add(first)
+    aliases.update(EXPLICIT_IMAGE_ALIASES_BY_SURFACE.get(key, ()))
+    return {alias for alias in aliases if alias}
+
+
+def _image_candidate_aliases(image: str) -> set[str]:
+    aliases: set[str] = set()
+    for var_name in re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", image):
+        for suffix in ("_COMMIT_OR_DIGEST", "_SOURCE", "_VERSION"):
+            if var_name.endswith(suffix):
+                aliases.add(_image_alias_key(var_name[: -len(suffix)]))
+                break
+
+    reference = image.split("@", 1)[0]
+    parts = [part for part in reference.split("/") if part]
+    if not parts:
+        return aliases
+    parts[-1] = parts[-1].split(":", 1)[0]
+    for part in parts:
+        normalized = _image_alias_key(part)
+        if not normalized:
+            continue
+        aliases.add(normalized)
+        first = _first_component_alias(normalized)
+        if first is not None:
+            aliases.add(first)
+    return aliases
+
+
+def _unset_digest_allowlist_key(key: str, surface: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+    return (
+        key,
+        str(surface.get("version", "")),
+        str(surface.get("source", "")),
+        str(surface.get("custody", "")),
+        str(surface.get("update_policy", "")),
+        str(surface.get("last_evaluated", "")),
+    )
+
+
+def _is_allowlisted_unset_digest(key: str, surface: dict[str, Any]) -> bool:
+    return _unset_digest_allowlist_key(key, surface) in UNSET_DIGEST_ALLOWLIST
+
+
+def _is_unpinned_digest(value: object) -> bool:
+    return value is None or value == UNSET_DIGEST
+
+
 def _is_host_only(surface: dict[str, Any]) -> bool:
     source = str(surface.get("source", "")).lower()
     custody = str(surface.get("custody", "")).lower()
@@ -242,11 +324,14 @@ def _is_base_image_surface(surface: dict[str, Any]) -> bool:
 def _pinnable_null_digest_errors(path: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for key, surface in sorted(by_name.items()):
+        commit_or_digest = surface.get("commit_or_digest")
         if (
             key in PHASE1_PENDING_DIGEST_SURFACES
             or _is_host_only(surface)
-            or surface.get("commit_or_digest") is not None
+            or (not _is_unpinned_digest(commit_or_digest) and not _is_allowlisted_unset_digest(key, surface))
         ):
+            continue
+        if commit_or_digest == UNSET_DIGEST and _is_allowlisted_unset_digest(key, surface):
             continue
         name = surface.get("name", key)
         errors.append(
@@ -299,12 +384,9 @@ def _from_image_and_platform(line: str) -> tuple[str, str | None] | None:
 
 
 def _matching_surface_for_image(image: str, by_name: dict[str, dict[str, Any]]) -> tuple[str, dict[str, Any]] | None:
-    image_key = _surface_key(image.replace("/", "-").replace(":", "-"))
+    image_aliases = _image_candidate_aliases(image)
     for key, surface in by_name.items():
-        aliases = {key, key.split("-")[0]}
-        if key == "gvisor/runsc":
-            aliases.add("runsc")
-        if any(alias and alias in image_key for alias in aliases):
+        if _surface_image_aliases(key) & image_aliases:
             return key, surface
     return None
 
