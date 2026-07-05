@@ -13,6 +13,49 @@ import pytest
 from creator_engine_validator import ce_cli, ce_onboard
 
 
+@pytest.mark.parametrize(
+    ("flag", "extra"),
+    [
+        ("--spec", ["spec.yaml"]),
+        ("--answers", ["answers.yaml"]),
+        ("--answers-schema", ["schema.yaml"]),
+        ("--plan", []),
+        ("--apply", []),
+        ("--inventory", []),
+    ],
+)
+def test_onboard_installer_flags_hint_ce_install(flag, extra, monkeypatch, capsys):
+    def should_not_dispatch(_args):
+        raise AssertionError("native onboard should not run for installer-only flags")
+
+    monkeypatch.setattr(ce_onboard, "run_cli", should_not_dispatch)
+
+    rc = ce_cli.main(["onboard", flag, *extra])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert flag in captured.err
+    assert "ce install <same args>" in captured.err
+    assert "unrecognized arguments" not in captured.err
+
+
+def test_onboard_without_installer_flags_still_dispatches_native(monkeypatch):
+    seen = {}
+
+    def capture(args):
+        seen["args"] = args
+        return 17
+
+    monkeypatch.setattr(ce_onboard, "run_cli", capture)
+
+    rc = ce_cli.main(["onboard", "--install-mode", "skip"])
+
+    assert rc == 17
+    assert seen["args"].group == "onboard"
+    assert seen["args"].install_mode == "skip"
+
+
 def test_emit_manifest_via_cli(capsys):
     rc = ce_cli.main(["onboard", "--emit-manifest"])
     assert rc == 0
