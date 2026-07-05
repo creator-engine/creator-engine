@@ -14,7 +14,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
 ### Added
 
-- **ce-375-scope-impact-p0** (ce-ops#375; validator tooling): **Warning-only Scope impact propagation.**
+- **ce-375-scope-impact-p0** (validator tooling): **Warning-only Scope impact propagation.**
 
   - Added optional Scope downstream references and a warning-only impact drift check for ratified Scope records.
 - **ce-conveyor-harvest-core** (ce-conveyor; conveyor harvest): **Conveyor harvest core.**
@@ -43,7 +43,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Adds a release-finalize workflow that verifies the Operator supplied public detached signature, copies finalized artifacts into docs/, and opens a release-publish PR.
   - Adds guarded reviewer-token approval and auto-merge wiring for the publish PR.
   - Covers the workflow with static unit contract tests.
-- **ce-351-queue-daemon-relocation** (ce-ops#351; deploy/queue-daemon): **Durable queue daemon relocation package.**
+- **ce-351-queue-daemon-relocation** (deploy/queue-daemon): **Durable queue daemon relocation package.**
 
   - Added a boot-persistent systemd unit for the merge-queue daemon with
     `Restart=always`, journald logging, OpenBao address wiring, and secret loading
@@ -58,26 +58,26 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Added `ce automerge-kill-switch status|on|off` over the durable live-policy state store.
   - Classified the governed operator kill switch as internal-only while keeping CLI inventory guards explicit.
   - Preserved actuator gate behavior while adding fail-closed operator fallback guidance for failed disarm writes.
-- **ce-triage-autolabel** (ce-ops#67; ce-ops triage queue advisory labels): **Add advisory classification labels to the ce-ops triage queue.**
+- **ce-triage-autolabel** (ce-ops triage queue advisory labels): **Add advisory classification labels to the ce-ops triage queue.**
 
   - Apply-mode now synchronizes deterministic `wc:` and `triage:` issue labels from the existing advisory queue classification.
   - Dry-runs report the would-be managed label delta without writing labels.
   - Label errors are recorded per issue so the advisory queue can continue posting.
-- **ce-166-doctrine-coverage** (ce-ops#166; knowledge-ssot doctrine coverage): **Add brain doctrine coverage ratchet.**
+- **ce-166-doctrine-coverage** (knowledge-ssot doctrine coverage): **Add brain doctrine coverage ratchet.**
 
   - Add a deterministic doctrine coverage ratchet for governed contract docs.
   - Seed current uncovered doctrine files as explicit exceptions while requiring new doctrine to be asserted or acknowledged; the ratchet only shrinks.
-- **ce-361-installer-mirror-policy** (ce-ops#361; release policy): **Codify installer mirror release policy.**
+- **ce-361-installer-mirror-policy** (release policy): **Codify installer mirror release policy.**
 
   - Added a draft release policy section for installer mirror immutability, emergency republish exceptions, audit evidence, and signed-release handling.
-- **ce-388-conveyor-redesign-adr** (ce-ops#388; conveyor daemon security-redesign ADR): **conveyor daemon security-redesign ADR.**
+- **ce-388-conveyor-redesign-adr** (conveyor daemon security-redesign ADR): **conveyor daemon security-redesign ADR.**
 
   Added ADR-0004 proposing the conveyor daemon arm-safety-by-construction model.
   The ADR makes discovery payloads data-only, moves checkout and git/gh authority
   to daemon-owned working directories and pinned daemon config, treats imported
   bundle contents as untrusted validation input, and blocks G-N3 arming until an
   independent security review ratifies explicit arming criteria.
-- **ce-398-controller-standup-docs** (ce-ops#398; controller playbooks): **Controller standup duty manifest and runbook.**
+- **ce-398-controller-standup-docs** (controller playbooks): **Controller standup duty manifest and runbook.**
 
   - Added a machine-readable controller duty manifest for replacement-controller standup.
   - Added a self-verifying standup runbook with shadow-only gate authority until the A5 lock primitive lands.
@@ -95,18 +95,18 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
   The filter is advisory only and does not authorize dispatch or perform any new
   forge mutations.
-- **ce-294-press-merge-bundle** (ce-ops#294; forge evidence): **Press-merge evidence bundle v1.**
+- **ce-294-press-merge-bundle** (forge evidence): **Press-merge evidence bundle v1.**
 
   - Added the read-only press-merge evidence bundle assembler, schema, hidden inert renderer, workflow artifact upload, and focused tests.
   - Captures the known validate-pr durability gap honestly with validation.available=false.
-- **ce-410-alloc-core** (ce-ops#410; validator forge daemon allocation): **Daemon path allocation core.**
+- **ce-410-alloc-core** (validator forge daemon allocation): **Daemon path allocation core.**
 
   - Added standalone daemon path allocation value objects, receipt verification, randomized runtime-root allocations, and cleanup mechanics for CE-410 slice 1.
-- **ce-413-automerge-tier-b** (ce-ops#413; forge automerge): **Auto-merge Tier B brain supersede chores.**
+- **ce-413-automerge-tier-b** (forge automerge): **Auto-merge Tier B brain supersede chores.**
 
   - Added the gated brain-ledger supersede automerge tier predicate and actuator re-verification.
   - Kept the tier flag default off and added focused policy and actuator coverage.
-- **ce-422-tenant-record-schema** (ce-ops#422; validator tenant records): **Add tenant record schema and validator.**
+- **ce-422-tenant-record-schema** (validator tenant records): **Add tenant record schema and validator.**
 
   - Added the `tenant-record` schema with closed-object validation for tenant identity, credential references, confidentiality posture, issue venue, fleet allocation, and governance ratification fields.
   - Added the `tenant_record` validator check, a fictional well-formed tenant example, and focused unit coverage for required sections, pointer-only credential refs, unknown keys, enum failures, and ratification digest shape.
@@ -120,13 +120,13 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Covers ANSI, bullet, wrapped-line, placeholder, diff-echo, last-signal-wins,
     hostile pane text, schema compatibility, and slug-mismatch behavior with
     focused unit tests.
-- **ce-388-conveyor-harvest-daemon** (ce-ops#388; conveyor daemon): **Conveyor harvest daemon shadow-mode launcher and entrypoint.**
+- **ce-388-conveyor-harvest-daemon** (conveyor daemon): **Conveyor harvest daemon shadow-mode launcher and entrypoint.**
 
   - Added the shadow-mode conveyor harvest daemon entrypoint, launcher, service unit, container adapter wiring, and unit coverage.
-- **ce-437-s4-runtime-image** (ce-ops#437; deploy/runtime-image): **Publish canonical multi-arch runtime image.**
+- **ce-437-s4-runtime-image** (deploy/runtime-image): **Publish canonical multi-arch runtime image.**
 
   - Added the canonical runtime image Dockerfile, GHCR multi-arch publish workflow, consumer digest-pin contract, and focused static validation.
-- **ce-443-stuck-lease-runbook** (ce-ops#443; playbooks/controller/runbooks): **Add conveyor daemon stuck-lease recovery runbook.**
+- **ce-443-stuck-lease-runbook** (playbooks/controller/runbooks): **Add conveyor daemon stuck-lease recovery runbook.**
 
   - Added an operator runbook for `DaemonLeaseStale` after an exit-74 heartbeat
     crash, including the fail-closed rationale, `pgrep` live-process checks,
@@ -192,7 +192,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Encoded supported D1b doctrine items as static brain assertions.
   - Removed doctrine-coverage exceptions now covered by active static assertions.
   - Left unsupported current-main claims out of the ledger for follow-up.
-- **ce-367-ce-native-init** (ce-ops#367; ce-init): **CE-native ce init project scaffolding.**
+- **ce-367-ce-native-init** (ce-init): **CE-native ce init project scaffolding.**
 
   - Adds the public CE-native `ce init` project scaffold with embedded offline templates, right-sized work-class artifacts, stage vocabulary, changelog/path-manifest templates, and local CE skills.
   - Updates README/docs reconciliation and regenerates the CLI reference for the new surface.
@@ -205,12 +205,12 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Added a scheduled freshness workflow that checks out ce-ops with `secrets.CE_OPS_READ_TOKEN`, generates the runtime artifact, and verifies it against the private registry without auto-push or auto-PR behavior.
   - Design: default gitignored-artifact approach (not keyed-HMAC) — the round-1 rework replaced a committed unsalted-sha256 denylist with a runtime-only, plaintext-token artifact that is generated on demand from the private registry and never packaged or committed; the artifact loader rejects any 64-hex-digest-shaped token to guard against reintroducing hashed identifiers.
   - Superseded the d1b-39 brain assertion again to re-pin `validators/pyproject.toml` after the rework removed generated artifact package data (squashed on harvest merge: the round-1 v2->v3 intermediate state was corrected by the rework back to byte-identical pyproject.toml content, so the landed ledger carries a single v2(tombstone)->v4(active) supersede instead of two chained hops).
-- **ce-410-s8b-sandbox-runner** (creator-engine/ce-ops#410; validation-sandbox): **slice 8b validation sandbox runner.**
+- **ce-410-s8b-sandbox-runner** (validation-sandbox): **slice 8b validation sandbox runner.**
 
   - Promotes the rootless Podman verification worker-container policy.
   - Adds a containerized validation sandbox runner with signed receipts and side-effect ledger recording.
   - Covers the runner with offline unit tests using injected launcher and ledger seams.
-- **ce-410-s9-ledger-binding-seam** (creator-engine/ce-ops#410; conveyor-daemon): **slice 9 ledger binding seam.**
+- **ce-410-s9-ledger-binding-seam** (conveyor-daemon): **slice 9 ledger binding seam.**
 
   - Requires the validation ledger binding seam for armed conveyor daemon construction.
   - Adds unit coverage for armed refusal and disarmed construction without the seam.
@@ -221,7 +221,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   Reworked command detection to catch wrapped or absolute-path runtime commands and
   added fail-closed manifest coverage for missing, malformed, and stale baseline
   entries.
-- **ce-n5-worktree-prune** (ce-ops#N5; validators): **Add fail-safe worktree prune tool.**
+- **ce-n5-worktree-prune** (validators): **Add fail-safe worktree prune tool.**
 
   - Added `ce worker worktree-prune` (dry-run by default; `--apply` required for destructive action).
   - Classification uses three-dot content diff vs origin/main (not ancestry alone); dirty/unpushed worktrees are report-only, never touched.
@@ -229,13 +229,13 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Hardened invocation-worktree protection to derive independently from the process cwd (symlink-safe, walked to its containing worktree root), not just from `--repo-root`, so a `--repo-root`-pointed worktree A never causes removal of the cwd's own worktree B.
   - Added `empty-tip-content` regression coverage (content-identical-but-diverged branch tip → prunable) and its inverse (diverged and non-empty tip content → `REPORT_ONLY`/`unpushed-commits`), proving the content check gates pruning, not ancestry.
   - Locked registered worktrees are now surfaced as their own `REPORT_ONLY`/`locked` verdict.
-- **ce-434-contained-seat-profile** (ce-ops#434; governance): **validate-pr contained-seat profile for harvest-side carriers.**
+- **ce-434-contained-seat-profile** (governance): **validate-pr contained-seat profile for harvest-side carriers.**
 
   - Add `ce validate-pr --profile contained-seat`, a narrow profile that runs the normal preflight while tolerating only `path_manifest_carrier_required` because contained-seat carriers are generated harvest-side.
   - Choose a named profile instead of a general skip flag so validate-pr stays fail-closed: unknown profiles are refused and no broad check-skipping surface is introduced.
   - Keep the profile parseable but hidden from generated CLI help so the existing committed CLI reference remains unchanged.
   - Keep default `ce validate-pr` behavior byte-identical with no profile, and cover the profile, notice line, and refusal paths in validate-pr tests.
-- **ce-453-preflight-skip-transparency** (ce-ops#453; validators): **preflight skipped-test transparency.**
+- **ce-453-preflight-skip-transparency** (validators): **preflight skipped-test transparency.**
 
   - Report skipped tests from the PR preflight baseline-diff test gate with file counts and pytest -rs reasons when available.
   - Keep skipped tests transparent rather than failing the preflight, and carry the skip count into the final PASS summary.
@@ -243,7 +243,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
 ### Changed
 
-- **ce-372-autoupdate-test-hygiene** (ce-ops#372; signed updater tests): **Auto-update startup notice test hygiene.**
+- **ce-372-autoupdate-test-hygiene** (signed updater tests): **Auto-update startup notice test hygiene.**
 
   - **Declared work class:** tiny
   - Replaced the startup notice test's hardcoded cache path with pytest tmp_path.
@@ -254,13 +254,13 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Link the rendered page from the existing docs section without removing existing markdown docs links.
   - Include a public-safe architecture-at-a-glance diagram for controller, seats, forge, and containment.
   - Update the docs navigation test so the docs section keeps required markdown links and explicitly permits this rendered overview page.
-- **ce-380-dgx-launcher-image-guard** (ce-ops#380; validator surfaces manifest guard): **DGX launcher image manifest guard.**
+- **ce-380-dgx-launcher-image-guard** (validator surfaces manifest guard): **DGX launcher image manifest guard.**
 
   - Generalized the runsc image default guard across launcher scripts.
   - Added DGX launcher coverage for manifest-aligned and divergent defaults.
-- **ce-dev4-surface-update** (ce-ops#377; deploy): **DGX seat image: openssh-client + PyNaCl; codex 0.142.4.**
+- **ce-dev4-surface-update** (deploy): **DGX seat image: openssh-client + PyNaCl; codex 0.142.4.**
 
-  Fix contained DGX codex seat (missing ssh-keygen + PyNaCl); codex surface + tag 0.142.4; arm64 base-digest override pending ce-ops#377.
+  Fix contained DGX codex seat (missing ssh-keygen + PyNaCl); codex surface + tag 0.142.4; arm64 base-digest override pending on a tracked follow-up.
 - **ce-l2-automerge-canary-livedata** (L2; automerge canary live-data decision inputs): **Wire live PR data into the automerge canary decision path.**
 
   - **Declared work class:** S
@@ -276,47 +276,47 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 - **ce-contributing-guide-ci-steps** (ce-contributing-guide-ci-steps; docs): **Document first-PR CI steps in the contributing guide.**
 
   - Document the required declared work class line, per-PR changelog fragment, and local `ce validate-pr` preflight for first PRs.
-- **ce-339-libsodium-dockerfile** (ce-ops#339; deploy/dgx-runsc Dockerfile): **Add libsodium runtime package to DGX seat image.**
+- **ce-339-libsodium-dockerfile** (deploy/dgx-runsc Dockerfile): **Add libsodium runtime package to DGX seat image.**
 
   - Adds Debian bookworm runtime package `libsodium23` to the DGX seat image runtime apt package list.
   - Uses the runtime library package rather than `libsodium-dev` because no headers are needed.
   - CE-TEST-COUPLING-EXEMPT: Dockerfile-only infrastructure change; no testable application logic changed.
   - Follow-on controller step: rebuild the DGX seat image and relaunch dev-4 after this Dockerfile change lands.
   - **Declared work class:** XS
-- **ce-385-workclass-doc-vocab** (creator-engine/ce-ops#385; docs authoring): **docs: update work-class authoring vocabulary.**
+- **ce-385-workclass-doc-vocab** (docs authoring): **docs: update work-class authoring vocabulary.**
 
   - Updated author-facing work-class references to the current XS/S/M/L taxonomy.
-- **ce-395-bump-to-main** (ce-ops#395; release): **Add release-bump commit mode.**
+- **ce-395-bump-to-main** (release): **Add release-bump commit mode.**
 
   - Add release-bump commit mode that creates a fresh local branch, commits only canonical version sources, and generates PR carriers without pushing or opening a PR.
   - Delete the orphaned release_orchestrate module.
-- **ce-407-pin-migration-s1** (ce-ops#407; brain assertion verification): **Migrate pr_preflight brain pins to probes.**
+- **ce-407-pin-migration-s1** (brain assertion verification): **Migrate pr_preflight brain pins to probes.**
 
   - Migrates d1b-01, d1b-42, and d1b-43 from pr_preflight.py hash pins to focused probe verification.
   - Registers pr_preflight probe checks and updates the authoritative brain drift ratchet.
-- **ce-407-pin-migration-s2** (ce-ops#407; brain assertion verification): **Migrate integrator belt brain pins to probes.**
+- **ce-407-pin-migration-s2** (brain assertion verification): **Migrate integrator belt brain pins to probes.**
 
   - Migrates d1b-10, d1b-11, and d1b-12 from integrator_belt.py hash pins to focused probe verification.
   - Registers integrator belt probe checks and updates the authoritative brain drift ratchet.
-- **ce-410-authority-contexts-core** (ce-ops#410; validators): **Typed authority contexts for integrator credentials.**
+- **ce-410-authority-contexts-core** (validators): **Typed authority contexts for integrator credentials.**
 
   - Added typed authority contexts for transport, local git, and validation sandbox boundaries.
   - Removed process-global GH_TOKEN mutation from the integrator gh runner shim.
   - Wired queue-poll and live action construction through explicit context values.
-- **ce-410-conveyor-phase-authority** (ce-ops#410; conveyor): **Type conveyor git runner phases and pass explicit subprocess envs.**
+- **ce-410-conveyor-phase-authority** (conveyor): **Type conveyor git runner phases and pass explicit subprocess envs.**
 
   - Added conveyor-local git phase typing until authority_contexts.py lands.
   - Routed local git and validation subprocesses through explicit, scrubbed env mappings.
-- **ce-410-integrator-git-phase-split** (ce-ops#410; forge/integrator-belt): **Split integrator git authority by phase.**
+- **ce-410-integrator-git-phase-split** (forge/integrator-belt): **Split integrator git authority by phase.**
 
   - Route local integrator git commands through LocalGitContext while fetch, push, and ls-remote retain transport credentials.
   - Add regression coverage that records every git subprocess environment and rejects credential-bearing local git envs.
-- **ce-412-automerge-tier-a** (ce-ops#412; automerge): **Auto-merge Tier A carrier/changelog split-tier.**
+- **ce-412-automerge-tier-a** (automerge): **Auto-merge Tier A carrier/changelog split-tier.**
 
   - Added a default-off carrier/changelog automerge tier flag and path predicate.
   - Recorded tier metadata and reviewer venue in automerge decisions and actuator audit records.
   - Wired workflow policy materialization and unit coverage for Tier A.
-- **ce-410-s8c-armed-wiring** (creator-engine/ce-ops#410; conveyor validation): **Conveyor armed-mode validation via sandbox runner.**
+- **ce-410-s8c-armed-wiring** (conveyor validation): **Conveyor armed-mode validation via sandbox runner.**
 
   - Wired armed conveyor validation through the validation sandbox runner and recorded receipts.
   - Committed generated carriers before armed sandbox validation so receipts bind the prepared tree.
@@ -324,21 +324,21 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Strengthened fail-closed behavior: absence of a successful validation record now fails the item before any tree-sha comparison (absent = strict), before push/PR open.
   - Documented the 8c interim: slice 9 must promote `validation_ledger_binding` into the armed required-seam list.
   - Design SSOT `/var/tmp/CE410_SLICE8_SPIKE_DESIGN_20260704.md` (sha256 `15db27aa632b1e9f67806665ce8e961e88913186446d14b638c164fb1e5d600f`) assigns full publish reverify to slice 10: re-derive `tree_sha` immediately before push/PR and confirm it equals the receipt-bound tree, with per-phase audit trail.
-- **ce-440-s2-cev3-deprecation** (creator-engine/ce-ops#440; validator CLI): **cev3 deprecation notice and internal-groups lock-in.**
+- **ce-440-s2-cev3-deprecation** (validator CLI): **cev3 deprecation notice and internal-groups lock-in.**
 
   - Adds a direct cev3 invocation deprecation notice while suppressing it for ce forwarding shims.
   - Locks ce v3 forwarding shims out of internal-only command groups.
-- **ce-440-s3a-docs-sweep** (ce-ops#440; docs): **Docs sweep to the unified ce command surface.**
+- **ce-440-s3a-docs-sweep** (docs): **Docs sweep to the unified ce command surface.**
 
   Replaced user-facing cev3 command examples with the unified ce surface.
-- **ce-440-s3b-systemd-exec-migration** (ce-ops#440; systemd gate daemons): **Migrate repo systemd units from cev3 to ce.**
+- **ce-440-s3b-systemd-exec-migration** (systemd gate daemons): **Migrate repo systemd units from cev3 to ce.**
 
   - Migrated the integrator and review pickup systemd units to invoke the unified `ce` CLI surface while preserving daemon arguments.
   - Updated the gate daemon systemd test prefix assertion to allow `ce` and bash launchers only.
-- **ce-440-s3c-migration-doc-snippets** (creator-engine/ce-ops#440; operations docs): **docs: align dogfood-migration systemd snippets with the unified ce surface.**
+- **ce-440-s3c-migration-doc-snippets** (operations docs): **docs: align dogfood-migration systemd snippets with the unified ce surface.**
 
   - Aligns the dogfood migration guide's checked-in systemd examples with the unified `ce` console-script surface.
-- **ce-444-queue-daemon-startup-lease** (ce-ops#444; validators/creator_engine_validator/v3_cli.py): **Fail-closed queue daemon startup lease.**
+- **ce-444-queue-daemon-startup-lease** (validators/creator_engine_validator/v3_cli.py): **Fail-closed queue daemon startup lease.**
 
   - Added a default-on singleton lease to the Python `ce queue-daemon` entrypoint
     before the first daemon pass, including clean held/stale refusal output.
@@ -349,7 +349,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
     straight into normal startup instead of refusing — fixing a startup
     deadlock under the canonical launcher while keeping every other refusal
     path (unrelated live holder, stale lease) unchanged and fail-closed.
-- **ce-445-c2-daemon-container-plumbing** (ce-ops#445; deploy/daemons): **Daemon container launcher env-file, CA-cert, and tmpfs secret custody plumbing.**
+- **ce-445-c2-daemon-container-plumbing** (deploy/daemons): **Daemon container launcher env-file, CA-cert, and tmpfs secret custody plumbing.**
 
   - Added guarded `CE_DAEMON_ENV_FILE` support, read-only OpenBao CA cert remapping,
     and tmpfs-backed container paths for daemon secret file custody.
@@ -359,12 +359,12 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
   - Extend automerge policy and actuator rechecks to cover the ratified docs envelope for docs, root markdown, changelog, and PR manifest paths.
   - Add regression coverage for the #771 docs-envelope AUTO path set and code/work-class refusal cases.
-- **ce-l3-triage-apply-completion** (ce-ops#67; ce-ops triage queue automation): **L3 triage apply-mode completion.**
+- **ce-l3-triage-apply-completion** (ce-ops triage queue automation): **L3 triage apply-mode completion.**
 
   - Create the triage queue sentinel comment in apply mode when absent, then patch it on later runs.
   - Flip scheduled triage queue runs to apply mode with CE_TRIAGE_APPLY_KILL_SWITCH as the rollback switch.
   - Add unit coverage for exactly-once sentinel creation, scheduled kill-switch wiring, and bounded apply mutations.
-- **ce-414-installer-doc-egress** (creator-engine/ce-ops#414; installer docs): **installer docs: version-symbolic release paths and egress allowlist.**
+- **ce-414-installer-doc-egress** (installer docs): **installer docs: version-symbolic release paths and egress allowlist.**
 
   - Documents version-symbolic release download paths and the manifest as the authority.
   - Adds the default one-liner egress allowlist to the installer contract and pilot runbook.
@@ -377,7 +377,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
     carrier gate, with the contained-seat carrier notice printed.
   - Non-contained seats and harvest/controller runs remain on full
     `ce validate-pr`; the standing preflight bar is unchanged.
-- **ce-445-c5prep-daemon-smoke** (ce-ops#445; deploy/daemons): **Add daemon container stateful restart smoke coverage.**
+- **ce-445-c5prep-daemon-smoke** (deploy/daemons): **Add daemon container stateful restart smoke coverage.**
 
   - Added a host-operator smoke script that runs the canonical daemon container
     adapter twice against one scratch state root and asserts lease release,
@@ -400,7 +400,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
   - Explain that stale installed validator wheels can refuse gate commands when the source checkout is newer.
   - Name `CE_ALLOW_STALE_WHEEL=1` as the explicit one-off override and keep reinstalling or updating the wheel as the durable fix.
-- **ce-runner-helper-dedup** (ce-ops#447; runner docker gvisor translation): **Deduplicate Docker runner translation helpers.**
+- **ce-runner-helper-dedup** (runner docker gvisor translation): **Deduplicate Docker runner translation helpers.**
 
   - Hoist shared mount, policy-field, and launch-probe translation helpers into a public runner seam.
   - Route both plain Docker and gVisor proxy backends through the shared helpers without changing rendered argv semantics.
@@ -411,7 +411,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
   - Retry Controller launch recall hydration with the deterministic default store when vllm-openai is unavailable or dimension-mismatched.
   - Cover deterministic fallback and rebuild-stable keyword/graph recall invariants.
-- **ce-351-launcher-argparity** (ce-ops#351; deploy / queue-daemon launcher (config/infra)): **Fix arg-parity gap in queue-daemon relocation launcher — wire missing `--approval-wall-secret-ref-policy-sha`.**
+- **ce-351-launcher-argparity** (deploy / queue-daemon launcher (config/infra)): **Fix arg-parity gap in queue-daemon relocation launcher — wire missing `--approval-wall-secret-ref-policy-sha`.**
 
   - **`deploy/queue-daemon/launch-queue-daemon.sh`** — added `--approval-wall-secret-ref-policy-sha`
     arg (sourced from new required env var `CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA`); added the
@@ -423,37 +423,37 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
   No change to fail-closed logic, secret handling, or unrelated args.  The `--json` arg was
   already present in the launcher; confirmed not missing.
-- **ce-373-subprocess-timeouts** (ce-ops#373; validator preflight): **Bound validate-pr network subprocess calls.**
+- **ce-373-subprocess-timeouts** (validator preflight): **Bound validate-pr network subprocess calls.**
 
   - Added a shared network subprocess timeout override for validate-pr and live onboard GH/git network calls.
   - Surfaced simulated subprocess timeouts as actionable preflight/onboard errors instead of hangs.
   - **Declared work class:** M
-- **ce-337-selfpush-canary** (ce-ops#337; vps-runsc egress broker): **Self-push broker stable socket mount and canary.**
+- **ce-337-selfpush-canary** (vps-runsc egress broker): **Self-push broker stable socket mount and canary.**
 
   - Fixes the VPS launcher to mount broker socket directories instead of restart-sensitive socket inodes.
   - Adds a contained self-push canary that fails on stale broker sockets, broker refusal, or non-no-op responses when requested.
   - Documents live diagnosis: dev-3 broker services were running, but the container-held push/review socket mounts returned ECONNREFUSED after daemon restarts.
-- **ce-386-wheelhouse-xdist-group** (ce-ops#386; validator tests): **Serialize wheelhouse built-surface tests under xdist.**
+- **ce-386-wheelhouse-xdist-group** (validator tests): **Serialize wheelhouse built-surface tests under xdist.**
 
   - Added the wheel-build xdist group to the built-surface wheelhouse tests and the packaging contract wheel parity test so shared source-tree wheel builds serialize under loadgroup.
-- **ce-386-xdist-wheelbuild** (ce-ops#386; validator tests): **Serialize wheelhouse built-surface wheel builds under xdist.**
+- **ce-386-xdist-wheelbuild** (validator tests): **Serialize wheelhouse built-surface wheel builds under xdist.**
 
   - Mirrored the wheel-build xdist grouping style from test_wheel_bake.py on built-surface tests that invoke source wheel builds.
-- **ce-387-holdlabel-symmetry** (ce-ops#387; forge controller inbox): **Hold-label symmetry for controller inbox.**
+- **ce-387-holdlabel-symmetry** (forge controller inbox): **Hold-label symmetry for controller inbox.**
 
   - Reused the full shared issue-side blocking hold-label union for PR awaiting-operator classification.
   - Covered PR labels without body markers across the union: `wip`, `blocked`, `waiting`,
     `status:*` variants such as `status:checkpoint`, `do-not-claim`,
     `dependency-blocked`, existing awaiting-operator labels (`awaiting-operator`,
     `hold`, `awaiting-operator/hold`), and held/on-hold aliases including case variants.
-- **ce-388-payload-data-only** (ce-ops#388; validators/conveyor-daemon): **Wire ADR-0004 payload schema into conveyor daemon discovery.**
+- **ce-388-payload-data-only** (validators/conveyor-daemon): **Wire ADR-0004 payload schema into conveyor daemon discovery.**
 
   - Wired ConveyorDaemonItem.from_mapping() through the ADR-0004 data-only schema before raw discovery field access.
   - Legacy command, base, remote, and path-bearing discovery mappings now reject with value-free audit records.
   - Schema-rejected discovery items are isolated per item so one bad payload cannot drop the rest of the batch.
   - Added daemon and schema regressions for missing, typed, non-mapping, and legacy-control payload failures.
   - Superseded d1b-10, d1b-11, and d1b-12 brain assertions to re-pin integrator belt evidence for this branch.
-- **ce-390-confidentiality-scanner-coverage** (ce-ops#390; public-repo confidentiality scanner): **Widen public-repo confidentiality scan to all tracked text files.**
+- **ce-390-confidentiality-scanner-coverage** (public-repo confidentiality scanner): **Widen public-repo confidentiality scan to all tracked text files.**
 
   Widened the public-repo confidentiality scanner from a docs-only extension allowlist to full coverage of all git-tracked text files, closing a gap where confidential ce-ops#N ticket references or other forbidden patterns could leak through non-doc file types.
 
@@ -462,10 +462,10 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Scan errors (unreadable file, forbidden-pattern match failure) fail closed rather than being silently skipped.
   - Pre-existing tracked-text baseline hits are allowlisted via the existing debt-ratchet mechanism; remediation is tracked internally, not via a new external program.
   - Adds 3 new tests proving qualified-form frontmatter/header refs pass with an empty allowlist, plus 3 companion tests for the existing bare-form + qualified-body-prose-fails coverage.
-- **ce-391-triage-advisory-text** (ce-ops#391; validator cli): **Surface commissioned unscheduled pickup triage advisory text.**
+- **ce-391-triage-advisory-text** (validator cli): **Surface commissioned unscheduled pickup triage advisory text.**
 
   - Added plain-text `ce pickup triage` output for commissioned unscheduled advisory count and issue details, matching the existing JSON payload signal.
-- **ce-402-preflight-failclosed** (ce-ops#402; validator preflight): **Fail closed when baseline-diff pytest does not execute tests.**
+- **ce-402-preflight-failclosed** (validator preflight): **Fail closed when baseline-diff pytest does not execute tests.**
 
   - Makes the validate-pr baseline-diff gate fail closed when pytest is missing, crashes, or collects zero tests.
   - Preserves zero-new-failures behavior for genuine identical pytest failures after tests execute.
@@ -481,20 +481,20 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Fixed the single-level supersede cap in brain assertion current-view validation.
   - Relaxed only superseded_by target resolution: supersede chains may pass through superseded records, but must terminate at exactly one active assertion; cycles are rejected.
   - This unblocks evidence re-pins on assertions already at -v2 without changing append mechanics, record shape, or ledger content.
-- **ce-410-conveyor-alloc-wire** (ce-ops#410; conveyor daemon allocation provenance): **slice 2: conveyor daemon allocation receipts (armed-path provenance).**
+- **ce-410-conveyor-alloc-wire** (conveyor daemon allocation provenance): **slice 2: conveyor daemon allocation receipts (armed-path provenance).**
 
   - Replaced the default-true `daemon_owned_paths_allocated` bit with `DaemonPathAllocator` receipts; raw discovery mappings via `from_mapping` stay data-only.
   - Armed conveyor construction now refuses without an injected allocator; armed runs allocate receipted paths for data-only items before prepare/land/push/PR and reject direct item paths lacking a valid receipt for the current allocator instance.
   - Retained confinement checks as defense-in-depth alongside allocator receipts.
   - Added secret-free allocation audit logging (allocation id, item key, root-relative paths, mode-check results, cleanup status).
-- **ce-410-integrator-alloc-wire** (ce-ops#410; integrator belt live-repair workspace allocation): **slice 3: integrator workspace allocation via daemon receipts.**
+- **ce-410-integrator-alloc-wire** (integrator belt live-repair workspace allocation): **slice 3: integrator workspace allocation via daemon receipts.**
 
   - Replaced predictable --work-root repair paths with daemon allocator-issued randomized workspaces (allocator.allocate_integrator_workspace receipts).
   - Added fail-closed --runtime-root queue-poll wiring and explicit --work-root refusal.
   - Cleanup now only proceeds by receipt (no rmtree of deterministic paths).
   - Added offline coverage for allocator-backed workspaces, receipt cleanup, and unsafe runtime roots.
   - Consumes the daemon path allocator module landed in the prior slice (#758) read-only.
-- **ce-388-fastfollow-lease-ux** (ce-ops#388; conveyor daemon): **Fast-follow conveyor daemon lease UX and one-shot launcher flag.**
+- **ce-388-fastfollow-lease-ux** (conveyor daemon): **Fast-follow conveyor daemon lease UX and one-shot launcher flag.**
 
   - Added clean direct-entrypoint lease refusal handling with exit 73.
   - Renamed the launcher finite-pass flag to `--one-shot` and made `--dry-run` fail closed.
@@ -503,27 +503,27 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   defaulting empty probes to true. Empty non-git directories now report disabled
   brownfield adoption, while detected Git history, workflows, or test commands
   enable the brownfield inventory.
-- **ce-417-pilot-runbook-gaps** (creator-engine/ce-ops#417; pilot documentation): **Document pilot brownfield apply prerequisites.**
+- **ce-417-pilot-runbook-gaps** (pilot documentation): **Document pilot brownfield apply prerequisites.**
 
   - Corrected the solo-pilot sudo guidance so the default os-native backend does not imply an unused privileged install.
   - Added pilot-facing brownfield apply prerequisites, clone/cd guidance, and the live-driver App-token permission nuance.
-- **ce-428-client-workflow-template** (ce-ops#428; onboard apply emits a client-repo CE validation workflow): **client workflow template for adopted repos.**
+- **ce-428-client-workflow-template** (onboard apply emits a client-repo CE validation workflow): **client workflow template for adopted repos.**
 
   - Replaces the adopted-repo workflow with a signed-download wheel install and `ce check .ce/`.
   - Pins the temporary client-profile tolerate list to the four CE-resident checks pending the client-profile follow-up.
-- **ce-429-repo-root-forward** (ce-ops#429; forge automerge): **Forward automerge repo root.**
+- **ce-429-repo-root-forward** (forge automerge): **Forward automerge repo root.**
 
   - Forwarded the parsed automerge decide --repo-root value into policy decision evaluation.
   - Added CLI coverage from a non-root working directory.
-- **ce-445-daemon-container-test-gaps** (ce-ops#445; validators): **daemon container env-file/cacert refusal tests and conveyor invocation pin.**
+- **ce-445-daemon-container-test-gaps** (validators): **daemon container env-file/cacert refusal tests and conveyor invocation pin.**
 
   - Added daemon container launcher coverage for missing CE_DAEMON_ENV_FILE and CE_DAEMON_CACERT_FILE refusal paths, asserting clean stderr and no container engine invocation.
   - Added a byte-identical default conveyor-daemon invocation pin to preserve existing behavior when optional plumbing variables are unset.
-- **ce-445-g10-image-daemon-deps** (ce-ops#445; deploy): **Bundle gate-daemon runtime dependencies in canonical images.**
+- **ce-445-g10-image-daemon-deps** (deploy): **Bundle gate-daemon runtime dependencies in canonical images.**
 
   - Install GitHub CLI from the official signed apt repository in both canonical runtime Dockerfiles while preserving offline validator wheel builds.
   - Keep `git` installed and add static Dockerfile-content tests for the `gh` keyring/repository pins in `validators/tests/unit/test_runtime_image.py` and `validators/tests/unit/test_oci_image.py`.
-- **ce-445-g9-adapter-uid-model** (ce-ops#445; deploy/daemons): **Daemon container adapter uid and state-root ownership model for Docker.**
+- **ce-445-g9-adapter-uid-model** (deploy/daemons): **Daemon container adapter uid and state-root ownership model for Docker.**
 
   - Declared the canonical daemon image uid/gid contract as `CE_DAEMON_IMAGE_UID`
     defaulting to `10001`, and run the container as that uid/gid.
@@ -553,10 +553,10 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Keep native `ce onboard` dispatch unchanged for first-run orchestrator flags.
 
 
-- **ce-370-local-preflight-pr-body** (ce-ops#370; validators): **Local validate-pr honors PR body test-coupling exemptions.**
+- **ce-370-local-preflight-pr-body** (validators): **Local validate-pr honors PR body test-coupling exemptions.**
 
   - Local `ce validate-pr` now sources PR body text for the test-coupling gate when available, matching CI exemption handling while preserving strict fallback behavior.
-- **ce-377-per-arch-base-digests** (ce-ops#377; surfaces): **per-arch base-image digests.**
+- **ce-377-per-arch-base-digests** (surfaces): **per-arch base-image digests.**
 
   - Pin Rust and Debian base-image digests per target architecture for VPS amd64 and DGX arm64 builds.
   - Teach surface rendering to select the base-image digest for the requested target architecture while preserving existing digest-map output for non-base surfaces.
@@ -567,54 +567,54 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
   - Accept canonical XS/S/M/L and legacy tiny/story/feature/epic work-class inputs in validator preflight parser paths.
   - Reuse the shared WORK_CLASS_INPUTS alias set and normalize through normalize_work_class.
-- **ce-n1d-sshkeygen-preflight** (ce-ops#197; install): **ssh-keygen prereq actionable error in verify paths.**
+- **ce-n1d-sshkeygen-preflight** (install): **ssh-keygen prereq actionable error in verify paths.**
 
   Fail-closed ssh-keygen remediation in install-spec, update, v3 verify paths.
 - **ce-379-workclass-preflight-parity** (ce-379; validators): **Local PR preflight mirrors canonical work-class names.**
 
   - Keep `ce validate-pr` help and carrier errors aligned with `XS/S/M/L` while documenting legacy aliases.
   - Add regression coverage proving canonical carrier lines and legacy aliases normalize through the same floor behavior.
-- **ce-381-automerge-decide-pathset** (ce-ops#381; ci): **Automerge decide uses PR-owned changed paths.**
+- **ce-381-automerge-decide-pathset** (ci): **Automerge decide uses PR-owned changed paths.**
 
   - Resolve pull_request changed paths from the GitHub PR files API before falling
     back to a fetched-base three-dot git diff.
   - Add workflow-level regression coverage for stale-base docs PR classification.
-- **ce-382-brain-drift-falsered** (ce-ops#382; validators): **Brain drift validation ignores stale local runtime state.**
+- **ce-382-brain-drift-falsered** (validators): **Brain drift validation ignores stale local runtime state.**
 
   - Prefer tracked `.ce/brain/assertions.yaml` for repo-local drift checks even
     when ignored `.ce/state/brain/assertions.yaml` exists.
   - Keep canonical artifact drift fail-closed while adding regression coverage for
     stale local state and genuine canonical divergence.
-- **ce-370-prbody-local-parity** (ce-ops#370; validators): **Local validate-pr test-coupling PR body parity.**
+- **ce-370-prbody-local-parity** (validators): **Local validate-pr test-coupling PR body parity.**
 
   - Local `ce validate-pr` now passes explicit PR body files through to the test-coupling gate and falls back to the branch carrier when present, while staying strict when no local body source exists.
   - Moved shared git helpers out of `work_sizing_floor` private symbols for reuse by test-coupling.
-- **ce-376-unscheduled-sweep** (ce-ops#376; forge-triage): **Surface commissioned unscheduled issues in forge triage.**
+- **ce-376-unscheduled-sweep** (forge-triage): **Surface commissioned unscheduled issues in forge triage.**
 
   - Add an advisory commissioned_unscheduled section to forge triage output.
   - Mark commissioned_unscheduled_status as arc_missing when the payload lacks the arc issue.
   - Keep dispatchable arc items unchanged and emit no mutations for the sweep section.
   - Cover default and configurable commissioned predicates with unit tests.
-- **ce-382-brain-drift-local-reconcile** (ce-ops#382; validators): **Local brain drift reconcile.**
+- **ce-382-brain-drift-local-reconcile** (validators): **Local brain drift reconcile.**
 
   - Add `ce brain sync` for idempotent local runtime reconciliation.
   - Auto-reconcile ignored `.ce/state/brain` drift during local validate-pr when tracked `.ce/brain` sources are unchanged.
   - Preserve canonical `.ce/brain` drift gating and add actionable remediation text.
-- **ce-391b-has-milestone-scalar** (ce-ops#391; validators): **Fix forge triage milestone scalar classification.**
+- **ce-391b-has-milestone-scalar** (validators): **Fix forge triage milestone scalar classification.**
 
   - Tightened `_has_milestone` scalar fallback so false-y unknown milestone shapes remain unmilestoned while truthy scalar references count as milestones.
   - Added forge triage classification coverage for dict, list, `None`, empty string, bare string, and integer milestone payloads.
-- **ce-403-scanner-hardening** (ce-ops#403; validators): **Harden public docs confidentiality scanner.**
+- **ce-403-scanner-hardening** (validators): **Harden public docs confidentiality scanner.**
 
   - Harden the confidentiality scanner so stale baseline entries, empty scans, stat failures, and tracked-file enumeration failures fail closed.
   - Add regression tests for duplicate generated carrier issue metadata and scanner failure paths.
-- **ce-383-conveyor-argv-hardening** (ce-ops#383; validators): **Harden conveyor daemon argv ref handling.**
+- **ce-383-conveyor-argv-hardening** (validators): **Harden conveyor daemon argv ref handling.**
 
   - Add a git push option terminator before daemon remote/refspec positionals.
   - Reject unsafe base, remote, branch, landed branch, and PR base ref shapes before git/gh argv construction.
   - Keep PR title/body as unrestricted free text in fixed gh flag-value slots.
   - **Declared work class:** tiny
-- **ce-410-s10-publish-reverify-audit** (ce-ops#410; conveyor): **slice 10: final publish re-verification + per-phase audit.**
+- **ce-410-s10-publish-reverify-audit** (conveyor): **slice 10: final publish re-verification + per-phase audit.**
 
   Part of the conveyor publish hardening arc (slice 10 — final slice before the Re-Arming Evidence Bundle)
 
@@ -628,22 +628,22 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Publish-time diff paths are parsed fail-closed from `git diff --name-status --find-renames` and compared to the per-PR carrier manifest.
   - Checkout-local transport config is rejected for `core.hooksPath`, `credential.helper`, and `url.*.insteadOf`, including Git's lowercased `core.hookspath` and `url.*.insteadof` output.
   - Allocation, validation, and publish phases emit structured audit logs without receipt nonce/signature leakage.
-- **ce-445-g8-dockerfile-offline-setuptools** (ce-ops#445; deploy): **Install offline setuptools before canonical wheel builds.**
+- **ce-445-g8-dockerfile-offline-setuptools** (deploy): **Install offline setuptools before canonical wheel builds.**
 
   - Copy `validators/wheelhouse-dev` into both canonical-image wheel-builder stages and install `setuptools` with `--no-index` before building the validator wheel with unchanged `--no-deps --no-build-isolation` flags.
   - Fix `build-image.sh` staging: `stage_context()` and `print_stage_context_commands()` now include `wheelhouse-dev` in the staged context dir so `COPY validators/wheelhouse-dev` in the Dockerfile resolves correctly.
-- **ce-portability-guard-hygiene** (ce-ops#437; validators/tests/unit/test_portability_plane.py): **Portability guard test hygiene.**
+- **ce-portability-guard-hygiene** (validators/tests/unit/test_portability_plane.py): **Portability guard test hygiene.**
 
   - Isolate runtime-only subprocess command fixtures.
   - Add wrapper and absolute-path command fixtures.
   - Document fail-closed runtime-command prose behavior.
   - **Declared work class:** tiny
-- **ce-401-doctrine-coverage-fastfollow** (ce-ops#401; knowledge-ssot doctrine coverage): **Harden doctrine coverage ratchet edge cases.**
+- **ce-401-doctrine-coverage-fastfollow** (knowledge-ssot doctrine coverage): **Harden doctrine coverage ratchet edge cases.**
 
   - Treat an absent authoritative brain assertion ledger as empty coverage instead of corrupt or unreadable.
   - Document the ratchet's linkage-only semantics and single-root live invocation decision.
   - Add regression tests for duplicate exception entries and stale exceptions outside governed trees.
-- **ce-403-scanner-hardening-fastfollow** (ce-ops#403; validators): **Record public docs scanner hardening fast-follow.**
+- **ce-403-scanner-hardening-fastfollow** (validators): **Record public docs scanner hardening fast-follow.**
 
   - Completed semantic novelty check for the public docs confidentiality scanner fast-follow.
   - The requested hardening behaviors are already present on the fresh main base, so this branch carries the governed evidence without duplicating scanner implementation.
@@ -656,7 +656,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
     workflows, and no detected test commands still enables brownfield adoption.
   - Regenerated the schema reference with `python3 scripts/gen_schema_reference.py
     --write`; it was already content-current for this nested description change.
-- **ce-446-base-resolve-robust** (ce-ops#446; governance): **robust moved-base comparison-base resolution in governance workflow.**
+- **ce-446-base-resolve-robust** (governance): **robust moved-base comparison-base resolution in governance workflow.**
 
   - Resolve pull-request comparison bases through the GitHub compare API before local diff validation, avoiding shallow checkout parent traversal when the recorded PR base is behind origin/main.
   - Fetch only the server-resolved merge-base commit for local validation and report remaining graph/API failures as infrastructure failures.
@@ -667,7 +667,7 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Treat literal `UNSET` digests as unpinned unless covered by the current CE seat image debt allowlist.
   - Ratchet the CE seat image placeholder so pinning the digest requires removing the allowlist entry.
   - Replace substring Dockerfile image matching with exact aliases and explicit image overrides.
-- **ce-49-skew-guard-quickwin** (creator-engine/ce-ops#49; validators): **quick-win: refuse gate commands under stale-wheel version skew.**
+- **ce-49-skew-guard-quickwin** (validators): **quick-win: refuse gate commands under stale-wheel version skew.**
 
   - Refuse gate-relevant `ce` commands when an installed package is older than the target creator-engine checkout.
   - Warn and proceed for non-gate commands, with an explicit override escape hatch.
@@ -684,24 +684,24 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
   - Renumbers the quickstart guide headings into a coherent user-facing 1 through 5 sequence.
 
 
-- **ce-l2-spotcheck-openssh-note** (ce-ops#197; guide): **getting-started: openssh-client prerequisite note.**
+- **ce-l2-spotcheck-openssh-note** (guide): **getting-started: openssh-client prerequisite note.**
 
   Note the ssh-keygen/openssh-client prerequisite for external installs.
-- **ce-n15-docs-html** (ce-ops#37; site): **Render public docs to HTML.**
+- **ce-n15-docs-html** (site): **Render public docs to HTML.**
 
   - Render 6 public guide docs (understanding-ce, pilot-runbook, contributing-to-ce, solo-dev-onboarding, solo-ceo-onboarding, SECURITY_MODEL) from Markdown to styled HTML pages matching the docs/index.html dark theme.
   - Update docs/index.html #docs section links from .md to .html for all 6 rendered docs; llms-install.md remains raw .md (machine-fetched signed spec).
   - Update validators/tests/unit/test_site_index_docs_nav.py to expect .html links.
   - Cross-link strategy: published doc cross-links use rendered .html; unpublished docs inside docs/ use GitHub blob URL; paths escaping docs/ tree use repo-root blob URL.
   - Product-lens scrub: all 6 source docs and rendered HTML are clean of ce-ops# ticket refs and internal host identifiers.
-- **ce-320-install-narration** (ce-ops#320; agent-native install first-touch UX): **Newcomer-clean narration for agent-native install verification.**
+- **ce-320-install-narration** (agent-native install first-touch UX): **Newcomer-clean narration for agent-native install verification.**
 
   Instruct the installing agent to run the §0 signature ceremony quietly and surface a single plain-language confirmation (fail-closed hard stop on any verification failure preserved); reword the homepage paste-prompt to lead with the provenance promise; re-sign llms-install.md canonical bytes with ce-root-v1 (namespace ce-spec-v1). Verification commands byte-identical.
 - **ce-329-scrum-to-ce-guide** (ce-329; guide): **Draft Agile/SCRUM to CE SDLC onboarding guide.**
 
   - Replace the existing Agile/SCRUM guide with a public draft grounded in CE spec, plan, task, review, carrier, changelog, and ratification flow.
   - Anchor the SCRUM mapping to CE's Frame -> Shape -> Build -> Review -> Ship vocabulary and link readers to the welcome, understanding, contributing, and canonical vocabulary guides.
-- **ce-393-command-deprecation-policy** (ce-ops#393; contracts): **Command deprecation policy.**
+- **ce-393-command-deprecation-policy** (contracts): **Command deprecation policy.**
 
   - Add a public command deprecation policy for governed shrinking of the v1 top-level command surface.
   - Add the command deprecation manifest with the current source-derived top-level command budget and no active deprecations.
@@ -759,16 +759,16 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
   - Added slow integration coverage for orchestrate -> test-key sign -> finalize -> docs-copy guard parity.
   - Verified the copied docs tree with release artifact parity, install spec signature verification, and local latest signed release resolution.
-- **ce-410-s8a-shared-launcher** (ce-ops#410; validation-runtime): **slice 8a: shared container-launcher primitive.**
+- **ce-410-s8a-shared-launcher** (validation-runtime): **slice 8a: shared container-launcher primitive.**
 
   - Add a shared Podman launcher primitive for detached and foreground ephemeral container runs.
   - Refactor worker allocation to consume the shared detached argv path without changing behavior.
-- **ce-410-validation-env-scrub** (ce-ops#410; validation subprocess env-scrub sandbox seam (slice 7 rework)): **Add validation sandbox env-scrub subprocess seam.**
+- **ce-410-validation-env-scrub** (validation subprocess env-scrub sandbox seam (slice 7 rework)): **Add validation sandbox env-scrub subprocess seam.**
 
   - Added a typed validation-subprocess seam (`ValidationSandboxSpec` / `run_validation_sandbox`) that constructs its execution context via `ValidationSandboxContext.from_sandbox(...)` and revalidates the env allowlist against a widened credential-shaped-key filter before every invocation.
   - Routed `conveyor.py`'s `_default_validate_runner` through the sandbox seam while preserving the slice-6 validate command and scrubbed `PYTHONPATH`/`TMPDIR`/`PATH` environment (regression-pinned in `test_conveyor.py`).
   - Extended (not replaced) the slice-4 `forge/authority_contexts.py` module: widened `_FORBIDDEN_CREDENTIAL_KEYS`/added token-pattern matching, added `require_no_credential_env`/`is_credential_env_key` helpers; `TransportCredentialContext`, `LocalGitContext`, and `ValidationSandboxContext.from_sandbox` are unchanged.
-- **ce-437-adr-two-plane** (ce-ops#437; two-plane OS architecture ADR): **Add ADR-0014 for the two-plane OS architecture.**
+- **ce-437-adr-two-plane** (two-plane OS architecture ADR): **Add ADR-0014 for the two-plane OS architecture.**
 
   - Recorded the ratified portable Python control plane and canonical Linux container runtime plane decision.
   - Marked the prior OQ-1 `os-native` solo mapping superseded by the container-first architecture.
@@ -793,13 +793,13 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
 ### Chores
 
-- **ce-l1-install-doc-fix** (ce-ops#358; install): **Install spec: openssh-client prereq + 0.3.1 alignment, re-signed.**
+- **ce-l1-install-doc-fix** (install): **Install spec: openssh-client prereq + 0.3.1 alignment, re-signed.**
 
   Add openssh-client prerequisite note + align one-liner prose to 0.3.1, and re-sign the canonical spec with the offline ce-root-v1 trust root.
 
 ### Ci
 
-- **ce-l7-injection-cleanup** (ce-ops#0; release): **Harden release workflow GitHub expression injection boundaries.**
+- **ce-l7-injection-cleanup** (release): **Harden release workflow GitHub expression injection boundaries.**
 
   - **Declared work class:** tiny
   - Moves release workflow GitHub expression values out of shell run blocks and into env indirection.
@@ -864,13 +864,13 @@ Folds forward the parked brownfield-enabled-default schema clarification and the
 
 ### Test
 
-- **ce-ci-runblock-injection-guard** (ce-ops#703; ci): **CI run block injection guard test.**
+- **ce-ci-runblock-injection-guard** (ci): **CI run block injection guard test.**
 
   - Add a parser-based unit guard for GitHub Actions expressions embedded in workflow `run:` blocks.
 
 ### Tiny
 
-- **ce-451-zeros-digest-guard** (creator-engine/ce-ops#451; surfaces manifest placeholder digest guard): **Reject placeholder surface sha256 digests.**
+- **ce-451-zeros-digest-guard** (surfaces manifest placeholder digest guard): **Reject placeholder surface sha256 digests.**
 
   ## Summary
 
