@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "creator-engine-validator"
-version = "0.3.1"
+version = "0.3.2"
 description = "Offline validator for the Creator Engine v0.1 governance substrate"
 requires-python = ">=3.14"
 dependencies = [

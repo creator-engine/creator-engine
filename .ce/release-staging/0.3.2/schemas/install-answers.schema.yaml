@@ -1,0 +1,627 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/install-answers.schema.yaml"
+title: "Creator Engine Install Answers File"
+description: |
+  Machine-readable schema for `ce-install.answers.yaml` — the declarative,
+  IaC-style operator-answers file of the unified two-mode installer
+  (v3.5-E.3). One engine, two modes: the installer is a single pipeline of
+  journey steps, each declaring its inputs against ONE inventory; mode is
+  just where answers come from (`interactive > answers > detected > default`),
+  with `--non-interactive` turning the final ask into a fail-closed refusal
+  that enumerates exactly what is missing.
+
+  THIS SCHEMA IS THE SINGLE SOURCE OF TRUTH for the operator-input
+  inventory: the interactive prompts, the `ce onboard --inventory` emission,
+  and the answers-file validation all derive from it (never hand-maintained
+  in parallel). Each leaf input carries `x-ce-*` annotations:
+
+    x-ce-step         journey step that consumes it (0 verify · 1 host/deps ·
+                      2 cost profile · 3 provider auth · 4 GitHub leg ·
+                      5 pilot target)
+    x-ce-sensitivity  plain | consent | ratification | secret
+    x-ce-modes        which mode can supply it — F answers-file by value ·
+                      R answers-file by REFERENCE (SecretRef) · I interactive ·
+                      D detected (read-only probe)
+    x-ce-when         applicability condition {key, equals} — the input joins
+                      the ask/missing list only when the condition holds
+    x-ce-optional     true ⇒ never blocks (absent = accepted absence; it
+                      never joins the fail-closed missing list)
+    x-ce-default-from dotted key whose merged value seeds this one's default
+
+  Design properties (each load-bearing — design of record §2.3):
+    1. PARTIAL-BY-DESIGN — every key optional; present → consumed silently,
+       absent → one batched ask at its journey step (interactive) or the
+       fail-closed missing list (`--non-interactive`).
+    2. FAIL-CLOSED ON UNKNOWN KEYS — `additionalProperties: false`
+       everywhere; a typo'd key ERRORS, never silently falls through.
+    3. SECRETS NEVER BY VALUE — every secret-typed field is a SecretRef
+       (`env://` · `file://` · `prompt://` · `keychain://`); a raw value
+       cannot validate, so the file is committable and lands via governed PR.
+    4. RATIFICATION BINDINGS BY VALUE — the 64-hex
+       {ratified_prompt_sha, approver_ref} bindings are attestations, not
+       secrets; the file is exactly where a ratified choice is recorded.
+       Every governance-WEAKENING answer (cost opt-out; branch protections
+       below the CE reference floor) requires one, ratified-HUMAN-only,
+       educate-first: an agent preparing an answers file can configure
+       anything EXCEPT A WEAKER GRADER.
+    5. VERSIONED + PROFILE-AWARE — `answers_version: 1` required; optional
+       `profile` seeds defaults.
+
+  Nothing in this file can bypass `require_verified` — the answers file
+  configures the VERIFIED install procedure; it never substitutes for the
+  signature gate. Engine: `creator_engine_validator/v3_installer.py`.
+  Ring-1 check: `install_answers`. Prose contract:
+  `docs/contracts/installer.md`.
+type: object
+required:
+  - answers_version
+additionalProperties: false
+properties:
+  answers_version:
+    type: integer
+    const: 1
+    description: Answers-file format version. This schema is version 1.
+  profile:
+    type: string
+    enum: [solo-pilot, team]
+    x-ce-step: 1
+    x-ce-sensitivity: plain
+    x-ce-modes: [F, I]
+    x-ce-optional: true
+    description: |
+      Optional defaults profile. `solo-pilot` is the governance-only pilot
+      shape (shared App, reviewer = the authenticated human).
+  host:
+    type: object
+    additionalProperties: false
+    description: "Journey step 1 — host & dependencies."
+    properties:
+      sudo_grant:
+        type: array
+        items:
+          type: string
+          enum: [git, python, runsc, proxy]
+        uniqueItems: true
+        x-ce-step: 1
+        x-ce-sensitivity: consent
+        x-ce-modes: [F, I]
+        x-ce-optional: true
+        description: |
+          The SCOPED sudo pre-grant (fork F4): an explicit allowlist of the
+          system packages the grant covers. At apply time the planner diffs
+          its computed install set against this grant; any package OUTSIDE
+          the grant → stop and ask (refuse in `--non-interactive`). A bare
+          `sudo: true` is schema-invalid BY CONSTRUCTION (this is an array,
+          never a boolean): an unscoped grant would let plan drift silently
+          widen a privileged action.
+      userspace_install:
+        type: boolean
+        default: true
+        x-ce-step: 1
+        x-ce-sensitivity: consent
+        x-ce-modes: [F, I]
+        description: |
+          Consent to the user-space (no-sudo) install of `uv`.
+      workspace_root:
+        type: string
+        minLength: 1
+        default: "~/ce-workspaces"
+        x-ce-step: 1
+        x-ce-sensitivity: plain
+        x-ce-modes: [F, I, D]
+        description: |
+          Root for governed worktrees — OUTSIDE the repo (execution-zones
+          directive); the probe may suggest one.
+      state_root:
+        type: string
+        minLength: 1
+        default: ".ce/state"
+        x-ce-step: 1
+        x-ce-sensitivity: plain
+        x-ce-modes: [F]
+        x-ce-optional: true
+        description: |
+          The neutral CE-namespaced local-state root (rarely overridden).
+  cost:
+    type: object
+    additionalProperties: false
+    description: "Journey step 2 — cost profile (G-5 wiring, semantics unchanged)."
+    properties:
+      profile:
+        type: string
+        enum: [default, custom]
+        default: default
+        x-ce-step: 2
+        x-ce-sensitivity: plain
+        x-ce-modes: [F, I]
+        description: |
+          `default` → spend_cap_enforcement: enforce. `custom` → the opt-out,
+          which REQUIRES the `optout` ratification binding below.
+      optout:
+        $ref: "#/$defs/ratification_binding"
+        x-ce-step: 2
+        x-ce-sensitivity: ratification
+        x-ce-modes: [F, I]
+        x-ce-when: { key: "cost.profile", equals: "custom" }
+        description: |
+          The cost opt-out's ratified-HUMAN-only binding (G-5). REQUIRED iff
+          `cost.profile: custom`. `educate_acknowledged: true` is
+          schema-required alongside the binding so the file cannot skip the
+          educate-at-opt-out step; interactive mode shows the educate copy
+          verbatim first.
+  provider:
+    type: object
+    additionalProperties: false
+    description: |
+      Journey step 3 — provider auth (the LLM credential; stays in/near the
+      box, two-credential custody invariant). Subscription OAuth sessions are
+      DETECTED (credential-file presence, never contents) or driven
+      interactively (browser flow) — they have no answers-file key at all.
+    properties:
+      harness:
+        type: string
+        enum: [claude-code, codex, both]
+        x-ce-step: 3
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: Harness choice; the probe detects present binaries.
+      anthropic_api_key:
+        $ref: "#/$defs/secret_ref"
+        x-ce-step: 3
+        x-ce-sensitivity: secret
+        x-ce-modes: [D, R, I]
+        x-ce-optional: true
+        description: "SecretRef ONLY (e.g. env://ANTHROPIC_API_KEY) — never a raw key."
+      openai_api_key:
+        $ref: "#/$defs/secret_ref"
+        x-ce-step: 3
+        x-ce-sensitivity: secret
+        x-ce-modes: [D, R, I]
+        x-ce-optional: true
+        description: "SecretRef ONLY — never a raw key."
+      codex_token:
+        $ref: "#/$defs/secret_ref"
+        x-ce-step: 3
+        x-ce-sensitivity: secret
+        x-ce-modes: [D, R, I]
+        x-ce-optional: true
+        description: |
+          Codex access token (sanctioned automation path) — SecretRef ONLY.
+      transport:
+        type: string
+        enum: [cc-hooks, stream-json, acp]
+        x-ce-step: 3
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F]
+        x-ce-optional: true
+        description: |
+          Transport pin override; absent → derived by the auto-select matrix
+          (substrate decision: ACP where auth-permitted; subprocess+hooks
+          first-class for OAuth).
+  github:
+    type: object
+    additionalProperties: false
+    description: "Journey step 4 — the GitHub leg, fully decomposed (design §2.2 step 4)."
+    properties:
+      mode:
+        type: string
+        enum: [existing, new]
+        x-ce-step: 4
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: |
+          Connect an existing repo or create a new one. The probe
+          detect-and-offers the cwd origin remote.
+      repo:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$"
+        x-ce-step: 4
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: |
+          `owner/name` of the target repo. A file value that CONTRADICTS the
+          detected origin is a surfaced conflict (ask interactively / refuse
+          non-interactively) — never a silent override of reality.
+      new_repo:
+        type: object
+        additionalProperties: false
+        x-ce-when: { key: "github.mode", equals: "new" }
+        description: "New-repo parameters (mode: new only)."
+        properties:
+          visibility:
+            type: string
+            enum: [private, public]
+            default: private
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            x-ce-when: { key: "github.mode", equals: "new" }
+            description: New-repo visibility.
+          default_branch:
+            type: string
+            minLength: 1
+            default: main
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            x-ce-when: { key: "github.mode", equals: "new" }
+            description: New-repo default branch.
+          description:
+            type: string
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            x-ce-optional: true
+            x-ce-when: { key: "github.mode", equals: "new" }
+            description: Optional new-repo description.
+      bootstrap_token:
+        $ref: "#/$defs/secret_ref"
+        x-ce-step: 4
+        x-ce-sensitivity: secret
+        x-ce-modes: [D, R, I]
+        description: |
+          The installer's own one-time credential (creates/configures the
+          repo, installs the App, sets protections, enables Actions; needed
+          in BOTH `existing` and `new` modes) — SecretRef ONLY
+          (`prompt://github-bootstrap-token` asks at the moment of use even
+          in file mode). Minimal fine-grained scopes are VERIFIED by probe,
+          not asked. Never stored: runtime forge access is the App's JIT
+          token, never this one.
+      app:
+        type: object
+        additionalProperties: false
+        description: "GitHub App plan (shared CE-published vs operator-registered)."
+        properties:
+          kind:
+            type: string
+            enum: [shared, own]
+            default: shared
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            description: |
+              `shared` (CE-published App — the solo-pilot default, fork F5)
+              or `own` (operator-registered App).
+          app_id:
+            type: string
+            minLength: 1
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            x-ce-when: { key: "github.app.kind", equals: "own" }
+            description: Own-App id (after registration).
+          client_id:
+            type: string
+            minLength: 1
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            x-ce-when: { key: "github.app.kind", equals: "own" }
+            description: Own-App client id (the App-JWT `iss`).
+          pem:
+            $ref: "#/$defs/secret_ref"
+            x-ce-step: 4
+            x-ce-sensitivity: secret
+            x-ce-modes: [R, I]
+            x-ce-when: { key: "github.app.kind", equals: "own" }
+            description: |
+              Own-App private key — SecretRef ONLY, custody rule tmpfs only
+              (e.g. file:///dev/shm/ce-app.pem); never by value, never
+              persisted off tmpfs.
+          installation_id:
+            type: integer
+            minimum: 1
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F]
+            x-ce-optional: true
+            description: |
+              Re-run convergence: a declared (or detected) installation skips
+              the App authorization click entirely — the converged state is
+              fully declarative even though the FIRST run has one irreducible
+              interactive step (the click itself is `I` only and has no
+              answers key).
+      protections:
+        x-ce-step: 4
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        default: reference
+        x-ce-reference-posture:
+          required_checks: ["Validate governance artifacts"]
+          strict: true
+          dismiss_stale: true
+          enforce_admins: true
+          required_reviews: 1
+          squash_only: true
+        description: |
+          Branch-protection desired state. `reference` = the CE floor (the
+          posture CE itself runs — the `x-ce-reference-posture` data above is
+          THE floor as data; planners and checks derive it from here, never
+          hand-maintain a copy). Object form may STRENGTHEN freely; any
+          answer that WEAKENS the floor (a floor-true flag set false,
+          required_reviews below the floor, the CE required check dropped,
+          squash-only off) REQUIRES the `ratification` binding —
+          ratified-HUMAN-only, educate-first, same shape as the cost opt-out.
+        oneOf:
+          - type: string
+            const: reference
+          - type: object
+            additionalProperties: false
+            properties:
+              required_checks:
+                type: array
+                items: { type: string, minLength: 1 }
+                description: Required status-check names (the CE validate gate).
+              strict:
+                type: boolean
+                description: Strict up-to-date requirement.
+              dismiss_stale:
+                type: boolean
+                description: Dismiss stale approvals on new pushes.
+              enforce_admins:
+                type: boolean
+                description: Protections apply to admins too.
+              required_reviews:
+                type: integer
+                minimum: 0
+                description: Required approving reviews (floor is 1).
+              squash_only:
+                type: boolean
+                description: Squash-merge as the only merge method.
+              ratification:
+                $ref: "#/$defs/ratification_binding"
+                description: |
+                  REQUIRED iff this object weakens the reference floor.
+      actions:
+        type: object
+        additionalProperties: false
+        description: "GitHub Actions plan."
+        properties:
+          install_validate_workflow:
+            type: boolean
+            default: true
+            x-ce-step: 4
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            description: |
+              Install CE's validate workflow so the required check exists and
+              runs on every PR. Disabling it drops the CE required check —
+              that weakening is governed via `protections` (the floor's
+              required_checks), not here.
+      reviewer:
+        type: string
+        minLength: 1
+        x-ce-step: 4
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: |
+          Reviewer identity (the no-self-approval floor; solo: the human IS
+          the reviewer — detected as the bootstrap token's authenticated
+          login).
+  project:
+    type: object
+    additionalProperties: false
+    description: |
+      Journey step 5 — greenfield first-project inputs. These only apply when
+      `github.mode: new`; E2 owns the workspace checkout and bootstrap smoke,
+      while E4 supplies the first-project read model and minimal scaffold input
+      contract.
+    properties:
+      name:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [F, I]
+        x-ce-optional: true
+        x-ce-when: { key: "github.mode", equals: "new" }
+        description: |
+          Local project directory name under `host.workspace_root`. If omitted
+          CE derives the repo basename for the first-project projection.
+      scaffold:
+        type: object
+        additionalProperties: false
+        description: Greenfield bootstrap scaffold input contract for E2.
+        properties:
+          kind:
+            type: string
+            enum: [minimal]
+            default: minimal
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            x-ce-when: { key: "github.mode", equals: "new" }
+            description: |
+              Minimal bootstrap only: README, .gitignore, initial repo/default
+              branch, and bootstrap commit. Product code templates are follow-up
+              work and are not created by this path.
+  brownfield:
+    type: object
+    additionalProperties: false
+    description: |
+      Journey step 5 — brownfield project adoption. These inputs correct or
+      ratify the read-only project inventory that `ce onboard --inventory`
+      detects for an existing repo. They are value-free: no raw secrets,
+      scanner snippets, local actor identities, or destructive Git/GitHub
+      actions are accepted here.
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: |
+          Enable brownfield adoption planning for the current project. The live
+          installer derives this from read-only project probe signals; absent
+          answers do not imply unconditional enablement.
+      project_root:
+        type: string
+        minLength: 1
+        default: "."
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [D, F, I]
+        description: Project root to inventory; prefer repo-relative `.` when adopting the current repo.
+      inventory_depth:
+        type: string
+        enum: [bounded, full]
+        default: bounded
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [F, I]
+        description: Inventory depth. `bounded` samples standard source-controlled metadata only.
+      ci:
+        type: object
+        additionalProperties: false
+        description: Existing CI posture to preserve during adoption.
+        properties:
+          adopt_existing_workflows:
+            type: boolean
+            default: true
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            description: Preserve existing workflows and checks while adding CE validation.
+          required_checks_strategy:
+            type: string
+            enum: [preserve-and-add, preserve-only]
+            default: preserve-and-add
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [F, I]
+            description: Required-check posture; default preserves observed checks and adds the CE validate check.
+      tests:
+        type: object
+        additionalProperties: false
+        description: Detected or operator-supplied local validation commands.
+        properties:
+          required_commands:
+            type: array
+            items:
+              type: string
+              minLength: 1
+            uniqueItems: true
+            default: []
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            description: Commands the first Scope and project skill should preserve; empty means unknown, not invented.
+      history:
+        type: object
+        additionalProperties: false
+        description: Value-free project history classification.
+        properties:
+          mode:
+            type: string
+            enum: [git_history_present, absent, unknown]
+            default: unknown
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            description: |
+              `git_history_present` preserves existing history; `absent`
+              blocks normal adoption.
+      conventions:
+        type: object
+        additionalProperties: false
+        description: Advisory branch and commit conventions.
+        properties:
+          branch_pattern:
+            type: string
+            minLength: 1
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            x-ce-optional: true
+            description: Advisory branch naming pattern detected or supplied by the operator.
+          commit_style:
+            type: string
+            minLength: 1
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            x-ce-optional: true
+            description: Advisory commit message style detected or supplied by the operator.
+      secrets:
+        type: object
+        additionalProperties: false
+        description: Secrets-scrub preflight plan and per-finding waivers.
+        properties:
+          preflight:
+            type: string
+            enum: [required, clean, waived]
+            default: required
+            x-ce-step: 5
+            x-ce-sensitivity: plain
+            x-ce-modes: [D, F, I]
+            description: Secrets-scrub posture; adoption artifacts require clean or waived scanner evidence before write.
+          waivers:
+            type: array
+            default: []
+            x-ce-step: 5
+            x-ce-sensitivity: ratification
+            x-ce-modes: [F, I]
+            description: Per-finding value-free waivers; each waiver names a finding id and carries the ratified binding.
+            items:
+              type: object
+              required: [finding_id, ratification]
+              additionalProperties: false
+              properties:
+                finding_id:
+                  type: string
+                  minLength: 1
+                  description: Scanner finding id only; never the secret value or scanner snippet.
+                ratification:
+                  $ref: "#/$defs/ratification_binding"
+  pilot:
+    type: object
+    additionalProperties: false
+    description: "Journey step 5 — the pilot target."
+    properties:
+      target_repo:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$"
+        x-ce-step: 5
+        x-ce-sensitivity: plain
+        x-ce-modes: [F, I]
+        x-ce-default-from: "github.repo"
+        x-ce-optional: true
+        description: |
+          The repo CE drives (may differ from where CE is installed);
+          defaults to `github.repo`, so it never blocks on its own.
+$defs:
+  secret_ref:
+    type: string
+    pattern: "^(env|file|prompt|keychain)://\\S+$"
+    description: |
+      A secret BY REFERENCE, never by value: `env://VAR` ·
+      `file:///abs/path` (tmpfs for PEMs) · `prompt://label` (ask at the
+      moment of use, even in file mode) · `keychain://label` (deferred
+      backend). Refs are inert strings — the file stays committable and the
+      answers-file sha256 is evidence-hashable. Refs resolve at apply time
+      only, in memory; evidence records the REF, never the value.
+  ratification_binding:
+    type: object
+    required: [ratified_prompt_sha, approver_ref, educate_acknowledged]
+    additionalProperties: false
+    description: |
+      The ONE governance-weakening attestation shape (generalizes the G-5
+      cost opt-out into an installer-wide invariant): a ratified-HUMAN-only
+      binding, by value (it is an attestation, not a secret), with the
+      educate step acknowledged in-band.
+    properties:
+      ratified_prompt_sha:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: SHA256 of the ratified prompt recording the choice.
+      approver_ref:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+        description: Opaque digest standing in for the ratifying human.
+      educate_acknowledged:
+        type: boolean
+        const: true
+        description: |
+          The educate-first copy was shown and acknowledged; a binding
+          without it cannot validate (the file cannot skip education).
