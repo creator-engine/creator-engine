@@ -392,6 +392,118 @@ def test_preflight_reports_missing_required_carrier(tmp_path: Path, monkeypatch)
     assert "path_manifest_carrier_required" in out.getvalue()
 
 
+def test_preflight_default_profile_none_is_byte_identical(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    runner_default = FakeRunner(
+        tmp_path,
+        path_manifest_returncode=1,
+        path_manifest_stdout="FAIL path_manifest_fidelity path_manifest_carrier_required\n",
+    )
+    runner_explicit_none = FakeRunner(
+        tmp_path,
+        path_manifest_returncode=1,
+        path_manifest_stdout="FAIL path_manifest_fidelity path_manifest_carrier_required\n",
+    )
+    out_default = io.StringIO()
+    out_explicit_none = io.StringIO()
+    err_default = io.StringIO()
+    err_explicit_none = io.StringIO()
+
+    rc_default = pr_preflight.run_preflight(
+        _config(tmp_path),
+        runner=runner_default,
+        out=out_default,
+        err=err_default,
+    )
+    rc_explicit_none = pr_preflight.run_preflight(
+        _config(tmp_path, profile=None),
+        runner=runner_explicit_none,
+        out=out_explicit_none,
+        err=err_explicit_none,
+    )
+
+    assert rc_default == rc_explicit_none == 1
+    assert out_default.getvalue() == out_explicit_none.getvalue()
+    assert err_default.getvalue() == err_explicit_none.getvalue()
+    assert pr_preflight.CONTAINED_SEAT_CARRIER_NOTICE not in out_default.getvalue()
+
+
+def test_contained_seat_profile_omits_only_carrier_required_gate(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    workflow_audits = []
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: workflow_audits.append(repo_root))
+    runner = FakeRunner(
+        tmp_path,
+        path_manifest_returncode=1,
+        path_manifest_stdout="FAIL path_manifest_fidelity path_manifest_carrier_required\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.CONTAINED_SEAT_PROFILE),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    output = out.getvalue()
+    assert pr_preflight.CONTAINED_SEAT_CARRIER_NOTICE in output
+    assert "[PASS] Creator Engine validator - path-manifest PR-diff gate: passed; omitted" in output
+    assert "PASS: PR preflight" in output
+    assert workflow_audits == [tmp_path]
+    assert any("verify-test-coupling" in call for call in runner.argv_calls())
+    assert [
+        sys.executable,
+        "-m",
+        "creator_engine_validator",
+        "verify-path-manifest",
+        "--base",
+        "abc1234",
+        "--manifest-dir",
+        ".ce/pr-manifests",
+        "--head-ref",
+        "dev4-night-lane0-pr-preflight",
+        "--require-carrier",
+    ] in runner.argv_calls()
+
+
+def test_contained_seat_profile_still_enforces_non_carrier_path_manifest_failures(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    runner = FakeRunner(
+        tmp_path,
+        path_manifest_returncode=1,
+        path_manifest_stdout=(
+            "FAIL path_manifest_fidelity path_manifest_carrier_required\n"
+            "FAIL path_manifest_fidelity path_manifest_count_mismatch\n"
+        ),
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.CONTAINED_SEAT_PROFILE),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 1
+    output = out.getvalue()
+    assert "path_manifest_count_mismatch" in output
+    assert "FAIL: PR preflight" in output
+    assert pr_preflight.CONTAINED_SEAT_CARRIER_NOTICE not in output
+
+
 def test_preflight_reports_manifest_count_or_sha_desync(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
@@ -517,6 +629,25 @@ def test_preflight_build_parser_still_rejects_bogus_work_class():
         parser.parse_args(["--declared-work-class", "Z"])
 
     assert exc_info.value.code == 2
+
+
+def test_preflight_build_parser_rejects_unknown_profile():
+    parser = pr_preflight.build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["--profile", "bogus"])
+
+    assert exc_info.value.code == 2
+
+
+def test_preflight_build_parser_hides_profile_from_help(capsys):
+    parser = pr_preflight.build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "--profile" not in capsys.readouterr().out
 
 
 def test_preflight_fails_when_declared_work_class_line_missing(tmp_path: Path, monkeypatch):

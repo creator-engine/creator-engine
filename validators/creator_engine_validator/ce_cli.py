@@ -1649,6 +1649,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=pr_preflight.DEFAULT_TEST_COMMAND,
         help=f"test command to compare at base and HEAD (default: {pr_preflight.DEFAULT_TEST_COMMAND})",
     )
+    validate_pr.add_argument(
+        "--profile",
+        choices=pr_preflight.VALIDATE_PR_PROFILES,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
 
     # ce automerge-decide — CEO-mode auto-merge classifier (PR-A, ce-ops#291).
     # Classify-only / dry-run: prints the decision + rationale for a given PR;

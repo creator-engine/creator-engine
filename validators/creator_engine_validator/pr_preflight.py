@@ -43,6 +43,14 @@ PYTEST_OUTCOME_PATTERN = re.compile(
     r"\b(\d+)\s+"
     r"(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns)\b"
 )
+VALIDATE_PR_PROFILES = ("contained-seat",)
+CONTAINED_SEAT_PROFILE = "contained-seat"
+PATH_MANIFEST_CARRIER_REQUIRED_CODE = "path_manifest_carrier_required"
+PATH_MANIFEST_ERROR_PATTERN = re.compile(r"\b(path_manifest_[a-z0-9_]+)\b")
+CONTAINED_SEAT_CARRIER_NOTICE = (
+    "NOTICE: omitted check path_manifest_carrier_required for profile contained-seat "
+    "because the per-PR carrier is generated harvest-side."
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +63,7 @@ class PreflightConfig:
     pr_body: str | None = None
     allow_dirty: bool = False
     test_command: str = DEFAULT_TEST_COMMAND
+    profile: str | None = None
 
 
 @dataclass(frozen=True)
@@ -601,6 +610,54 @@ def _print_summary(checks: Sequence[CheckDetail], out: TextIO) -> None:
         print(f"  [{'PASS' if check.ok else 'FAIL'}] {check.name}: {check.detail}", file=out)
 
 
+def _validate_profile(profile: str | None) -> None:
+    if profile is not None and profile not in VALIDATE_PR_PROFILES:
+        raise RuntimeError(
+            f"unknown validate-pr profile {profile!r}; expected one of: {', '.join(VALIDATE_PR_PROFILES)}"
+        )
+
+
+def _path_manifest_error_codes(result: CommandResult) -> set[str]:
+    return set(PATH_MANIFEST_ERROR_PATTERN.findall(result.stdout + "\n" + result.stderr)) - {"path_manifest_fidelity"}
+
+
+def _run_path_manifest_gate(
+    config: PreflightConfig,
+    comparison_base: str,
+    py: str,
+    py_env: Mapping[str, str],
+    *,
+    runner: Runner,
+    out: TextIO,
+    err: TextIO,
+) -> str:
+    argv = [
+        py,
+        "-m",
+        "creator_engine_validator",
+        "verify-path-manifest",
+        "--base",
+        comparison_base,
+        "--manifest-dir",
+        ".ce/pr-manifests",
+        "--head-ref",
+        config.head_ref or "",
+        "--require-carrier",
+    ]
+    print("==> Creator Engine validator - path-manifest PR-diff gate", file=out)
+    result = runner(argv, config.repo_root, py_env)
+    _print_streams(result, out, err)
+    if result.returncode == 0:
+        return "passed"
+
+    error_codes = _path_manifest_error_codes(result)
+    if config.profile == CONTAINED_SEAT_PROFILE and error_codes == {PATH_MANIFEST_CARRIER_REQUIRED_CODE}:
+        print(CONTAINED_SEAT_CARRIER_NOTICE, file=out)
+        return "passed; omitted path_manifest_carrier_required (harvest-side carrier)"
+
+    raise RuntimeError(f"Creator Engine validator - path-manifest PR-diff gate failed with exit code {result.returncode}")
+
+
 def run_preflight(
     config: PreflightConfig,
     *,
@@ -621,7 +678,9 @@ def run_preflight(
             pr_body=config.pr_body,
             allow_dirty=config.allow_dirty,
             test_command=config.test_command,
+            profile=config.profile,
         )
+        _validate_profile(config.profile)
     except Exception as exc:
         checks.append(CheckDetail(name="preflight setup", ok=False, detail=str(exc)))
         _print_summary(checks, out)
@@ -987,30 +1046,15 @@ def run_preflight(
     checks.append(
         _run_check(
             "Creator Engine validator - path-manifest PR-diff gate",
-            lambda: (
-                _run_checked(
-                    "Creator Engine validator - path-manifest PR-diff gate",
-                    [
-                        py,
-                        "-m",
-                        "creator_engine_validator",
-                        "verify-path-manifest",
-                        "--base",
-                        comparison_base["value"],
-                        "--manifest-dir",
-                        ".ce/pr-manifests",
-                        "--head-ref",
-                        config.head_ref or "",
-                        "--require-carrier",
-                    ],
-                    config.repo_root,
-                    runner=runner,
-                    env=py_env,
-                    out=out,
-                    err=err,
-                ),
-                "passed",
-            )[1],
+            lambda: _run_path_manifest_gate(
+                config,
+                comparison_base["value"],
+                py,
+                py_env,
+                runner=runner,
+                out=out,
+                err=err,
+            ),
             out,
             err,
         )
@@ -1062,6 +1106,12 @@ def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
         default=DEFAULT_TEST_COMMAND,
         help=f"test command to compare at base and HEAD (default: {DEFAULT_TEST_COMMAND})",
     )
+    parser.add_argument(
+        "--profile",
+        choices=VALIDATE_PR_PROFILES,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
@@ -1076,6 +1126,7 @@ def run_cli(args: argparse.Namespace) -> int:
             pr_body=args.pr_body,
             allow_dirty=args.allow_dirty,
             test_command=args.test_command,
+            profile=args.profile,
         )
     )
 
