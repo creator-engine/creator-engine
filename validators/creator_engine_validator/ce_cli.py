@@ -209,6 +209,30 @@ INTERNAL_COMMAND_GROUPS = frozenset(
 
 _V3_FORWARDED_ENV = "CE_V3_FORWARDED"
 
+_NATIVE_ONBOARD_INSTALLER_FLAGS = frozenset(
+    {"--spec", "--answers", "--answers-schema", "--plan", "--apply", "--inventory"}
+)
+
+
+def _maybe_refuse_native_onboard_installer_flags(argv: Sequence[str]) -> int | None:
+    if not argv or argv[0] != "onboard":
+        return None
+    matched = []
+    for token in argv[1:]:
+        flag = token.split("=", 1)[0]
+        if flag in _NATIVE_ONBOARD_INSTALLER_FLAGS and flag not in matched:
+            matched.append(flag)
+    if not matched:
+        return None
+    print(
+        "ce onboard: installer-only flag(s) "
+        + ", ".join(matched)
+        + " belong to the installer flow; use `ce install <same args>`.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 V3_FORWARDING_SHIMS: dict[str, tuple[str, str]] = {
     "seats": ("list governed seat liveness from CE state", "seats"),
     "fleet": ("aggregated fleet status", "fleet"),
@@ -5196,6 +5220,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _press_merge_evidence_from_argv(argv[1:])
     if argv and argv[0] in V3_FORWARDING_SHIMS:
         return _forward_v3_argv(argv[0], argv[1:])
+    onboard_installer_flag_result = _maybe_refuse_native_onboard_installer_flags(argv)
+    if onboard_installer_flag_result is not None:
+        return onboard_installer_flag_result
     parser = _build_parser()
     args = parser.parse_args(argv)
     skew_result = _maybe_guard_stale_wheel_skew(args)
