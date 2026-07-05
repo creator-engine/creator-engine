@@ -108,6 +108,19 @@ class DockerPlan:
             args += ["--mount", _render_mount(mount)]
         if self.network == "none":
             args.append("--network=none")
+        elif self.network == "proxy":
+            raise DockerPlanRejected(
+                "network='proxy' plans cannot be rendered into docker argv: docker-side "
+                "egress mediation is not yet implemented (no flag here maps an egress "
+                "allowlist to a Docker network primitive, so the container would default "
+                "to the open bridge network if run). This backend's egress_enforceable() "
+                "is hardcoded False, so provisioning refuses before this point today; this "
+                "raise is a fail-closed backstop so a future runner that claims "
+                "egress_enforceable()=True cannot silently produce an open, "
+                "governed-labeled container."
+            )
+        else:
+            raise DockerPlanRejected(f"unknown network mode {self.network!r}")
         args += list(self.tty_flags)
         args += [self.image_ref, *command]
         return tuple(args)

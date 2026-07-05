@@ -76,7 +76,7 @@ All required fields MUST be present. Stricter type rules below apply.
 | `schema_version` | enum | `"1"` for G-1.0. |
 | `policy_id` | string | slug `^[a-z][a-z0-9-]{2,63}$`. |
 | `policy_sha` | string | 64 lowercase hex characters. |
-| `role` | enum | one of `architect_research`, `implementer`, `verification`, `controller`. The `controller` addition is an additive governance-contract change for launch-default policy records. |
+| `role` | enum | one of `architect_research`, `implementer`, `verification`, `controller`. The `controller` addition is an additive governance-contract change for launch-default policy records (ce-ops#447, Operator-ratified 2026-07-05 day-arc). |
 | `image_ref` | object | `name` required; `sha` (`sha256:<hex64>`) enforced as a digest pin by the check. |
 | `mount_manifest` | array<object> | each entry `{path, mode}` with `write_justification` required when `mode: rw`. |
 | `egress_allowlist` | array<object> | each entry `{host, ...}`; an empty array declares no egress (the safe floor). |

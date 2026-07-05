@@ -148,6 +148,25 @@ def test_translate_docker_plan_hardened_without_runtime_or_host_codex_binds():
     )
 
 
+def test_docker_argv_raises_on_proxy_network_fail_closed_lock():
+    """Fail-closed lock: docker_argv must never render a 'proxy' network plan.
+
+    Today this network value is unreachable via DockerBackend.provision because
+    SubprocessDockerRunner.egress_enforceable() is hardcoded False, so
+    provisioning refuses before a plan with network=='proxy' ever reaches
+    docker_argv (see test_provision_non_empty_egress_without_primitive_refuses_before_available,
+    which this test does not weaken). This test locks the latent branch directly:
+    if a future runner claims egress_enforceable()=True, docker_argv must still
+    refuse to render rather than silently emit a default (open) bridge network
+    labeled governed.
+    """
+    plan = translate_to_docker_plan(valid_policy(egress=True), **plan_inputs())
+    assert plan.network == "proxy"
+
+    with pytest.raises(DockerPlanRejected, match="docker-side egress mediation is not yet implemented"):
+        plan.docker_argv(("codex", "exec", "hello"))
+
+
 def test_translate_docker_plan_image_ref_comes_only_from_policy():
     bad = valid_policy()
     del bad["image_ref"]["sha"]

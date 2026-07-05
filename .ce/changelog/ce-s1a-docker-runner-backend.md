@@ -19,3 +19,8 @@ issue: ce-s1a-docker-runner-backend
 - Push-readiness follow-up: baselined the `runner.docker_backend` v3 taxonomy
   classification in `_versions.py` and regenerated the CLI/schema autogen
   reference docs so the version-boundary and autogen-sync gates pass clean.
+- Review-pickup follow-up: locked the latent `network=='proxy'` docker-argv
+  branch to fail closed (docker-side egress mediation is not implemented) with
+  a regression test, and cited ce-ops#447 (Operator-ratified 2026-07-05
+  day-arc) next to the `controller` role-enum addition in the schema and
+  contract doc.

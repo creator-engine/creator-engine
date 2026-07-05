@@ -101,8 +101,9 @@ properties:
     description: |
       Seat role enum. The three runtime seats carried from the v2
       worker-container contract plus the controller role ratified for
-      launch-default policy records. Additional roles MUST be ratified
-      as additive schema changes.
+      launch-default policy records (ce-ops#447, Operator-ratified
+      2026-07-05 day-arc). Additional roles MUST be ratified as
+      additive schema changes.
   isolation_backend:
     type: string
     enum: [gvisor-proxy, docker, openshell, local-noop, os-native]
