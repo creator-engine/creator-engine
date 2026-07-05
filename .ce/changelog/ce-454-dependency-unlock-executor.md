@@ -6,7 +6,7 @@ scope: validator
 issue: creator-engine/ce-ops#454
 ---
 
-**Merge-triggered dependency-unlock executor (slice 1, SHADOW-first).**
+**Merge-triggered dependency-unlock executor, SHADOW-first (slice 1).**
 
 - Add `creator_engine_validator.dependency_unlock`, a pure evaluator (injectable
   `GhRunner`, no import-time I/O) that implements
@@ -26,14 +26,9 @@ issue: creator-engine/ce-ops#454
   `pull_request` `closed` (gated `merged == true && base.ref == 'main'`),
   fail-open on an absent `CE_CROSS_REPO_TOKEN`, and uploads a JSON audit
   artifact on every run. SHADOW is the only mode this PR ships enabled: no
-  repo variable enables live mode. `CE_DEP_UNLOCK_RUN_MODE == 'live'` would
-  enable apply; `CE_DEP_UNLOCK_KILL_SWITCH` truthy always forces shadow
-  regardless.
+  repo variable enables live mode.
 - Add `validators/tests/unit/test_dependency_unlock.py` (32 cases, fake
-  `GhRunner`, zero network): dedup-on-duplicate-search-hit, fail-closed on
-  unparseable/ambiguous blocker refs, non-dependency hold labels blocking
-  despite resolved deps, zero write calls in shadow mode, kill-switch forcing
-  shadow over `RUN_MODE=live`, and the closed-without-merge matrix (PR closed
-  unmerged / issue closed not-planned / issue closed completed).
-- Does not touch `work_claims.py` (stretch piece-4, lifecycle states, is
-  explicitly out of this unit).
+  `GhRunner`, zero network) covering dedup, fail-closed parsing, non-dependency
+  holds, zero write calls in shadow mode, kill-switch precedence, and the
+  closed-without-merge matrix.
+- Does not touch `work_claims.py` (stretch piece-4 is out of this unit).
