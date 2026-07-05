@@ -16,3 +16,6 @@ issue: ce-s1a-docker-runner-backend
 - Extended the runtime-policy contract with `docker` and the ratified
   `controller` role enum addition, with hermetic unit coverage for translation,
   refusal, and bridge composition.
+- Push-readiness follow-up: baselined the `runner.docker_backend` v3 taxonomy
+  classification in `_versions.py` and regenerated the CLI/schema autogen
+  reference docs so the version-boundary and autogen-sync gates pass clean.

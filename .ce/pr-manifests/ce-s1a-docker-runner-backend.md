@@ -1,30 +1,22 @@
-# PR path manifest — ce-s1a-docker-runner-backend · Plain Docker runner backend
+# PR path manifest — ce-s1a-docker-runner-backend · Add plain Docker contained runner backend
 
-This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed
-authorized path-set for this PR. CI runs `verify-path-manifest --base <sha>
---manifest-dir .ce/pr-manifests --head-ref ce-s1a-docker-runner-backend` and
-requires this PR's `base..HEAD` diff to equal exactly the authorized path-set
-below; this carrier lists itself.
+This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-s1a-docker-runner-backend` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
-- **Governance-contract note:** this carrier includes the controller-authorized
-  additive runtime-policy `role` enum change adding `controller`, plus the
-  `docker` isolation backend enum addition.
-- **Schema path note:** the dispatch named `schemas/runtime-policy.schema.yaml`;
-  in this repository `schemas/` is a symlink to
-  `validators/creator_engine_validator/schemas/`, so the tracked diff path below
-  is the package schema path Git records.
 
-AUTHORIZED_PATHS_COUNT=20
+AUTHORIZED_PATHS_COUNT=24
 
-AUTHORIZED_PATHS_SHA256=73f3b2e78024713cd4569a2d7a83ed797f9972cf332241833ed7077ad4eb4a1e
+AUTHORIZED_PATHS_SHA256=02fca18be773ca9c8cb27df93be3893990882b5df3e4667b948c977a54e3a9fd
 
 ```text
 .ce/changelog/ce-s1a-docker-runner-backend.md
 .ce/pr-manifests/ce-s1a-docker-runner-backend.md
+.ce/reference/cli.generated.md
+.ce/reference/schemas.generated.md
 docs/contracts/runtime-policy.md
+validators/creator_engine_validator/_versions.py
 validators/creator_engine_validator/checks/ce_runtime_policy.py
 validators/creator_engine_validator/runner/__init__.py
 validators/creator_engine_validator/runner/docker_backend.py
@@ -42,4 +34,5 @@ validators/tests/unit/test_open_change.py
 validators/tests/unit/test_openshell_backend.py
 validators/tests/unit/test_orchestrator.py
 validators/tests/unit/test_redact.py
+validators/tests/unit/test_version_boundary.py
 ```
