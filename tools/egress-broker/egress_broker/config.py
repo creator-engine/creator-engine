@@ -1,9 +1,10 @@
 """The egress-broker per-App config schema + fail-closed loader (read AS DATA).
 
-The broker is configured host-side with: the target ``repo``, the ``installation_owner`` (the
-org an App is installed on — ``creator-engine`` — used for installation-id discovery), the
-publish :class:`~egress_broker.policy.BrokerPolicy`, and a per-seat App table covering
-dev-1/2/3/4. Each seat entry is the per-App identity the broker mints+pushes AS: ``app_id``
+The broker is configured host-side with: the default target ``repo`` (which a seat may
+override with its own ``repo``), the ``installation_owner`` (the org an App is installed on —
+``creator-engine`` — used for installation-id discovery), the publish
+:class:`~egress_broker.policy.BrokerPolicy`, and a per-seat App table covering dev-1/2/3/4.
+Each seat entry is the per-App identity the broker mints+pushes AS: ``app_id``
 (the JWT ``iss`` — the App's numeric id or client id), ``app_owner`` (the GitHub identity that
 owns the App, e.g. ``cedev4vps-coder``), and the App private key source — EITHER ``pem_path``
 (legacy, host-local, RAM-only by convention — ``/dev/shm/ce-dev4/ce-forge-dev4.pem``) OR a
@@ -12,10 +13,11 @@ preferred per ce-ops#266; ``secret_ref`` wins when both are present). ``installa
 the App installation to mint from (``None`` → discovered at run time, filtered to the org).
 
 Fail-closed (mirrors ``v3_forge_join.load_app_config``): a missing file, malformed JSON, a bad
-``repo``, an empty seat table, an empty author allow-list (a broker that could authorize no one
-is misconfigured), or a malformed seat is a :class:`BrokerConfigError` — never a silent
-default. The loader reads the config as DATA and copies no secret anywhere; the per-seat
-``repr`` keeps the App id / pem path out of incidental log surfaces.
+top-level or per-seat ``repo``, a seat with neither per-seat ``repo`` nor top-level default,
+an empty seat table, an empty author allow-list (a broker that could authorize no one is
+misconfigured), or a malformed seat is a :class:`BrokerConfigError` — never a silent default.
+The loader reads the config as DATA and copies no secret anywhere; the per-seat ``repr`` keeps
+the App id / pem path out of incidental log surfaces.
 """
 from __future__ import annotations
 
@@ -78,6 +80,7 @@ class SeatAppConfig:
     pem_path: Optional[str]
     installation_id: int | None
     secret_ref: Optional[VaultSecretRef] = None
+    repo: str = ""
 
     def __repr__(self) -> str:  # keep App id / pem path out of incidental log/repr surfaces
         key_source = (
@@ -184,12 +187,29 @@ def _build_vault_secret_ref(raw_ref: object, where: str) -> VaultSecretRef:
     return VaultSecretRef(mount=mount, path=path, field=field)
 
 
-def _build_seat(seat_id: str, raw: object) -> SeatAppConfig:
+def _validate_repo(repo: str, where: str) -> str:
+    repo = str(repo or "").strip()
+    if not repo:
+        raise BrokerConfigError(f"{where} is missing required non-empty 'repo'")
+    if not _REPO_RE.match(repo):
+        raise BrokerConfigError(f"{where} 'repo' {repo!r} is not in owner/name form")
+    return repo
+
+
+def _build_seat(seat_id: str, raw: object, *, default_repo: str | None) -> SeatAppConfig:
     if not isinstance(raw, Mapping):
         raise BrokerConfigError(f"seat {seat_id!r} must be a mapping")
     where = f"seat {seat_id!r}"
     app_id = _require_str(raw, "app_id", where)
     app_owner = _require_str(raw, "app_owner", where)
+    if raw.get("repo") is not None:
+        repo = _validate_repo(str(raw.get("repo") or ""), where)
+    elif default_repo:
+        repo = default_repo
+    else:
+        raise BrokerConfigError(
+            f"{where} must specify 'repo' because broker config has no top-level repo default"
+        )
 
     # Key source: prefer ``secret_ref`` (vault-backed); fall back to ``pem_path`` (legacy).
     # Exactly one of them must be provided.
@@ -230,6 +250,7 @@ def _build_seat(seat_id: str, raw: object) -> SeatAppConfig:
         pem_path=pem_path,
         installation_id=installation_id,
         secret_ref=secret_ref,
+        repo=repo,
     )
 
 
@@ -254,9 +275,8 @@ def load_broker_config(source: str | Path | Mapping) -> BrokerConfig:
     if not isinstance(data, Mapping):
         raise BrokerConfigError("broker config must be a JSON object / mapping")
 
-    repo = _require_str(data, "repo", "broker config")
-    if not _REPO_RE.match(repo):
-        raise BrokerConfigError(f"broker config 'repo' {repo!r} is not in owner/name form")
+    raw_repo = data.get("repo")
+    repo = _validate_repo(str(raw_repo or ""), "broker config") if raw_repo is not None else ""
     installation_owner = _require_str(data, "installation_owner", "broker config")
     audit_log = str(data.get("audit_log") or "").strip()
 
@@ -265,7 +285,7 @@ def load_broker_config(source: str | Path | Mapping) -> BrokerConfig:
     seats_raw = data.get("seats")
     if not isinstance(seats_raw, Mapping) or not seats_raw:
         raise BrokerConfigError("broker config 'seats' must be a non-empty mapping of seat_id -> App")
-    seats = {sid: _build_seat(sid, entry) for sid, entry in seats_raw.items()}
+    seats = {sid: _build_seat(sid, entry, default_repo=repo or None) for sid, entry in seats_raw.items()}
 
     return BrokerConfig(
         repo=repo,

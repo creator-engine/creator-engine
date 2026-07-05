@@ -1,5 +1,5 @@
 {
-  "_comment": "ADR-0007 egress broker — per-App config template covering dev-1/2/3/4. Copy to a host-local path (e.g. ~/.ce-egress/broker.json), fill the real App ids + installation ids. Key source: use 'secret_ref' (vault-backed, preferred per ce-ops#266) or 'pem_path' (legacy, RAM-only via /dev/shm). Exactly one must be set per seat. The PEM is never read by the broker process — only by `openssl` at sign time. For secret_ref seats the broker fetches the key from OpenBao KV v2 per-call (RAM-only, never written to disk).",
+  "_comment": "ADR-0007 egress broker — per-App config template covering dev-1/2/3/4. Copy to a host-local path (e.g. ~/.ce-egress/broker.json), fill the real App ids + installation ids. Top-level repo is the default for seats without their own repo; a seat-level repo overrides it. Key source: use 'secret_ref' (vault-backed, preferred per ce-ops#266) or 'pem_path' (legacy, RAM-only via /dev/shm). Exactly one must be set per seat. The PEM is never read by the broker process — only by `openssl` at sign time. For secret_ref seats the broker fetches the key from OpenBao KV v2 per-call (RAM-only, never written to disk).",
 
   "repo": "creator-engine/creator-engine",
   "installation_owner": "creator-engine",
@@ -46,7 +46,8 @@
       "installation_id": null
     },
     "dev-3": {
-      "_comment": "vault-backed (ce-ops#266): App key stored in OpenBao KV v2 at ce-kv/forge/dev-3 field private_key",
+      "_comment": "vault-backed (ce-ops#266): App key stored in OpenBao KV v2 at ce-kv/forge/dev-3 field private_key; repo demonstrates per-seat override",
+      "repo": "creator-engine/creator-engine-sandbox",
       "app_id": "REPLACE_WITH_DEV3_APP_ID",
       "app_owner": "ce-dev-3",
       "secret_ref": {

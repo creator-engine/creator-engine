@@ -255,10 +255,10 @@ def open_or_update_pr(
 # ---------------------------------------------------------------------------
 # Helpers — policy binding sha + the audit record assembly
 # ---------------------------------------------------------------------------
-def policy_binding_sha(config: BrokerConfig) -> str:
+def policy_binding_sha(config: BrokerConfig, *, repo: str | None = None) -> str:
     """A deterministic 64-hex digest binding a mint to the policy in force (the mint's policy_sha)."""
     body = {
-        "repo": config.repo,
+        "repo": repo or config.repo,
         "base_branch": config.policy.base_branch,
         "namespaces": sorted(config.policy.allowed_branch_namespaces),
         "forbidden": sorted(config.policy.forbidden_branches),
@@ -271,10 +271,17 @@ def policy_binding_sha(config: BrokerConfig) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _base_record(seat_id: str, config: BrokerConfig, branch: str, facts: CommitFacts, app_owner: str) -> dict:
+def _base_record(
+    seat_id: str,
+    config: BrokerConfig,
+    branch: str,
+    facts: CommitFacts,
+    app_owner: str,
+    repo: str,
+) -> dict:
     return {
         "seat_id": seat_id,
-        "repo": config.repo,
+        "repo": repo,
         "branch": branch,
         "base": config.policy.base_branch,
         "head_sha": facts.head_sha,
@@ -331,6 +338,7 @@ def courier(
         raise EgressRefused(str(exc), audit_record=rec) from exc
 
     app_owner = seat.app_owner
+    seat_repo = seat.repo
 
     # 2. read the seat's head-commit facts host-side (absent branch = deny + audit).
     reader = read_facts_fn or (lambda: read_commit_facts(repo_path, branch, spawn=git_spawn))
@@ -339,7 +347,14 @@ def courier(
     except CommitFactsError as exc:
         rec = append_audit(
             audit_log,
-            {**_base_record(seat_id, config, branch, CommitFacts("", "", "", "", ""), app_owner),
+            {**_base_record(
+                seat_id,
+                config,
+                branch,
+                CommitFacts("", "", "", "", ""),
+                app_owner,
+                seat_repo,
+            ),
              "decision": "deny", "applied": False, "pushed": False,
              "verified": {"reasons": [str(exc)]}},
             now=audit_now,
@@ -348,12 +363,12 @@ def courier(
 
     # 3. rate-guard input + pluggable preconditions, then the PURE policy decision.
     recent = count_recent_pushes(audit_log, seat_id, window_seconds=config.policy.window_seconds, now=audit_now)
-    preconditions = tuple(hook(seat_id, config.repo, branch, facts))
+    preconditions = tuple(hook(seat_id, seat_repo, branch, facts))
     decision = evaluate(
         facts, branch, config.policy, rate_state=RateState(recent), preconditions=preconditions
     )
 
-    base = _base_record(seat_id, config, branch, facts, app_owner)
+    base = _base_record(seat_id, config, branch, facts, app_owner, seat_repo)
     base["verified"] = decision.to_dict()
 
     # 4. deny → audit + refuse, never minting/pushing.
@@ -410,12 +425,12 @@ def courier(
         )
     )
     run_id = f"egress-{seat_id}-{facts.head_sha[:12]}"
-    policy_sha = policy_binding_sha(config)
+    policy_sha = policy_binding_sha(config, repo=seat_repo)
 
     def _default_mint(s: SeatAppConfig, iid: int) -> ScopedToken:
         return mint_egress_token(
             replace(s, installation_id=iid),
-            repo=config.repo,
+            repo=seat_repo,
             installation_owner=config.installation_owner,
             signer=signer,
             run_id=run_id, policy_sha=policy_sha, permissions=PUSH_PR_PERMISSIONS,
@@ -424,10 +439,10 @@ def courier(
         )
 
     _mint = mint_fn or _default_mint
-    _push = push_fn or (lambda token: _default_push(config.repo, branch, repo_path, token, git_spawn))
+    _push = push_fn or (lambda token: _default_push(seat_repo, branch, repo_path, token, git_spawn))
     _open_pr = open_pr_fn or (
         lambda token: open_or_update_pr(
-            config.repo, branch, config.policy.base_branch, seat_id=seat_id, head_sha=facts.head_sha,
+            seat_repo, branch, config.policy.base_branch, seat_id=seat_id, head_sha=facts.head_sha,
             declared_work_class=resolved_declared_work_class,
             gh_runner=authenticated_gh_runner(token, spawn=gh_spawn) if gh_spawn else authenticated_gh_runner(token),
         )

@@ -12,6 +12,7 @@ ALWAYS revoked (even if the PR step raises), and every path appends a secret-fre
 """
 
 import json
+import subprocess
 
 import pytest
 
@@ -485,6 +486,110 @@ def test_apply_without_injected_mint_uses_default_minter(tmp_path):
         ("open_pr", "ghs_default_minted"),
         ("revoke", "ghs_default_minted"),
     ]
+
+
+def test_apply_default_push_and_pr_use_resolved_seat_repo(tmp_path, monkeypatch):
+    from creator_engine_validator.forge import change_push
+
+    cfg = load_broker_config(
+        {
+            "repo": "creator-engine/creator-engine",
+            "installation_owner": "creator-engine",
+            "audit_log": str(tmp_path / "audit.jsonl"),
+            "policy": {
+                "base_branch": "main",
+                "allowed_branch_namespaces": ["ce-"],
+                "forbidden_branches": [],
+                "authorized_emails": [],
+                "authorized_logins": ["cedev4vps-coder"],
+                "max_pushes_per_window": 10,
+                "window_seconds": 3600,
+            },
+            "seats": {
+                "dev-4": {
+                    "repo": "creator-engine/creator-engine-sandbox",
+                    "app_id": "4085526",
+                    "app_owner": "cedev4vps-coder",
+                    "pem_path": "/dev/shm/ce-dev4/ce-forge-dev4.pem",
+                    "installation_id": None,
+                }
+            },
+        }
+    )
+    push_calls = []
+    gh_calls = []
+
+    class PushResult:
+        def to_dict(self):
+            return {
+                "repo": "creator-engine/creator-engine-sandbox",
+                "branch": "ce-egress-broker",
+                "pushed": True,
+                "remote_head": _GOOD_FACTS.head_sha,
+                "local_head": _GOOD_FACTS.head_sha,
+            }
+
+    def fake_push_change(repo, branch, *, source_dir, token, apply, spawn):
+        push_calls.append(
+            {
+                "repo": repo,
+                "branch": branch,
+                "source_dir": source_dir,
+                "apply": apply,
+                "token_repo": token.repo,
+            }
+        )
+        return PushResult()
+
+    def fake_gh_spawn(argv, input_text, env):
+        gh_calls.append({"argv": list(argv), "input": input_text, "gh_token": env.get("GH_TOKEN")})
+        method = argv[argv.index("-X") + 1]
+        if method == "GET":
+            return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+        if method == "POST":
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"number": 424}), stderr="")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(change_push, "push_change", fake_push_change)
+    token = ScopedToken(
+        run_id="r",
+        repo="creator-engine/creator-engine-sandbox",
+        policy_sha="a" * 64,
+        secret_name="forge_egress_push_pr",
+        permissions=(),
+        expires_at="2026-06-20T13:00:00Z",
+        token_ref="ref",
+        value="ghs_resolved_repo_token",
+    )
+
+    result = courier(
+        "dev-4",
+        "/seat/workspace/creator-engine",
+        "ce-egress-broker",
+        config=cfg,
+        apply=True,
+        read_facts_fn=lambda: _GOOD_FACTS,
+        declared_work_class="story",
+        resolve_id_fn=lambda seat: 555,
+        mint_fn=lambda seat, installation_id: token,
+        gh_spawn=fake_gh_spawn,
+        revoke_fn=lambda token: True,
+    )
+
+    assert result.pr_number == 424
+    assert push_calls == [
+        {
+            "repo": "creator-engine/creator-engine-sandbox",
+            "branch": "ce-egress-broker",
+            "source_dir": "/seat/workspace/creator-engine",
+            "apply": True,
+            "token_repo": "creator-engine/creator-engine-sandbox",
+        }
+    ]
+    assert gh_calls[0]["argv"][4].startswith("repos/creator-engine/creator-engine-sandbox/pulls?")
+    assert gh_calls[1]["argv"][4] == "repos/creator-engine/creator-engine-sandbox/pulls"
+    assert all(call["gh_token"] == "ghs_resolved_repo_token" for call in gh_calls)
+    assert _audit_lines(tmp_path)[-1]["repo"] == "creator-engine/creator-engine-sandbox"
 
 
 def test_empty_minted_token_refuses_before_push_or_pr_and_ignores_ambient_auth(tmp_path, monkeypatch):

@@ -12,6 +12,7 @@ Secret hygiene: the per-seat ``SeatAppConfig`` keeps the App id / pem path out o
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -66,6 +67,47 @@ def test_loads_a_well_formed_config(tmp_path):
     assert cfg.policy.base_branch == "main"
     assert "ce-" in cfg.policy.allowed_branch_namespaces
     assert set(cfg.seats) == {"dev-4", "dev-2"}
+
+
+def test_per_seat_repo_override_wins_over_top_level_default(tmp_path):
+    doc = _doc()
+    doc["seats"]["dev-4"]["repo"] = "creator-engine/creator-engine-sandbox"
+
+    cfg = load_broker_config(_write(tmp_path, doc))
+
+    assert cfg.repo == "creator-engine/creator-engine"
+    assert cfg.seat("dev-4").repo == "creator-engine/creator-engine-sandbox"
+
+
+def test_top_level_repo_defaults_seats_without_override(tmp_path):
+    cfg = load_broker_config(_write(tmp_path, _doc()))
+
+    assert cfg.seat("dev-4").repo == "creator-engine/creator-engine"
+    assert cfg.seat("dev-2").repo == "creator-engine/creator-engine"
+
+
+def test_all_per_seat_repos_allow_missing_top_level_default(tmp_path):
+    doc = _doc()
+    doc.pop("repo")
+    doc["seats"]["dev-4"]["repo"] = "creator-engine/creator-engine-dev4"
+    doc["seats"]["dev-2"]["repo"] = "creator-engine/creator-engine-dev2"
+
+    cfg = load_broker_config(_write(tmp_path, doc))
+
+    assert cfg.repo == ""
+    assert cfg.seat("dev-4").repo == "creator-engine/creator-engine-dev4"
+    assert cfg.seat("dev-2").repo == "creator-engine/creator-engine-dev2"
+
+
+def test_seat_without_repo_and_without_top_level_default_is_refused(tmp_path):
+    doc = _doc()
+    doc.pop("repo")
+    doc["seats"]["dev-4"]["repo"] = "creator-engine/creator-engine-dev4"
+
+    with pytest.raises(BrokerConfigError) as exc:
+        load_broker_config(_write(tmp_path, doc))
+
+    assert "seat 'dev-2' must specify 'repo'" in str(exc.value)
 
 
 def test_seat_lookup_returns_typed_app_config(tmp_path):
@@ -175,3 +217,11 @@ def test_load_from_mapping_directly():
     # the loader also accepts an already-parsed mapping (for the CLI / tests)
     cfg = load_broker_config(_doc())
     assert cfg.repo == "creator-engine/creator-engine"
+
+
+def test_apps_example_json_parses_with_default_and_override():
+    cfg = load_broker_config(Path("tools/egress-broker/apps.example.json"))
+
+    assert cfg.repo == "creator-engine/creator-engine"
+    assert cfg.seat("dev-1").repo == "creator-engine/creator-engine"
+    assert cfg.seat("dev-3").repo == "creator-engine/creator-engine-sandbox"
