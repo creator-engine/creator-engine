@@ -21,7 +21,8 @@ issue: creator-engine/ce-ops#454
   (closed unmerged, `not_planned`, unknown, inaccessible) stays blocking,
   fail-closed.
 - Add `ce dependency-unlock scan` (new INTERNAL command group, hidden from
-  `ce --help` and the generated CLI reference, mirroring `triage`).
+  `ce --help` and the generated CLI reference, mirroring `triage`); update the
+  CLI-inventory companion guard in `test_v1_docs_reconciliation.py`.
 - Add `.github/workflows/ce-dependency-unlock.yml`: triggers on
   `pull_request` `closed` (gated `merged == true && base.ref == 'main'`),
   fail-open on an absent `CE_CROSS_REPO_TOKEN`, and uploads a JSON audit
@@ -31,4 +32,8 @@ issue: creator-engine/ce-ops#454
   `GhRunner`, zero network) covering dedup, fail-closed parsing, non-dependency
   holds, zero write calls in shadow mode, kill-switch precedence, and the
   closed-without-merge matrix.
+- Supersede the stale `brain-assertion-d1b-09-ce-cli-doc-coupling` evidence
+  pin (v3 -> v4) via `ce brain correct`, since editing
+  `test_v1_docs_reconciliation.py` changed its whole-file evidence_sha256;
+  bumps the `test_ce_brain_drift.py` active-count ratchet 89 -> 90.
 - Does not touch `work_claims.py` (stretch piece-4 is out of this unit).
