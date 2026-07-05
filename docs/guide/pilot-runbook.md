@@ -17,12 +17,15 @@ contracts/designs. For the shortest command sequence, see
 
 - A coding agent you already use (Claude Code or Codex) — CE governs *your* agent.
 - A greenfield (or existing) GitHub repository you want CE to drive work on.
-- Permission to install dependencies (sudo) and to authorize a GitHub App.
+- Permission to authorize a GitHub App. Sudo is needed only when your selected
+  backend plans privileged host dependencies; the solo-pilot default is
+  os-native and does not require a privileged dependency install.
 
 ## 1. Install (one engine, two modes — operator-typeless)
 
-You type nothing during setup; you approve only **sudo** (privileged dependency
-installs) and the **GitHub-App authorization click**. Contract:
+You type nothing during setup; you approve only the remaining human seams the
+plan reports: the **GitHub-App authorization click** and, only for backends that
+plan privileged host dependencies, **sudo**. Contract:
 [`../contracts/installer.md`](../contracts/installer.md).
 
 - **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`.
@@ -54,7 +57,7 @@ or answer interactively as each journey step batches its asks. The agent loop:
 # the one-liner runs this once with verified absolute paths:
 <venv>/bin/ce install --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --inventory
 # prepare ce-install.answers.yaml (secrets ONLY as env:// file:// prompt:// refs;
-# sudo pre-granted only as a scoped list, e.g. host.sudo_grant: [runsc, proxy])
+# leave host.sudo_grant empty for the solo-pilot os-native default)
 ce install --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --plan
 ce install --spec <verified-spec> --trust-root <verified-trust-root> --answers-schema <verified-schema> --answers ce-install.answers.yaml --apply --non-interactive
 ```
@@ -116,9 +119,19 @@ and initial branch are onboarding evidence only; they do not count as first ship
 For an existing repo, `ce install --inventory` and `--plan` also report
 `brownfield` / `brownfield_adoption`: workflows and checks to preserve, detected
 test commands, Git history posture, branch/commit conventions, scrub preflight,
-project skill artifacts, and a first Scope seed. These paths are read-only until
-E2's `onboard_apply` brownfield extension legs perform the writes; a build
-without those legs refuses apply with `e2_brownfield_seam_unavailable`.
+project skill artifacts, and a first Scope seed. Clone the target repository
+first, then run the brownfield onboard commands from inside that checkout; the
+adoption planner resolves the project root from the current working directory.
+These paths are read-only until E2's `onboard_apply` brownfield extension legs
+perform the writes. To run brownfield `--apply`, the host environment must set
+`CE_FORGE_LIVE_FORGE=1` and `CE_FORGE_ADOPTION_WRITE=1`, and the GitHub App
+credentials must resolve: `CE_FORGE_APP_CLIENT_ID`, the installation id
+(`CE_FORGE_INSTALLATION_ID` or `github.app.installation_id`), and either
+`CE_FORGE_APP_PEM` for the local signer path or both `CE_FORGE_MINT_BROKER_URL`
+and `CE_FORGE_MINT_BROKER_USER_TOKEN` for the shared-App mint-broker path. If
+those write-authority flags or credentials are absent, apply refuses with
+`e2_brownfield_seam_unavailable`; satisfy the flags and credential source, then
+re-run apply from the target repo checkout.
 
 ## 3. Drive work as a Scope (Frame → Shape → Build → Review → Ship)
 
