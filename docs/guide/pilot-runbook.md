@@ -1,8 +1,8 @@
 # Creator Engine — Pilot Runbook (v3.1 pilot-ready)
 
 *The end-to-end pilot onboarding path: install CE, provision a repo + the GitHub
-App, file work as a Scope, and get governed, cost-safe PRs + merges — all under
-the branded `ce session` frame, on your own agent. Brand new? Begin at the
+App, open a governed terminal session with `ce session`, file work as a Scope,
+and get cost-safe PRs + merges on your own agent. Brand new? Begin at the
 [`Welcome / Start Here`](./welcome.md) front door. Plain-language intro:
 [`understanding-ce.md`](./understanding-ce.md). The mechanics live in the cited
 contracts/designs. For the shortest command sequence, see
@@ -133,9 +133,20 @@ those write-authority flags or credentials are absent, apply refuses with
 `e2_brownfield_seam_unavailable`; satisfy the flags and credential source, then
 re-run apply from the target repo checkout.
 
+A minimal brownfield answers file still uses the same versioned answers schema:
+
+```yaml
+answers_version: 1
+github:
+  mode: existing
+  repo: owner/repo
+brownfield:
+  enabled: true
+```
+
 ## 3. Drive work as a Scope (Frame → Shape → Build → Review → Ship)
 
-Launch the session frame:
+From the repository you want CE to govern, open the terminal session:
 
 ```
 ce session
@@ -143,9 +154,10 @@ ce session
 ◆ CE · Frame 0 · Shape 0 · Build 0 · Review 0 · Ship 0  │  ctx 8%  │  spend —
 ```
 
-The status line shows your **stage** (the canon Frame→Shape→Build→Review→Ship over
-the conserved machine), plus a **unified context + spend meter** with a
-boundary-aware checkpoint/`/clear` nudge. Vocabulary canon:
+`ce session` starts the governed launcher around your coding-agent terminal. The
+status line shows your **stage** (the canon Frame→Shape→Build→Review→Ship over the
+conserved machine), plus a **unified context + spend meter** with a boundary-aware
+checkpoint/`/clear` nudge. Vocabulary canon:
 [`../architecture/stage-vocabulary.md`](../architecture/stage-vocabulary.md).
 
 1. **Frame** — just chat with your agent about what you want. Nothing is tracked.
@@ -191,10 +203,10 @@ then apply after the plan is clean:
 ce install --spec llms-install.md --answers ce-install.answers.yaml --apply --non-interactive
 ```
 
-Authorize the App when prompted, then open `ce session`. Chat in Frame, confirm a
-real first Scope, set the Budget, ratify it, drive the Build, review the PR in a
-distinct venue, and merge through `ce merge --apply`. From there, every change is
-a governed, cost-safe, evidence-backed Scope.
+Authorize the App when prompted, then run `ce session` from the repo terminal.
+Chat in Frame, confirm a real first Scope, set the Budget, ratify it, drive the
+Build, review the PR in a distinct venue, and merge through `ce merge --apply`.
+From there, every change is a governed, cost-safe, evidence-backed Scope.
 
 ## Deferred (after E1)
 
