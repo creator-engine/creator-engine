@@ -579,6 +579,131 @@ def test_run_review_pickup_loop_preserves_inbox_on_rate_limit(tmp_path):
     assert json.loads(inbox_path.read_text(encoding="utf-8")) == existing
 
 
+def test_run_review_pickup_loop_refreshes_supplier_and_runner_each_pass():
+    supplied_tokens = iter(("tok-pass-1", "tok-pass-2"))
+    runner_tokens = []
+    auth_headers = []
+
+    def token_supplier() -> str:
+        return next(supplied_tokens)
+
+    def gh_runner_factory(token: str):
+        runner_tokens.append(token)
+
+        def runner(argv, input_text=None):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="unexpected gh call")
+
+        return runner
+
+    def transport(method, url, headers, body):
+        auth_headers.append(headers.get("Authorization"))
+        return 200, {}, json.dumps({"total_count": 0, "items": []})
+
+    result = review_pickup.run_review_pickup_loop(
+        token="static-token",
+        reviewer_seats=("reviewer-b",),
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(argv, 1),
+        token_supplier=token_supplier,
+        gh_runner_factory=gh_runner_factory,
+        transport=transport,
+        repo="owner/repo",
+        iterations=2,
+        interval=0,
+        sleep=lambda seconds: None,
+    )
+
+    assert len(result.passes) == 2
+    assert all(not review_pass.incomplete for review_pass in result.passes)
+    assert runner_tokens == ["tok-pass-1", "tok-pass-2"]
+    assert auth_headers == ["Bearer tok-pass-1", "Bearer tok-pass-2"]
+
+
+def test_run_review_pickup_loop_retries_after_supplier_failure():
+    calls = {"count": 0}
+    events = []
+    sleeps = []
+
+    def token_supplier() -> str:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("backend unavailable")
+        return "tok-pass-2"
+
+    def gh_runner_factory(token: str):
+        return lambda argv, input_text=None: subprocess.CompletedProcess(argv, 1)
+
+    result = review_pickup.run_review_pickup_loop(
+        token="",
+        reviewer_seats=("reviewer-b",),
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(argv, 1),
+        token_supplier=token_supplier,
+        gh_runner_factory=gh_runner_factory,
+        transport=lambda method, url, headers, body: (200, {}, json.dumps({"total_count": 0, "items": []})),
+        repo="owner/repo",
+        iterations=2,
+        interval=0,
+        sleep=sleeps.append,
+        log_sink=events.append,
+        max_consecutive_failures=2,
+    )
+
+    assert [review_pass.incomplete for review_pass in result.passes] == [True, False]
+    assert sleeps == [0]
+    incomplete = [event for event in events if event["event"] == "review_pickup_pass_incomplete"]
+    assert incomplete[0]["reason"] == "token_supplier_failed"
+    assert incomplete[0]["error_type"] == "RuntimeError"
+
+
+def test_run_review_pickup_loop_retries_pickup_error_with_supplier():
+    events = []
+
+    result = review_pickup.run_review_pickup_loop(
+        token="",
+        reviewer_seats=(),
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(argv, 1),
+        token_supplier=lambda: "tok-pass",
+        gh_runner_factory=lambda token: (
+            lambda argv, input_text=None: subprocess.CompletedProcess(argv, 1)
+        ),
+        transport=lambda method, url, headers, body: (200, {}, json.dumps({"total_count": 0, "items": []})),
+        repo="owner/repo",
+        iterations=2,
+        interval=0,
+        sleep=lambda seconds: None,
+        log_sink=events.append,
+        max_consecutive_failures=3,
+    )
+
+    assert [review_pass.incomplete for review_pass in result.passes] == [True, True]
+    incomplete = [event for event in events if event["event"] == "review_pickup_pass_incomplete"]
+    assert [event["reason"] for event in incomplete] == ["pickup_error", "pickup_error"]
+    assert "requires at least one --seat reviewer" in incomplete[0]["note"]
+
+
+def test_cev3_review_pickup_supplier_failures_return_nonzero(monkeypatch, capsys):
+    from creator_engine_validator import v3_cli
+
+    def token_supplier() -> str:
+        raise RuntimeError("backend unavailable")
+
+    monkeypatch.setattr(v3_cli, "_review_pickup_token_supplier_from_args", lambda args: token_supplier)
+
+    code = v3_cli.main([
+        "review-pickup",
+        "--identity", "controller",
+        "--repo", "o/r",
+        "--seat", "ce-dev-3",
+        "--once",
+        "--pickup-token-max-consecutive-failures", "1",
+        "--json",
+    ])
+
+    assert code == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["error"] == "review_pickup_failed"
+    assert "exiting for supervisor restart" in out["detail"]
+
+
 def test_awaiting_review_inbox_paginates_past_routing_first_page():
     forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-2"])
     transport = _fake_transport([

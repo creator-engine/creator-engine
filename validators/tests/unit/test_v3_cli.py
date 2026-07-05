@@ -20,6 +20,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import _versions as ver
+from creator_engine_validator import pickup_search
 from creator_engine_validator import onboard_apply, v3_cli, v3_installer, v3_seat_bridge
 from creator_engine_validator.forge.approval_capability import ApprovalCapabilityVerifier
 from creator_engine_validator.schema import validate_with_schema
@@ -1209,6 +1210,119 @@ class _RecordingApprovalWallBackend:
 
     def collect_audit(self, grant):
         return {"grant_id": grant.grant_id, "audit_ref": grant.audit_ref}
+
+
+def _pickup_secret_args(**overrides) -> Namespace:
+    values = {
+        "repo": "owner/repo",
+        "org": None,
+        "pickup_token_secret_backend": None,
+        "pickup_token_secret_mount": None,
+        "pickup_token_secret_path": None,
+        "pickup_token_secret_field": None,
+        "pickup_token_secret_version": None,
+        "pickup_token_secret_purpose": None,
+        "pickup_token_secret_owner_ref": None,
+        "pickup_token_secret_ref_policy_sha": None,
+        "pickup_token_secret_target_ref": None,
+        "pickup_token_secret_run_id": "review-pickup-daemon",
+        "pickup_token_secret_seat_id": "dev-2",
+        "pickup_token_secret_ttl_seconds": (
+            v3_cli.secret_identity.DEFAULT_REVIEW_PICKUP_TOKEN_SECRET_TTL_SECONDS
+        ),
+    }
+    values.update(overrides)
+    return Namespace(**values)
+
+
+class _RecordingPickupTokenBackend:
+    backend_key = "openbao"
+
+    def __init__(self) -> None:
+        self.requests = []
+        self.materialized_targets = []
+        self.revoked = []
+
+    def validate_config(self) -> None:
+        return None
+
+    def resolve_identity(self, seat_id):
+        raise AssertionError("resolve_identity is not used by review-pickup token supply")
+
+    def issue(self, request):
+        self.requests.append(request)
+        return v3_cli.secret_identity.SecretGrant(
+            grant_id="grant-review-pickup-token-001",
+            run_id=request.run_id,
+            seat_id=request.seat_id,
+            secret_ref=request.secret_ref,
+            lease_id=None,
+            token_accessor_ref="accessor:review-pickup",
+            issued_at="2026-07-05T00:00:00Z",
+            expires_at="2026-07-05T00:05:00Z",
+            delivery_ref=None,
+            audit_ref="audit:review-pickup",
+        )
+
+    def issue_secret_zero(self, request):
+        raise AssertionError("issue_secret_zero is not used by review-pickup token supply")
+
+    def materialize(self, grant, target_ref):
+        self.materialized_targets.append(target_ref)
+        return replace(grant, delivery_ref=target_ref)
+
+    def revoke(self, grant):
+        self.revoked.append(grant.grant_id)
+        return replace(grant, revoked_at="2026-07-05T00:00:01Z")
+
+    def collect_audit(self, grant):
+        return {"grant_id": grant.grant_id, "audit_ref": grant.audit_ref}
+
+
+def test_review_pickup_token_supplier_unconfigured_preserves_static_path() -> None:
+    assert v3_cli._review_pickup_token_supplier_from_args(_pickup_secret_args()) is None
+
+
+def test_review_pickup_token_supplier_uses_recording_backend(monkeypatch) -> None:
+    backend = _RecordingPickupTokenBackend()
+    monkeypatch.setattr(v3_cli.secret_identity, "get_backend", lambda key: backend)
+    monkeypatch.setattr(
+        v3_cli,
+        "_approval_wall_materialized_value_reader",
+        lambda target_ref: "ghp_backend_review_token",
+    )
+
+    supplier = v3_cli._review_pickup_token_supplier_from_args(
+        _pickup_secret_args(
+            pickup_token_secret_ref_policy_sha="a" * 64,
+            pickup_token_secret_target_ref="file:/run/ce/review-pickup-token",
+        )
+    )
+
+    assert supplier is not None
+    assert supplier() == "ghp_backend_review_token"
+    assert backend.materialized_targets == ["file:/run/ce/review-pickup-token"]
+    assert backend.revoked == ["grant-review-pickup-token-001"]
+    request = backend.requests[0]
+    assert request.run_id == "review-pickup-daemon"
+    assert request.seat_id == "dev-2"
+    assert request.ttl_seconds == 300
+    assert request.secret_ref.backend == "openbao"
+    assert request.secret_ref.mount == "ce-kv"
+    assert request.secret_ref.path == "forge/ce-dev-2/gh-token"
+    assert request.secret_ref.field == "token"
+    assert request.secret_ref.purpose == "review-pickup-token"
+    assert request.secret_ref.owner_ref == "controller:reviewer"
+
+
+def test_review_pickup_token_supplier_rejects_env_target_ref() -> None:
+    args = _pickup_secret_args(
+        pickup_token_secret_ref_policy_sha="a" * 64,
+        pickup_token_secret_target_ref="env:CE_PICKUP_TOKEN",
+    )
+
+    with pytest.raises(pickup_search.PickupError, match="env: targets are fork-unsafe"):
+        v3_cli._review_pickup_token_supplier_from_args(args)
 
 
 def test_approval_capability_marker_issuer_uses_backend_supplier(monkeypatch):

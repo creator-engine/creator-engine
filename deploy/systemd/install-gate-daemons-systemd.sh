@@ -23,7 +23,9 @@ Defaults:
 The script copies rendered units, runs daemon-reload, enables the services, and
 starts them unless --no-start is supplied. It does not create or overwrite the
 secret env file; create it first with CE_GATE_REPO, CE_GATE_AUTHORIZED_REVIEWERS,
-plus GH_TOKEN and/or CE_PICKUP_TOKEN as needed.
+plus GH_TOKEN and/or CE_PICKUP_TOKEN as needed. Review pickup can also use the
+OpenBao token supplier when CE_PICKUP_TOKEN_SECRET_TARGET_REF and the matching
+SecretRef variables are present in the gate env file.
 USAGE
 }
 
@@ -142,6 +144,12 @@ Create it before starting the services. Required:
   GH_TOKEN=...
 Optional for review pickup:
   CE_PICKUP_TOKEN=...
+  BAO_ADDR=...
+  BAO_TOKEN=...
+  BAO_CACERT=...
+  CE_OPENBAO_ALLOWED_REFS=path=forge/ce-dev-2/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+  CE_PICKUP_TOKEN_SECRET_TARGET_REF=file:/run/user/<uid>/creator-engine/review-pickup-token
+  CE_PICKUP_TOKEN_SECRET_REF_POLICY_SHA=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
 Optional for work-pickup belt:
   CE_BELT_INTERVAL_SECONDS=120
   CE_BELT_LABELS=enhancement
