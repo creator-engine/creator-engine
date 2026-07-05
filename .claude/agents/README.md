@@ -24,6 +24,9 @@ Spec 005 §d.2 ratifies role-shaped worker policies with distinct defaults:
 - `reviewer`: read-only code review role aligned with the schema/review
   workflow vocabulary; it reports findings or verdicts for the controller to
   submit with controller-scoped credentials.
+- `canary_qa`: end-to-end product canary and QA role that validates live
+  released artifacts from disposable scratch only, with egress limited to
+  released artifact channels and controller-minted sandbox-repository tokens.
 
 Naming reconciliation with Codex `AGENTS.md` vocabulary:
 
@@ -31,6 +34,7 @@ Naming reconciliation with Codex `AGENTS.md` vocabulary:
 - `worker` / `implementer` maps to CE `implementer`.
 - Read-only review maps to CE `reviewer`.
 - Verification maps to CE `verification`.
+- Released-artifact canary and QA maps to CE `canary_qa`.
 
 ## Scope
 
