@@ -2813,6 +2813,17 @@ def _history_mode_from_probe(probe: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _brownfield_enabled_from_probe(probe: dict[str, Any]) -> bool:
+    history = probe.get("history") or {}
+    history_present = (
+        history.get("present") is True
+        or _history_mode_from_probe(probe) == "git_history_present"
+        or bool(history.get("head_sha"))
+    )
+    workflows = (probe.get("ci") or {}).get("workflows") or []
+    return bool(history_present or workflows or _commands_from_probe(probe))
+
+
 def brownfield_detected_facts(probe: dict[str, Any] | None) -> dict[str, Any]:
     """Project a read-only project probe into dotted answers facts.
 
@@ -2823,7 +2834,7 @@ def brownfield_detected_facts(probe: dict[str, Any] | None) -> dict[str, Any]:
     probe = probe or {}
     conventions = probe.get("conventions") or {}
     detected: dict[str, Any] = {
-        "brownfield.enabled": bool(probe.get("enabled", True)),
+        "brownfield.enabled": _brownfield_enabled_from_probe(probe),
         "brownfield.project_root": str(probe.get("project_root") or "."),
         "brownfield.history.mode": _history_mode_from_probe(probe),
         "brownfield.secrets.preflight": str(
@@ -2993,7 +3004,7 @@ def _brownfield_inventory_payload(
     tests = _string_list(merged.value("brownfield.tests.required_commands", _commands_from_probe(probe)))
     secrets = probe.get("secrets") or {}
     return {
-        "enabled": bool(merged.value("brownfield.enabled", True)),
+        "enabled": bool(merged.value("brownfield.enabled", _brownfield_enabled_from_probe(probe))),
         "project_root": str(merged.value("brownfield.project_root", ".")),
         "ci": {
             "existing_workflows": workflows,

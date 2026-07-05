@@ -584,13 +584,15 @@ def _detect_brownfield_project(project_root: Path) -> dict[str, Any]:
     history = _detect_git_history(project_root)
     branches = history.pop("branches", [])
     subjects = history.pop("commit_subjects", [])
+    ci = _detect_ci_workflows(project_root)
+    tests = _detect_test_commands(project_root)
     return {
-        "enabled": True,
+        "enabled": bool(history.get("present") or ci.get("workflows") or tests.get("commands")),
         "project_root": ".",
         "history": history,
         "github": {"origin_remote": history.get("origin_remote")},
-        "ci": _detect_ci_workflows(project_root),
-        "tests": _detect_test_commands(project_root),
+        "ci": ci,
+        "tests": tests,
         "conventions": {
             "branch_patterns": _branch_candidates(branches, history.get("default_branch")),
             "commit_styles": _commit_style_candidates(subjects),
