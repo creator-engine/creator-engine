@@ -29,7 +29,15 @@ def _author(login=_OTHER_AUTHOR):
     return lambda repo, pr_number: login
 
 
-def _config():
+def _config(*, seat_repo=None):
+    seat = {
+        "app_id": "4085526",
+        "app_owner": "cedev4vps-coder",
+        "pem_path": "/dev/shm/ce-dev4/ce-forge-dev4.pem",
+        "installation_id": 123,
+    }
+    if seat_repo is not None:
+        seat["repo"] = seat_repo
     return load_broker_config(
         {
             "repo": _REPO,
@@ -45,12 +53,7 @@ def _config():
                 "window_seconds": 3600,
             },
             "seats": {
-                "seat-reviewer-1": {
-                    "app_id": "4085526",
-                    "app_owner": "cedev4vps-coder",
-                    "pem_path": "/dev/shm/ce-dev4/ce-forge-dev4.pem",
-                    "installation_id": 123,
-                }
+                "seat-reviewer-1": seat
             },
         }
     )
@@ -76,10 +79,10 @@ def _payload(event="COMMENT", body="Looks reasonable."):
     }
 
 
-def _token(value=_SECRET):
+def _token(value=_SECRET, *, repo=_REPO):
     return ScopedToken(
         run_id="self-review-run",
-        repo=_REPO,
+        repo=repo,
         policy_sha="0" * 64,
         secret_name="forge_self_review",
         permissions=(("metadata", "read"), ("pull_requests", "write")),
@@ -184,6 +187,47 @@ def test_comment_review_mints_and_injects_token_only_into_gh_env(caplog):
     )
     assert _SECRET not in evidence
     assert "GH_TOKEN" not in evidence
+
+
+def test_comment_review_uses_resolved_seat_repo_for_request_path():
+    target_repo = "creator-engine/creator-engine-sandbox"
+    author_calls = []
+    minted: list[TokenRequest] = []
+    spawned: list[tuple[list[str], str | None, dict[str, str]]] = []
+
+    def resolve_author(repo, pr_number):
+        author_calls.append((repo, pr_number))
+        return _OTHER_AUTHOR
+
+    def mint(req: TokenRequest):
+        minted.append(req)
+        return _token(repo=req.repo)
+
+    def spawn(argv, input_text, env):
+        spawned.append((list(argv), input_text, dict(env)))
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": 987}), stderr="")
+
+    result = broker.submit_self_review(
+        _request(),
+        config=_config(seat_repo=target_repo),
+        resolve_id_fn=lambda seat: 123,
+        mint_fn=mint,
+        gh_spawn=spawn,
+        resolve_author_fn=resolve_author,
+    )
+
+    assert result.repo == target_repo
+    assert author_calls == [(target_repo, 7)]
+    assert minted[0].repo == target_repo
+    assert spawned[0][0] == [
+        "gh",
+        "api",
+        "-X",
+        "POST",
+        f"repos/{target_repo}/pulls/7/reviews",
+        "--input",
+        "-",
+    ]
 
 
 def test_request_changes_review_uses_same_review_api_shape():

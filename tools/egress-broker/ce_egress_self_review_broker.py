@@ -544,6 +544,7 @@ def submit_self_review(
         seat = config.seat(request.seat_id)
     except BrokerConfigError as exc:
         raise SelfReviewRefused(str(exc)) from exc
+    seat_repo = seat.repo
 
     # Author≠reviewer guard. Positioned with the APPROVE refusal — BEFORE any
     # installation/credential minting or source-host write. The seat's review
@@ -551,7 +552,7 @@ def submit_self_review(
     # same login GitHub records as the review's author; compare it to the PR's
     # resolved author. Resolution fails closed (refuse, never post).
     resolve_author = resolve_author_fn or _resolve_pr_author
-    pr_author = resolve_author(config.repo, request.pr_number)
+    pr_author = resolve_author(seat_repo, request.pr_number)
     if pr_author and pr_author == seat.app_owner:
         raise SelfReviewRefused(
             "self-review refused: requesting seat is the PR author "
@@ -594,7 +595,7 @@ def submit_self_review(
     )
     installation_id = resolver(seat)
     run_id = f"self-review-{request.seat_id}-{request.head_sha[:12]}-pr{request.pr_number}"
-    policy_sha = policy_binding_sha(config)
+    policy_sha = policy_binding_sha(config, repo=seat_repo)
 
     def _default_minter(token_request: TokenRequest) -> ScopedToken:
         return mint_egress_token(
@@ -625,7 +626,7 @@ def submit_self_review(
         submitted = submit_contained_seat_pr_review(
             ContainedSeatReview(
                 seat_id=request.seat_id,
-                repo=config.repo,
+                repo=seat_repo,
                 pr_number=request.pr_number,
                 head_sha=request.head_sha,
                 event=request.event,
