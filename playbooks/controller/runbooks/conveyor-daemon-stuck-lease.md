@@ -1,5 +1,10 @@
 # Conveyor Daemon Stuck-Lease Recovery Runbook
 
+> **Canonical location.** This is the canonical conveyor-daemon stuck-lease
+> recovery procedure. `deploy/conveyor-daemon/RUNBOOK.md` points here instead
+> of duplicating the steps; keep this file authoritative for any lease-recovery
+> change.
+
 Use this runbook when the conveyor daemon refuses to restart after a heartbeat
 crash and reports `DaemonLeaseStale`.
 
@@ -14,6 +19,17 @@ refusal similar to:
 ```text
 ERROR: conveyor-daemon singleton lease refused: stale conveyor-daemon lease requires explicit audited takeover; lease_path=/path/to/conveyor-daemon.lease; holder_pid=12345
 ```
+
+A restart can also refuse because another holder is genuinely live, not stale:
+
+```text
+ERROR: conveyor-daemon singleton lease refused: live conveyor-daemon lease is held by conveyor-daemon:otherhost:12345 pid=12345 host=otherhost; lease_path=/path/to/conveyor-daemon.lease; holder_pid=12345
+```
+
+A stale-lease refusal means the recorded holder pid is dead (safe to recover
+below). A live-lease refusal means another holder and pid are named directly in
+the message; do not remove the lease or treat it as stale — investigate or stop
+that live daemon cleanly instead.
 
 The expected lease file is the daemon lease root plus the daemon name:
 `${CE_DAEMON_LEASE_ROOT}/conveyor-daemon.lease`. The reusable lease helper also

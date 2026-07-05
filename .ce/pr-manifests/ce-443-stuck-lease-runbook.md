@@ -4,12 +4,13 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=3
+AUTHORIZED_PATHS_COUNT=4
 
-AUTHORIZED_PATHS_SHA256=cd2c0cf0c082d97699014417cf03b461ff307b44ade7cd88147bfd7fa5185dc3
+AUTHORIZED_PATHS_SHA256=2ea51556145130bd3b1af3ed1e65fa7b6987e6caf5c60b09e787a4653dde1bce
 
 ```text
 .ce/changelog/ce-443-stuck-lease-runbook.md
 .ce/pr-manifests/ce-443-stuck-lease-runbook.md
+deploy/conveyor-daemon/RUNBOOK.md
 playbooks/controller/runbooks/conveyor-daemon-stuck-lease.md
 ```
