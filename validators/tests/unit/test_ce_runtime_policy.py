@@ -106,6 +106,18 @@ def test_well_formed_verification_policy_no_egress_passes(tmp_path):
     assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
 
 
+def test_well_formed_controller_policy_passes(tmp_path):
+    record = valid_policy("controller")
+    record["policy_id"] = "gvisor-controller-v1"
+    assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
+
+
+def test_well_formed_docker_backend_passes(tmp_path):
+    record = valid_policy()
+    record["isolation_backend"] = "docker"
+    assert validate_runtime_policy(record, tmp_path / "policy.yml") == []
+
+
 def test_well_formed_openshell_backend_passes(tmp_path):
     record = valid_policy()
     record["isolation_backend"] = "openshell"
@@ -121,6 +133,12 @@ def test_well_formed_local_noop_backend_passes(tmp_path):
 def test_resolve_isolation_backend_aliases_cli_gvisor_to_policy_key():
     record = valid_policy()
     assert resolve_isolation_backend(record, explicit="gvisor") == "gvisor-proxy"
+
+
+def test_resolve_isolation_backend_accepts_docker_key():
+    record = valid_policy()
+    record["isolation_backend"] = "docker"
+    assert resolve_isolation_backend(record, explicit="docker") == "docker"
 
 
 def test_resolve_isolation_backend_refuses_requested_policy_mismatch():
@@ -169,9 +187,11 @@ def test_default_flip_is_gated_schema_default_stays_gvisor_proxy():
     )
     backend_prop = schema["properties"]["isolation_backend"]
     assert backend_prop["default"] == "gvisor-proxy"
+    assert "docker" in backend_prop["enum"]
     assert "os-native" in backend_prop["enum"]
     assert "gvisor-proxy" in backend_prop["enum"]
     assert "local-noop" in backend_prop["enum"]
+    assert "controller" in schema["properties"]["role"]["enum"]
 
 
 def test_gvisor_proxy_pinned_record_still_validates(tmp_path):

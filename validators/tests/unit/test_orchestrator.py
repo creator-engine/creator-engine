@@ -322,7 +322,7 @@ def test_orchestrator_registers_no_check_and_no_backend():
     import creator_engine_validator.orchestrator  # noqa: F401  (import = the side-effect surface)
 
     assert not any("orchestrat" in n for n in registered_checks())
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a); orchestrator still adds none
+    assert available_backends() == ("docker", "gvisor-proxy", "local-noop", "openshell", "os-native")  # +docker; orchestrator still adds none
 
 
 def test_run_plan_no_live_subprocess_or_socket(monkeypatch):

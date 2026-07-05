@@ -97,19 +97,24 @@ properties:
       instance to the exact policy version in force at provision time.
   role:
     type: string
-    enum: [architect_research, implementer, verification]
+    enum: [architect_research, implementer, verification, controller]
     description: |
       Seat role enum. The three runtime seats carried from the v2
-      worker-container contract. Additional roles MUST be ratified as
-      additive schema changes; this schema fixes only the three above.
+      worker-container contract plus the controller role ratified for
+      launch-default policy records (ce-ops#447, Operator-ratified
+      2026-07-05 day-arc). Additional roles MUST be ratified as
+      additive schema changes.
   isolation_backend:
     type: string
-    enum: [gvisor-proxy, openshell, local-noop, os-native]
+    enum: [gvisor-proxy, docker, openshell, local-noop, os-native]
     default: gvisor-proxy
     description: |
       Runner-backend selector (the G-1.1 adapter axis). `gvisor-proxy`
       is the canonical v3 backend — a hardened gVisor container paired
       with a capability-separation egress proxy (shipped at G-1.2).
+      `docker` is the plain-Docker contained backend for tenant hosts
+      that do not expose the DGX runsc runtime; it uses the policy's
+      digest-pinned image and manifest mounts without host Codex binds.
       `openshell` is the fast-follow backend behind the same runner
       abstraction. `local-noop` is the inert registered backend used for
       dry-run/foundation wiring; it enforces the same policy validation

@@ -655,7 +655,7 @@ Options:
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |
-| `--backend` | no | `gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
+| `--backend` | no | `docker, gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
 | `--claim-ticket` | no |  | ce-ops#38: acquire + verify a work-claim lock on this ticket (owner/name#N, an issue URL, or N inside the slug) BEFORE any launch side effect; a foreign active claim refuses the launch |
 | `--repo-root` | no |  | repo root for lifecycle registration |
 | `--ledger-root` | no |  | path to .ce/state/active-work-ledger for lifecycle registration |
@@ -737,7 +737,7 @@ Options:
 | `--lane-kind` | no | `approval, audit, implementation, merge, read-only, review` | optional lane kind carrier (read-only/implementation/review/approval/merge/audit) |
 | `--tenant-policy` | no |  | path to an Operator-ratified operating-mode-policy sidecar that ratifies an elevated mode |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); enforce refuses loudly on an unsupported host; advisory/off require a resource_optout ratification binding |
-| `--backend` | no | `gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
+| `--backend` | no | `docker, gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
 | `--ratification-evidence` | no |  | inherited ratification-evidence pointer carried for elevated modes / privileged lane kinds |
 | `--reviewer-authority-ref` | no |  | G2.007.3: reviewer-authority envelope ref for a distinct reviewer venue (role=reviewer + --lane-kind review); validated then exported to the pane env as CE_REVIEWER_AUTHORITY_REF for the in-band hook |
 | `--seat-env-file` | no |  | v3.1-G2f (F4/D2): path to an owner-only (0600-class) env file sourced into the seat process via an exec-wrap before launch — the per-seat credential contract (e.g. a reviewer token). The file PATH transits argv; the secret VALUE never enters argv, the tmux server, or any record. Refused if missing or group/world-accessible |
@@ -797,7 +797,7 @@ Options:
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |
-| `--backend` | no | `gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
+| `--backend` | no | `docker, gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
 | `--claim-ticket` | no |  | ce-ops#38: acquire + verify a work-claim lock on this ticket (owner/name#N, an issue URL, or N inside the slug) BEFORE any launch side effect; a foreign active claim refuses the launch |
 | `--repo-root` | no |  | repo root for lifecycle registration |
 | `--ledger-root` | no |  | path to .ce/state/active-work-ledger for lifecycle registration |

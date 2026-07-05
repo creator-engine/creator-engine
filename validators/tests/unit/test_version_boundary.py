@@ -153,7 +153,10 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#228 PR-2 added ``forge.cred_injection_proxy`` (60 -> 61).
     # ce-ops#234 added ``forge.approval_capability`` for controller-only
     # approval wall markers required before integrator enqueue (61 -> 62).
-    assert len(ver.V3_RUNTIME) == 62
+    # ce-ops#447 unit A added ``runner.docker_backend``, the plain-Docker
+    # runner backend, classified alongside its runner-backend siblings
+    # (62 -> 63).
+    assert len(ver.V3_RUNTIME) == 63
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

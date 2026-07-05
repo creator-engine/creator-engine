@@ -265,4 +265,4 @@ def test_change_status_registers_no_check_and_no_backend():
     from creator_engine_validator.runner import available_backends
 
     assert "change_status" not in registered_checks()
-    assert available_backends() == ("gvisor-proxy", "local-noop", "openshell", "os-native")  # +openshell (v3.5-A.2a)
+    assert available_backends() == ("docker", "gvisor-proxy", "local-noop", "openshell", "os-native")  # +docker

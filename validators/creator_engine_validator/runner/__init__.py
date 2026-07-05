@@ -61,6 +61,15 @@ from .gvisor_proxy_backend import (
     translate_to_egress_proxy_config,
     translate_to_runsc_plan,
 )
+from .docker_backend import BACKEND_KEY as DOCKER_BACKEND_KEY
+from .docker_backend import (
+    DockerBackend,
+    DockerMountSpec,
+    DockerPlan,
+    DockerPlanRejected,
+    SubprocessDockerRunner,
+    translate_to_docker_plan,
+)
 from .os_native_backend import BACKEND_KEY as OS_NATIVE_BACKEND_KEY
 from .os_native_backend import (
     LINUX_SANDBOX_PRIMITIVES,
@@ -118,7 +127,12 @@ __all__ = [
     "DENIED",
     "DEFAULT_SHIM_DIR",
     "DENY_EXIT_CODE",
+    "DOCKER_BACKEND_KEY",
     "ESCALATE",
+    "DockerBackend",
+    "DockerMountSpec",
+    "DockerPlan",
+    "DockerPlanRejected",
     "EgressEvent",
     "LifecycleEvent",
     "MountEvent",
@@ -166,6 +180,7 @@ __all__ = [
     "SandboxCreateSpec",
     "SandboxPolicy",
     "SubprocessContainerRunner",
+    "SubprocessDockerRunner",
     "SubprocessSandboxClient",
     "TeardownResult",
     "UnknownBackend",
@@ -179,6 +194,7 @@ __all__ = [
     "render_posix_tool_shim",
     "render_sandbox_policy_yaml",
     "translate_to_egress_proxy_config",
+    "translate_to_docker_plan",
     "translate_to_runsc_plan",
     "translate_to_sandbox_policy",
 ]

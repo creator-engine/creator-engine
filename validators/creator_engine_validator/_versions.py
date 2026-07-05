@@ -231,6 +231,12 @@ V3_RUNTIME: frozenset[str] = frozenset(
         "runner.audit_overlay",
         "runner.backend",
         "runner.cc_hook_adapter",
+        # ce-ops#447 unit A: plain-Docker backend for tenant contained launch,
+        # mirroring the gVisor runner's translate-vs-execute split. Reuses
+        # runner.gvisor_proxy_backend's subprocess container runner + egress
+        # proxy translation helpers; a runner backend like its siblings below,
+        # so this is a v3->v3 edge, not a new shared->v3 coupling.
+        "runner.docker_backend",
         "runner.gvisor_proxy_backend",
         "runner.noop_backend",
         # v3.5-A.1 OpenShell backend (defined; registration deferred to A.2)
