@@ -90,6 +90,22 @@ def test_runtime_dockerfile_installs_validator_from_wheel_seam_offline() -> None
     assert "command -v creator-engine-validator" in text
 
 
+def test_runtime_dockerfile_installs_gate_daemon_runtime_dependencies_from_pinned_repos() -> None:
+    text = _dockerfile()
+
+    assert 'urlopen("https://cli.github.com/packages/githubcli-archive-keyring.gpg", timeout=30)' in text
+    assert "chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg" in text
+    assert (
+        "deb [arch=$(dpkg --print-architecture) "
+        "signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] "
+        "https://cli.github.com/packages stable main"
+    ) in text
+    assert "      gh \\" in text
+    assert "      git \\" in text
+    assert "command -v gh" in text
+    assert "command -v git" in text
+
+
 def test_runtime_dockerfile_is_non_root_and_engine_agnostic() -> None:
     text = _dockerfile()
 

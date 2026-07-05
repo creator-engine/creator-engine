@@ -61,8 +61,15 @@ RUN set -eux; \
     esac; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+      ca-certificates; \
+    install -d -m 0755 /etc/apt/keyrings /etc/apt/sources.list.d; \
+    python -c 'from pathlib import Path; from urllib.request import urlopen; Path("/etc/apt/keyrings/githubcli-archive-keyring.gpg").write_bytes(urlopen("https://cli.github.com/packages/githubcli-archive-keyring.gpg", timeout=30).read())'; \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
       bash \
-      ca-certificates \
+      gh \
       git \
       tini; \
     rm -rf /var/lib/apt/lists/*; \
@@ -86,6 +93,8 @@ RUN set -eux; \
       creator-engine-validator; \
     command -v ce; \
     command -v creator-engine-validator; \
+    command -v gh; \
+    command -v git; \
     ce --help >/tmp/ce-help.txt; \
     creator-engine-validator --help >/tmp/creator-engine-validator-help.txt
 
