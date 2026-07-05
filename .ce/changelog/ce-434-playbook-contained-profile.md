@@ -13,4 +13,4 @@ Document the contained-seat validation profile in the dispatch playbook.
 - The directive describes the profile as the full suite minus the harvest-side
   carrier gate, with the contained-seat carrier notice printed.
 - Non-contained seats and harvest/controller runs remain on full
-  `ce validate-pr`; the ce-ops#303 preflight bar is unchanged.
+  `ce validate-pr`; the standing preflight bar is unchanged.
