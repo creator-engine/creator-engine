@@ -36,4 +36,9 @@ issue: creator-engine/ce-ops#454
   pin (v3 -> v4) via `ce brain correct`, since editing
   `test_v1_docs_reconciliation.py` changed its whole-file evidence_sha256;
   bumps the `test_ce_brain_drift.py` active-count ratchet 89 -> 90.
+- Declared work class is `epic` (not the slice's usual `feature`): the
+  work-sizing floor PR-diff gate measures 1096 non-test source-added lines
+  (ceiling for `feature`/M is 1000), driven mostly by the new
+  `dependency_unlock.py` module (757 lines) plus the workflow YAML, CLI
+  wiring, and the brain-assertion ledger append.
 - Does not touch `work_claims.py` (stretch piece-4 is out of this unit).
