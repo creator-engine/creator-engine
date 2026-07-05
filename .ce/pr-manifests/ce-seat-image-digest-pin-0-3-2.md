@@ -4,15 +4,16 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=5d23be26b4644fea9f3205ce688f8dae0145eb02c38f445b83a3ae3e83735b58
+AUTHORIZED_PATHS_SHA256=28714895c9c471497c5a3e64fce90ce78de94a177f2f6af97a0648a5b9fcb570
 
 ```text
 .ce/changelog/ce-seat-image-digest-pin-0-3-2.md
 .ce/pr-manifests/ce-seat-image-digest-pin-0-3-2.md
 surfaces/manifest.yaml
 validators/creator_engine_validator/checks/surfaces_manifest.py
+validators/tests/unit/test_onboard_apply.py
 validators/tests/unit/test_seat_image.py
 validators/tests/unit/test_surfaces_manifest.py
 ```
