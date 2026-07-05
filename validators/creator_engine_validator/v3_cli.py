@@ -3449,20 +3449,48 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
                 adoption_driver = candidate_driver
                 adoption_mode = True
             else:
-                # Not authorized for the write escalation → unchanged status-quo refuse.
+                # Not authorized for the write escalation → status-quo refuse. If the dual
+                # escalation flags are present but the selector returned a non-adoption driver,
+                # credential resolution is the blocker.
                 _close_apply_driver(live_candidate)
-                return _emit(
-                    args,
-                    1,
-                    [
+                dual_escalation_requested = (
+                    str(os.environ.get(onboard_apply_live.ENV_LIVE_FORGE, "")).strip().lower()
+                    in {"1", "true", "yes", "on"}
+                    and str(
+                        os.environ.get(onboard_apply_live.ENV_ADOPTION_WRITE, "")
+                    ).strip().lower() in {"1", "true", "yes", "on"}
+                )
+                if dual_escalation_requested:
+                    refusal_message = (
+                        f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
+                        "E3 brownfield adoption is planned, but this onboard_apply run cannot "
+                        "resolve the App credential for the adoption write escalation. Configure "
+                        "the App credential per the brownfield adoption contract: local PEM for "
+                        "kind: own or broker for kind: shared"
+                    )
+                    refusal_detail = (
+                        "E3 brownfield apply requires App credential resolution for the adoption "
+                        "write escalation; configure the App credential per the brownfield "
+                        "adoption contract: local PEM for kind: own or broker for kind: shared"
+                    )
+                else:
+                    refusal_message = (
                         f"{_BRAND} · onboard apply REFUSED (e2_brownfield_seam_unavailable): "
                         "E3 brownfield adoption is planned, but this onboard_apply run is not authorized "
                         "for the adoption write escalation (set CE_FORGE_LIVE_FORGE + CE_FORGE_ADOPTION_WRITE)"
-                    ],
+                    )
+                    refusal_detail = (
+                        "E3 brownfield apply requires the adoption write escalation "
+                        "(CE_FORGE_ADOPTION_WRITE); this run only emits the handoff plan"
+                    )
+                return _emit(
+                    args,
+                    1,
+                    [refusal_message],
                     {
                         "error": "refused",
                         "code": "e2_brownfield_seam_unavailable",
-                        "detail": "E3 brownfield apply requires the adoption write escalation (CE_FORGE_ADOPTION_WRITE); this run only emits the handoff plan",
+                        "detail": refusal_detail,
                         "brownfield_blockers": [],
                         "brownfield_adoption": brownfield_plan,
                     },
