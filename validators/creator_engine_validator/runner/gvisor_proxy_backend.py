@@ -27,7 +27,6 @@ Defensive only — hardens our own agent runtime; never an offensive capability.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import shutil
@@ -48,6 +47,24 @@ from .backend import (
     TeardownResult,
     register_backend,
 )
+from .translation import (
+    LAUNCH_PROBE_CONTRACT,
+    LAUNCH_PROBE_CONTRACT_LABEL,
+    LAUNCH_PROBE_RUN_ID_LABEL,
+    MountSpec,
+    argv_carries_launch_probe_contract,
+    bind_launch_owned_probe_contract,
+    first_writable_mount_target,
+    launch_probe_container_name,
+    mount_from_policy_entry,
+    optional_uid_gid,
+    render_mount,
+    require_abs_path,
+    require_image_digest,
+    require_mode,
+    require_nonempty_str,
+    require_uid_gid,
+)
 
 BACKEND_KEY = "gvisor-proxy"
 #: The container client used to reach Docker's registered runsc runtime.
@@ -57,11 +74,7 @@ DEFAULT_DOCKER_RUNTIME = "runsc-gvproxy-ptrace"
 DEFAULT_CONTAINER_HOME = "/home/cedev4"
 DEFAULT_CONTAINER_CODEX_HOME = f"{DEFAULT_CONTAINER_HOME}/.codex"
 DEFAULT_CODEX_BIN_TARGET = "/usr/local/bin/codex"
-LAUNCH_PROBE_CONTRACT = "ce-launch-owned-probe-v1"
-LAUNCH_PROBE_RUN_ID_LABEL = "creator-engine.run-id"
-LAUNCH_PROBE_CONTRACT_LABEL = "creator-engine.probe-contract"
 
-_IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_RUNTIME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _HOST_NETWORK_ARG_RE = re.compile(r"^--?(?:network|net)=host$")
 
@@ -119,13 +132,6 @@ class EgressProxyConfig:
 
 
 @dataclass(frozen=True)
-class MountSpec:
-    source: str
-    target: str
-    mode: str  # "ro" | "rw"
-
-
-@dataclass(frozen=True)
 class RunscPlan:
     """A Docker-backed gVisor/runsc container plan translated from a policy."""
 
@@ -178,12 +184,12 @@ class RunscPlan:
             "--env",
             f"CODEX_HOME={self.container_codex_home}",
             "--mount",
-            _render_mount(MountSpec(self.host_codex_home, self.container_codex_home, self.codex_home_mode)),
+            render_mount(MountSpec(self.host_codex_home, self.container_codex_home, self.codex_home_mode)),
             "--mount",
-            _render_mount(MountSpec(self.host_codex_bin, self.codex_bin_target, "ro")),
+            render_mount(MountSpec(self.host_codex_bin, self.codex_bin_target, "ro")),
         ]
         for mount in self.mounts:
-            args += ["--mount", _render_mount(mount)]
+            args += ["--mount", render_mount(mount)]
         if self.docker_network:
             args.append(f"--network={self.docker_network}")
         args += list(self.tty_flags)
@@ -217,35 +223,44 @@ def translate_to_runsc_plan(
     image = runtime_policy.get("image_ref") or {}
     name = image.get("name", "") if isinstance(image, dict) else ""
     sha = image.get("sha", "") if isinstance(image, dict) else ""
-    image_name = _require_nonempty_str(name, "image_ref.name")
-    image_digest = _require_image_digest(sha)
+    image_name = require_nonempty_str(name, "image_ref.name", error_type=RunscPlanRejected)
+    image_digest = require_image_digest(sha, error_type=RunscPlanRejected)
     mounts = tuple(
-        _mount_from_policy_entry(entry, index)
+        mount_from_policy_entry(entry, index, error_type=RunscPlanRejected)
         for index, entry in enumerate(runtime_policy.get("mount_manifest") or [])
         if isinstance(entry, dict)
     )
     if not mounts:
         raise RunscPlanRejected("mount_manifest must include at least one Docker bind mount")
-    workdir = container_workdir or _first_writable_mount_target(mounts)
+    workdir = container_workdir or first_writable_mount_target(mounts)
     if workdir is None:
         raise RunscPlanRejected("container_workdir is required when no rw mount is declared")
-    resolved_uid = _require_uid_gid(uid, "uid")
-    resolved_gid = _optional_uid_gid(gid, "gid")
+    resolved_uid = require_uid_gid(uid, "uid", error_type=RunscPlanRejected)
+    resolved_gid = optional_uid_gid(gid, "gid", error_type=RunscPlanRejected)
     runtime = _require_runtime_name(runtime_name)
-    codex_home = _require_abs_path(host_codex_home, "host_codex_home")
-    codex_bin = _require_abs_path(host_codex_bin, "host_codex_bin")
-    container_home = _require_abs_path(container_home, "container_home")
-    container_codex_home = _require_abs_path(container_codex_home, "container_codex_home")
-    workdir = _require_abs_path(workdir, "container_workdir")
-    mode = _require_mode(codex_home_mode, "codex_home_mode")
+    codex_home = require_abs_path(host_codex_home, "host_codex_home", error_type=RunscPlanRejected)
+    codex_bin = require_abs_path(host_codex_bin, "host_codex_bin", error_type=RunscPlanRejected)
+    container_home = require_abs_path(container_home, "container_home", error_type=RunscPlanRejected)
+    container_codex_home = require_abs_path(
+        container_codex_home, "container_codex_home", error_type=RunscPlanRejected
+    )
+    workdir = require_abs_path(workdir, "container_workdir", error_type=RunscPlanRejected)
+    mode = require_mode(codex_home_mode, "codex_home_mode", error_type=RunscPlanRejected)
     if docker_network:
         raise RunscPlanRejected(
             "docker_network must be omitted for the DGX runsc plan; the registered "
             "runsc-gvproxy-ptrace runtime owns networking"
         )
-    rendered_tty_flags = tuple(_require_nonempty_str(flag, "tty_flags") for flag in tty_flags)
+    rendered_tty_flags = tuple(
+        require_nonempty_str(flag, "tty_flags", error_type=RunscPlanRejected)
+        for flag in tty_flags
+    )
     policy_mounts = tuple(
-        MountSpec(source=mount.source, target=mount.target, mode=_require_mode(mount.mode, "mount mode"))
+        MountSpec(
+            source=mount.source,
+            target=mount.target,
+            mode=require_mode(mount.mode, "mount mode", error_type=RunscPlanRejected),
+        )
         for mount in mounts
     )
     has_egress = bool(runtime_policy.get("egress_allowlist") or [])
@@ -273,76 +288,8 @@ def translate_to_runsc_plan(
     )
 
 
-def _mount_from_policy_entry(entry: dict[str, Any], index: int) -> MountSpec:
-    path = _require_abs_path(entry.get("path"), f"mount_manifest[{index}].path")
-    return MountSpec(
-        source=path,
-        target=path,
-        mode=_require_mode(entry.get("mode", "ro"), f"mount_manifest[{index}].mode"),
-    )
-
-
-def _first_writable_mount_target(mounts: tuple[MountSpec, ...]) -> str | None:
-    for mount in mounts:
-        if mount.mode == "rw":
-            return mount.target
-    return None
-
-
-def _render_mount(mount: MountSpec) -> str:
-    rendered = f"type=bind,source={mount.source},target={mount.target}"
-    if mount.mode == "ro":
-        rendered = f"{rendered},readonly"
-    return rendered
-
-
-def _require_nonempty_str(value: Any, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise RunscPlanRejected(f"{field} is required")
-    return value
-
-
-def _require_abs_path(value: Any, field: str) -> str:
-    path = _require_nonempty_str(value, field)
-    if not path.startswith("/") or path.startswith("//") or "\x00" in path:
-        raise RunscPlanRejected(f"{field} must be a non-empty absolute path")
-    return path
-
-
-def _require_mode(value: Any, field: str) -> str:
-    mode = _require_nonempty_str(value, field)
-    if mode not in {"ro", "rw"}:
-        raise RunscPlanRejected(f"{field} must be 'ro' or 'rw'")
-    return mode
-
-
-def _require_image_digest(value: Any) -> str:
-    digest = _require_nonempty_str(value, "image_ref.sha")
-    if not _IMAGE_DIGEST_RE.match(digest):
-        raise RunscPlanRejected("image_ref.sha must be a sha256:<hex64> digest")
-    return digest
-
-
-def _require_uid_gid(value: int | str | None, field: str) -> int:
-    if isinstance(value, bool) or value is None:
-        raise RunscPlanRejected(f"{field} is required")
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        raise RunscPlanRejected(f"{field} must be a non-negative integer") from None
-    if parsed < 0:
-        raise RunscPlanRejected(f"{field} must be a non-negative integer")
-    return parsed
-
-
-def _optional_uid_gid(value: int | str | None, field: str) -> int | None:
-    if value is None:
-        return None
-    return _require_uid_gid(value, field)
-
-
 def _require_runtime_name(value: Any) -> str:
-    runtime = _require_nonempty_str(value, "runtime_name")
+    runtime = require_nonempty_str(value, "runtime_name", error_type=RunscPlanRejected)
     if not _SAFE_RUNTIME_RE.match(runtime):
         raise RunscPlanRejected("runtime_name contains unsafe characters")
     if runtime in {"runsc", "runsc-gvproxy"}:
@@ -474,8 +421,8 @@ class SubprocessContainerRunner:
         check.
         """
         del surface  # the ownership proof is Docker-observed name/labels.
-        expected_name = _launch_probe_container_name(run_id)
-        if not _argv_carries_launch_probe_contract(argv, run_id=run_id, name=expected_name):
+        expected_name = launch_probe_container_name(run_id)
+        if not argv_carries_launch_probe_contract(argv, run_id=run_id, name=expected_name):
             return None
         deadline = time.monotonic() + self._probe_timeout_seconds
         while True:
@@ -584,63 +531,6 @@ def _sequence_has_network_value(parts: list[str], expected: str) -> bool:
     return False
 
 
-def _launch_probe_container_name(run_id: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(run_id)).strip("-._")
-    if not cleaned or not cleaned[0].isalnum():
-        cleaned = f"run-{cleaned}" if cleaned else "run"
-    digest = hashlib.sha256(str(run_id).encode("utf-8")).hexdigest()[:12]
-    base = cleaned[:48].rstrip("-._") or "run"
-    return f"ce-probe-{base}-{digest}"
-
-
-def _launch_probe_contract_args(run_id: str) -> tuple[str, ...]:
-    name = _launch_probe_container_name(run_id)
-    return (
-        "--name",
-        name,
-        "--label",
-        f"{LAUNCH_PROBE_RUN_ID_LABEL}={run_id}",
-        "--label",
-        f"{LAUNCH_PROBE_CONTRACT_LABEL}={LAUNCH_PROBE_CONTRACT}",
-    )
-
-
-def _bind_launch_owned_probe_contract(argv: Sequence[str], *, run_id: str) -> tuple[str, ...]:
-    parts = tuple(str(part) for part in argv)
-    if len(parts) < 2 or parts[1] != "run":
-        return (*_launch_probe_contract_args(run_id), *parts)
-    insert_at = 2
-    if len(parts) > insert_at and parts[insert_at] == "--rm":
-        insert_at += 1
-    return (*parts[:insert_at], *_launch_probe_contract_args(run_id), *parts[insert_at:])
-
-
-def _argv_carries_launch_probe_contract(
-    argv: Sequence[str],
-    *,
-    run_id: str,
-    name: str,
-) -> bool:
-    parts = [str(part) for part in argv]
-    labels = {
-        f"{LAUNCH_PROBE_RUN_ID_LABEL}={run_id}",
-        f"{LAUNCH_PROBE_CONTRACT_LABEL}={LAUNCH_PROBE_CONTRACT}",
-    }
-    if "--name" not in parts:
-        return False
-    try:
-        if parts[parts.index("--name") + 1] != name:
-            return False
-    except IndexError:
-        return False
-    seen_labels = {
-        parts[index + 1]
-        for index, part in enumerate(parts[:-1])
-        if part == "--label"
-    }
-    return labels.issubset(seen_labels)
-
-
 def _normalize_metadata_key(value: str) -> str:
     return value.strip().lower().replace("-", "_")
 
@@ -728,7 +618,7 @@ class GvisorProxyBackend(RunnerBackend):
             raise BackendUnavailable(
                 f"no provisioned Docker/runsc plan for handle {handle.ref!r}; refusing unproven handle"
             )
-        argv = _bind_launch_owned_probe_contract(
+        argv = bind_launch_owned_probe_contract(
             plan.docker_argv(request.command),
             run_id=handle.run_id,
         )

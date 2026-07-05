@@ -47,6 +47,15 @@ from .backend import (
 )
 from .noop_backend import BACKEND_KEY as LOCAL_NOOP_BACKEND_KEY
 from .noop_backend import LocalNoopBackend
+from .translation import (
+    LAUNCH_PROBE_CONTRACT,
+    LAUNCH_PROBE_CONTRACT_LABEL,
+    LAUNCH_PROBE_RUN_ID_LABEL,
+    argv_carries_launch_probe_contract,
+    bind_launch_owned_probe_contract,
+    launch_probe_container_name,
+    render_mount,
+)
 from .gvisor_proxy_backend import BACKEND_KEY as GVISOR_PROXY_BACKEND_KEY
 from .gvisor_proxy_backend import (
     ContainerRunner,
@@ -151,6 +160,9 @@ __all__ = [
     "FilesystemPolicy",
     "GVISOR_PROXY_BACKEND_KEY",
     "GvisorProxyBackend",
+    "LAUNCH_PROBE_CONTRACT",
+    "LAUNCH_PROBE_CONTRACT_LABEL",
+    "LAUNCH_PROBE_RUN_ID_LABEL",
     "LINUX_SANDBOX_PRIMITIVES",
     "LOCAL_NOOP_BACKEND_KEY",
     "LandlockPolicy",
@@ -185,12 +197,16 @@ __all__ = [
     "TeardownResult",
     "UnknownBackend",
     "available_backends",
+    "argv_carries_launch_probe_contract",
+    "bind_launch_owned_probe_contract",
     "build_runtime",
     "get_backend",
     "guarded_env",
+    "launch_probe_container_name",
     "probe_os_native_capability",
     "register_backend",
     "render_install_script",
+    "render_mount",
     "render_posix_tool_shim",
     "render_sandbox_policy_yaml",
     "translate_to_egress_proxy_config",
