@@ -22,6 +22,7 @@ adapter; no secrets or environment values are printed.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -567,12 +568,60 @@ def probe_controller_recall_endpoint(repo_root: Path | str | None = None) -> dic
     )
 
 
-def _has_launched_event(seat_dir: Path | str) -> bool:
+def _parse_positive_pid(raw_pid: Any) -> int | None:
+    """Strict pid parse: a positive int, excluding ``bool`` (``isinstance(True,
+    int)`` is ``True`` in Python) and excluding non-integral/negative/zero
+    values. Returns ``None`` when ``raw_pid`` is not a confirmable live-pid
+    candidate.
+    """
+    if isinstance(raw_pid, bool):
+        return None
+    if isinstance(raw_pid, int):
+        return raw_pid if raw_pid > 0 else None
+    if isinstance(raw_pid, str):
+        stripped = raw_pid.strip()
+        if stripped.isdigit():
+            value = int(stripped)
+            return value if value > 0 else None
+        return None
+    return None
+
+
+def _strict_events_file_scan(seat_dir: Path | str) -> tuple[bool, list[dict[str, Any]]]:
+    """Strictly scan ``events.jsonl`` for the launch-gate reuse check ONLY.
+
+    This is deliberately stricter than :func:`seat_sentinel.iter_events_file`
+    (which is tolerant read-side observability code that must keep skipping
+    malformed lines for other consumers). The launch gate must fail closed:
+
+    * missing file / empty (whitespace-only) file -> ``(False, [])`` — proceed
+      as today, no launched-event history to reconcile.
+    * any non-blank line that isn't a parseable JSON object -> ``(True, [])``
+      — ambiguous, caller must refuse.
+    * otherwise -> ``(False, <parsed event dicts>)``.
+    """
     events_path = Path(seat_dir) / seat_sentinel.EVENTS_FILENAME
-    return any(
-        event.get("event") == seat_sentinel.EVENT_LAUNCHED
-        for event in seat_sentinel.iter_events_file(events_path)
-    )
+    if not events_path.is_file():
+        return False, []
+    try:
+        text = events_path.read_text(encoding="utf-8")
+    except OSError:
+        return False, []
+    if not text.strip():
+        return False, []
+    events: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except ValueError:
+            return True, []
+        if not isinstance(obj, dict):
+            return True, []
+        events.append(obj)
+    return False, events
 
 
 STALE_SURFACE_RECOVERY_COMMAND = "ce reap once"
@@ -699,6 +748,47 @@ def harness_binary_check(
     which: Any | None = None,
 ) -> dict[str, Any]:
     binary = configured_harness_binary(harness)
+    if harness == "codex":
+        # Desync guard: delegate to the SAME resolution the real launcher uses
+        # (codex_launch_spec.resolve_codex_harness_binary) rather than a
+        # bare shutil.which(binary) — that seam honors CE_CODEX_HARNESS
+        # (used EXCLUSIVELY when set) and the composed PATH (live PATH merged
+        # with KNOWN_GOOD_PATH), so doctor never reports green for a harness
+        # the launcher would actually refuse to resolve.
+        try:
+            resolved = codex_launch_spec.resolve_codex_harness_binary()
+        except codex_launch_spec.GovernedCommandError as exc:
+            detail = (
+                f"configured codex harness binary could not be resolved: {exc}; "
+                f"tried the {codex_launch_spec.CODEX_HARNESS_ENV} override path and the "
+                "composed launch PATH (live PATH + known-good sbin/bin dirs); set "
+                f"{codex_launch_spec.CODEX_HARNESS_ENV} to an absolute executable path "
+                "or install codex on PATH before running `ce launch --harness codex`"
+            )
+            return {
+                "clause": "RED-G-HARNESS-PATH",
+                "name": "configured harness binary on PATH",
+                "applicable": True,
+                "ok": False,
+                "detail": detail,
+                "harness": harness,
+                "binary": binary,
+                "resolved": None,
+            }
+        return {
+            "clause": "RED-G-HARNESS-PATH",
+            "name": "configured harness binary on PATH",
+            "applicable": True,
+            "ok": True,
+            "detail": (
+                f"configured codex harness binary {binary!r} resolves via the "
+                f"launcher's codex resolution (override/composed-PATH) at {resolved}"
+            ),
+            "harness": harness,
+            "binary": binary,
+            "resolved": resolved,
+        }
+
     resolver = which or shutil.which
     resolved = resolver(binary)
     ok = resolved is not None
@@ -1182,7 +1272,20 @@ def launch(
         runtime_policy=resolved_runtime_policy,
     )
     stale_surface_archive: SeatSurfaceArchiveResult | None = None
-    if _has_launched_event(seat_dir):
+    ambiguous_events, strict_events = _strict_events_file_scan(seat_dir)
+    if ambiguous_events:
+        raise SeatSurfaceReuseRefused(
+            _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
+        )
+    strict_launched_events = [
+        event for event in strict_events if event.get("event") == seat_sentinel.EVENT_LAUNCHED
+    ]
+    if strict_launched_events:
+        for event in strict_launched_events:
+            if _parse_positive_pid(event.get("pid")) is None:
+                raise SeatSurfaceReuseRefused(
+                    _refuse_reuse_message(seat_dir, "ambiguous (corrupt sentinel event record)")
+                )
         stale_surface_archive = _archive_stale_launched_surface(
             seat_dir=seat_dir,
             session=session,
