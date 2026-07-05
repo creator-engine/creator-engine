@@ -21,6 +21,6 @@ issue: ce-s1a-docker-runner-backend
   reference docs so the version-boundary and autogen-sync gates pass clean.
 - Review-pickup follow-up: locked the latent `network=='proxy'` docker-argv
   branch to fail closed (docker-side egress mediation is not implemented) with
-  a regression test, and cited ce-ops#447 (Operator-ratified 2026-07-05
-  day-arc) next to the `controller` role-enum addition in the schema and
-  contract doc.
+  a regression test, and added an Operator-ratified (2026-07-05 day-arc)
+  decision citation next to the `controller` role-enum addition in the schema
+  and contract doc (see those files for the ticket reference).
