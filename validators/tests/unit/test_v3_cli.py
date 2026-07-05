@@ -1597,6 +1597,25 @@ def test_detect_brownfield_project_empty_non_git_dir_disables_brownfield(tmp_pat
     assert probe["tests"]["commands"] == []
 
 
+def test_detect_brownfield_project_enables_for_git_history_without_ci_or_tests(tmp_path):
+    import subprocess
+
+    (tmp_path / "README.md").write_text("# Existing project\n", encoding="utf-8")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "ce@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "CE Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "feat: initial project"], cwd=tmp_path, check=True, capture_output=True)
+
+    probe = v3_cli._detect_brownfield_project(tmp_path)
+
+    assert probe["enabled"] is True
+    assert probe["history"]["present"] is True
+    assert probe["history"]["mode"] == "git_history_present"
+    assert probe["ci"]["workflows"] == []
+    assert probe["tests"]["commands"] == []
+
+
 def test_detect_brownfield_project_enables_brownfield_for_real_signals(tmp_path):
     workflow_dir = tmp_path / ".github" / "workflows"
     workflow_dir.mkdir(parents=True)
