@@ -1,12 +1,12 @@
 ---
 slug: ce-452-canary-qa-worker-role
 date: 2026-07-05
-kind: added
-scope: worker roles
-issue: ce-ops#452
+kind: tiny
+scope: .claude/agents/canary_qa.md (new worker role) + .claude/agents/README.md roster update + changelog
+issue: creator-engine/ce-ops#452
 ---
 
-**Add governed canary/QA worker role definition.**
+**Canary QA worker role.**
 
 - Defines `canary_qa` as a disposable-scratch released-artifact validation role
   with live-artifact egress and sandbox-repository short-TTL credentials only.
