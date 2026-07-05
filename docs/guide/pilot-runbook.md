@@ -35,6 +35,14 @@ installs) and the **GitHub-App authorization click**. Contract:
   Your agent fetches the **signed** install spec, **verifies it against the pinned
   CE public key before executing**, and assists the GitHub-App step.
 
+Default one-liner installs need outbound access to `creator-engine.dev` for the
+signed spec and wheelhouse artifacts, `https://dns.google` for the default
+out-of-band trust anchor (`CE_TRUST_ANCHOR_URL`), and `github.com` for the
+`astral-sh/uv` releases used to acquire the manifest-pinned `uv` and CPython 3.14
+when the host has no local Python `>=3.14`. Egress-restricted environments must
+allow all three destinations before running the one-liner, or installation can
+fail non-obviously during trust verification or Python acquisition.
+
 Both modes are the SAME journey; the only difference is *where answers come
 from* (`interactive > answers-file > detected > default`). You can prepare
 every answer **upfront, IaC-style**, in a committable
