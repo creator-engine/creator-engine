@@ -43,6 +43,14 @@ PYTEST_OUTCOME_PATTERN = re.compile(
     r"\b(\d+)\s+"
     r"(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns)\b"
 )
+PYTEST_OUTCOME_COUNT_PATTERN = re.compile(
+    r"\b(?P<count>\d+)\s+"
+    r"(?P<outcome>passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns)\b"
+)
+PYTEST_SKIP_REASON_PATTERN = re.compile(
+    r"^SKIPPED\s+\[(?P<count>\d+)\]\s+(?P<location>.+?)(?::\s+(?P<reason>.*))?$",
+    re.MULTILINE,
+)
 VALIDATE_PR_PROFILES = ("contained-seat",)
 CONTAINED_SEAT_PROFILE = "contained-seat"
 PATH_MANIFEST_CARRIER_REQUIRED_CODE = "path_manifest_carrier_required"
@@ -78,6 +86,19 @@ class CheckDetail:
     name: str
     ok: bool
     detail: str
+
+
+@dataclass(frozen=True)
+class SkipReportEntry:
+    path: str
+    count: int
+    reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class BaselineDiffTestResult:
+    detail: str
+    head_skip_count: int = 0
 
 
 class Runner(Protocol):
@@ -431,6 +452,73 @@ def _pytest_executed_test_count(result: CommandResult) -> int:
     return sum(int(match.group(1)) for match in PYTEST_OUTCOME_PATTERN.finditer(text))
 
 
+def _pytest_outcome_count(result: CommandResult, outcome: str) -> int:
+    text = result.stdout + "\n" + result.stderr
+    return sum(
+        int(match.group("count"))
+        for match in PYTEST_OUTCOME_COUNT_PATTERN.finditer(text)
+        if match.group("outcome") == outcome
+    )
+
+
+def _pytest_skip_report_path(location: str) -> str:
+    if ".py" in location:
+        return location.split(".py", 1)[0] + ".py"
+    if "::" in location:
+        return location.split("::", 1)[0]
+    return re.sub(r":\d+$", "", location)
+
+
+def _pytest_skip_report_entries(result: CommandResult) -> list[SkipReportEntry]:
+    text = result.stdout + "\n" + result.stderr
+    grouped: dict[str, tuple[int, list[str]]] = {}
+    for match in PYTEST_SKIP_REASON_PATTERN.finditer(text):
+        path = _pytest_skip_report_path(match.group("location").strip())
+        reason = (match.group("reason") or "").strip()
+        count, reasons = grouped.setdefault(path, (0, []))
+        grouped[path] = (count + int(match.group("count")), reasons)
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    return [
+        SkipReportEntry(path=path, count=count, reasons=tuple(reasons))
+        for path, (count, reasons) in sorted(grouped.items())
+    ]
+
+
+def _print_pytest_skip_report(result: CommandResult, out: TextIO) -> int:
+    skip_count = _pytest_outcome_count(result, "skipped")
+    if skip_count <= 0:
+        return 0
+
+    noun = "test" if skip_count == 1 else "tests"
+    print(f"REPORT-FLAG skipped tests: {skip_count} skipped {noun} in head baseline-diff test run", file=out)
+    entries = _pytest_skip_report_entries(result)
+    attributed_count = sum(entry.count for entry in entries)
+    if not entries:
+        print(
+            "REPORT-FLAG skipped tests: pytest did not emit -rs skip details; "
+            "rerun the test command with -rs to see skipped files and reasons",
+            file=out,
+        )
+        return skip_count
+
+    for entry in entries:
+        entry_noun = "test" if entry.count == 1 else "tests"
+        reason = "; ".join(entry.reasons)
+        suffix = f" reason={reason}" if reason else ""
+        print(f"REPORT-FLAG skipped tests: {entry.path}: {entry.count} skipped {entry_noun}{suffix}", file=out)
+
+    unattributed_count = skip_count - attributed_count
+    if unattributed_count > 0:
+        missing_noun = "test" if unattributed_count == 1 else "tests"
+        print(
+            f"REPORT-FLAG skipped tests: {unattributed_count} skipped {missing_noun} "
+            "were not attributed by pytest -rs output",
+            file=out,
+        )
+    return skip_count
+
+
 def _validate_pytest_execution(label: str, result: CommandResult, command: str) -> None:
     executed_count = _pytest_executed_test_count(result)
     if result.returncode in (0, 1) and executed_count > 0:
@@ -458,7 +546,7 @@ def _run_baseline_diff_tests(
     runner: Runner,
     out: TextIO,
     err: TextIO,
-) -> str:
+) -> BaselineDiffTestResult:
     argv = _test_command_argv(config.test_command)
     with tempfile.TemporaryDirectory(prefix="ce-validate-pr-base-") as temp:
         base_worktree = Path(temp) / "base"
@@ -484,6 +572,7 @@ def _run_baseline_diff_tests(
     baseline_failures = _failure_ids(baseline)
     head_failures = _failure_ids(head)
     new_failures = sorted(head_failures - baseline_failures)
+    head_skip_count = _print_pytest_skip_report(head, out)
     if new_failures:
         preview = ", ".join(new_failures[:5])
         more = "" if len(new_failures) <= 5 else f" (+{len(new_failures) - 5} more)"
@@ -491,9 +580,12 @@ def _run_baseline_diff_tests(
             "baseline-diff test gate found new failure(s): "
             f"{preview}{more} (baseline={len(baseline_failures)}, head={len(head_failures)})"
         )
-    return (
-        "zero new failures "
-        f"(baseline={len(baseline_failures)}, head={len(head_failures)}, command={config.test_command!r})"
+    return BaselineDiffTestResult(
+        detail=(
+            "zero new failures "
+            f"(baseline={len(baseline_failures)}, head={len(head_failures)}, command={config.test_command!r})"
+        ),
+        head_skip_count=head_skip_count,
     )
 
 
@@ -603,9 +695,13 @@ def _fleet_manifest_guard(repo_root: Path, out: TextIO) -> str:
     return "fleet manifests are schema-valid and free of CE-internal identifiers"
 
 
-def _print_summary(checks: Sequence[CheckDetail], out: TextIO) -> None:
+def _print_summary(checks: Sequence[CheckDetail], out: TextIO, *, skipped_tests: int = 0) -> None:
     ok = all(check.ok for check in checks)
-    print(f"{'PASS' if ok else 'FAIL'}: PR preflight", file=out)
+    if ok and skipped_tests > 0:
+        noun = "test" if skipped_tests == 1 else "tests"
+        print(f"PASS: PR preflight (with {skipped_tests} skipped {noun} -- see report above)", file=out)
+    else:
+        print(f"{'PASS' if ok else 'FAIL'}: PR preflight", file=out)
     for check in checks:
         print(f"  [{'PASS' if check.ok else 'FAIL'}] {check.name}: {check.detail}", file=out)
 
@@ -691,6 +787,7 @@ def run_preflight(
 
     comparison_base: dict[str, str] = {}
     declared_work_class: dict[str, str] = {}
+    skipped_tests: dict[str, int] = {}
     py_env = _python_env(config.repo_root)
     py = sys.executable
 
@@ -757,6 +854,17 @@ def run_preflight(
             raise RuntimeError(f"{exc}. {_brain_drift_remediation_note()}") from exc
         return f"passed; {reconcile_detail}"
 
+    def baseline_diff_gate() -> str:
+        result = _run_baseline_diff_tests(
+            config,
+            comparison_base["value"],
+            runner=runner,
+            out=out,
+            err=err,
+        )
+        skipped_tests["value"] = result.head_skip_count
+        return result.detail
+
     checks.append(
         _run_check(
             "clean worktree",
@@ -796,19 +904,13 @@ def run_preflight(
     checks.append(
         _run_check(
             "baseline-diff test command",
-            lambda: _run_baseline_diff_tests(
-                config,
-                comparison_base["value"],
-                runner=runner,
-                out=out,
-                err=err,
-            ),
+            baseline_diff_gate,
             out,
             err,
         )
     )
     if not checks[-1].ok:
-        _print_summary(checks, out)
+        _print_summary(checks, out, skipped_tests=skipped_tests.get("value", 0))
         return 1
     checks.append(
         _run_check(
@@ -1070,7 +1172,7 @@ def run_preflight(
         )
     )
 
-    _print_summary(checks, out)
+    _print_summary(checks, out, skipped_tests=skipped_tests.get("value", 0))
     return 0 if all(check.ok for check in checks) else 1
 
 
