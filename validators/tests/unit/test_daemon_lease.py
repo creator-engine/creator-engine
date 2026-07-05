@@ -694,6 +694,55 @@ def test_container_runner_creates_missing_state_and_lease_roots(tmp_path: Path):
     assert oct(lease_root.stat().st_mode & 0o777) == "0o700"
 
 
+@pytest.mark.skipif(os.getuid() == 0, reason="non-root Docker creation branch is not exercised as root")
+def test_container_runner_creates_missing_docker_roots_for_non_root_caller_when_uid_matches(tmp_path: Path):
+    fake_docker = tmp_path / "docker"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_docker, argv_file)
+    env = _container_runner_env(tmp_path, fake_docker)
+    env["CE_DAEMON_IMAGE_UID"] = str(os.getuid())
+    state_root = tmp_path / "state"
+    lease_root = state_root / "daemon-leases"
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert state_root.is_dir()
+    assert lease_root.is_dir()
+    assert state_root.stat().st_uid == os.getuid()
+    assert lease_root.stat().st_uid == os.getuid()
+    assert oct(state_root.stat().st_mode & 0o777) == "0o700"
+    assert oct(lease_root.stat().st_mode & 0o777) == "0o700"
+    assert argv_file.exists()
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="non-root Docker creation branch is not exercised as root")
+def test_container_runner_refuses_freshly_created_docker_state_root_when_uid_mismatches(tmp_path: Path):
+    fake_docker = tmp_path / "docker"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_docker, argv_file)
+    env = _container_runner_env(tmp_path, fake_docker)
+    wrong_uid = os.getuid() + 1
+    env["CE_DAEMON_IMAGE_UID"] = str(wrong_uid)
+    state_root = tmp_path / "state"
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    assert "CE_DAEMON_STATE_ROOT owner uid" in proc.stderr
+    assert f"Run: chown -R {wrong_uid}:{wrong_uid} {state_root}" in proc.stderr
+    assert not argv_file.exists()
+    # The state root did not exist before this run. The non-root caller
+    # cannot chown it to the mismatched image uid, so install -d's chown
+    # attempt fails and falls back to creating the directory without
+    # ownership changes -- it ends up owned by the caller, not the image
+    # uid, and first-boot creation must not silently paper over that with a
+    # false pass.
+    assert state_root.is_dir()
+    assert state_root.stat().st_uid == os.getuid()
+
+
 def test_container_runner_refuses_docker_state_root_with_wrong_owner(tmp_path: Path):
     fake_docker = tmp_path / "docker"
     argv_file = tmp_path / "engine-argv.txt"
