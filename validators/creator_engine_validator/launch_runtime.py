@@ -386,6 +386,7 @@ class _ControllerRecallConfig:
     configured: bool
     embedder_name: str | None = None
     endpoint: str | None = None
+    endpoint_configured: bool = False
     endpoint_model_id: str | None = None
     endpoint_dim: int | None = None
     reason: str | None = None
@@ -408,12 +409,14 @@ def _status_payload(
     *,
     reason: str,
     endpoint: str | None = None,
+    endpoint_configured: bool = False,
     embedder: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "state": state,
         "reason": reason,
         "endpoint": endpoint,
+        "endpoint_configured": endpoint_configured,
     }
     if embedder is not None:
         payload["embedder"] = embedder
@@ -452,6 +455,7 @@ def _controller_recall_config_from_env() -> _ControllerRecallConfig:
         )
     embedder_name = raw_embedder or "vllm-openai"
     endpoint = _configured_endpoint_for(embedder_name, raw_endpoint)
+    endpoint_configured = raw_endpoint is not None
     endpoint_dim = None
     if raw_dim is not None:
         try:
@@ -461,6 +465,7 @@ def _controller_recall_config_from_env() -> _ControllerRecallConfig:
                 configured=True,
                 embedder_name=embedder_name,
                 endpoint=endpoint,
+                endpoint_configured=endpoint_configured,
                 endpoint_model_id=raw_model_id,
                 reason=f"{RECALL_ENDPOINT_DIM_ENV} must be a positive integer",
             )
@@ -469,6 +474,7 @@ def _controller_recall_config_from_env() -> _ControllerRecallConfig:
                 configured=True,
                 embedder_name=embedder_name,
                 endpoint=endpoint,
+                endpoint_configured=endpoint_configured,
                 endpoint_model_id=raw_model_id,
                 reason=f"{RECALL_ENDPOINT_DIM_ENV} must be a positive integer",
             )
@@ -476,6 +482,7 @@ def _controller_recall_config_from_env() -> _ControllerRecallConfig:
         configured=True,
         embedder_name=embedder_name,
         endpoint=endpoint,
+        endpoint_configured=endpoint_configured,
         endpoint_model_id=raw_model_id,
         endpoint_dim=endpoint_dim,
     )
@@ -512,10 +519,22 @@ def _open_surface_kwargs(
 
 def _emit_recall_status(status: Mapping[str, Any]) -> None:
     line = str(status.get("line") or _recall_status_line(status))
-    if status.get("state") in {"hydrated", "unconfigured"}:
+    state = status.get("state")
+    if state == "unconfigured":
+        LOGGER.debug(line)
+    elif state == "hydrated":
         LOGGER.info(line)
+    elif status.get("endpoint") and status.get("endpoint_configured"):
+        endpoint = status["endpoint"]
+        LOGGER.warning(
+            "Semantic recall hydration skipped: configured embedding endpoint "
+            "unreachable at %s; launch proceeds, but recall quality is reduced. "
+            "Fix the endpoint or unset %s to use launch without semantic recall hydration.",
+            endpoint,
+            RECALL_ENDPOINT_ENV,
+        )
     else:
-        LOGGER.warning(line)
+        LOGGER.debug(line)
 
 
 def probe_controller_recall_endpoint(repo_root: Path | str | None = None) -> dict[str, Any]:
@@ -533,6 +552,7 @@ def probe_controller_recall_endpoint(repo_root: Path | str | None = None) -> dic
             "unavailable",
             reason=config.reason,
             endpoint=config.endpoint,
+            endpoint_configured=config.endpoint_configured,
             embedder=config.embedder_name,
         )
     if config.endpoint is None:
@@ -558,12 +578,14 @@ def probe_controller_recall_endpoint(repo_root: Path | str | None = None) -> dic
             "unavailable",
             reason=f"unreachable: {exc}",
             endpoint=config.endpoint,
+            endpoint_configured=config.endpoint_configured,
             embedder=config.embedder_name,
         )
     return _status_payload(
         "hydrated",
         reason=f"endpoint {config.endpoint} reachable",
         endpoint=config.endpoint,
+        endpoint_configured=config.endpoint_configured,
         embedder=config.embedder_name,
     )
 
@@ -885,6 +907,7 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
             "unavailable",
             reason=config.reason,
             endpoint=config.endpoint,
+            endpoint_configured=config.endpoint_configured,
             embedder=config.embedder_name,
         )
         return payload
@@ -895,6 +918,7 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
                 "unavailable",
                 reason=str(probe_status.get("reason") or "endpoint pre-probe failed"),
                 endpoint=config.endpoint,
+                endpoint_configured=config.endpoint_configured,
                 embedder=config.embedder_name,
             )
             return payload
@@ -916,6 +940,7 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
             "hydrated",
             reason=f"semantic recall hydrated with {config.label}",
             endpoint=config.endpoint,
+            endpoint_configured=config.endpoint_configured,
             embedder=config.embedder_name,
         )
     except (
@@ -930,6 +955,7 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
             "unavailable",
             reason=str(exc),
             endpoint=config.endpoint,
+            endpoint_configured=config.endpoint_configured,
             embedder=config.embedder_name,
         )
     except Exception as exc:
@@ -937,6 +963,7 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
             "unavailable",
             reason=f"unexpected recall error: {exc}",
             endpoint=config.endpoint,
+            endpoint_configured=config.endpoint_configured,
             embedder=config.embedder_name,
         )
     return payload
