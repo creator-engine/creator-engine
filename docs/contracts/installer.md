@@ -429,6 +429,46 @@ environment. `ce` remains the user-facing command; the `cev3` shim is retained
 for bootstrap/internal compatibility. A future version-stamped user command
 (`cev4`, etc.) remains the anti-pattern this avoids.
 
+## Gate-daemon installer environment contract
+
+`deploy/systemd/install-gate-daemons-systemd.sh` installs the gate daemon units
+but never creates or overwrites the operator's env file. The env file is the
+only handoff for deployment-specific credentials and daemon configuration:
+
+- `CE_GATE_REPO` — repository slug (`owner/name`) for the daemon fleet.
+- `CE_GATE_AUTHORIZED_REVIEWERS` — comma-separated reviewer seats whose reviews
+  may authorize merge-queue enqueue.
+- `CE_BELT_IDENTITY` — work-pickup belt identity.
+- `GH_TOKEN` — integrator token for the merge-queue daemon.
+- `CE_PICKUP_TOKEN` — static review/work pickup token fallback.
+- `BAO_ADDR` — OpenBao endpoint for the review-pickup token supplier.
+- `BAO_TOKEN` — OpenBao client token; evidence and docs carry only the env name.
+- `BAO_CACERT` — optional OpenBao CA bundle path.
+- `CE_OPENBAO_ALLOWED_REFS` — allowlist entry binding the permitted review-pickup
+  SecretRef fields and policy digest.
+- `CE_PICKUP_TOKEN_SECRET_BACKEND` — SecretIdentity backend key; the reviewed
+  deployment path uses `openbao`.
+- `CE_PICKUP_TOKEN_SECRET_MOUNT` — OpenBao KV mount for the review-pickup
+  SecretRef.
+- `CE_PICKUP_TOKEN_SECRET_PATH` — OpenBao secret path for the review-pickup
+  SecretRef.
+- `CE_PICKUP_TOKEN_SECRET_FIELD` — field inside the OpenBao secret payload.
+- `CE_PICKUP_TOKEN_SECRET_PURPOSE` — SecretRef purpose, normally
+  `review-pickup-token`.
+- `CE_PICKUP_TOKEN_SECRET_OWNER_REF` — owner binding for the SecretRef.
+- `CE_PICKUP_TOKEN_SECRET_REF_POLICY_SHA` — 64-hex policy digest for the
+  SecretRef allowlist.
+- `CE_PICKUP_TOKEN_SECRET_TARGET_REF` — `file:` materialization target read after
+  OpenBao delivery.
+- `CE_BELT_INTERVAL_SECONDS` — optional belt poll interval.
+- `CE_BELT_LABELS` — optional single work-pickup label filter.
+
+The OpenBao-backed review-pickup path is armed only when the env file carries
+the OpenBao client variables, `CE_OPENBAO_ALLOWED_REFS`, and the full
+`CE_PICKUP_TOKEN_SECRET_*` SecretRef set above. The installed unit remains on the
+static `CE_PICKUP_TOKEN` command until the operator switches to the documented
+OpenBao-ready `ExecStart` after live verification.
+
 ## Boundary (pure planner; live executor seam)
 
 CI-pure: parser/canonicalization · artifact-manifest validation · dependency
