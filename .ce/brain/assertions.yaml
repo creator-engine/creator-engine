@@ -3501,4 +3501,46 @@ records:
   verification_method:
     evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
     type: static
+- claim:
+    object: merge-queue-checks-requested
+    predicate: verified-by-sha256
+    sha256: f708637942edfd22e2b1ce5af6d0d6bae9485a2fdc7f70e14cf69a8aefdf56ae
+    subject: convention
+  content_hash: 86002caefcd2aadd49445ecb434afa8ec1de1c003617ad521b36cd9ffaa49232
+  evidence_ref: .github/workflows/validate.yml
+  id: brain-assertion-fleet-mergequeue-trigger
+  kind: brain-assertion
+  prev_hash: 7535be6411ab556f968d26b0739ebec6715ac088c07e6b34d8915acacbbc79a6
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 134
+  statement: convention verified-by-sha256 merge-queue-checks-requested
+  status: superseded
+  superseded_by: brain-assertion-baefc5e6234d292664afc28c
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/validate.yml
+    type: static
+- claim:
+    object: merge-queue-checks-requested
+    predicate: verified-by-sha256
+    sha256: 978429ed467c28c0573699a5cf18ef02373bb0b86121eeb3aa93c8ea23f178ae
+    subject: convention
+  content_hash: fd1c37ec79a59258333386d10da2773e16dd321fe85998c0588792329beb40fa
+  evidence_ref: .github/workflows/validate.yml
+  id: brain-assertion-baefc5e6234d292664afc28c
+  kind: brain-assertion
+  prev_hash: 86002caefcd2aadd49445ecb434afa8ec1de1c003617ad521b36cd9ffaa49232
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 135
+  statement: convention verified-by-sha256 merge-queue-checks-requested
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/validate.yml
+    type: static
 schema_version: '1'

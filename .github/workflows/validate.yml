@@ -159,6 +159,7 @@ jobs:
           set -euo pipefail
           base_ref=""
           base_rev=""
+          comparison_base=""
           live_base_sha=""
           live_head_ref=""
           live_head_sha=""
@@ -322,38 +323,100 @@ jobs:
             return 1
           }
 
+          resolve_compare_api_merge_base() {
+            local compare_base compare_head context response status
+            compare_base="$1"
+            compare_head="$2"
+            context="$3"
+            response="$(mktemp)"
+
+            if gh api "repos/${GITHUB_REPOSITORY}/compare/${compare_base}...${compare_head}" >"${response}"; then
+              :
+            else
+              status=$?
+              rm -f "${response}"
+              echo "INFRA: GitHub compare API failed while resolving ${context} merge-base (${compare_base}...${compare_head}); re-run after GitHub API connectivity recovers" >&2
+              return "${status}"
+            fi
+
+            python - "${response}" "${context}" <<'PYEOF'
+          import json
+          import re
+          import sys
+
+          response_path = sys.argv[1]
+          context = sys.argv[2]
+          sha_re = re.compile(r"^[0-9a-f]{40}$")
+          try:
+              with open(response_path, encoding="utf-8") as handle:
+                  payload = json.load(handle)
+          except (OSError, ValueError) as exc:
+              print(
+                  f"INFRA: GitHub compare API returned unreadable {context} merge-base payload: {exc}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          merge_base = ((payload.get("merge_base_commit") or {}).get("sha") or "")
+          if not isinstance(merge_base, str) or not sha_re.fullmatch(merge_base):
+              print(
+                  f"INFRA: GitHub compare API response did not include a valid {context} merge_base_commit.sha",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          print(merge_base)
+          PYEOF
+            status=$?
+            rm -f "${response}"
+            return "${status}"
+          }
+
+          fetch_resolved_comparison_base() {
+            local resolved_sha
+            resolved_sha="$1"
+            if git rev-parse "${resolved_sha}^{commit}" >/dev/null 2>&1; then
+              return 0
+            fi
+            if ! fetch_with_shallow_retry --no-tags --depth=1 origin "${resolved_sha}"; then
+              echo "INFRA: failed to fetch server-resolved comparison base ${resolved_sha}; local diff validation cannot proceed" >&2
+              exit 1
+            fi
+            if ! git rev-parse "${resolved_sha}^{commit}" >/dev/null 2>&1; then
+              echo "INFRA: fetched server-resolved comparison base ${resolved_sha}, but the commit is still unavailable locally" >&2
+              exit 1
+            fi
+          }
+
           fetch_with_shallow_retry --no-tags --prune --depth=100 origin \
             "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
 
           base_rev="origin/${base_ref}"
           if [[ -n "${live_base_sha}" ]]; then
             fetched_base_sha="$(git rev-parse "origin/${base_ref}^{commit}" 2>/dev/null || true)"
-            if [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
-              if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-                # The PR has fallen behind origin/${base_ref}. The merge queue
-                # (merge_group context) owns currency-to-HEAD for the actual
-                # merge, so do NOT hard-fail the PR-head check here. Fetch the
-                # PR's recorded base SHA explicitly and compare the PR diff
-                # against its own merge-base; that still correctly detects
-                # NEW failures the PR introduces.
-                if git fetch --no-tags --depth=100 origin "${live_base_sha}" >/dev/null 2>&1 &&
-                  git rev-parse "${live_base_sha}^{commit}" >/dev/null 2>&1; then
-                  echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}); comparing against PR merge-base from recorded base ${live_base_sha}"
-                  base_rev="${live_base_sha}"
-                else
-                  echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}) and not directly fetchable; comparing against origin/${base_ref} merge-base"
-                  base_rev="origin/${base_ref}"
-                fi
+            if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+              # Resolve PR comparison bases server-side. This avoids local
+              # parent traversal through objects that a shallow checkout may not
+              # have when origin/${base_ref} has moved past the PR's recorded base.
+              comparison_base="$(resolve_compare_api_merge_base "${live_base_sha}" "${live_head_sha}" "pull request")"
+              fetch_resolved_comparison_base "${comparison_base}"
+              if [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
+                echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}); comparing against server-resolved PR merge-base ${comparison_base} from recorded base ${live_base_sha}"
               else
+                echo "Resolved PR comparison base via GitHub compare API: ${comparison_base}"
+              fi
+              base_rev="${live_base_sha}"
+            elif [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
                 echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
                 exit 1
-              fi
             else
               base_rev="${live_base_sha}"
             fi
           fi
 
-          comparison_base="$(git merge-base "${base_rev}" HEAD 2>/dev/null || true)"
+          if [[ -z "${comparison_base}" ]]; then
+            comparison_base="$(git merge-base "${base_rev}" HEAD 2>/dev/null || true)"
+          fi
           if [[ -z "${comparison_base}" && "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
             fetch_with_shallow_retry --no-tags --prune --unshallow origin
             fetch_with_shallow_retry --no-tags --prune origin \
@@ -361,26 +424,15 @@ jobs:
             if [[ -n "${live_base_sha}" ]]; then
               fetched_base_sha="$(git rev-parse "origin/${base_ref}^{commit}" 2>/dev/null || true)"
               if [[ "${fetched_base_sha}" != "${live_base_sha}" ]]; then
-                if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-                  if git fetch --no-tags --depth=100 origin "${live_base_sha}" >/dev/null 2>&1 &&
-                    git rev-parse "${live_base_sha}^{commit}" >/dev/null 2>&1; then
-                    echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}); comparing against PR merge-base from recorded base ${live_base_sha}"
-                    base_rev="${live_base_sha}"
-                  else
-                    echo "::warning::PR base ${live_base_sha} behind origin/${base_ref} (${fetched_base_sha}) and not directly fetchable; comparing against origin/${base_ref} merge-base"
-                    base_rev="origin/${base_ref}"
-                  fi
-                else
-                  echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
-                  exit 1
-                fi
+                echo "FAIL: live PR base ${live_base_sha} (${base_ref}) was not fetched at origin/${base_ref}; re-run on the current base" >&2
+                exit 1
               fi
             fi
             comparison_base="$(git merge-base "${base_rev}" HEAD 2>/dev/null || true)"
           fi
 
           if [[ -z "${comparison_base}" ]]; then
-            echo "FAIL: could not derive merge-base for ${base_rev} and HEAD" >&2
+            echo "INFRA: could not derive merge-base for ${base_rev} and HEAD after fetch retries; local repository is missing required commit graph objects" >&2
             exit 1
           fi
 
