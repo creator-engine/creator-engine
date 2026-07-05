@@ -220,18 +220,27 @@ def test_tombstone_invariants_reject_two_active_records_with_same_id(tmp_path: P
     assert any("multiple active entries" in error.message for error in errors)
 
 
-def test_tombstone_invariants_reject_dangling_superseded_by_chain(tmp_path: Path):
-    records = _manual_chained_supersede_records()
-    records[1]["superseded_by"] = "brain-assertion-drift-tombstone-missing"
-    records = _rehash_records(records, start=1)
+def test_tombstone_invariants_reject_duplicate_tombstone_for_same_id(tmp_path: Path):
+    records = _correct_manual_claim(
+        assertion_id="brain-assertion-drift-tombstone-a",
+        new_assertion_id="brain-assertion-drift-tombstone-b",
+        claim={"subject": "brain", "predicate": "mode", "object": "second"},
+        records=_assert_manual_claim(
+            assertion_id="brain-assertion-drift-tombstone-a",
+            claim={"subject": "brain", "predicate": "mode", "object": "first"},
+        ),
+    )
+    # Inject a second tombstone for the same id after the valid active+tombstone+successor chain
+    extra_tombstone = copy.deepcopy(records[1])
+    records = _rehash_records([*records, extra_tombstone])
     path = _write_ledger(tmp_path, _ledger_text_from_records(records))
 
     errors = ce_brain_drift.validate_file(path, context=ce_brain_drift.DriftContext(repo_root=tmp_path))
 
-    assert any(error.code == ce_brain_drift.CODE_INVALID_SUPERSEDE_CHAIN for error in errors), [
+    assert any(error.code == ce_brain_drift.CODE_TOMBSTONE_ORDER for error in errors), [
         error.format() for error in errors
     ]
-    assert any("missing superseded_by target" in error.message for error in errors)
+    assert any("duplicate tombstone" in error.message for error in errors)
 
 
 def test_tombstone_invariants_reject_tombstone_before_closed_record(tmp_path: Path):
@@ -965,14 +974,14 @@ def test_authoritative_migrated_assertions_validate_and_probe():
         for error in errors
         if not (
             isinstance(error, ce_brain_drift.DriftFinding)
-            and error.assertion_id == "brain-assertion-d1b-19-brain-drift-state-reconcile-v3"
+            and error.assertion_id == "brain-assertion-d1b-19-brain-drift-state-reconcile-v4"
             and error.evidence_ref == "validators/creator_engine_validator/checks/ce_brain_drift.py"
         )
     ]
     assert unexpected_errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 89
+    assert len(active) == 90
     assert {
         brain_probe.record_probe_name(record)
         for record in active

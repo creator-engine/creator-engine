@@ -34,7 +34,6 @@ CODE_DRIFT = "brain_assertion_drift"
 CODE_UNVERIFIABLE = "brain_assertion_unverifiable"
 CODE_AUTHORITATIVE_MISMATCH = "brain_assertion_authoritative_mismatch"
 CODE_DUPLICATE_ACTIVE_ID = "brain_assertion_duplicate_active_id"
-CODE_INVALID_SUPERSEDE_CHAIN = "brain_assertion_invalid_supersede_chain"
 CODE_TOMBSTONE_ORDER = "brain_assertion_tombstone_order"
 
 _HASH_RE = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
@@ -174,14 +173,6 @@ def _active_record_indexes(records: list[Any]) -> list[int]:
     )
 
 
-def _latest_record_indexes_by_id(records: Sequence[Any]) -> dict[str, int]:
-    latest: dict[str, int] = {}
-    for idx, record in enumerate(records):
-        if isinstance(record, Mapping) and isinstance(record.get("id"), str):
-            latest[record["id"]] = idx
-    return latest
-
-
 def _duplicate_id_tombstone_invariant_errors(records: Sequence[Any], path: Path) -> list[ValidationError]:
     errors: list[ValidationError] = []
     indexes_by_id: dict[str, list[int]] = {}
@@ -212,6 +203,7 @@ def _duplicate_id_tombstone_invariant_errors(records: Sequence[Any], path: Path)
             )
 
         seen_active = False
+        seen_superseded = False
         for idx in indexes:
             record = records[idx]
             if not isinstance(record, Mapping):
@@ -219,118 +211,40 @@ def _duplicate_id_tombstone_invariant_errors(records: Sequence[Any], path: Path)
             if record.get("status") == "active":
                 seen_active = True
                 continue
-            if record.get("status") == "superseded" and not seen_active:
-                errors.append(
-                    _error(
-                        CODE_TOMBSTONE_ORDER,
-                        path,
-                        ("records", idx),
-                        "status",
-                        (
-                            f"tombstone for duplicated assertion id {assertion_id!r} appears before "
-                            "the active record it closes"
-                        ),
+            if record.get("status") == "superseded":
+                if not seen_active:
+                    errors.append(
+                        _error(
+                            CODE_TOMBSTONE_ORDER,
+                            path,
+                            ("records", idx),
+                            "status",
+                            (
+                                f"tombstone for duplicated assertion id {assertion_id!r} appears before "
+                                "the active record it closes"
+                            ),
+                        )
                     )
-                )
-    return errors
-
-
-def _supersede_chain_invariant_errors(records: Sequence[Any], path: Path) -> list[ValidationError]:
-    errors: list[ValidationError] = []
-    latest_indexes = _latest_record_indexes_by_id(records)
-    for idx, record in enumerate(records):
-        if not isinstance(record, Mapping) or record.get("status") != "superseded":
-            continue
-        target_id = record.get("superseded_by")
-        if not isinstance(target_id, str) or target_id not in latest_indexes:
-            errors.append(
-                _error(
-                    CODE_INVALID_SUPERSEDE_CHAIN,
-                    path,
-                    ("records", idx),
-                    "superseded_by",
-                    (
-                        f"tombstone for assertion {record.get('id')!r} points at missing "
-                        f"superseded_by target {target_id!r}"
-                    ),
-                )
-            )
-            continue
-
-        seen = {str(record.get("id"))}
-        current_id = target_id
-        while True:
-            current_idx = latest_indexes.get(current_id)
-            if current_idx is None:
-                errors.append(
-                    _error(
-                        CODE_INVALID_SUPERSEDE_CHAIN,
-                        path,
-                        ("records", idx),
-                        "superseded_by",
-                        (
-                            f"tombstone for assertion {record.get('id')!r} has a dangling "
-                            f"superseded_by chain at {current_id!r}"
-                        ),
+                elif seen_superseded:
+                    errors.append(
+                        _error(
+                            CODE_TOMBSTONE_ORDER,
+                            path,
+                            ("records", idx),
+                            "status",
+                            (
+                                f"duplicate tombstone for assertion id {assertion_id!r}; "
+                                "only one superseded row is permitted per id"
+                            ),
+                        )
                     )
-                )
-                break
-            current = records[current_idx]
-            if not isinstance(current, Mapping):
-                break
-            status = current.get("status")
-            if status == "active":
-                break
-            if status != "superseded":
-                errors.append(
-                    _error(
-                        CODE_INVALID_SUPERSEDE_CHAIN,
-                        path,
-                        ("records", idx),
-                        "superseded_by",
-                        (
-                            f"tombstone for assertion {record.get('id')!r} has a superseded_by "
-                            f"chain ending in non-active target {current_id!r}"
-                        ),
-                    )
-                )
-                break
-            if current_id in seen:
-                errors.append(
-                    _error(
-                        CODE_INVALID_SUPERSEDE_CHAIN,
-                        path,
-                        ("records", idx),
-                        "superseded_by",
-                        (
-                            f"tombstone for assertion {record.get('id')!r} has a cyclic "
-                            f"superseded_by chain at {current_id!r}"
-                        ),
-                    )
-                )
-                break
-            seen.add(current_id)
-            next_id = current.get("superseded_by")
-            if not isinstance(next_id, str):
-                errors.append(
-                    _error(
-                        CODE_INVALID_SUPERSEDE_CHAIN,
-                        path,
-                        ("records", current_idx),
-                        "superseded_by",
-                        f"superseded assertion {current_id!r} must point at another assertion id",
-                    )
-                )
-                break
-            current_id = next_id
+                else:
+                    seen_superseded = True
     return errors
 
 
 def _tombstone_invariant_errors(records: Sequence[Any], path: Path) -> list[ValidationError]:
-    errors: list[ValidationError] = []
-    errors.extend(_duplicate_id_tombstone_invariant_errors(records, path))
-    errors.extend(_supersede_chain_invariant_errors(records, path))
-    return errors
+    return _duplicate_id_tombstone_invariant_errors(records, path)
 
 
 def _normalize_claimed_hash(value: Any) -> str | None:
@@ -1075,7 +989,6 @@ def verify_state_root(state_root: Path | str, *, context: DriftContext | None = 
         CODE_UNVERIFIABLE,
         CODE_AUTHORITATIVE_MISMATCH,
         CODE_DUPLICATE_ACTIVE_ID,
-        CODE_INVALID_SUPERSEDE_CHAIN,
         CODE_TOMBSTONE_ORDER,
     ],
 )
