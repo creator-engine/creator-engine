@@ -9,8 +9,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
-from creator_engine_validator import ce_cli, v3_cli
+from creator_engine_validator import ce_cli, daemon_lease, v3_cli
 from creator_engine_validator.search_rate_limiter import SearchRateLimiter
 from creator_engine_validator.forge.approval_capability import (
     ApprovalCapabilityClaims,
@@ -2026,6 +2027,382 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys, tmp_path: Path):
     assert captured["approval_wall"].armed is True
     assert load_approval_wall_state(tmp_path / "approval-capability-wall" / "state.json").armed is True
     assert '"enqueue_count": 0' in capsys.readouterr().out
+
+
+def test_ce_queue_daemon_refuses_second_singleton_lease_before_first_pass(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    held = daemon_lease.acquire("queue-daemon", "existing-holder", state_root=lease_root)
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "token_from_env",
+        lambda _name: (_ for _ in ()).throw(AssertionError("token must not be read")),
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    try:
+        ret = v3_cli.main([
+            "queue-daemon",
+            "--repo", REPO,
+            "--once",
+            "--daemon-lease-root", str(lease_root),
+            "--root", str(tmp_path),
+        ])
+    finally:
+        held.release()
+
+    assert ret == 73
+    err = capsys.readouterr().err
+    assert "queue-daemon singleton lease refused" in err
+    assert f"lease_path={lease_root / 'queue-daemon.lease'}" in err
+    assert "holder=existing-holder" in err
+    assert "pid=" in err
+
+
+def test_ce_queue_daemon_refuses_stale_singleton_lease_without_takeover(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    (lease_root / "queue-daemon.lease").write_text(
+        json.dumps(
+            {
+                "holder_id": "old-holder",
+                "pid": 999999999,
+                "host": v3_cli.socket.gethostname(),
+                "acquired_at": 1.0,
+                "heartbeat_at": 1.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    assert ret == 73
+    err = capsys.readouterr().err
+    assert "queue-daemon singleton lease refused" in err
+    assert f"lease_path={lease_root / 'queue-daemon.lease'}" in err
+    assert "holder=old-holder" in err
+    assert "pid=999999999" in err
+    assert "verify-dead-then-remove" in err
+
+
+def test_ce_queue_daemon_heartbeats_each_pass_and_releases_cleanly(
+    monkeypatch,
+    tmp_path: Path,
+):
+    class FakeLease:
+        def __init__(self):
+            self.heartbeats = 0
+            self.released = False
+
+        def heartbeat(self):
+            self.heartbeats += 1
+
+        def release(self):
+            self.released = True
+
+    lease = FakeLease()
+    acquire_calls = []
+    flag_lease_root = tmp_path / "flag-leases"
+    monkeypatch.setenv("CE_DAEMON_LEASE_ROOT", str(tmp_path / "env-leases"))
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "daemon-secret")
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+
+    def fake_acquire(*args, **kwargs):
+        acquire_calls.append((args, kwargs))
+        return lease
+
+    def fake_loop(**kwargs):
+        kwargs["log_sink"]({"action": "daemon_pass_start", "index": 1})
+        kwargs["log_sink"]({"action": "daemon_pass_complete", "index": 1})
+        kwargs["log_sink"]({"action": "daemon_pass_start", "index": 2})
+        return belt.DaemonLoopResult(
+            ticks=(
+                belt.DaemonLoopTick(
+                    index=1,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+                belt.DaemonLoopTick(
+                    index=2,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(v3_cli.daemon_lease, "acquire", fake_acquire)
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--daemon-lease-root", str(flag_lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    assert ret == 0
+    assert acquire_calls[0][0][0] == "queue-daemon"
+    assert acquire_calls[0][1]["state_root"] == flag_lease_root
+    assert acquire_calls[0][1]["allow_takeover"] is False
+    assert lease.heartbeats == 2
+    assert lease.released is True
+
+
+def _write_supervisor_lease(lease_root: Path, *, holder_id: str, pid: int) -> Path:
+    lease_path = lease_root / "queue-daemon.lease"
+    now = time.time()
+    lease_path.write_text(
+        json.dumps(
+            {
+                "holder_id": holder_id,
+                "pid": pid,
+                "host": v3_cli.socket.gethostname(),
+                "acquired_at": now,
+                "heartbeat_at": now,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return lease_path
+
+
+def test_ce_queue_daemon_defers_to_live_ancestor_supervisor_lease(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A launcher supervisor (a live ANCESTOR of this process) already holds
+    the singleton lease — per the required fix, the CLI must defer to it
+    (proceed without acquiring/releasing its own lease) instead of deadlocking
+    with DaemonLeaseHeld, exactly the ce-ops#444 startup deadlock this rework
+    closes."""
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    supervisor_pid = os.getppid()  # a real, live ancestor of this test process
+    lease_path = _write_supervisor_lease(
+        lease_root, holder_id=f"queue-daemon:test-supervisor:{supervisor_pid}", pid=supervisor_pid
+    )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "daemon-secret")
+
+    def fake_loop(**kwargs):
+        kwargs["log_sink"]({"action": "daemon_pass_start", "index": 1})
+        return belt.DaemonLoopResult(
+            ticks=(
+                belt.DaemonLoopTick(
+                    index=1,
+                    result=belt.DaemonPassResult(decisions=(), dry_run=True),
+                ),
+            )
+        )
+
+    monkeypatch.setattr(v3_cli.integrator_belt, "run_daemon_loop", fake_loop)
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--dry-run",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    err = capsys.readouterr().err
+    assert ret == 0
+    assert "deferring to launcher supervisor" in err
+    assert f"holder pid={supervisor_pid}" in err
+    # The supervisor's own lease file must be untouched: same holder, still
+    # present (never released, never overwritten by the CLI's own acquire).
+    assert lease_path.exists()
+    reread = json.loads(lease_path.read_text(encoding="utf-8"))
+    assert reread["pid"] == supervisor_pid
+
+
+def test_ce_queue_daemon_refuses_live_non_ancestor_holder(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A live lease holder that is NOT an ancestor of this process (e.g. some
+    other unrelated live daemon instance) must still refuse with the
+    pre-existing exit-73 behavior — the ancestry deferral must not become an
+    unverified bypass."""
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        _write_supervisor_lease(
+            lease_root, holder_id=f"queue-daemon:unrelated:{other.pid}", pid=other.pid
+        )
+
+        monkeypatch.setattr(
+            v3_cli.integrator_belt,
+            "token_from_env",
+            lambda _name: (_ for _ in ()).throw(AssertionError("token must not be read")),
+        )
+        monkeypatch.setattr(
+            v3_cli.integrator_belt,
+            "run_daemon_loop",
+            lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+        )
+
+        ret = v3_cli.main([
+            "queue-daemon",
+            "--repo", REPO,
+            "--once",
+            "--daemon-lease-root", str(lease_root),
+            "--root", str(tmp_path),
+        ])
+    finally:
+        other.terminate()
+        other.wait(timeout=5)
+
+    err = capsys.readouterr().err
+    assert ret == 73
+    assert "queue-daemon singleton lease refused" in err
+    assert f"pid={other.pid}" in err
+    assert "deferring to launcher supervisor" not in err
+
+
+def test_ce_queue_daemon_stale_lease_not_deferred_even_with_ancestor_pid(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A STALE lease (TTL-expired remote-host record) must never be deferred
+    to, even in the degenerate case where its recorded pid numerically
+    collides with a real ancestor pid of this process — deferral is only
+    ever reachable from the ``DaemonLeaseHeld`` (live) path, never from
+    ``DaemonLeaseStale``, so stale takeover stays fully gated on the
+    pre-existing explicit-audited-takeover path, unchanged by this rework."""
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    ancestor_pid = os.getppid()
+    (lease_root / "queue-daemon.lease").write_text(
+        json.dumps(
+            {
+                "holder_id": "old-holder",
+                "pid": ancestor_pid,
+                "host": "some-other-unrelated-host",
+                "acquired_at": 1.0,
+                "heartbeat_at": 1.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    err = capsys.readouterr().err
+    assert ret == 73
+    assert "queue-daemon singleton lease refused" in err
+    assert "verify-dead-then-remove" in err
+    assert "deferring to launcher supervisor" not in err
+
+
+def test_ce_queue_daemon_refuses_live_remote_host_lease_even_with_ancestor_pid(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+):
+    """A LIVE lease from a DIFFERENT host must be refused (exit 73) even when
+    its recorded pid numerically collides with a real local ancestor pid of
+    this process.  The realistic failure mode is pid=1 (container init), but
+    we use os.getppid() as the local ancestor to test the host-equality gate
+    in isolation without depending on any particular pid value.
+
+    This test exercises the finding that _defer_to_supervisor_lease must
+    verify host equality as a precondition of the ancestry walk: pid
+    namespaces are host-local, so a foreign-host record with a matching pid
+    number must never be treated as a local ancestor.
+    """
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    ancestor_pid = os.getppid()
+    # A fresh, live heartbeat so _lease_is_live evaluates by pid-existence,
+    # not TTL — this reaches DaemonLeaseHeld, which is what activates the
+    # deferral path.  The host is deliberately different from this machine.
+    lease_path = lease_root / "queue-daemon.lease"
+    now = time.time()
+    lease_path.write_text(
+        json.dumps(
+            {
+                "holder_id": f"queue-daemon:remote-host:{ancestor_pid}",
+                "pid": ancestor_pid,
+                "host": "some-other-remote-host-xyz",
+                "acquired_at": now,
+                "heartbeat_at": now,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "token_from_env",
+        lambda _name: (_ for _ in ()).throw(AssertionError("token must not be read")),
+    )
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon loop must not run")),
+    )
+
+    ret = v3_cli.main([
+        "queue-daemon",
+        "--repo", REPO,
+        "--once",
+        "--daemon-lease-root", str(lease_root),
+        "--root", str(tmp_path),
+    ])
+
+    err = capsys.readouterr().err
+    assert ret == 73
+    assert "queue-daemon singleton lease refused" in err
+    assert "deferring to launcher supervisor" not in err
 
 
 def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
