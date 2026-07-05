@@ -122,6 +122,48 @@ def test_exception_for_nonexistent_file_fails_as_stale_exception(tmp_path: Path)
     assert _codes(tmp_path) == [chk.CODE_STALE_EXCEPTION]
 
 
+def test_absent_authoritative_ledger_is_empty_coverage_not_unreadable(tmp_path: Path):
+    _write_doc(tmp_path, "docs/contracts/new-doctrine.md")
+    _write_manifest(tmp_path, exceptions=[], governed_trees=["docs/contracts"])
+
+    errors = chk.validate_repo(tmp_path)
+
+    assert [error.code for error in errors] == [chk.CODE_UNCOVERED]
+    assert "unreadable" not in errors[0].message
+
+
+def test_duplicate_exception_entry_fails_manifest_validation(tmp_path: Path):
+    _write_doc(tmp_path, "docs/contracts/covered.md")
+    _write_manifest(
+        tmp_path,
+        exceptions=["docs/contracts/covered.md", "docs/contracts/covered.md"],
+        governed_trees=["docs/contracts"],
+    )
+    _write_unrelated_ledger(tmp_path)
+
+    errors = chk.validate_repo(tmp_path)
+
+    assert [error.code for error in errors] == [chk.CODE_MANIFEST_INVALID]
+    assert "duplicate doctrine exception" in errors[0].message
+    assert errors[0].path.endswith("doctrine-coverage.yaml:/exceptions/1")
+
+
+def test_exception_outside_governed_trees_fails_as_stale_exception(tmp_path: Path):
+    _write_doc(tmp_path, "docs/contracts/covered.md")
+    _write_doc(tmp_path, "docs/other/outside.md")
+    _write_manifest(
+        tmp_path,
+        exceptions=["docs/other/outside.md"],
+        governed_trees=["docs/contracts"],
+    )
+    _write_unrelated_ledger(tmp_path)
+
+    errors = chk.validate_repo(tmp_path)
+
+    assert [error.code for error in errors] == [chk.CODE_STALE_EXCEPTION, chk.CODE_UNCOVERED]
+    assert "outside governed_trees" in errors[0].message
+
+
 def test_malformed_manifest_missing_governed_trees_fails_closed(tmp_path: Path):
     _write_doc(tmp_path, "docs/contracts/new-doctrine.md")
     _write_manifest(tmp_path, exceptions=[])

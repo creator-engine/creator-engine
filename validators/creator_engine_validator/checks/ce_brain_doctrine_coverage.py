@@ -4,6 +4,16 @@ This check keeps doctrine prose under governed trees tied either to an active
 static brain assertion or to an explicit seeded exception. New unaccounted
 doctrine files fail closed, while stale exceptions force the debt list to
 shrink as assertions are added or files are removed.
+
+The ratchet verifies linkage only: an active static assertion whose
+``evidence_ref`` resolves to the doctrine file. It does not prove topical
+relevance; semantic validity remains layered on ``ce_brain_assertions`` and
+``ce_brain_drift``.
+
+The registered check intentionally anchors to one repo root from the first
+input path. Live validator invocations operate on a single checkout root; if
+this check needs batch multi-root semantics later, mirror
+``surfaces_manifest._repo_roots`` instead of widening the doctrine tree scan.
 """
 
 from __future__ import annotations
@@ -202,16 +212,19 @@ def validate_repo(repo_root: Path) -> list[ValidationError]:
     if tree_errors:
         return tree_errors
 
-    try:
-        records = brain_runtime.load_authoritative_records(repo_root)
-    except brain_runtime.BrainLedgerInvalid as exc:
-        return [
-            _manifest_error(
-                repo_root / brain_runtime.AUTHORITATIVE_LEDGER_RELATIVE_PATH,
-                (),
-                f"authoritative brain assertion ledger is unreadable: {exc}",
-            )
-        ]
+    if brain_runtime.authoritative_ledger_exists(repo_root):
+        try:
+            records = brain_runtime.load_authoritative_records(repo_root)
+        except brain_runtime.BrainLedgerInvalid as exc:
+            return [
+                _manifest_error(
+                    repo_root / brain_runtime.AUTHORITATIVE_LEDGER_RELATIVE_PATH,
+                    (),
+                    f"authoritative brain assertion ledger is unreadable: {exc}",
+                )
+            ]
+    else:
+        records = []
 
     covered = _covered_paths(records)
     exceptions = set(manifest.exceptions)
