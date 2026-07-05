@@ -64,18 +64,7 @@ KNOWN_SURFACES = frozenset(
 PYTHON_DEP_SURFACES = frozenset({"pyyaml", "jsonschema", "textual"})
 PHASE1_PENDING_DIGEST_SURFACES = frozenset({"codex", "claude-code", *PYTHON_DEP_SURFACES})
 UNSET_DIGEST = "UNSET"
-UNSET_DIGEST_ALLOWLIST = frozenset(
-    {
-        (
-            "ce-seat-image",
-            "UNSET",
-            "ghcr.io/creator-engine/creator-engine/ce-seat",
-            "creator-engine image",
-            "manifest-list digest required before tenant launch use; UNSET until published",
-            "2026-07-05",
-        )
-    }
-)
+UNSET_DIGEST_ALLOWLIST = frozenset()
 EXPLICIT_IMAGE_ALIASES_BY_SURFACE = {
     "ce-seat-image": frozenset({"ce-seat"}),
     "codex": frozenset({"codex-runsc"}),
