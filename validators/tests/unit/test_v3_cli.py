@@ -1587,6 +1587,46 @@ dependencies = ["pytest"]
     return root
 
 
+def test_detect_brownfield_project_empty_non_git_dir_disables_brownfield(tmp_path):
+    probe = v3_cli._detect_brownfield_project(tmp_path)
+
+    assert probe["enabled"] is False
+    assert probe["history"]["present"] is False
+    assert probe["history"]["mode"] == "absent"
+    assert probe["ci"]["workflows"] == []
+    assert probe["tests"]["commands"] == []
+
+
+def test_detect_brownfield_project_enables_brownfield_for_real_signals(tmp_path):
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "ci.yml").write_text(
+        """\
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pytest
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        """\
+[project]
+dependencies = ["pytest"]
+""",
+        encoding="utf-8",
+    )
+
+    probe = v3_cli._detect_brownfield_project(tmp_path)
+
+    assert probe["enabled"] is True
+    assert [workflow["path"] for workflow in probe["ci"]["workflows"]] == [".github/workflows/ci.yml"]
+    assert [item["command"] for item in probe["tests"]["commands"]] == ["python -m pytest"]
+
+
 def _source_files(root: Path) -> set[str]:
     return {
         path.relative_to(root).as_posix()

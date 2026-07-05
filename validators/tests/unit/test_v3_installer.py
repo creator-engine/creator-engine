@@ -1726,6 +1726,27 @@ def test_github_existing_detects_brownfield_facts():
     assert merged.value("brownfield.history.mode") == "git_history_present"
 
 
+def test_brownfield_detected_facts_disable_empty_probe_even_with_stale_enabled_true():
+    detected = inst.brownfield_detected_facts(
+        _brownfield_probe(
+            enabled=True,
+            history={
+                "mode": "absent",
+                "present": False,
+                "head_sha": None,
+                "default_branch": None,
+                "commit_count": 0,
+                "dirty": False,
+            },
+            ci={"workflows": [], "current_required_checks": [], "workflow_present": False},
+            tests={"commands": []},
+            github={"origin_remote": "owner/repo"},
+        )
+    )
+
+    assert detected["brownfield.enabled"] is False
+
+
 def test_detected_vs_file_conflict_surfaces_for_repo_and_project_root():
     answers = _answers(**{
         "github.repo": "other/repo",
