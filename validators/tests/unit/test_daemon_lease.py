@@ -585,6 +585,22 @@ def test_container_runner_rejects_env_file_without_0600_mode(tmp_path: Path):
     assert not argv_file.exists()
 
 
+def test_container_runner_refuses_missing_env_file_before_container_invocation(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    missing_env_file = tmp_path / "missing-daemon.env"
+    env = _container_runner_env(tmp_path, fake_engine)
+    env["CE_DAEMON_ENV_FILE"] = str(missing_env_file)
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    assert proc.stderr == f"ERROR: CE_DAEMON_ENV_FILE does not name a file: {missing_env_file}\n"
+    assert not argv_file.exists()
+
+
 def test_container_runner_passes_env_file_before_explicit_env(tmp_path: Path):
     fake_engine = tmp_path / "fake-engine"
     argv_file = tmp_path / "engine-argv.txt"
@@ -625,6 +641,22 @@ def test_container_runner_maps_cacert_file_to_container_bao_cacert(tmp_path: Pat
     assert "BAO_CACERT=/ce/etc/openbao-ca.crt" in argv
     assert "BAO_CACERT" not in argv
     assert "/usr/local/share/ca-certificates/host-only.crt" not in argv
+
+
+def test_container_runner_refuses_missing_cacert_file_before_container_invocation(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    missing_cacert_file = tmp_path / "missing-openbao-ca.crt"
+    env = _container_runner_env(tmp_path, fake_engine)
+    env["CE_DAEMON_CACERT_FILE"] = str(missing_cacert_file)
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    assert proc.stderr == f"ERROR: CE_DAEMON_CACERT_FILE does not name a file: {missing_cacert_file}\n"
+    assert not argv_file.exists()
 
 
 def test_container_runner_uses_tmpfs_for_queue_secret_target_when_host_sets_target(tmp_path: Path):
@@ -687,6 +719,64 @@ def test_container_runner_keeps_queue_default_invocation_byte_identical(tmp_path
             "example.invalid/ce-runtime@sha256:abc",
             "bash",
             "/workspace/creator-engine/deploy/queue-daemon/launch-queue-daemon.sh",
+        ]
+    ) + "\n"
+
+
+def test_container_runner_keeps_conveyor_default_invocation_byte_identical(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    env = _container_runner_env(tmp_path, fake_engine)
+    repo_root = _repo_root()
+    state_root = tmp_path / "state"
+
+    proc = _run_container_runner("conveyor-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert argv_file.read_text(encoding="utf-8") == "\n".join(
+        [
+            "run",
+            "--rm",
+            "--name",
+            "ce-conveyor-daemon",
+            "--workdir",
+            "/workspace/creator-engine",
+            "--volume",
+            f"{repo_root}:/workspace/creator-engine:ro",
+            "--volume",
+            f"{state_root}:/ce/state",
+            "--env",
+            "CE_DAEMON_UNCONTAINED=1",
+            "--env",
+            "CE_DAEMON_STATE_ROOT=/ce/state",
+            "--env",
+            "CE_DAEMON_LEASE_ROOT=/ce/state/daemon-leases",
+            "--env",
+            "CE_QUEUE_DAEMON_BIN=cev3",
+            "--env",
+            "CE_QUEUE_DAEMON_REPO_ROOT=/workspace/creator-engine",
+            "--env",
+            "CE_QUEUE_DAEMON_ROOT=/ce/state/queue-daemon/v3",
+            "--env",
+            "CE_APPROVAL_WALL_SECRET_TARGET_FILE=/ce/state/queue-daemon/approval-wall-secret",
+            "--env",
+            "CE_APPROVAL_WALL_STATE=/ce/state/queue-daemon/approval-wall-state.json",
+            "--env",
+            "CE_CONVEYOR_DAEMON_REPO_ROOT=/workspace/creator-engine",
+            "--env",
+            "CE_CONVEYOR_DAEMON_RUNTIME_ROOT=/ce/state/conveyor-daemon/runtime",
+            "--env",
+            "CE_CONVEYOR_DAEMON_DISCOVERY_STATE=/ce/state/conveyor-daemon/discovery-state.json",
+            "--env",
+            "CE_CONVEYOR_DAEMON_LEDGER_PATH=/ce/state/conveyor-daemon/conveyor-daemon-ledger.jsonl",
+            "--env",
+            "CE_CONVEYOR_DAEMON_VALIDATION_LEDGER_ROOT=/ce/state/conveyor-daemon/side-effect-ledger",
+            "--env",
+            "CE_CONVEYOR_DAEMON_ACTIVE_WORK_LEDGER_ROOT=/ce/state/conveyor-daemon/active-work-ledger",
+            "example.invalid/ce-runtime@sha256:abc",
+            "bash",
+            "/workspace/creator-engine/deploy/conveyor-daemon/launch-conveyor-daemon.sh",
         ]
     ) + "\n"
 
