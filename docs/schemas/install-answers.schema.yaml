@@ -447,11 +447,14 @@ properties:
     properties:
       enabled:
         type: boolean
-        default: true
+        default: false
         x-ce-step: 5
         x-ce-sensitivity: plain
         x-ce-modes: [D, F, I]
-        description: Enable brownfield adoption planning for the current project.
+        description: |
+          Enable brownfield adoption planning for the current project. The live
+          installer derives this from read-only project probe signals; absent
+          answers do not imply unconditional enablement.
       project_root:
         type: string
         minLength: 1
