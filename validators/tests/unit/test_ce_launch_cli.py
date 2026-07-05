@@ -328,6 +328,66 @@ def test_launch_help_names_ce_state_not_hermes(capsys):
     assert ".hermes" not in out
 
 
+def test_launch_preflight_passes_without_claim_acquisition(
+    tmp_path, use_fake_tmux, monkeypatch, capsys
+):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    monkeypatch.setattr(
+        ce_cli.launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True
+    )
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_gh_runner",
+        lambda: (_ for _ in ()).throw(AssertionError("preflight must not acquire claims")),
+    )
+    # Stub the codex harness resolution so the harness-binary gate evaluates
+    # PASS deterministically on any host (including CI runners where codex is
+    # not installed). CE_CODEX_HARNESS is the exclusive override used by
+    # resolve_codex_harness_binary; _fake_codex sets it to a real executable.
+    _fake_codex(tmp_path, monkeypatch)
+
+    ret = ce_cli.main(
+        [
+            "launch",
+            "--preflight",
+            "--backend",
+            "host",
+            "--harness",
+            "codex",
+            "--claim-ticket",
+            "95",
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "plan: PASS" in out
+    assert "visible-runtime-backend: PASS" in out
+    assert "WOULD-REFUSE" not in out
+    assert adapter.spawned == []
+
+
+def test_launch_preflight_refusal_exits_nonzero(use_fake_tmux, capsys):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+
+    ret = ce_cli.main(["launch", "--preflight", "--backend", "host", "--no-tmux"])
+
+    assert ret == 1
+    out = capsys.readouterr().out
+    assert (
+        "visibility: WOULD-REFUSE [G6-LAUNCH-HIDDEN-REFUSED]: refusing hidden/detached"
+        in out
+    )
+    assert adapter.spawned == []
+
+
 def test_launch_dry_run_json(use_fake_tmux, capsys):
     ret = ce_cli.main(["launch", "--dry-run", "--json"])
     assert ret == 0

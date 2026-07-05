@@ -1999,6 +1999,17 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument("--resume", action="store_true", help="attach an existing launcher session")
         p.add_argument("--dry-run", action="store_true", help="plan only; no tmux spawn, no provider login")
         p.add_argument(
+            "--preflight",
+            action="store_true",
+            help=(
+                "diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state; "
+                "exit 0 = all evaluable gates pass and no critical gates skipped; "
+                "exit 1 = at least one gate WOULD-REFUSE; "
+                "exit 3 = all evaluable gates pass but one or more critical gates "
+                "(e.g. containment provisioning) could not be evaluated without a live launch"
+            ),
+        )
+        p.add_argument(
             "--no-tmux",
             action="store_true",
             help="refuse-only flag: request a non-visible/headless seat (always refused)",
@@ -3954,6 +3965,32 @@ def _harness_matrix(args) -> int:
 
 
 def _launch(args, invoked_as: str = "launch") -> int:
+    harness_args = None
+    if args.harness == "claude":
+        harness_args = getattr(args, "claude_arg", None)
+    elif args.harness == "codex":
+        harness_args = getattr(args, "codex_arg", None)
+    if getattr(args, "preflight", False):
+        report = launch_runtime.preflight_launch(
+            harness=args.harness,
+            session=args.session,
+            window=args.window,
+            invoked_as=invoked_as,
+            resume=args.resume,
+            visible=not args.no_tmux,
+            extra_args=harness_args,
+            mcp_config_path=getattr(args, "mcp_config", None),
+            closeout_file=getattr(args, "closeout_file", None),
+            completion_report_ref=getattr(args, "completion_report_ref", None),
+            runtime_policy=getattr(args, "runtime_policy", None),
+            backend=getattr(args, "backend", None),
+            repo_root=getattr(args, "repo_root", None),
+            tmux_adapter=_make_tmux_adapter(),
+        )
+        for line in report.format_lines():
+            print(line)
+        return report.exit_code
+
     brain_code = _preflight_launch_brain_bootstrap(args, invoked_as)
     if brain_code != 0:
         return brain_code
@@ -3961,11 +3998,6 @@ def _launch(args, invoked_as: str = "launch") -> int:
     claim_code, claim_ctx = _acquire_launch_claim(args, invoked_as)
     if claim_code != 0:
         return claim_code
-    harness_args = None
-    if args.harness == "claude":
-        harness_args = getattr(args, "claude_arg", None)
-    elif args.harness == "codex":
-        harness_args = getattr(args, "codex_arg", None)
     try:
         result = launch_runtime.launch(
             harness=args.harness,

@@ -229,15 +229,28 @@ def test_advisory_without_optout_refuses_before_any_side_effect(tmp_path):
 
 def test_enforce_refuses_loudly_on_unsupported_host(tmp_path):
     adapter = FakeAdapter()
-    with pytest.raises(launch_runtime.ResourceBoundRefused, match="unavailable"):
+    policy = _write_policy(tmp_path)
+    with pytest.raises(launch_runtime.ResourceBoundRefused, match="unavailable") as exc:
         launch_runtime.launch(
             harness="claude",
             session="s",
             tmux_adapter=adapter,
-            runtime_policy=_write_policy(tmp_path),
+            runtime_policy=policy,
             support_probe=lambda runner=None, **_: (False, "no user manager"),
         )
     assert adapter.spawned == []  # refused BEFORE any side effect
+
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        session="s",
+        tmux_adapter=FakeAdapter(),
+        runtime_policy=policy,
+        support_probe=lambda runner=None, **_: (False, "no user manager"),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+    gate = next(gate for gate in report.gates if gate.name == "resource-bounding")
+    assert gate.status == "WOULD-REFUSE"
+    assert gate.detail == str(exc.value)
 
 
 def test_unreadable_policy_refuses(tmp_path):

@@ -69,6 +69,28 @@ def _inner_argv(result):
     return shlex.split(lines[idx - 1])
 
 
+def _preflight_gate(report: launch_runtime.LaunchPreflightReport, name: str):
+    return next(gate for gate in report.gates if gate.name == name)
+
+
+def _tree_fingerprint(root: Path) -> list[tuple[str, str, str]]:
+    return [
+        (
+            str(path.relative_to(root)),
+            oct(path.stat().st_mode),
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    ]
+
+
+def _make_seat_dir(tmp_path: Path, name: str) -> Path:
+    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / name
+    seat_dir.mkdir(parents=True)
+    return seat_dir
+
+
 def _brain_payload(result):
     ref = Path(result.plan.brain_bootstrap_ref)
     assert ref.is_file()
@@ -348,6 +370,208 @@ def test_dry_run_works_without_tmux_available():
     assert adapter.spawned == []
 
 
+def test_preflight_missing_default_runtime_policy_matches_live_refusal(tmp_path):
+    adapter = FakeAdapter()
+    with pytest.raises(launch_runtime.RuntimePolicyRefused) as exc:
+        launch_runtime.launch(
+            harness="hermes",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+        )
+
+    report = launch_runtime.preflight_launch(
+        harness="hermes",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "runtime-policy")
+    assert gate.status == "WOULD-REFUSE"
+    assert gate.detail == str(exc.value)
+    assert report.exit_code == 1
+
+
+def test_preflight_ambiguous_seat_surface_matches_live_refusal(tmp_path):
+    seat_dir = _make_seat_dir(tmp_path, "ambiguous-preflight--controller")
+    seat_dir.joinpath("events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": "ambiguous-preflight--controller"}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(launch_runtime.SeatSurfaceReuseRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="ambiguous-preflight",
+            window="controller",
+            repo_root=tmp_path,
+            tmux_adapter=FakeAdapter(),
+        )
+
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        backend="host",
+        session="ambiguous-preflight",
+        window="controller",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "seat-surface-reuse")
+    assert gate.status == "WOULD-REFUSE"
+    assert gate.detail == str(exc.value)
+
+
+def test_preflight_leaves_stale_seat_dir_byte_identical(tmp_path):
+    seat_dir = _make_seat_dir(tmp_path, "preflight-stale--controller")
+    seat_dir.joinpath("events.jsonl").write_text(
+        json.dumps({"event": "launched", "seat_id": "preflight-stale--controller", "pid": 999999})
+        + "\n"
+        + json.dumps({"event": "exited", "seat_id": "preflight-stale--controller", "exit_code": 0})
+        + "\n",
+        encoding="utf-8",
+    )
+    seat_dir.joinpath("state.txt").write_text("preserved\n", encoding="utf-8")
+    before = _tree_fingerprint(seat_dir)
+
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        backend="host",
+        session="preflight-stale",
+        window="controller",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "seat-surface-reuse")
+    assert gate.status == "SKIPPED"
+    assert "would be archived during live launch" in (gate.detail or "")
+    assert seat_dir.is_dir()
+    assert _tree_fingerprint(seat_dir) == before
+
+
+def _write_runtime_policy(tmp_path: Path) -> Path:
+    """Write a minimal valid runtime-policy YAML for preflight/launch tests."""
+    policy = {
+        "kind": "runtime-policy-record",
+        "record_type": "runtime_policy",
+        "schema_version": "1",
+        "policy_id": "test-gvisor-policy",
+        "policy_sha": "a" * 64,
+        "role": "implementer",
+        "image_ref": {
+            "name": "registry.example/creator-engine/implementer",
+            "sha": "sha256:" + "b" * 64,
+        },
+        "isolation_backend": "gvisor-proxy",
+        "mount_manifest": [
+            {
+                "path": "/runtime/worktree",
+                "mode": "rw",
+                "write_justification": "allocated worktree for this seat",
+            },
+            {"path": "/runtime/governance", "mode": "ro"},
+        ],
+        "egress_allowlist": [
+            {"host": "model-provider.example", "protocol": "https", "assurance": ["l4"]},
+        ],
+        "secret_allowlist": ["model-provider-key"],
+        "grant_extensible": False,
+        "grant_authority": "controller",
+    }
+    path = tmp_path / "runtime-policy.yaml"
+    path.write_text(yaml.safe_dump(policy, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def test_preflight_resume_with_runtime_policy_matches_live_refusal(tmp_path):
+    """Blocking 1 regression pin: preflight must surface the resume+runtime-policy
+    refusal (WOULD-REFUSE with message-identical to the live RuntimePolicyRefused)
+    rather than silently omitting the gate and reporting all-PASS."""
+    policy_path = _write_runtime_policy(tmp_path)
+
+    with pytest.raises(launch_runtime.RuntimePolicyRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            runtime_policy=str(policy_path),
+            resume=True,
+            tmux_adapter=FakeAdapter(sessions={"ce-controller"}),
+        )
+
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        runtime_policy=str(policy_path),
+        resume=True,
+        tmux_adapter=FakeAdapter(sessions={"ce-controller"}),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "resume-runtime-policy")
+    assert gate.status == "WOULD-REFUSE"
+    assert gate.detail == str(exc.value)
+    assert report.exit_code == 1
+
+
+def test_preflight_exit_code_3_when_critical_gate_skipped(tmp_path):
+    """Blocking 3 regression pin: when all evaluable gates PASS but at least
+    one CRITICAL gate is SKIPPED (e.g. visible-runtime-backend when containment
+    is requested), preflight must exit 3, NOT 0, so 'exit 0' unambiguously means
+    no critical skips."""
+    # Provide the policy via the explicit --runtime-policy arg (no --backend,
+    # since --backend host is the explicit opt-out and conflicts with a policy).
+    policy_path = _write_runtime_policy(tmp_path)
+
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        runtime_policy=str(policy_path),
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    assert report.ok is True, [g for g in report.gates if g.status == "WOULD-REFUSE"]
+    assert report.has_critical_skips is True
+    assert report.exit_code == launch_runtime.PREFLIGHT_EXIT_CRITICAL_SKIP
+    summary_lines = [
+        line for line in report.format_lines()
+        if "require live launch" in line
+    ]
+    assert summary_lines, "expected a critical-skip summary line in format_lines()"
+    assert "visible-runtime-backend" in summary_lines[0]
+
+
+def test_preflight_exit_code_0_when_no_critical_skips(tmp_path):
+    """Regression: host-backend (no containment) exit 0 is still clean exit 0."""
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        backend="host",
+        tmux_adapter=FakeAdapter(),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    assert report.ok is True
+    assert report.has_critical_skips is False
+    assert report.exit_code == 0
+
+
+def test_preflight_resume_seat_surface_skip_is_critical(tmp_path):
+    """Regression: seat-surface-reuse SKIPPED for resume is a critical skip."""
+    report = launch_runtime.preflight_launch(
+        harness="claude",
+        backend="host",
+        resume=True,
+        tmux_adapter=FakeAdapter(sessions={"ce-controller"}),
+        which=lambda binary: f"/fake/bin/{binary}",
+    )
+
+    gate = _preflight_gate(report, "seat-surface-reuse")
+    assert gate.status == "SKIPPED"
+    assert gate.critical is True
+    assert report.has_critical_skips is True
+    assert report.exit_code == launch_runtime.PREFLIGHT_EXIT_CRITICAL_SKIP
+
+
 # ---------------------------------------------------------------------------
 # Hidden-continuation refusal (no hidden fallback)
 # ---------------------------------------------------------------------------
@@ -462,12 +686,6 @@ def test_launch_refuses_ambiguous_launched_surface_with_recovery_command(tmp_pat
     assert "ce reap once" in message
     assert seat_dir.is_dir()
     assert adapter.spawned == []
-
-
-def _make_seat_dir(tmp_path: Path, name: str) -> Path:
-    seat_dir = tmp_path / ".ce" / "state" / "dispatches" / name
-    seat_dir.mkdir(parents=True)
-    return seat_dir
 
 
 def test_launch_refuses_mixed_dead_pid_and_missing_pid_launched_events(tmp_path):
