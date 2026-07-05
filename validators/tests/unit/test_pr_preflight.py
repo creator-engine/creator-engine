@@ -769,6 +769,94 @@ def test_preflight_still_passes_genuine_identical_test_failures(tmp_path: Path, 
     assert "PASS: PR preflight" in out.getvalue()
 
 
+def test_preflight_reports_skipped_tests_with_file_reasons_and_pass_flag(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        head_test_result=pr_preflight.CommandResult(
+            0,
+            "\n".join(
+                [
+                    "=========================== short test summary info ===========================",
+                    "SKIPPED [1] validators/tests/integration/test_container_deps.py:14: ssh-keygen unavailable",
+                    "SKIPPED [1] validators/tests/integration/test_worker_runtime.py:22: podman unavailable",
+                    "2 passed, 2 skipped in 0.02s",
+                    "",
+                ]
+            ),
+            "",
+        ),
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    output = out.getvalue()
+    assert "REPORT-FLAG skipped tests: 2 skipped tests in head baseline-diff test run" in output
+    assert (
+        "REPORT-FLAG skipped tests: validators/tests/integration/test_container_deps.py: "
+        "1 skipped test reason=ssh-keygen unavailable"
+    ) in output
+    assert (
+        "REPORT-FLAG skipped tests: validators/tests/integration/test_worker_runtime.py: "
+        "1 skipped test reason=podman unavailable"
+    ) in output
+    assert "PASS: PR preflight (with 2 skipped tests -- see report above)" in output
+
+
+def test_preflight_zero_skip_run_does_not_print_report_flag(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        head_test_result=pr_preflight.CommandResult(0, "3 passed in 0.02s\n", ""),
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    output = out.getvalue()
+    assert "REPORT-FLAG skipped tests" not in output
+    assert "PASS: PR preflight (with" not in output
+    assert "PASS: PR preflight" in output
+
+
+def test_contained_seat_profile_reports_skips_without_changing_carrier_notice(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        path_manifest_returncode=1,
+        path_manifest_stdout="FAIL path_manifest_fidelity path_manifest_carrier_required\n",
+        head_test_result=pr_preflight.CommandResult(
+            0,
+            "\n".join(
+                [
+                    "=========================== short test summary info ===========================",
+                    "SKIPPED [1] validators/tests/integration/test_container_deps.py:14: ssh-keygen unavailable",
+                    "4 passed, 1 skipped in 0.02s",
+                    "",
+                ]
+            ),
+            "",
+        ),
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.CONTAINED_SEAT_PROFILE),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    output = out.getvalue()
+    assert pr_preflight.CONTAINED_SEAT_CARRIER_NOTICE in output
+    assert "REPORT-FLAG skipped tests: validators/tests/integration/test_container_deps.py" in output
+    assert "PASS: PR preflight (with 1 skipped test -- see report above)" in output
+
+
 def test_pytest_env_scrubs_host_tokens_and_sets_tmpdir(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "secret")
     monkeypatch.setenv("BAO_TOKEN", "secret")
