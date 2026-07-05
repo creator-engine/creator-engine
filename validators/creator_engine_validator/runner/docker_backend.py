@@ -8,7 +8,6 @@ home; the image reference comes only from the runtime-policy record.
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -30,8 +29,19 @@ from .gvisor_proxy_backend import (
     DOCKER_BINARY,
     EgressNotEnforceable,
     SubprocessContainerRunner as _GvisorSubprocessContainerRunner,
-    _bind_launch_owned_probe_contract,
     translate_to_egress_proxy_config,
+)
+from .translation import (
+    MountSpec as DockerMountSpec,
+    bind_launch_owned_probe_contract,
+    first_writable_mount_target,
+    mount_from_policy_entry,
+    optional_uid_gid,
+    render_mount,
+    require_abs_path,
+    require_image_digest,
+    require_nonempty_str,
+    require_uid_gid,
 )
 
 BACKEND_KEY = "docker"
@@ -39,18 +49,9 @@ DEFAULT_CONTAINER_HOME = "/tmp/ce-home"
 DEFAULT_CONTAINER_CODEX_HOME = f"{DEFAULT_CONTAINER_HOME}/.codex"
 DEFAULT_TMPFS_MOUNTS = ("/tmp:rw,nosuid,nodev,noexec,size=64m",)
 
-_IMAGE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-
 
 class DockerPlanRejected(ValueError):
     """The Docker plan lacks required safe rendering inputs."""
-
-
-@dataclass(frozen=True)
-class DockerMountSpec:
-    source: str
-    target: str
-    mode: str
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ class DockerPlan:
         for tmpfs in self.tmpfs_mounts:
             args += ["--tmpfs", tmpfs]
         for mount in self.mounts:
-            args += ["--mount", _render_mount(mount)]
+            args += ["--mount", render_mount(mount)]
         if self.network == "none":
             args.append("--network=none")
         elif self.network == "proxy":
@@ -141,25 +142,33 @@ def translate_to_docker_plan(
     image = runtime_policy.get("image_ref") or {}
     name = image.get("name", "") if isinstance(image, dict) else ""
     sha = image.get("sha", "") if isinstance(image, dict) else ""
-    image_name = _require_nonempty_str(name, "image_ref.name")
-    image_digest = _require_image_digest(sha)
+    image_name = require_nonempty_str(name, "image_ref.name", error_type=DockerPlanRejected)
+    image_digest = require_image_digest(sha, error_type=DockerPlanRejected)
     mounts = tuple(
-        _mount_from_policy_entry(entry, index)
+        mount_from_policy_entry(entry, index, error_type=DockerPlanRejected)
         for index, entry in enumerate(runtime_policy.get("mount_manifest") or [])
         if isinstance(entry, dict)
     )
     if not mounts:
         raise DockerPlanRejected("mount_manifest must include at least one Docker bind mount")
-    workdir = container_workdir or _first_writable_mount_target(mounts)
+    workdir = container_workdir or first_writable_mount_target(mounts)
     if workdir is None:
         raise DockerPlanRejected("container_workdir is required when no rw mount is declared")
-    resolved_uid = _require_uid_gid(uid, "uid")
-    resolved_gid = _optional_uid_gid(gid, "gid")
-    container_home = _require_abs_path(container_home, "container_home")
-    container_codex_home = _require_abs_path(container_codex_home, "container_codex_home")
-    workdir = _require_abs_path(workdir, "container_workdir")
-    rendered_tmpfs = tuple(_require_nonempty_str(mount, "tmpfs_mounts") for mount in tmpfs_mounts)
-    rendered_tty_flags = tuple(_require_nonempty_str(flag, "tty_flags") for flag in tty_flags)
+    resolved_uid = require_uid_gid(uid, "uid", error_type=DockerPlanRejected)
+    resolved_gid = optional_uid_gid(gid, "gid", error_type=DockerPlanRejected)
+    container_home = require_abs_path(container_home, "container_home", error_type=DockerPlanRejected)
+    container_codex_home = require_abs_path(
+        container_codex_home, "container_codex_home", error_type=DockerPlanRejected
+    )
+    workdir = require_abs_path(workdir, "container_workdir", error_type=DockerPlanRejected)
+    rendered_tmpfs = tuple(
+        require_nonempty_str(mount, "tmpfs_mounts", error_type=DockerPlanRejected)
+        for mount in tmpfs_mounts
+    )
+    rendered_tty_flags = tuple(
+        require_nonempty_str(flag, "tty_flags", error_type=DockerPlanRejected)
+        for flag in tty_flags
+    )
     has_egress = bool(runtime_policy.get("egress_allowlist") or [])
     return DockerPlan(
         docker_binary=DOCKER_BINARY,
@@ -179,74 +188,6 @@ def translate_to_docker_plan(
         tmpfs_mounts=rendered_tmpfs,
         tty_flags=rendered_tty_flags,
     )
-
-
-def _mount_from_policy_entry(entry: dict[str, Any], index: int) -> DockerMountSpec:
-    path = _require_abs_path(entry.get("path"), f"mount_manifest[{index}].path")
-    return DockerMountSpec(
-        source=path,
-        target=path,
-        mode=_require_mode(entry.get("mode", "ro"), f"mount_manifest[{index}].mode"),
-    )
-
-
-def _first_writable_mount_target(mounts: tuple[DockerMountSpec, ...]) -> str | None:
-    for mount in mounts:
-        if mount.mode == "rw":
-            return mount.target
-    return None
-
-
-def _render_mount(mount: DockerMountSpec) -> str:
-    rendered = f"type=bind,source={mount.source},target={mount.target}"
-    if mount.mode == "ro":
-        rendered = f"{rendered},readonly"
-    return rendered
-
-
-def _require_nonempty_str(value: Any, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise DockerPlanRejected(f"{field} is required")
-    return value
-
-
-def _require_abs_path(value: Any, field: str) -> str:
-    path = _require_nonempty_str(value, field)
-    if not path.startswith("/") or path.startswith("//") or "\x00" in path:
-        raise DockerPlanRejected(f"{field} must be a non-empty absolute path")
-    return path
-
-
-def _require_mode(value: Any, field: str) -> str:
-    mode = _require_nonempty_str(value, field)
-    if mode not in {"ro", "rw"}:
-        raise DockerPlanRejected(f"{field} must be 'ro' or 'rw'")
-    return mode
-
-
-def _require_image_digest(value: Any) -> str:
-    digest = _require_nonempty_str(value, "image_ref.sha")
-    if not _IMAGE_DIGEST_RE.match(digest):
-        raise DockerPlanRejected("image_ref.sha must be a sha256:<hex64> digest")
-    return digest
-
-
-def _require_uid_gid(value: int | str | None, field: str) -> int:
-    if isinstance(value, bool) or value is None:
-        raise DockerPlanRejected(f"{field} is required")
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        raise DockerPlanRejected(f"{field} must be a non-negative integer") from None
-    if parsed < 0:
-        raise DockerPlanRejected(f"{field} must be a non-negative integer")
-    return parsed
-
-
-def _optional_uid_gid(value: int | str | None, field: str) -> int | None:
-    if value is None:
-        return None
-    return _require_uid_gid(value, field)
 
 
 class SubprocessDockerRunner(_GvisorSubprocessContainerRunner):
@@ -340,7 +281,7 @@ class DockerBackend(RunnerBackend):
             raise BackendUnavailable(
                 f"no provisioned Docker plan for handle {handle.ref!r}; refusing unproven handle"
             )
-        argv = _bind_launch_owned_probe_contract(
+        argv = bind_launch_owned_probe_contract(
             plan.docker_argv(request.command),
             run_id=handle.run_id,
         )
