@@ -273,6 +273,65 @@ def test_stage_signed_release_stages_placeholder_signing_seam(tmp_path: Path):
     assert result.signing_command in manifest
 
 
+def test_stage_signed_release_refuses_stale_prose_release_version(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    spec_path = repo / "docs" / "llms-install.md"
+    spec_path.write_text(
+        spec_path.read_text(encoding="utf-8")
+        + "\nThis release installs creator-engine-validator==0.1.0.\n",
+        encoding="utf-8",
+    )
+    _git(repo, "commit", "-aqm", "plant stale prose version")
+    head = _git(repo, "rev-parse", "--verify", "HEAD")
+    out = tmp_path / "stage"
+
+    with pytest.raises(ReleasePublishError) as exc:
+        stage_signed_release(
+            repo_root=repo,
+            version="0.2.0",
+            build_git_sha=head,
+            out=out,
+            force=True,
+            build_wheel=_fake_builder,
+            verify_parity=lambda root: [],
+        )
+
+    detail = str(exc.value)
+    assert "stale prose release version" in detail
+    assert "'0.1.0'" in detail
+    assert "line " in detail
+    assert "target release version '0.2.0'" in detail
+    assert not out.exists()
+
+
+def test_stage_signed_release_allows_matching_prose_release_version(tmp_path: Path):
+    repo = tmp_path / "repo"
+    build_sha = _write_minimal_repo(repo)
+    spec_path = repo / "docs" / "llms-install.md"
+    spec_path.write_text(
+        spec_path.read_text(encoding="utf-8")
+        + "\nThis release installs creator-engine-validator==0.2.0.\n",
+        encoding="utf-8",
+    )
+    _git(repo, "commit", "-aqm", "add matching prose version")
+    head = _git(repo, "rev-parse", "--verify", "HEAD")
+    out = tmp_path / "stage"
+
+    result = stage_signed_release(
+        repo_root=repo,
+        version="0.2.0",
+        build_git_sha=head,
+        out=out,
+        force=True,
+        build_wheel=_fake_builder,
+        verify_parity=lambda root: [],
+    )
+
+    assert result.version == "0.2.0"
+    assert (out / "llms-install.canonical").is_file()
+
+
 def test_stage_signed_release_requires_explicit_force_for_non_empty_output(tmp_path: Path):
     repo = tmp_path / "repo"
     build_sha = _write_minimal_repo(repo)
