@@ -112,6 +112,7 @@ from . import (
     ce_onboard,
     ce_provenance,
     connector_runtime,
+    dependency_unlock,
     dispatch_plan,
     doctor_runtime,
     fanin_runtime,
@@ -205,7 +206,7 @@ def _herdr_session_module():
 # internal testing and GRADUATES to a public product command in a later release
 # (ce-ops#237).
 INTERNAL_COMMAND_GROUPS = frozenset(
-    {"herdr", "ask", "support", "triage", "automerge-kill-switch"}
+    {"herdr", "ask", "support", "triage", "automerge-kill-switch", "dependency-unlock"}
 )
 
 _V3_FORWARDED_ENV = "CE_V3_FORWARDED"
@@ -1623,6 +1624,31 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_triage_queue_args(tq_scan)
     tq_inspect = triage_queue_sub.add_parser("inspect", help=argparse.SUPPRESS)
     _add_triage_queue_args(tq_inspect)
+
+    # INTERNAL command (see INTERNAL_COMMAND_GROUPS): merge-triggered
+    # dependency-unlock evaluator (slice 1). Ships SHADOW-only: no repo
+    # variable enables live mode in this PR, so `ce dependency-unlock scan`
+    # never makes a GitHub write call by default. It never ratifies,
+    # approves, merges, dispatches, or bypasses a required check.
+    dependency_unlock_group = groups.add_parser("dependency-unlock", help=argparse.SUPPRESS)
+    dependency_unlock_sub = dependency_unlock_group.add_subparsers(dest="dependency_unlock_cmd")
+    dep_unlock_scan = dependency_unlock_sub.add_parser("scan", help=argparse.SUPPRESS)
+    dep_unlock_scan.add_argument(
+        "--event-path",
+        default=None,
+        help="path to a GitHub pull_request event JSON (defaults to $GITHUB_EVENT_PATH)",
+    )
+    dep_unlock_scan.add_argument("--pr-repo", default=None, help="manual override: merged PR owner/name")
+    dep_unlock_scan.add_argument("--pr-number", type=int, default=None, help="manual override: merged PR number")
+    dep_unlock_scan.add_argument("--merge-sha", default=None, help="manual override: merge commit SHA")
+    dep_unlock_scan.add_argument("--merged-at", default=None, help="manual override: merged-at timestamp")
+    dep_unlock_scan.add_argument(
+        "--search-repo",
+        default=dependency_unlock.DEFAULT_SEARCH_REPO,
+        help="repo to search for candidate blocked issues",
+    )
+    dep_unlock_scan.add_argument("--audit-root", default=None)
+    dep_unlock_scan.add_argument("--json", action="store_true", dest="json_output")
 
     publish_branch_cmd = groups.add_parser(
         "publish-branch",
@@ -3794,6 +3820,85 @@ def _triage_queue_inspect(args) -> int:
     return _emit_triage_queue(args, payload)
 
 
+def _emit_dependency_unlock(args, payload: dict) -> int:
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        kind = payload.get("kind", dependency_unlock.KIND)
+        status = payload.get("status", "unknown")
+        count = payload.get("proposal_count", 0)
+        print(f"{kind}: {status} mode={payload.get('mode', 'shadow')} proposal_count={count}")
+        for warning in payload.get("warnings", ()):
+            print(f"  warning: {warning}", file=sys.stderr)
+    return 0
+
+
+def _dependency_unlock_skip_payload(reason: str) -> dict:
+    return {
+        "kind": dependency_unlock.KIND,
+        "schema_version": dependency_unlock.SCHEMA_VERSION,
+        "advisory": dependency_unlock.NON_AUTHORITY_STATEMENT,
+        "status": "skipped",
+        "reason": reason,
+        "proposal_count": 0,
+        "proposals": [],
+        "warnings": [reason],
+    }
+
+
+def _dependency_unlock_scan(args) -> int:
+    now = dependency_unlock.utc_now_iso()
+    merged = None
+    if args.pr_repo and args.pr_number is not None and args.merge_sha and args.merged_at:
+        merged = dependency_unlock.MergedItem(
+            repo=args.pr_repo,
+            number=args.pr_number,
+            merge_sha=args.merge_sha,
+            merged_at=args.merged_at,
+        )
+    else:
+        event_path = args.event_path or os.environ.get("GITHUB_EVENT_PATH")
+        if event_path:
+            try:
+                event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                payload = _dependency_unlock_skip_payload(f"event_unreadable:{exc}")
+                dependency_unlock.write_audit_record(args.audit_root, payload, evaluated_at=now)
+                return _emit_dependency_unlock(args, payload)
+            merged = dependency_unlock.merged_item_from_event(
+                event, default_repo=os.environ.get("GITHUB_REPOSITORY")
+            )
+
+    if merged is None:
+        payload = _dependency_unlock_skip_payload("no_merged_pr_context")
+        dependency_unlock.write_audit_record(args.audit_root, payload, evaluated_at=now)
+        return _emit_dependency_unlock(args, payload)
+
+    try:
+        payload = dependency_unlock.evaluate_pr_merge(
+            merged,
+            search_repo=args.search_repo,
+            run_mode=os.environ.get("CE_DEP_UNLOCK_RUN_MODE"),
+            kill_switch=os.environ.get("CE_DEP_UNLOCK_KILL_SWITCH"),
+            gh_runner=_make_gh_runner(),
+            audit_root=args.audit_root,
+            now=now,
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory workflow must fail open.
+        payload = {
+            "kind": dependency_unlock.KIND,
+            "schema_version": dependency_unlock.SCHEMA_VERSION,
+            "advisory": dependency_unlock.NON_AUTHORITY_STATEMENT,
+            "status": "refused",
+            "reason": f"scan_failed:{exc}",
+            "proposal_count": 0,
+            "proposals": [],
+            "warnings": [f"scan_failed:{exc}"],
+        }
+        dependency_unlock.write_audit_record(args.audit_root, payload, evaluated_at=now)
+    return _emit_dependency_unlock(args, payload)
+
+
 def _pickup_triage(args) -> int:
     try:
         if args.issues_json == "-":
@@ -5091,6 +5196,10 @@ _TRIAGE_QUEUE_DISPATCH = {
     "inspect": _triage_queue_inspect,
 }
 
+_DEPENDENCY_UNLOCK_DISPATCH = {
+    "scan": _dependency_unlock_scan,
+}
+
 _HERDR_DISPATCH = {
     "remote-attach": _herdr_remote_attach,
 }
@@ -5384,6 +5493,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _TRIAGE_QUEUE_DISPATCH.get(triage_queue_cmd)
         if handler is None:
             parser.parse_args(["triage", "queue", "--help"])  # prints queue help, exits
+            return 2
+        return handler(args)
+    if args.group == "dependency-unlock":
+        dependency_unlock_cmd = getattr(args, "dependency_unlock_cmd", None)
+        handler = _DEPENDENCY_UNLOCK_DISPATCH.get(dependency_unlock_cmd)
+        if handler is None:
+            parser.parse_args(["dependency-unlock", "--help"])  # prints group help, exits
             return 2
         return handler(args)
     if args.group == "claim":
