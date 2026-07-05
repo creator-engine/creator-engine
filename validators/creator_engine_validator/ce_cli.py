@@ -4253,6 +4253,7 @@ def _automerge_decide(args) -> int:
         run_mode=getattr(args, "run_mode", None),
         author_login=getattr(args, "author_login", None),
         approver_login=getattr(args, "approver_login", None),
+        repo_root=repo_root,
     )
 
     if getattr(args, "json_output", False):
