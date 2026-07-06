@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   auto-tag:
@@ -58,6 +59,7 @@ jobs:
           PYEOF
 
       - name: Create annotated release tag
+        id: create-tag
         if: steps.release-version.outputs.should_tag == 'true'
         env:
           VERSION: ${{ steps.release-version.outputs.version }}
@@ -72,6 +74,7 @@ jobs:
 
           if [[ "${remote_status}" -eq 0 ]]; then
             echo "::notice title=Release auto-tag skipped::${TAG_NAME} already exists"
+            echo "tag_pushed=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           if [[ "${remote_status}" -ne 2 ]]; then
@@ -83,3 +86,84 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${TAG_NAME}" -m "Creator Engine v${VERSION}" "${GITHUB_SHA}"
           git push origin "refs/tags/${TAG_NAME}"
+          echo "tag_pushed=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Dispatch downstream release workflows in order
+        if: steps.release-version.outputs.should_tag == 'true' && steps.create-tag.outputs.tag_pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release-version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Dispatch a workflow and block until it completes successfully.
+          # The ordering guarantee is enforced here: publish-seat-image is never
+          # dispatched before publish-runtime-image concludes with success,
+          # ensuring ce-runtime:VERSION is in GHCR when the seat build FROM-pulls it.
+          dispatch_and_wait() {
+            local workflow_file="$1"
+            shift
+            local dispatch_time
+            dispatch_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Dispatching ${workflow_file} at ${dispatch_time}..."
+            gh workflow run "${workflow_file}" "$@"
+
+            # Allow up to 120 s for GitHub to register the queued run.
+            local run_id="" attempt
+            for attempt in $(seq 1 12); do
+              sleep 10
+              run_id="$(
+                gh run list \
+                  --workflow="${workflow_file}" \
+                  --limit=10 \
+                  --json databaseId,createdAt \
+                  | jq -r --arg t "${dispatch_time}" \
+                      '.[] | select(.createdAt >= $t) | .databaseId' \
+                  | head -1
+              )"
+              [[ -n "${run_id}" ]] && break
+            done
+
+            if [[ -z "${run_id}" ]]; then
+              echo "ERROR: could not find dispatched run for ${workflow_file} after 120s" >&2
+              exit 1
+            fi
+
+            echo "Polling run ${run_id} (${workflow_file})..."
+            local i data status conclusion=""
+            for i in $(seq 1 60); do
+              data="$(gh run view "${run_id}" --json status,conclusion)"
+              status="$(printf '%s' "${data}" | jq -r '.status')"
+              conclusion="$(printf '%s' "${data}" | jq -r '.conclusion // ""')"
+              if [[ "${status}" == "completed" ]]; then
+                break
+              fi
+              if [[ "${i}" -eq 60 ]]; then
+                echo "ERROR: ${workflow_file} run ${run_id} did not complete within 30 minutes" >&2
+                exit 1
+              fi
+              sleep 30
+            done
+
+            if [[ "${conclusion}" != "success" ]]; then
+              echo "ERROR: ${workflow_file} run ${run_id} concluded with '${conclusion}'" >&2
+              exit 1
+            fi
+            echo "${workflow_file} run ${run_id} succeeded."
+          }
+
+          # 1. Publish runtime image first; seat image FROM-pulls ce-runtime:VERSION.
+          dispatch_and_wait publish-runtime-image.yml \
+            --field "version=${VERSION}"
+
+          # 2. Publish seat image only after runtime is confirmed in GHCR.
+          dispatch_and_wait publish-seat-image.yml \
+            --field "version=${VERSION}"
+
+          # 3. Create draft release + operator sign surface (fire-and-forget;
+          #    no image dependency, long-running orchestrator).
+          echo "Dispatching release.yml (version=${VERSION}, dry_run=false)..."
+          gh workflow run release.yml \
+            --field "version=${VERSION}" \
+            --field "dry_run=false"
+          echo "release.yml dispatched."

@@ -34,7 +34,9 @@ def test_release_auto_tag_runs_only_on_main_push_with_write_contents_permission(
     doc = _load_workflow()
 
     assert _on_block(doc) == {"push": {"branches": ["main"]}}
-    assert doc["permissions"] == {"contents": "write"}
+    # contents:write to push the annotated tag; actions:write to dispatch
+    # downstream workflows via the Workflow Dispatch API after the tag push.
+    assert doc["permissions"] == {"contents": "write", "actions": "write"}
 
 
 def test_release_auto_tag_checks_out_full_history_with_credentials_available():
@@ -82,8 +84,42 @@ def test_release_auto_tag_creates_and_pushes_annotated_release_tag_only_when_sem
     step = _step_named(doc, "Create annotated release tag")
     run = step["run"]
 
+    assert step["id"] == "create-tag"
     assert step["if"] == "steps.release-version.outputs.should_tag == 'true'"
     assert step["env"]["TAG_NAME"] == "${{ steps.release-version.outputs.tag_name }}"
     assert step["env"]["VERSION"] == "${{ steps.release-version.outputs.version }}"
     assert 'git tag -a "${TAG_NAME}" -m "Creator Engine v${VERSION}" "${GITHUB_SHA}"' in run
     assert 'git push origin "refs/tags/${TAG_NAME}"' in run
+    # tag_pushed output gates the dispatch step; must be set on both paths.
+    assert 'echo "tag_pushed=true" >> "${GITHUB_OUTPUT}"' in run
+    assert 'echo "tag_pushed=false" >> "${GITHUB_OUTPUT}"' in run
+
+
+def test_release_auto_tag_dispatches_downstream_workflows_in_order_after_new_tag():
+    doc = _load_workflow()
+    step = _step_named(doc, "Dispatch downstream release workflows in order")
+    run = step["run"]
+
+    # Only fires when a new tag was actually pushed in this run.
+    assert (
+        step["if"]
+        == "steps.release-version.outputs.should_tag == 'true' && steps.create-tag.outputs.tag_pushed == 'true'"
+    )
+    # GITHUB_TOKEN used via GH_TOKEN; no new secrets.
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+
+    # Ordering: runtime before seat (seat FROM-pulls ce-runtime:VERSION).
+    runtime_pos = run.index("publish-runtime-image.yml")
+    seat_pos = run.index("publish-seat-image.yml")
+    release_pos = run.index("release.yml")
+    assert runtime_pos < seat_pos < release_pos
+
+    # Seat is gated on runtime success (dispatch_and_wait blocks on conclusion).
+    assert "dispatch_and_wait publish-runtime-image.yml" in run
+    assert "dispatch_and_wait publish-seat-image.yml" in run
+
+    # Version input is forwarded to each downstream workflow.
+    assert '--field "version=${VERSION}"' in run
+
+    # release.yml receives dry_run=false.
+    assert '--field "dry_run=false"' in run
