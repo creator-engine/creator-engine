@@ -8,7 +8,7 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=1beda34e89a2eee0fe8c4f42d763a9fcaf8297d0d08531ec1a2a400047a53b44
+AUTHORIZED_PATHS_SHA256=3428ee3195d50bd42b96ad6ec25c60d907ad69da2a4086e8b0d5f9288f19b082
 
 ```text
 .ce/brain/assertions.yaml
@@ -19,7 +19,7 @@ docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/launch_runtime.py
 validators/creator_engine_validator/takeover_runtime.py
-validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_ce_launch_cli.py
 validators/tests/unit/test_ce_takeover_cli.py
+validators/tests/unit/test_launch_runtime.py
 ```

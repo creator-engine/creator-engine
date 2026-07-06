@@ -14,6 +14,7 @@ import logging
 import os
 import shlex
 import socket
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,35 @@ def _clear_recall_env(monkeypatch):
         launch_runtime.RECALL_ENDPOINT_DIM_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+def _fresh_takeover_evidence_payload(*, harness: str = "claude") -> dict:
+    return {
+        "kind": "ce-takeover-evidence-packet",
+        "schema_version": 1,
+        "generated_at": launch_runtime.takeover_evidence_generated_at(),
+        "host_id": launch_runtime.takeover_evidence_host_id(),
+        "selected_harness": harness,
+        "initial_state": "AWAITING-OPERATOR",
+    }
+
+
+def _write_takeover_evidence(path: Path, payload: dict) -> Path:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _refused_controller_evidence(tmp_path: Path, payload: dict) -> dict:
+    evidence_path = _write_takeover_evidence(tmp_path / "takeover.json", payload)
+    with pytest.raises(launch_runtime.GovernedControllerLaunchRefused) as exc:
+        launch_runtime._validate_governed_controller_launch(
+            role="controller",
+            harness="claude",
+            repo_root=tmp_path,
+            session="ce-controller",
+            takeover_evidence=evidence_path,
+        )
+    return exc.value.to_dict()
 
 
 def _assert_foreman_charter_and_worker_spawn(payload):
@@ -686,6 +716,74 @@ def test_launch_refuses_ambiguous_launched_surface_with_recovery_command(tmp_pat
     assert "ce reap once" in message
     assert seat_dir.is_dir()
     assert adapter.spawned == []
+
+
+def test_controller_takeover_evidence_accepts_fresh_same_host_packet(tmp_path):
+    evidence_path = _write_takeover_evidence(
+        tmp_path / "takeover.json",
+        _fresh_takeover_evidence_payload(),
+    )
+
+    launch_runtime._validate_governed_controller_launch(
+        role="controller",
+        harness="claude",
+        repo_root=tmp_path,
+        session="ce-controller",
+        takeover_evidence=evidence_path,
+    )
+
+
+def test_controller_takeover_evidence_refuses_missing_generated_at(tmp_path):
+    payload = _fresh_takeover_evidence_payload()
+    payload.pop("generated_at")
+
+    refusal = _refused_controller_evidence(tmp_path, payload)
+
+    assert refusal["evidence_status"] == "invalid"
+    assert "generated_at" in refusal["detail"]
+
+
+def test_controller_takeover_evidence_refuses_malformed_generated_at(tmp_path):
+    payload = _fresh_takeover_evidence_payload()
+    payload["generated_at"] = "not-a-timestamp"
+
+    refusal = _refused_controller_evidence(tmp_path, payload)
+
+    assert refusal["evidence_status"] == "invalid"
+    assert "generated_at" in refusal["detail"]
+
+
+def test_controller_takeover_evidence_refuses_stale_packet(tmp_path):
+    payload = _fresh_takeover_evidence_payload()
+    stale = datetime.now(timezone.utc) - timedelta(
+        seconds=launch_runtime.TAKEOVER_EVIDENCE_MAX_AGE_SECONDS + 5
+    )
+    payload["generated_at"] = launch_runtime.takeover_evidence_generated_at(stale)
+
+    refusal = _refused_controller_evidence(tmp_path, payload)
+
+    assert refusal["evidence_status"] == "stale"
+    assert "stale" in refusal["detail"]
+
+
+def test_controller_takeover_evidence_refuses_missing_host_id(tmp_path):
+    payload = _fresh_takeover_evidence_payload()
+    payload.pop("host_id")
+
+    refusal = _refused_controller_evidence(tmp_path, payload)
+
+    assert refusal["evidence_status"] == "invalid"
+    assert "host_id" in refusal["detail"]
+
+
+def test_controller_takeover_evidence_refuses_wrong_host_id(tmp_path):
+    payload = _fresh_takeover_evidence_payload()
+    payload["host_id"] = f"{launch_runtime.takeover_evidence_host_id()}-other"
+
+    refusal = _refused_controller_evidence(tmp_path, payload)
+
+    assert refusal["evidence_status"] == "wrong-host"
+    assert "host_id" in refusal["detail"]
 
 
 def test_launch_refuses_mixed_dead_pid_and_missing_pid_launched_events(tmp_path):

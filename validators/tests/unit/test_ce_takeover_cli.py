@@ -114,6 +114,8 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "ce-takeover-evidence-packet"
+    assert payload["generated_at"].endswith("Z")
+    assert payload["host_id"] == ce_cli.launch_runtime.takeover_evidence_host_id()
     assert payload["predecessor"] == {"requested": "ce-controller", "detected": True}
     assert payload["selected_harness"] == "claude"
     assert payload["ring0_verify"]["ok"] is True
@@ -123,7 +125,7 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
         "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED"
     )
     assert payload["raw_controller_launch_refusal"]["recovery_command"] == (
-        f"ce takeover --from ce-controller --harness claude --repo-root {tmp_path} --dry-run"
+        f"ce takeover --from ce-controller --harness claude --repo-root {tmp_path} --dry-run --json"
     )
     rearm = payload["re_arm_plan"]
     assert rearm["status"] == "found"

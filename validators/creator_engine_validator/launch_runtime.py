@@ -73,6 +73,8 @@ HOST_BACKEND_OPT_OUT = "host"
 CONTROLLER_ROLE = "controller"
 TAKEOVER_EVIDENCE_KIND = "ce-takeover-evidence-packet"
 TAKEOVER_INITIAL_STATE = "AWAITING-OPERATOR"
+TAKEOVER_EVIDENCE_MAX_AGE_SECONDS = 15 * 60
+TAKEOVER_EVIDENCE_CLOCK_SKEW_SECONDS = 60
 READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED = (
     "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED"
 )
@@ -154,6 +156,12 @@ class GovernedControllerLaunchRefused(LaunchError):
         return dict(self.evidence)
 
 
+class _TakeoverEvidenceValidationError(ValueError):
+    def __init__(self, evidence_status: str, detail: str):
+        self.evidence_status = evidence_status
+        super().__init__(detail)
+
+
 class SeatSurfaceReuseRefused(LaunchError):
     """A target seat events surface already has a launched event; refuse reuse."""
 
@@ -221,6 +229,14 @@ def _quote_command(tokens: Sequence[str]) -> str:
     return " ".join(shlex.quote(str(token)) for token in tokens)
 
 
+def takeover_evidence_host_id() -> str:
+    return seat_lifecycle.default_host_id()
+
+
+def takeover_evidence_generated_at(now: datetime | None = None) -> str:
+    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _controller_recovery_command(
     *,
     harness: str,
@@ -240,6 +256,7 @@ def _controller_recovery_command(
                 "--repo-root",
                 root,
                 "--dry-run",
+                "--json",
             ]
         )
     return _quote_command(
@@ -278,6 +295,109 @@ def _load_takeover_evidence(path: Path) -> Mapping[str, Any]:
     return payload
 
 
+def _takeover_refusal(
+    *,
+    harness: str,
+    repo_root: Path | str | None,
+    session: str,
+    evidence_path: Path,
+    evidence_status: str,
+    detail: str,
+) -> GovernedControllerLaunchRefused:
+    refusal = raw_controller_launch_refusal_evidence(
+        harness=harness,
+        repo_root=repo_root,
+        predecessor=session,
+    )
+    refusal.update(
+        {
+            "evidence_ref": str(evidence_path),
+            "evidence_status": evidence_status,
+            "detail": detail,
+        }
+    )
+    return GovernedControllerLaunchRefused(refusal)
+
+
+def _parse_takeover_generated_at(value: Any) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise _TakeoverEvidenceValidationError(
+            "invalid",
+            "takeover evidence generated_at must be an RFC3339 UTC timestamp",
+        )
+    raw = value.strip()
+    parseable = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        generated_at = datetime.fromisoformat(parseable)
+    except ValueError as exc:
+        raise _TakeoverEvidenceValidationError(
+            "invalid",
+            "takeover evidence generated_at must be an RFC3339 UTC timestamp",
+        ) from exc
+    if generated_at.tzinfo is None:
+        raise _TakeoverEvidenceValidationError(
+            "invalid",
+            "takeover evidence generated_at must include a timezone",
+        )
+    return generated_at.astimezone(timezone.utc)
+
+
+def _validate_takeover_evidence_payload(
+    payload: Mapping[str, Any],
+    *,
+    harness: str,
+    now: datetime | None = None,
+) -> None:
+    if (
+        payload.get("kind") != TAKEOVER_EVIDENCE_KIND
+        or payload.get("initial_state") != TAKEOVER_INITIAL_STATE
+        or payload.get("selected_harness") != harness
+    ):
+        raise _TakeoverEvidenceValidationError(
+            "mismatch",
+            (
+                "takeover evidence must be a ce-takeover-evidence-packet "
+                f"for harness {harness!r} in {TAKEOVER_INITIAL_STATE}"
+            ),
+        )
+
+    generated_at = _parse_takeover_generated_at(payload.get("generated_at"))
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+    age_seconds = (current - generated_at).total_seconds()
+    if age_seconds < -TAKEOVER_EVIDENCE_CLOCK_SKEW_SECONDS:
+        raise _TakeoverEvidenceValidationError(
+            "invalid",
+            "takeover evidence generated_at is too far in the future",
+        )
+    if age_seconds > TAKEOVER_EVIDENCE_MAX_AGE_SECONDS:
+        raise _TakeoverEvidenceValidationError(
+            "stale",
+            (
+                "takeover evidence is stale: generated_at is older than "
+                f"{TAKEOVER_EVIDENCE_MAX_AGE_SECONDS} seconds"
+            ),
+        )
+
+    host_id = payload.get("host_id")
+    expected_host_id = takeover_evidence_host_id()
+    if not isinstance(host_id, str) or not host_id.strip():
+        raise _TakeoverEvidenceValidationError(
+            "invalid",
+            "takeover evidence host_id is required",
+        )
+    if host_id != expected_host_id:
+        raise _TakeoverEvidenceValidationError(
+            "wrong-host",
+            (
+                f"takeover evidence host_id {host_id!r} does not match "
+                f"current host {expected_host_id!r}"
+            ),
+        )
+
+
 def _validate_governed_controller_launch(
     *,
     role: str | None,
@@ -300,40 +420,25 @@ def _validate_governed_controller_launch(
     try:
         payload = _load_takeover_evidence(evidence_path)
     except ValueError as exc:
-        refusal = raw_controller_launch_refusal_evidence(
+        raise _takeover_refusal(
             harness=harness,
             repo_root=repo_root,
-            predecessor=session,
-        )
-        refusal.update(
-            {
-                "evidence_ref": str(evidence_path),
-                "evidence_status": "invalid",
-                "detail": str(exc),
-            }
-        )
-        raise GovernedControllerLaunchRefused(refusal) from exc
-    if (
-        payload.get("kind") != TAKEOVER_EVIDENCE_KIND
-        or payload.get("initial_state") != TAKEOVER_INITIAL_STATE
-        or payload.get("selected_harness") != harness
-    ):
-        refusal = raw_controller_launch_refusal_evidence(
+            session=session,
+            evidence_path=evidence_path,
+            evidence_status="invalid",
+            detail=str(exc),
+        ) from exc
+    try:
+        _validate_takeover_evidence_payload(payload, harness=harness)
+    except _TakeoverEvidenceValidationError as exc:
+        raise _takeover_refusal(
             harness=harness,
             repo_root=repo_root,
-            predecessor=session,
-        )
-        refusal.update(
-            {
-                "evidence_ref": str(evidence_path),
-                "evidence_status": "mismatch",
-                "detail": (
-                    "takeover evidence must be a ce-takeover-evidence-packet "
-                    f"for harness {harness!r} in {TAKEOVER_INITIAL_STATE}"
-                ),
-            }
-        )
-        raise GovernedControllerLaunchRefused(refusal)
+            session=session,
+            evidence_path=evidence_path,
+            evidence_status=exc.evidence_status,
+            detail=str(exc),
+        ) from exc
 
 
 def _corrupt_default_runtime_policy_message(path: Path) -> str:

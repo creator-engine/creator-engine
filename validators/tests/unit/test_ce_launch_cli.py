@@ -431,7 +431,7 @@ def test_raw_controller_role_launch_refuses_with_recovery_command_json(
     assert payload["read_only"] is True
     assert payload["required_evidence"] == "ce-takeover-evidence-packet"
     assert payload["recovery_command"] == (
-        f"ce takeover --from ce-controller --harness codex --repo-root {tmp_path} --dry-run"
+        f"ce takeover --from ce-controller --harness codex --repo-root {tmp_path} --dry-run --json"
     )
     assert adapter.spawned == []
 
@@ -458,7 +458,7 @@ def test_raw_controller_role_launch_refusal_teaches_recovery_command_text(
     err = capsys.readouterr().err
     assert "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED" in err
     assert (
-        f"ce takeover --from ce-controller --harness claude --repo-root {tmp_path} --dry-run"
+        f"ce takeover --from ce-controller --harness claude --repo-root {tmp_path} --dry-run --json"
         in err
     )
     assert adapter.spawned == []

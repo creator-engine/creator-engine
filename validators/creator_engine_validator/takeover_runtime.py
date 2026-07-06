@@ -145,6 +145,8 @@ class TakeoverPlan:
         return {
             "kind": TAKEOVER_KIND,
             "schema_version": 1,
+            "generated_at": launch_runtime.takeover_evidence_generated_at(),
+            "host_id": launch_runtime.takeover_evidence_host_id(),
             "predecessor": {
                 "requested": self.predecessor,
                 "detected": self.predecessor_detected,

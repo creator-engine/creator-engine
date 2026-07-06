@@ -10,3 +10,4 @@ issue: ce-ops#477
 
 - Added raw controller launch refusal evidence and exact recovery command.
 - Added duty-manifest watcher/daemon re-arm dry-run planning.
+- Hardened takeover evidence with generated-at/host binding and fail-closed launch validation.
