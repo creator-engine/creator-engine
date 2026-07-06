@@ -616,6 +616,41 @@ def _build_parser() -> argparse.ArgumentParser:
         "as CE_REVIEWER_AUTHORITY_REF for the in-band hook",
     )
     launch.add_argument(
+        "--mint-reviewer-authority",
+        action="store_true",
+        help="G11: mint a lane-scoped reviewer-authority envelope in ignored ledger "
+        "state, validate it, then inject it into a distinct reviewer venue; mutually "
+        "exclusive with --reviewer-authority-ref",
+    )
+    launch.add_argument(
+        "--reviewer-authority-pr",
+        dest="reviewer_authority_pr_number",
+        type=int,
+        default=None,
+        help="PR number bound into a minted reviewer-authority envelope",
+    )
+    launch.add_argument(
+        "--reviewer-authority-head-sha",
+        default=None,
+        help="PR head SHA bound into a minted reviewer-authority envelope",
+    )
+    launch.add_argument(
+        "--reviewer-authority-actor",
+        default=None,
+        help="reviewer login bound into a minted reviewer-authority envelope (never a token)",
+    )
+    launch.add_argument(
+        "--reviewer-authority-ratified-prompt-sha",
+        default=None,
+        help="ratified reviewer prompt SHA bound into a minted envelope; defaults to --prompt-sha",
+    )
+    launch.add_argument(
+        "--reviewer-authority-emitting-role",
+        default="controller",
+        choices=["operator", "controller", "architect", "implementer", "reviewer", "verification", "agent_reviewer"],
+        help="canonical non-ratifying emitting role for a minted reviewer-authority envelope",
+    )
+    launch.add_argument(
         "--seat-env-file",
         dest="seat_env_file",
         default=None,
@@ -2335,6 +2370,12 @@ def _lane_launch(args) -> int:
             tenant_policy=getattr(args, "tenant_policy", None),
             ratification_evidence_ref=getattr(args, "ratification_evidence_ref", None),
             reviewer_authority_ref=getattr(args, "reviewer_authority_ref", None),
+            mint_reviewer_authority=getattr(args, "mint_reviewer_authority", False),
+            reviewer_authority_pr_number=getattr(args, "reviewer_authority_pr_number", None),
+            reviewer_authority_head_sha=getattr(args, "reviewer_authority_head_sha", None),
+            reviewer_authority_actor=getattr(args, "reviewer_authority_actor", None),
+            reviewer_authority_ratified_prompt_sha=getattr(args, "reviewer_authority_ratified_prompt_sha", None),
+            reviewer_authority_emitting_role=getattr(args, "reviewer_authority_emitting_role", "controller"),
             seat_env_file=getattr(args, "seat_env_file", None),
             runtime_policy=getattr(args, "runtime_policy", None),
             backend=getattr(args, "backend", None),
@@ -2354,6 +2395,7 @@ def _lane_launch(args) -> int:
             {
                 "pane_path": str(result.pane_path),
                 "record": result.record,
+                "reviewer_authority_ref": result.reviewer_authority_ref,
                 "seat_record_ref": result.seat_record_ref,
                 "seat_lifecycle_state": result.seat_lifecycle_state,
             },

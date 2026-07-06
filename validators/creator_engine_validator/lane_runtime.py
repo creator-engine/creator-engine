@@ -451,6 +451,70 @@ def _validate_reviewer_authority_ref(reviewer_authority_ref: str, repo_root: Pat
     return reviewer_authority_ref
 
 
+def _reviewer_authority_envelope_path(
+    ledger_root: Path, controller_id: str, lane_id: str
+) -> Path:
+    return ledger_root / "panes" / controller_id / f"{lane_id}.reviewer-authority.yaml"
+
+
+def _compose_reviewer_authority_envelope(
+    *,
+    controller_id: str,
+    lane_id: str,
+    pr_number: int | str | None,
+    head_sha: str | None,
+    actor: str | None,
+    ratified_prompt_sha: str | None,
+    emitting_role: str,
+    operating_mode: str,
+    recorded_at: str,
+) -> dict[str, Any]:
+    envelope_uuid = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"ce-reviewer-authority:{controller_id}:{lane_id}:{pr_number}:{head_sha}:{actor}:{recorded_at}",
+    )
+    return {
+        "reviewer_authority_envelope": {
+            "envelope_id": f"rva-launch-{envelope_uuid.hex}",
+            "mechanic": "pr_review",
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "actor": actor,
+            "ratified_prompt_sha": ratified_prompt_sha,
+            "emitting_role": emitting_role,
+            "operating_mode": operating_mode,
+            "recorded_at": recorded_at,
+        }
+    }
+
+
+def _validate_reviewer_authority_envelope(
+    envelope: Mapping[str, Any], path: Path | str
+) -> None:
+    from .checks.reviewer_authority_envelope import (
+        validate_reviewer_authority_envelope_record,
+    )
+
+    errors = validate_reviewer_authority_envelope_record(dict(envelope), path)
+    if errors:
+        detail = "; ".join(e.format() for e in errors[:3])
+        raise ReviewerAuthorityInvalid(
+            f"minted reviewer-authority envelope is invalid: {detail}"
+        )
+
+
+def _write_reviewer_authority_envelope(
+    *,
+    ledger_root: Path,
+    controller_id: str,
+    lane_id: str,
+    envelope: Mapping[str, Any],
+) -> str:
+    path = _reviewer_authority_envelope_path(ledger_root, controller_id, lane_id)
+    _atomic_write(path, yaml.safe_dump(dict(envelope), sort_keys=True))
+    return str(path.resolve())
+
+
 #: The argv prefix that sources a seat env file into the seat process, then execs the
 #: governed command. The SECRET never transits argv — only the file PATH does (``$1``);
 #: ``set -a``/``set +a`` exports the sourced vars to the exec'd child only.
@@ -660,6 +724,12 @@ def launch(
     tenant_policy: Path | str | None = None,
     ratification_evidence_ref: str | None = None,
     reviewer_authority_ref: str | None = None,
+    mint_reviewer_authority: bool = False,
+    reviewer_authority_pr_number: int | str | None = None,
+    reviewer_authority_head_sha: str | None = None,
+    reviewer_authority_actor: str | None = None,
+    reviewer_authority_ratified_prompt_sha: str | None = None,
+    reviewer_authority_emitting_role: str = "controller",
     seat_env_file: Path | str | None = None,
     runtime_policy: Path | str | None = None,
     backend: str | None = None,
@@ -705,6 +775,33 @@ def launch(
     #     ride ONLY a distinct reviewer venue (role=reviewer + lane_kind=review), and
     #     it must resolve to a schema-valid reviewer-authority envelope. Both checks
     #     are pure and raise before any side effect (no tmux spawn, no pane write).
+    reviewer_authority_to_mint: dict[str, Any] | None = None
+    if mint_reviewer_authority and reviewer_authority_ref is not None:
+        raise ReviewerAuthorityInvalid(
+            "supply either reviewer_authority_ref or mint_reviewer_authority, not both"
+        )
+    if mint_reviewer_authority:
+        if not is_distinct_reviewer_venue(role=role, lane_kind=mode_resolution.lane_kind):
+            raise ReviewerVenueIdentityInvalid(
+                f"mint_reviewer_authority requires a distinct reviewer venue "
+                f"(role={REVIEWER_VENUE_ROLE!r} + lane_kind={REVIEWER_VENUE_LANE_KIND!r}); "
+                f"got role={role!r} lane_kind={mode_resolution.lane_kind!r}"
+            )
+        reviewer_authority_to_mint = _compose_reviewer_authority_envelope(
+            controller_id=controller_id,
+            lane_id=lane_id,
+            pr_number=reviewer_authority_pr_number,
+            head_sha=reviewer_authority_head_sha,
+            actor=reviewer_authority_actor,
+            ratified_prompt_sha=reviewer_authority_ratified_prompt_sha or str(prompt_sha),
+            emitting_role=reviewer_authority_emitting_role,
+            operating_mode=mode_resolution.operating_mode,
+            recorded_at=_utc_now_str(now),
+        )
+        _validate_reviewer_authority_envelope(
+            reviewer_authority_to_mint,
+            _reviewer_authority_envelope_path(ledger_root, controller_id, lane_id),
+        )
     if reviewer_authority_ref is not None:
         if not is_distinct_reviewer_venue(role=role, lane_kind=mode_resolution.lane_kind):
             raise ReviewerVenueIdentityInvalid(
@@ -869,6 +966,20 @@ def launch(
         raise WorktreePathInvalid(
             f"worktree path {str(worktree_path)!r} is not an existing directory; "
             "refusing lane launch before any side effect"
+        )
+
+    # 5c. G11: in-launcher reviewer-authority minting. The envelope is lane-scoped
+    #     under ignored ledger state, validated with the same schema as supplied
+    #     refs, then passed through the existing launch-pinned env carrier.
+    if reviewer_authority_to_mint is not None:
+        reviewer_authority_ref = _write_reviewer_authority_envelope(
+            ledger_root=ledger_root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+            envelope=reviewer_authority_to_mint,
+        )
+        reviewer_authority_ref = _validate_reviewer_authority_ref(
+            reviewer_authority_ref, repo_root
         )
 
     resolved_state_root = (

@@ -64,7 +64,10 @@ G2.002.1 operating-mode carriers (optional): `--operating-mode` (default
 `strict`), `--autonomy-class`, `--lane-kind`, `--tenant-policy`,
 `--ratification-evidence`. G2.007.3 reviewer-venue carrier (optional):
 `--reviewer-authority-ref` (a reviewer-authority envelope ref for a distinct
-reviewer venue; see step 0b and
+reviewer venue) or G11 `--mint-reviewer-authority` with
+`--reviewer-authority-pr`, `--reviewer-authority-head-sha`, and
+`--reviewer-authority-actor` to mint a lane-scoped envelope in ignored ledger
+state; see step 0b and
 [`./REVIEWER_VENUE_AUTHORITY.md`](./REVIEWER_VENUE_AUTHORITY.md) §4).
 
 The launch sequence, **with every refusal raised before any side effect**:
@@ -81,16 +84,20 @@ The launch sequence, **with every refusal raised before any side effect**:
    as a privileged ratifier (`G2-PRIVILEGED-RATIFIER-INVALID`) is refused in
    every mode. These carriers record posture only and mint no authority; the
    Operator-only privileged floor is preserved unchanged.
-0b. **Reviewer-venue authority injection (G2.007.3).** When
-   `--reviewer-authority-ref` is supplied, the lane must be a distinct reviewer
-   venue — `--role reviewer` **and** `--lane-kind review`
+0b. **Reviewer-venue authority injection and minting (G2.007.3/G11).** When
+   `--reviewer-authority-ref` or `--mint-reviewer-authority` is supplied, the
+   lane must be a distinct reviewer venue — `--role reviewer` **and** `--lane-kind review`
    (`is_distinct_reviewer_venue`); otherwise refuse `G3-REVIEWER-VENUE-IDENTITY`.
-   The ref must resolve (under `--repo-root` or as an absolute path) to a
-   schema-valid reviewer-authority envelope; otherwise refuse
-   `G3-REVIEWER-AUTHORITY-INVALID`. Both refusals raise before any side effect.
-   On success the validated ref is exported into the pane environment as
-   `CE_REVIEWER_AUTHORITY_REF` (via tmux `-e`, never printed) and the venue
-   identity is recorded in the ignored governance sidecar; the in-band
+   An explicit ref must resolve (under `--repo-root` or as an absolute path) to a
+   schema-valid reviewer-authority envelope. A minted envelope must include the
+   PR number, head SHA, reviewer actor login, and ratified prompt SHA (default:
+   `--prompt-sha`) and is written to the lane-scoped ignored ledger path before
+   pane spawn. Invalid or incomplete authority refuses
+   `G3-REVIEWER-AUTHORITY-INVALID`; `--reviewer-authority-ref` and
+   `--mint-reviewer-authority` are mutually exclusive. On success the validated
+   ref is exported into the pane environment as `CE_REVIEWER_AUTHORITY_REF` (via
+   tmux `-e`, never printed) and the venue identity is recorded in the ignored
+   governance sidecar; the in-band
    `.claude/hooks/ce-pretooluse.sh` forwards it to the validator as
    `--reviewer-authority-ref`, which injects `ce.reviewer_authority_ref` before
    `hook_check.build_context()`. Fail-closed: with no ref, no authority is

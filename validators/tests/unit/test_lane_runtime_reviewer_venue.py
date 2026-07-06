@@ -189,6 +189,42 @@ def test_reviewer_authority_ref_exported_to_pane_env(tmp_path):
     assert result.reviewer_authority_ref == ref
 
 
+def test_minted_reviewer_authority_is_exported_and_recorded(tmp_path):
+    adapter = RecordingAdapter()
+    result = _launch_reviewer(
+        tmp_path,
+        adapter=adapter,
+        mint_reviewer_authority=True,
+        reviewer_authority_pr_number=108,
+        reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+        reviewer_authority_actor="ubuntuaws745-cmyk",
+    )
+
+    assert result.reviewer_authority_ref
+    minted = Path(result.reviewer_authority_ref)
+    assert minted == (
+        _ledger(tmp_path) / "panes" / CID / f"{LID}.reviewer-authority.yaml"
+    ).resolve()
+    assert minted.is_file()
+    assert adapter.last_env is not None
+    assert adapter.last_env.get("CE_REVIEWER_AUTHORITY_REF") == str(minted)
+
+    envelope = yaml.safe_load(minted.read_text(encoding="utf-8"))["reviewer_authority_envelope"]
+    assert envelope["mechanic"] == "pr_review"
+    assert envelope["pr_number"] == 108
+    assert envelope["actor"] == "ubuntuaws745-cmyk"
+    assert envelope["head_sha"] == "aa02b0ceb192b38f52da0d99f798e1e2710a8a22"
+    assert envelope["ratified_prompt_sha"] == hashlib.sha256(
+        (_prompt(tmp_path)[0]).read_bytes()
+    ).hexdigest()
+    assert envelope["emitting_role"] == "controller"
+    assert envelope["operating_mode"] == "strict"
+
+    sidecar = lane_runtime._governance_sidecar_path(_ledger(tmp_path), CID, LID)
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert data["reviewer_authority_ref"] == str(minted)
+
+
 def test_reviewer_venue_identity_recorded_in_sidecar(tmp_path):
     ref = _write_envelope(tmp_path)
     result = _launch_reviewer(tmp_path, reviewer_authority_ref=ref)
@@ -232,6 +268,51 @@ def test_authority_ref_with_wrong_lane_kind_refused(tmp_path):
     with pytest.raises(lane_runtime.ReviewerVenueIdentityInvalid):
         _launch_reviewer(tmp_path, adapter=adapter, reviewer_authority_ref=ref,
                          lane_kind="implementation")
+    assert adapter.spawned == []
+
+
+def test_minted_authority_requires_complete_schema_bindings_before_spawn(tmp_path):
+    adapter = RecordingAdapter()
+    with pytest.raises(lane_runtime.ReviewerAuthorityInvalid):
+        _launch_reviewer(
+            tmp_path,
+            adapter=adapter,
+            mint_reviewer_authority=True,
+            reviewer_authority_pr_number=108,
+            reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+            # actor intentionally omitted
+        )
+    assert adapter.spawned == []
+
+
+def test_minted_authority_requires_reviewer_venue_identity_before_spawn(tmp_path):
+    adapter = RecordingAdapter()
+    with pytest.raises(lane_runtime.ReviewerVenueIdentityInvalid):
+        _launch_reviewer(
+            tmp_path,
+            adapter=adapter,
+            role="implementer",
+            mint_reviewer_authority=True,
+            reviewer_authority_pr_number=108,
+            reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+            reviewer_authority_actor="ubuntuaws745-cmyk",
+        )
+    assert adapter.spawned == []
+
+
+def test_minted_authority_and_explicit_ref_are_mutually_exclusive(tmp_path):
+    ref = _write_envelope(tmp_path)
+    adapter = RecordingAdapter()
+    with pytest.raises(lane_runtime.ReviewerAuthorityInvalid):
+        _launch_reviewer(
+            tmp_path,
+            adapter=adapter,
+            reviewer_authority_ref=ref,
+            mint_reviewer_authority=True,
+            reviewer_authority_pr_number=108,
+            reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+            reviewer_authority_actor="ubuntuaws745-cmyk",
+        )
     assert adapter.spawned == []
 
 
