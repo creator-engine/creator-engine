@@ -106,6 +106,7 @@ from . import operator_runbook_refusal_sync as operator_runbook_refusal_sync  # 
 from . import release_artifact_parity_guard as release_artifact_parity_guard  # noqa: E402,F401
 from . import install_spec_signature_guard as install_spec_signature_guard  # noqa: E402,F401
 from . import pr_closes_linkage as pr_closes_linkage  # noqa: E402,F401
+from . import version_drift as version_drift  # noqa: E402,F401
 from . import surfaces_manifest as surfaces_manifest  # noqa: E402,F401
 from . import fleet_manifest_guard as fleet_manifest_guard  # noqa: E402,F401
 from . import identity_denylist_autogen_sync as identity_denylist_autogen_sync  # noqa: E402,F401

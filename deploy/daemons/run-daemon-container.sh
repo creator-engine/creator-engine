@@ -16,7 +16,7 @@ Required for queue-daemon runtime:
 
 Optional container variables:
   CE_CONTAINER_ENGINE              docker or podman executable; default docker
-  CE_DAEMON_IMAGE                  canonical runtime image; default ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2
+  CE_DAEMON_IMAGE                  canonical runtime image; default ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.3
   CE_DAEMON_IMAGE_UID              canonical image uid/gid contract; default 10001
   CE_DAEMON_CONTAINER_NAME         default ce-<daemon>
   CE_DAEMON_REPO_ROOT              host checkout; default repository root
@@ -210,7 +210,7 @@ main() {
         ;;
     esac
   fi
-  local image="${CE_DAEMON_IMAGE:-ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2}"
+  local image="${CE_DAEMON_IMAGE:-ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.3}"
   # Canonical daemon image contract: the runtime user is uid/gid 10001 (`ce`).
   local image_uid="${CE_DAEMON_IMAGE_UID:-10001}"
   is_unsigned_int "$image_uid" || die "CE_DAEMON_IMAGE_UID must be a numeric uid/gid: $image_uid"

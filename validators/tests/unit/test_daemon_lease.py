@@ -892,7 +892,7 @@ def test_container_runner_default_image_uses_canonical_runtime_name(tmp_path: Pa
 
     assert proc.returncode == 0, proc.stderr
     argv = argv_file.read_text(encoding="utf-8").splitlines()
-    assert "ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2" in argv
+    assert "ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.3" in argv
 
 
 def test_container_runner_writes_per_attempt_logs_and_latest_symlink(tmp_path: Path):

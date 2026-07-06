@@ -1104,6 +1104,25 @@ def run_preflight(
     )
     checks.append(
         _run_check(
+            "Creator Engine validator - version-drift current surface gate",
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - version-drift current surface gate",
+                    [py, "-m", "creator_engine_validator", "verify-version-drift", "."],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "current-version surfaces match version.py",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Creator Engine validator - brain drift check",
             brain_drift_gate,
             out,

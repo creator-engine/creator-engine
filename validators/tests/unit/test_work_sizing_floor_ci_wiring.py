@@ -178,6 +178,15 @@ def test_validate_workflow_runs_path_manifest_gate_from_live_base_and_head_ref()
     assert "PR_BASE_SHA" not in run
 
 
+def test_validate_workflow_runs_version_drift_gate():
+    step = _validate_step("Creator Engine validator — version-drift current surface gate")
+
+    run = step["run"]
+    assert "verify-version-drift" in run
+    assert "PYTHONPATH=validators python -m creator_engine_validator" in run
+    assert "permissions:" not in run
+
+
 def test_validate_workflow_runs_install_spec_signature_guard_as_blocking_gate():
     step = _validate_step("Creator Engine validator — install-spec signature guard")
 
