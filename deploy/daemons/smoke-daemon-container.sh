@@ -28,6 +28,11 @@ Environment:
 
 The default Docker path enforces the image uid ownership contract. If Docker is
 not installed or not reachable, this script exits 77 with a SKIP message.
+
+Before starting the real engine passes, the smoke runs a host-prep-only mixed-uid
+probe with fake docker/stat shims against scratch state. This documented
+simulation covers the rerun case where an unprivileged host user sees a
+10001-owned 0700 state root but cannot traverse it.
 USAGE
 }
 
@@ -119,6 +124,92 @@ write_secret_file() {
   chmod 0600 "$path"
 }
 
+write_mixed_uid_probe_engine() {
+  local path="$1"
+  local calls_file="$2"
+  local state_root="$3"
+  cat >"$path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'CALL' >> "$calls_file"
+for arg in "\$@"; do printf '\\t%s' "\$arg" >> "$calls_file"; done
+printf '\\n' >> "$calls_file"
+if [[ "\${1:-}" == "run" ]]; then
+  chmod 0700 "$state_root"
+  install -d -m 0700 "$state_root/daemon-leases"
+fi
+exit 0
+EOF
+  chmod 0755 "$path"
+}
+
+write_mixed_uid_probe_stat() {
+  local path="$1"
+  local state_root="$2"
+  local image_uid="$3"
+  local real_stat
+  real_stat="$(command -v stat)"
+  cat >"$path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "-c" && "\${3:-}" == "--" && "\${4:-}" == "$state_root" ]]; then
+  case "\${2:-}" in
+    %a)
+      printf '700\\n'
+      exit 0
+      ;;
+    %u)
+      printf '$image_uid\\n'
+      exit 0
+      ;;
+  esac
+fi
+exec "$real_stat" "\$@"
+EOF
+  chmod 0755 "$path"
+}
+
+run_mixed_uid_host_prep_probe() {
+  local root="$1"
+  local image_uid="$2"
+  local tmpdir="$3"
+  local probe_dir="$tmpdir/mixed-uid-host-prep-probe"
+  local state_root="$probe_dir/state"
+  local calls_file="$probe_dir/engine-calls"
+  local fake_docker="$probe_dir/docker"
+  local fake_stat="$probe_dir/stat"
+
+  install -d -m 0700 "$probe_dir"
+  install -d -m 0700 "$state_root"
+  chmod 0000 "$state_root"
+  write_mixed_uid_probe_engine "$fake_docker" "$calls_file" "$state_root"
+  write_mixed_uid_probe_stat "$fake_stat" "$state_root" "$image_uid"
+
+  (
+    export PATH="$probe_dir:$PATH"
+    export CE_CONTAINER_ENGINE="$fake_docker"
+    export CE_DAEMON_CONTAINER_NAME="ce-daemon-mixed-uid-probe-$$"
+    export CE_DAEMON_REPO_ROOT="$root"
+    export CE_DAEMON_STATE_ROOT="$state_root"
+    export CE_DAEMON_LEASE_ROOT="$state_root/daemon-leases"
+    export CE_DAEMON_IMAGE_UID="$image_uid"
+    export CE_DAEMON_LOG_DIR="$probe_dir/logs"
+    export CE_CONVEYOR_DAEMON_SIGNING_SECRET="mixed-uid-probe-secret"
+    export GH_TOKEN="${GH_TOKEN:-daemon-container-smoke-token}"
+    "$root/deploy/daemons/run-daemon-container.sh" conveyor-daemon --one-shot
+  ) >"$probe_dir/adapter.stdout" 2>"$probe_dir/adapter.stderr" || {
+    chmod 0700 "$state_root" 2>/dev/null || true
+    printf '%s\n' "---- mixed-uid host-prep probe stdout ----" >&2
+    sed -n '1,160p' "$probe_dir/adapter.stdout" >&2 || true
+    printf '%s\n' "---- mixed-uid host-prep probe stderr ----" >&2
+    sed -n '1,160p' "$probe_dir/adapter.stderr" >&2 || true
+    die "mixed-uid host-prep probe failed"
+  }
+  chmod 0700 "$state_root"
+  [[ -s "$calls_file" ]] || die "mixed-uid host-prep probe did not reach fake docker"
+  printf 'mixed-uid host-prep probe reached container engine\n'
+}
+
 # Best-effort stop of the currently tracked pass's container/runner. Invoked
 # from the EXIT trap so a die() anywhere after the container starts (e.g. a
 # wait_for_file timeout) cannot leak a running container or an orphaned
@@ -171,6 +262,7 @@ run_pass() {
     export CE_DAEMON_STATE_ROOT="$state_root"
     export CE_DAEMON_LEASE_ROOT="$state_root/daemon-leases"
     export CE_DAEMON_IMAGE_UID="$image_uid"
+    export CE_DAEMON_LOG_DIR="$tmpdir/adapter-logs"
     export CE_CONVEYOR_DAEMON_SIGNING_SECRET_FILE="$secret_file"
     export CE_CONVEYOR_DAEMON_SEAT_PROBES='[{"seat_id":"smoke","argv":["bash","-lc","sleep 2"]}]'
     export GH_TOKEN="${GH_TOKEN:-daemon-container-smoke-token}"
@@ -234,6 +326,7 @@ main() {
   local secret_file="$SMOKE_TMPDIR/signing-secret"
   write_secret_file "$secret_file"
 
+  run_mixed_uid_host_prep_probe "$root" "$image_uid" "$SMOKE_TMPDIR"
   run_pass 1 "$root" "$engine" "$image_uid" "$state_root" "$secret_file" "$SMOKE_TMPDIR"
   run_pass 2 "$root" "$engine" "$image_uid" "$state_root" "$secret_file" "$SMOKE_TMPDIR"
 

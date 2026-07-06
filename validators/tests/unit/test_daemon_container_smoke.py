@@ -83,6 +83,7 @@ def test_smoke_script_runs_two_one_shot_passes_through_canonical_adapter(tmp_pat
         {
             "CE_CONTAINER_ENGINE": str(fake_engine),
             "CE_DAEMON_REPO_ROOT": str(_repo_root()),
+            "CE_DAEMON_IMAGE": "example.invalid/ce-runtime:smoke-override",
             "TMPDIR": str(tmp_path),
         }
     )
@@ -103,6 +104,8 @@ def test_smoke_script_runs_two_one_shot_passes_through_canonical_adapter(tmp_pat
     assert calls.count("\tstop\t--time\t20\tce-daemon-smoke-") == 2
     assert "\t--tmpfs\t/run/creator-engine/conveyor-daemon-secret:rw,size=1m,mode=0700,uid=10001,gid=10001" in calls
     assert "\t--env\tCE_DAEMON_LEASE_ROOT=/ce/state/daemon-leases" in calls
+    assert "\texample.invalid/ce-runtime:smoke-override\tbash\t/workspace/creator-engine/deploy/conveyor-daemon/launch-conveyor-daemon.sh" in calls
     assert "\t/workspace/creator-engine/deploy/conveyor-daemon/launch-conveyor-daemon.sh\t--one-shot" in calls
     assert not (state_root / "daemon-leases" / "conveyor-daemon.lease").exists()
+    assert "mixed-uid host-prep probe reached container engine" in proc.stdout
     assert "OK: daemon container stateful smoke passed" in proc.stdout

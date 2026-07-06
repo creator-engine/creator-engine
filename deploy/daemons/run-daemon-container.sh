@@ -16,7 +16,7 @@ Required for queue-daemon runtime:
 
 Optional container variables:
   CE_CONTAINER_ENGINE              docker or podman executable; default docker
-  CE_DAEMON_IMAGE                  canonical runtime image; default creator-engine/ce-validator:0.3.2
+  CE_DAEMON_IMAGE                  canonical runtime image; default ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2
   CE_DAEMON_IMAGE_UID              canonical image uid/gid contract; default 10001
   CE_DAEMON_CONTAINER_NAME         default ce-<daemon>
   CE_DAEMON_REPO_ROOT              host checkout; default repository root
@@ -29,6 +29,7 @@ Optional container variables:
   CE_DAEMON_CACERT_FILE            optional host CA cert mounted read-only for BAO_CACERT
   CE_DAEMON_TOKEN_FILE             optional host token file mounted read-only
   CE_DAEMON_TOKEN_CONTAINER_PATH   default /run/creator-engine/daemon-token
+  CE_DAEMON_LOG_DIR                host log directory; default $HOME
   CE_CONVEYOR_DAEMON_*             conveyor-daemon config forwarded when present
 
 No secret values are baked into the image or this script. Host bootstrap must
@@ -77,12 +78,46 @@ engine_requires_host_uid_match() {
   [[ "$(basename -- "$engine")" == "docker" ]]
 }
 
+host_uid() {
+  id -u
+}
+
+path_is_under_state_root() {
+  local path="$1"
+  local state_root="$2"
+  [[ "$path" == "$state_root"/* ]]
+}
+
+should_defer_state_child_prep_to_container() {
+  local path="$1"
+  local state_root="$2"
+  local image_uid="$3"
+  local require_host_uid_match="$4"
+
+  [[ "$require_host_uid_match" == "1" ]] || return 1
+  [[ "$path" != "$state_root" ]] || return 1
+  path_is_under_state_root "$path" "$state_root" || return 1
+
+  local current_uid
+  current_uid="$(host_uid)" || return 1
+  [[ "$current_uid" != "0" && "$current_uid" != "$image_uid" ]] || return 1
+
+  local state_mode state_owner_uid
+  state_mode="$(file_mode "$state_root")" || return 1
+  state_owner_uid="$(file_uid "$state_root")" || return 1
+  [[ "$state_mode" == "700" && "$state_owner_uid" == "$image_uid" ]]
+}
+
 prepare_state_root_dir() {
   local label="$1"
   local path="$2"
   local state_root="$3"
   local image_uid="$4"
   local require_host_uid_match="$5"
+
+  if should_defer_state_child_prep_to_container "$path" "$state_root" "$image_uid" "$require_host_uid_match"; then
+    return 0
+  fi
 
   if [[ -e "$path" && ! -d "$path" ]]; then
     die "$label exists but is not a directory: $path"
@@ -106,6 +141,23 @@ prepare_state_root_dir() {
     owner_uid="$(file_uid "$path")" || die "cannot stat $label owner: $path"
     [[ "$owner_uid" == "$image_uid" ]] || die "$label owner uid $owner_uid does not match canonical container uid $image_uid: $path. Run: chown -R $image_uid:$image_uid $state_root"
   fi
+}
+
+setup_attempt_log() {
+  local daemon="$1"
+  local root="$2"
+  local log_dir="${CE_DAEMON_LOG_DIR:-${HOME:-$root}}"
+  local timestamp
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  install -d -m 0700 "$log_dir" || die "cannot create CE_DAEMON_LOG_DIR: $log_dir"
+
+  local log_path="$log_dir/ce-wall-daemon-container-$daemon-$timestamp-$$.log"
+  local latest_path="$log_dir/ce-wall-daemon-container.log"
+  : >"$log_path" || die "cannot create daemon attempt log: $log_path"
+  chmod 0600 "$log_path" || die "cannot chmod daemon attempt log: $log_path"
+  ln -sfn "$(basename -- "$log_path")" "$latest_path" 2>/dev/null || true
+
+  exec > >(tee -a "$log_path") 2> >(tee -a "$log_path" >&2)
 }
 
 require_mode_0600() {
@@ -137,6 +189,7 @@ main() {
 
   local root
   root="$(repo_root)"
+  setup_attempt_log "$daemon" "$root"
   local repo_container="${CE_DAEMON_REPO_CONTAINER_PATH:-/workspace/creator-engine}"
   local state_root="${CE_DAEMON_STATE_ROOT:-$root/.ce/state}"
   local state_container="${CE_DAEMON_STATE_CONTAINER_PATH:-/ce/state}"
@@ -157,7 +210,7 @@ main() {
         ;;
     esac
   fi
-  local image="${CE_DAEMON_IMAGE:-creator-engine/ce-validator:0.3.2}"
+  local image="${CE_DAEMON_IMAGE:-ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2}"
   # Canonical daemon image contract: the runtime user is uid/gid 10001 (`ce`).
   local image_uid="${CE_DAEMON_IMAGE_UID:-10001}"
   is_unsigned_int "$image_uid" || die "CE_DAEMON_IMAGE_UID must be a numeric uid/gid: $image_uid"
