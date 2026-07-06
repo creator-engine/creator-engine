@@ -4,6 +4,8 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
+- **Declared work class:** story
+
 AUTHORIZED_PATHS_COUNT=9
 
 AUTHORIZED_PATHS_SHA256=cdf50a747a3cd4dc51300c3648be9df4b4f6fec93158ae8339b5acf19e01e6e4
