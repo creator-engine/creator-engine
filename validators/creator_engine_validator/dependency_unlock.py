@@ -577,6 +577,9 @@ def _evaluate_one_candidate(
                 repo=fresh.repo,
                 number=fresh.number,
                 labels_to_remove=labels_to_remove,
+                merged=merged,
+                expected_blocker_refs=declared.refs,
+                expected_evidence_hash=evidence_hash,
                 gh_runner=gh_runner,
             )
         )
@@ -587,14 +590,20 @@ def _evaluate_one_candidate(
 
 
 def _apply_unlock(
-    *, repo: str, number: int, labels_to_remove: Sequence[str], gh_runner: GhRunner
+    *,
+    repo: str,
+    number: int,
+    labels_to_remove: Sequence[str],
+    gh_runner: GhRunner,
+    merged: MergedItem,
+    expected_blocker_refs: Sequence[BlockerRef],
+    expected_evidence_hash: str,
 ) -> dict[str, Any]:
     """LIVE-mode mutation (dormant this slice): remove each resolved dependency-hold label.
 
-    Re-checks the live label set immediately before mutating (stale-evidence
+    Re-checks the live candidate immediately before mutating (stale-evidence
     guard: "if the mutation target changed after evidence was computed, the
-    candidate is stale and must be re-evaluated"). A label already absent at
-    mutate time is a success no-op, never an error.
+    candidate is stale and must be re-evaluated").
     """
     recheck_payload = _fetch_issue(repo, number, gh_runner)
     if recheck_payload is None:
@@ -602,11 +611,68 @@ def _apply_unlock(
     recheck_candidate = forge_triage.normalize_issue(recheck_payload, default_repo=repo)
     if recheck_candidate is None:
         return {"applied": False, "warning": "recheck_failed"}
+    if recheck_candidate.state.strip().lower() != "open":
+        return _stale_apply_refusal(
+            "candidate_not_open_at_apply",
+            candidate=recheck_candidate,
+            expected_evidence_hash=expected_evidence_hash,
+        )
+
+    declared = declared_blockers(recheck_candidate)
+    if declared.problems:
+        return _stale_apply_refusal(
+            declared.problems[0],
+            candidate=recheck_candidate,
+            expected_evidence_hash=expected_evidence_hash,
+            problems=declared.problems,
+        )
+    expected_ref_keys = {ref.ref_key for ref in expected_blocker_refs}
+    actual_ref_keys = {ref.ref_key for ref in declared.refs}
+    if actual_ref_keys != expected_ref_keys:
+        return _stale_apply_refusal(
+            "declared_blockers_changed_at_apply",
+            candidate=recheck_candidate,
+            expected_evidence_hash=expected_evidence_hash,
+            declared_blockers=declared.refs,
+        )
+
+    resolutions = tuple(resolve_blocker(ref, merged=merged, gh_runner=gh_runner) for ref in declared.refs)
+    unresolved = [resolution for resolution in resolutions if not resolution.resolved]
+    if unresolved:
+        return _stale_apply_refusal(
+            "blocker_unresolved_at_apply",
+            candidate=recheck_candidate,
+            expected_evidence_hash=expected_evidence_hash,
+            declared_blockers=declared.refs,
+            blocker_resolutions=resolutions,
+        )
     if _non_dependency_hold_present(recheck_candidate.labels):
         # A non-dependency hold label appeared since evidence was computed:
         # the mutation target is stale. Re-evaluate on the next run rather
         # than partially applying against changed state.
-        return {"applied": False, "warning": "stale_mutation_target"}
+        return _stale_apply_refusal(
+            "non_dependency_hold_present_at_apply",
+            candidate=recheck_candidate,
+            expected_evidence_hash=expected_evidence_hash,
+            declared_blockers=declared.refs,
+            blocker_resolutions=resolutions,
+        )
+
+    recheck_evidence_hash = _evidence_hash(
+        candidate_repo=recheck_candidate.repo,
+        candidate_number=recheck_candidate.number,
+        labels=recheck_candidate.labels,
+        resolutions=resolutions,
+    )
+    if recheck_evidence_hash != expected_evidence_hash:
+        return _stale_apply_refusal(
+            "evidence_changed_at_apply",
+            candidate=recheck_candidate,
+            expected_evidence_hash=expected_evidence_hash,
+            actual_evidence_hash=recheck_evidence_hash,
+            declared_blockers=declared.refs,
+            blocker_resolutions=resolutions,
+        )
     current = {_label_key(label) for label in recheck_candidate.labels}
 
     removed: list[str] = []
@@ -623,6 +689,41 @@ def _apply_unlock(
     if errors:
         return {"applied": False, "removed": removed, "warning": f"remove_failed:{';'.join(errors)}"}
     return {"applied": True, "removed": removed}
+
+
+def _stale_apply_refusal(
+    reason: str,
+    *,
+    candidate: forge_triage.IssueCandidate,
+    expected_evidence_hash: str,
+    actual_evidence_hash: str | None = None,
+    declared_blockers: Sequence[BlockerRef] = (),
+    blocker_resolutions: Sequence[BlockerResolution] = (),
+    problems: Sequence[str] = (),
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "candidate": {
+            "repo": candidate.repo,
+            "number": candidate.number,
+            "state": candidate.state,
+            "labels": list(candidate.labels),
+        },
+        "expected_evidence_hash": expected_evidence_hash,
+    }
+    if actual_evidence_hash is not None:
+        evidence["actual_evidence_hash"] = actual_evidence_hash
+    if declared_blockers:
+        evidence["declared_blockers"] = [ref.to_dict() for ref in declared_blockers]
+    if blocker_resolutions:
+        evidence["blocker_resolutions"] = [resolution.to_dict() for resolution in blocker_resolutions]
+    if problems:
+        evidence["problems"] = list(problems)
+    return {
+        "applied": False,
+        "warning": "stale_mutation_target",
+        "refusal_reason": reason,
+        "refusal_evidence": evidence,
+    }
 
 
 def _remove_issue_label(
@@ -674,6 +775,25 @@ def evaluate_pr_merge(
         "warnings": [],
     }
 
+    if not _cross_repo_token_present():
+        result.update(
+            {
+                "status": "refused",
+                "refusal_reason": "cross_repo_token_absent",
+                "credential_evidence": {
+                    "required_env": "CE_CROSS_REPO_TOKEN",
+                    "present": False,
+                },
+                "search_ok": False,
+                "candidate_count": 0,
+                "proposal_count": 0,
+                "proposals": [],
+            }
+        )
+        result["warnings"].append("cross_repo_token_absent")
+        write_audit_record(audit_root, result, evaluated_at=evaluated_at)
+        return result
+
     raw_candidates, search_ok, search_warning = search_dependency_candidates(
         merged, search_repo=search_repo, gh_runner=runner
     )
@@ -681,6 +801,9 @@ def evaluate_pr_merge(
     if not search_ok:
         result["status"] = "refused"
         result["refusal_reason"] = "search_inconclusive"
+        result["candidate_count"] = 0
+        result["proposal_count"] = 0
+        result["proposals"] = []
         result["warnings"].append(search_warning or "search_inconclusive")
         write_audit_record(audit_root, result, evaluated_at=evaluated_at)
         return result
@@ -703,6 +826,10 @@ def evaluate_pr_merge(
     result["status"] = "ok"
     write_audit_record(audit_root, result, evaluated_at=evaluated_at)
     return result
+
+
+def _cross_repo_token_present() -> bool:
+    return bool(os.environ.get("CE_CROSS_REPO_TOKEN", "").strip())
 
 
 def utc_now_iso() -> str:

@@ -28,12 +28,6 @@ on:
   pull_request:
     types: [closed]
   workflow_dispatch:
-    inputs:
-      apply:
-        description: "Reserved for future manual live-mode testing; this slice always runs SHADOW regardless of this input."
-        type: boolean
-        default: false
-        required: false
 
 concurrency:
   group: ce-dependency-unlock-${{ github.event.pull_request.number }}

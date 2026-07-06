@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from creator_engine_validator import dependency_unlock as du
 
 MERGED = du.MergedItem(
@@ -11,6 +13,11 @@ MERGED = du.MergedItem(
     merge_sha="abc123def",
     merged_at="2026-07-05T00:00:00Z",
 )
+
+
+@pytest.fixture(autouse=True)
+def _dependency_unlock_token(monkeypatch):
+    monkeypatch.setenv("CE_CROSS_REPO_TOKEN", "test-token")
 
 
 def _issue(
@@ -91,12 +98,22 @@ class FakeGhRunner:
 
         if "/issues/" in path and "/labels" not in path and method == "GET":
             key = self._repo_number(path, "issues")
-            payload = self.issues.get(key)
+            payload = self._next_payload(self.issues.get(key))
             if payload is None:
                 return subprocess.CompletedProcess(argv, 1, stdout="", stderr="not found")
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
 
         return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+
+    @staticmethod
+    def _next_payload(payload):
+        if isinstance(payload, list):
+            if len(payload) > 1:
+                return payload.pop(0)
+            if payload:
+                return payload[0]
+            return None
+        return payload
 
     @staticmethod
     def _method(argv: list[str]) -> str:
@@ -203,6 +220,33 @@ def test_evaluate_pr_merge_refuses_when_search_inconclusive():
     assert result["refusal_reason"] == "search_inconclusive"
     assert result.get("proposals", []) == []
     assert runner.write_calls == []
+
+
+def test_evaluate_pr_merge_refuses_when_cross_repo_token_absent(monkeypatch):
+    monkeypatch.delenv("CE_CROSS_REPO_TOKEN", raising=False)
+    issue = _issue(290, labels=["blocked:creator-engine/creator-engine#900"])
+    runner = FakeGhRunner(search_issues=[issue], issues={("creator-engine/ce-ops", 290): issue})
+
+    result = du.evaluate_pr_merge(MERGED, gh_runner=runner, now="2026-07-05T00:00:00Z")
+
+    assert result["status"] == "refused"
+    assert result["refusal_reason"] == "cross_repo_token_absent"
+    assert result["credential_evidence"] == {"required_env": "CE_CROSS_REPO_TOKEN", "present": False}
+    assert result["proposal_count"] == 0
+    assert runner.calls == []
+
+
+def test_gh_api_oserror_refuses_fail_closed_not_crash():
+    def missing_gh(_argv, _input_text=None):
+        raise FileNotFoundError("gh")
+
+    result = du.evaluate_pr_merge(MERGED, gh_runner=missing_gh, now="2026-07-05T00:00:00Z")
+
+    assert result["status"] == "refused"
+    assert result["refusal_reason"] == "search_inconclusive"
+    assert result["proposal_count"] == 0
+    assert result.get("proposals", []) == []
+    assert any("search_failed:gh" in warning for warning in result["warnings"])
 
 
 # ---------------------------------------------------------------------------
@@ -346,13 +390,24 @@ def test_live_mode_removes_resolved_dependency_hold_label():
     assert any(method == "DELETE" for method, _ in runner.write_calls)
 
 
-def test_apply_unlock_label_already_absent_is_success_noop():
+def test_apply_unlock_refuses_when_label_absent_between_evidence_and_apply():
     repo = "creator-engine/ce-ops"
     label = "blocked:creator-engine/creator-engine#900"
     already_clean = _issue(160, labels=[])
     runner = FakeGhRunner(issues={(repo, 160): already_clean})
-    outcome = du._apply_unlock(repo=repo, number=160, labels_to_remove=(label,), gh_runner=runner)
-    assert outcome == {"applied": True, "removed": [label]}
+    outcome = du._apply_unlock(
+        repo=repo,
+        number=160,
+        labels_to_remove=(label,),
+        gh_runner=runner,
+        merged=MERGED,
+        expected_blocker_refs=(MERGED.ref,),
+        expected_evidence_hash="previous-evidence",
+    )
+    assert outcome["applied"] is False
+    assert outcome["warning"] == "stale_mutation_target"
+    assert outcome["refusal_reason"] == "declared_blockers_changed_at_apply"
+    assert "refusal_evidence" in outcome
     assert runner.write_calls == []
 
 
@@ -361,8 +416,72 @@ def test_apply_unlock_aborts_when_non_dependency_hold_appeared():
     label = "blocked:creator-engine/creator-engine#900"
     stale = _issue(161, labels=[label, "hold"])
     runner = FakeGhRunner(issues={(repo, 161): stale})
-    outcome = du._apply_unlock(repo=repo, number=161, labels_to_remove=(label,), gh_runner=runner)
-    assert outcome == {"applied": False, "warning": "stale_mutation_target"}
+    evidence_hash = du._evidence_hash(
+        candidate_repo=repo,
+        candidate_number=161,
+        labels=(label,),
+        resolutions=(du.resolve_blocker(MERGED.ref, merged=MERGED, gh_runner=runner),),
+    )
+    outcome = du._apply_unlock(
+        repo=repo,
+        number=161,
+        labels_to_remove=(label,),
+        gh_runner=runner,
+        merged=MERGED,
+        expected_blocker_refs=(MERGED.ref,),
+        expected_evidence_hash=evidence_hash,
+    )
+    assert outcome["applied"] is False
+    assert outcome["warning"] == "stale_mutation_target"
+    assert outcome["refusal_reason"] == "non_dependency_hold_present_at_apply"
+    assert "refusal_evidence" in outcome
+    assert runner.write_calls == []
+
+
+def test_apply_unlock_refuses_when_candidate_closed_between_evidence_and_apply():
+    repo = "creator-engine/ce-ops"
+    label = "blocked:creator-engine/creator-engine#900"
+    open_issue = _issue(162, labels=[label])
+    closed_issue = _issue(162, labels=[label], state="closed")
+    runner = FakeGhRunner(search_issues=[open_issue], issues={(repo, 162): [open_issue, closed_issue]})
+
+    result = du.evaluate_pr_merge(
+        MERGED, gh_runner=runner, run_mode="live", kill_switch=None, now="2026-07-05T00:00:00Z"
+    )
+
+    proposal = result["proposals"][0]
+    assert proposal["applied"] is False
+    assert proposal["warning"] == "stale_mutation_target"
+    assert proposal["refusal_reason"] == "candidate_not_open_at_apply"
+    assert proposal["refusal_evidence"]["candidate"]["state"] == "closed"
+    assert runner.write_calls == []
+
+
+def test_apply_unlock_refuses_when_blocker_reopened_between_evidence_and_apply():
+    repo = "creator-engine/ce-ops"
+    label_primary = "blocked:creator-engine/creator-engine#900"
+    label_secondary = "blocked:#999"
+    issue = _issue(163, labels=[label_primary, label_secondary])
+    runner = FakeGhRunner(
+        search_issues=[issue],
+        issues={
+            (repo, 163): issue,
+            (repo, 999): [
+                _issue(999, state="closed", extra={"state_reason": "completed"}),
+                _issue(999, state="open"),
+            ],
+        },
+    )
+
+    result = du.evaluate_pr_merge(
+        MERGED, gh_runner=runner, run_mode="live", kill_switch=None, now="2026-07-05T00:00:00Z"
+    )
+
+    proposal = result["proposals"][0]
+    assert proposal["applied"] is False
+    assert proposal["warning"] == "stale_mutation_target"
+    assert proposal["refusal_reason"] == "blocker_unresolved_at_apply"
+    assert proposal["refusal_evidence"]["blocker_resolutions"][1]["state"] == "open"
     assert runner.write_calls == []
 
 
