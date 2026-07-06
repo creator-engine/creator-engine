@@ -62,7 +62,7 @@ As of June 25, 2026:
   secret-identity) are in active development at varying maturity. The
   `LocalSecretIdentityBackend` covers offline development without any external
   secret store.
-- The package artifacts are at `creator-engine-validator` version `0.3.0`. There
+- The package artifacts are at `creator-engine-validator` version `0.3.2`. There
   is no public product tag or GitHub release yet; release publication is a
   separate governed workstream. See
   [`docs/delivery/VERSIONING_AND_RELEASE_POLICY.md`](./docs/delivery/VERSIONING_AND_RELEASE_POLICY.md).
@@ -221,7 +221,7 @@ space if needed.
    The script fetches the signed agent-native spec, verifies it against the
    pinned `ce-root-v1` OpenSSH trust root, verifies the wheelhouse manifest and
    every artifact hash, obtains Python 3.14 through the pinned `uv` artifact if
-   needed, installs `creator-engine-validator==0.3.0` offline, proves `ce`,
+   needed, installs `creator-engine-validator==0.3.2` offline, proves `ce`,
    and runs authenticated inventory. This E1 bootstrap does **not** run sudo,
    automate the GitHub App click, mutate branch protection, or create/adopt a
    project. A successful E1 run is inventory-only; a full governed seat still
