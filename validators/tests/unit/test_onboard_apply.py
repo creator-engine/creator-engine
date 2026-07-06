@@ -557,10 +557,11 @@ def test_runtime_posture_emits_valid_default_docker_runtime_policy(tmp_path):
     assert record["kind"] == ce_runtime_policy.KIND_VALUE
     assert record["isolation_backend"] == "docker"
     assert record["role"] == "controller"
-    assert record["image_ref"] == {
-        "name": onboard_apply.CANONICAL_SEAT_IMAGE_NAME,
-        "sha": onboard_apply.CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA,
-    }
+    # Derive the expected image ref from the same function the production code
+    # uses (which in turn reads surfaces/manifest.yaml as SSOT).  This ensures
+    # that future digest bumps in the manifest automatically track here without
+    # requiring a separate test-literal update.
+    assert record["image_ref"] == onboard_apply._canonical_seat_image_ref()
     mounts = record["mount_manifest"]
     assert mounts[0]["path"] == str((tmp_path / "workspaces").resolve())
     assert mounts[0]["mode"] == "rw"

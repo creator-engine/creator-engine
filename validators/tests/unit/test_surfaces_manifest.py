@@ -386,14 +386,29 @@ def test_consistent_manifest_mixed_sha256_digest_passes(tmp_path: Path):
     assert result.ok, [error.format() for error in result.errors]
 
 
-def test_consistent_manifest_allowlisted_unset_digest_passes(tmp_path: Path):
+_TEST_UNSET_DIGEST_ALLOWLIST = frozenset(
+    {
+        (
+            "test-allowlisted-image",
+            "UNSET",
+            "ghcr.io/creator-engine/creator-engine/test-allowlisted-image",
+            "creator-engine image",
+            "manifest-list digest required before tenant launch use; UNSET until published",
+            "2026-07-05",
+        )
+    }
+)
+
+
+def test_consistent_manifest_allowlisted_unset_digest_passes(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(chk, "UNSET_DIGEST_ALLOWLIST", _TEST_UNSET_DIGEST_ALLOWLIST)
     doc = _consistent_doc()
     doc["surfaces"].append(  # type: ignore[union-attr]
         {
-            "name": "CE seat image",
+            "name": "test-allowlisted-image",
             "version": "UNSET",
             "commit_or_digest": "UNSET",
-            "source": "ghcr.io/creator-engine/creator-engine/ce-seat",
+            "source": "ghcr.io/creator-engine/creator-engine/test-allowlisted-image",
             "custody": "creator-engine image",
             "update_policy": "manifest-list digest required before tenant launch use; UNSET until published",
             "last_evaluated": "2026-07-05",
@@ -406,14 +421,15 @@ def test_consistent_manifest_allowlisted_unset_digest_passes(tmp_path: Path):
     assert result.ok, [error.format() for error in result.errors]
 
 
-def test_consistent_manifest_allowlisted_unset_digest_ratchet_only_shrinks(tmp_path: Path):
+def test_consistent_manifest_allowlisted_unset_digest_ratchet_only_shrinks(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(chk, "UNSET_DIGEST_ALLOWLIST", _TEST_UNSET_DIGEST_ALLOWLIST)
     doc = _consistent_doc()
     doc["surfaces"].append(  # type: ignore[union-attr]
         {
-            "name": "CE seat image",
+            "name": "test-allowlisted-image",
             "version": "UNSET",
             "commit_or_digest": "e" * 64,
-            "source": "ghcr.io/creator-engine/creator-engine/ce-seat",
+            "source": "ghcr.io/creator-engine/creator-engine/test-allowlisted-image",
             "custody": "creator-engine image",
             "update_policy": "manifest-list digest required before tenant launch use; UNSET until published",
             "last_evaluated": "2026-07-05",
@@ -424,7 +440,7 @@ def test_consistent_manifest_allowlisted_unset_digest_ratchet_only_shrinks(tmp_p
     result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
 
     assert chk.CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST in _codes(result)
-    assert any("CE seat image.commit_or_digest" in error.path for error in result.errors)
+    assert any("test-allowlisted-image.commit_or_digest" in error.path for error in result.errors)
 
 
 def test_consistent_manifest_ce_alias_does_not_substring_match_from_token(tmp_path: Path):

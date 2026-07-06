@@ -24,11 +24,11 @@ surfaces:
     last_evaluated: "2026-06-26"
 
   - name: CE seat image
-    version: "UNSET"
-    commit_or_digest: UNSET
+    version: "0.3.2"
+    commit_or_digest: sha256:1955e3418f1913bb7a1f73fd259bf4baba6ccf98e1a3428a59ef9f75a03b5d43
     source: ghcr.io/creator-engine/creator-engine/ce-seat
     custody: creator-engine image
-    update_policy: manifest-list digest required before tenant launch use; UNSET until published
+    update_policy: manifest-list digest required before tenant launch use
     last_evaluated: "2026-07-05"
 
   - name: herdr

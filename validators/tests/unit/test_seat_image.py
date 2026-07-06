@@ -166,17 +166,19 @@ def test_seat_readme_documents_contract_and_deliberate_exclusions() -> None:
     assert "ce-ops" not in text.lower()
 
 
-def test_surfaces_manifest_records_unpublished_seat_image_placeholder() -> None:
+def test_surfaces_manifest_records_pinned_seat_image_digest() -> None:
     doc = _surfaces()
     seat = next(
         surface for surface in doc["surfaces"] if surface["name"] == "CE seat image"
     )
 
-    assert seat["version"] == "UNSET"
-    assert seat["commit_or_digest"] == "UNSET"
+    assert seat["version"] == "0.3.2"
+    assert seat["commit_or_digest"] == (
+        "sha256:1955e3418f1913bb7a1f73fd259bf4baba6ccf98e1a3428a59ef9f75a03b5d43"
+    )
     assert seat["source"] == "ghcr.io/creator-engine/creator-engine/ce-seat"
     assert "manifest-list digest" in seat["update_policy"]
-    assert "UNSET until published" in seat["update_policy"]
+    assert "UNSET until published" not in seat["update_policy"]
 
 
 def test_surfaces_manifest_tracks_claude_code_cli_pin() -> None:
