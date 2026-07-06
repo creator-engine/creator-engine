@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -101,11 +102,17 @@ def _default_lock_path() -> Path:
 
 
 class SeatCredentialStore:
-    """In-memory active credential registry protected by a host flock."""
+    """In-memory active credential registry protected by a host flock.
+
+    The registry is deliberately process-local. Cross-process single-active behavior depends on
+    the deployment's one live broker process per seat/socket guard, while the flock serializes
+    concurrent request handling inside that process.
+    """
 
     def __init__(self, lock_path: str | Path | None = None):
         self.lock_path = Path(lock_path) if lock_path is not None else _default_lock_path()
         self._active: dict[tuple[str, str], _ActiveCredential] = {}
+        self._timers: dict[tuple[str, str], threading.Timer] = {}
 
     def _locked(self):
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +132,7 @@ class SeatCredentialStore:
             active = self._active.pop((seat_id, credential_class), None)
             if active is None:
                 return False
+            self._cancel_timer((seat_id, credential_class))
             _best_effort_revoke(active)
             return True
 
@@ -140,10 +148,13 @@ class SeatCredentialStore:
             self._expire_locked(now=now, audit=audit)
             previous = self._active.pop((active.seat_id, active.credential_class), None)
             if previous is not None:
+                self._cancel_timer((previous.seat_id, previous.credential_class))
                 _best_effort_revoke(previous)
                 audit("replace", previous.credential_ref, "single_active_replaced")
             minted = mint()
-            self._active[(minted.seat_id, minted.credential_class)] = minted
+            key = (minted.seat_id, minted.credential_class)
+            self._active[key] = minted
+            self._schedule_expiry(key, minted, audit=audit, now=now)
             return minted
 
     def _expire_locked(
@@ -155,8 +166,43 @@ class SeatCredentialStore:
         expired = [key for key, active in self._active.items() if active.expires_at <= now]
         for key in expired:
             active = self._active.pop(key)
+            self._cancel_timer(key)
             _best_effort_revoke(active)
             audit("expire", active.credential_ref, "ttl_expired")
+
+    def _schedule_expiry(
+        self,
+        key: tuple[str, str],
+        active: _ActiveCredential,
+        *,
+        audit: Callable[[str, str | None, str | None], None],
+        now: datetime,
+    ) -> None:
+        delay = max(0.0, (active.expires_at - now).total_seconds())
+        timer = threading.Timer(delay, self._expire_one, args=(key, active.credential_ref, audit))
+        timer.daemon = True
+        self._timers[key] = timer
+        timer.start()
+
+    def _expire_one(
+        self,
+        key: tuple[str, str],
+        credential_ref: str,
+        audit: Callable[[str, str | None, str | None], None],
+    ) -> None:
+        with self._locked():
+            active = self._active.get(key)
+            if active is None or active.credential_ref != credential_ref:
+                return
+            self._active.pop(key, None)
+            self._timers.pop(key, None)
+            _best_effort_revoke(active)
+            audit("expire", active.credential_ref, "ttl_expired")
+
+    def _cancel_timer(self, key: tuple[str, str]) -> None:
+        timer = self._timers.pop(key, None)
+        if timer is not None:
+            timer.cancel()
 
 
 class _Flock:
@@ -532,4 +578,3 @@ def revoke_seat_credential(
         "revoked": True,
         "audit_record": audit_record,
     }
-

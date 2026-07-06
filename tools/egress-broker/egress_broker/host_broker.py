@@ -304,7 +304,7 @@ def serve_self_push_unix_socket(
     mode: int = 0o600,
     expected_peer_uids: frozenset[int] | None = None,
     expected_peer_gids: frozenset[int] | None = None,
-    reject_unexpected_peer: bool = False,
+    reject_unexpected_peer: bool = True,
     activated_socket: socket.socket | None = None,
     courier_fn: CourierFn = contained_seat_self_push,
     **host_courier_options: Any,
@@ -317,7 +317,8 @@ def serve_self_push_unix_socket(
     request per connection. When systemd socket activation supplies ``activated_socket``, the
     broker uses that already-listening socket without touching the path, preserving the socket
     inode across daemon restarts. ``once=True`` is a CI/test seam; the live daemon leaves it
-    false under a supervisor.
+    false under a supervisor. Configured peer UID/GID expectations are fail-closed by default;
+    unexpected peers are rejected before request parsing.
     """
     path = Path(socket_path)
     if activated_socket is None:
@@ -414,6 +415,8 @@ def _audit_self_push_peercred(
             origin = "unexpected"
             decision = "reject"
         else:
+            # Compatibility-only diagnostic mode. Live configured peer profiles should keep
+            # the default reject behavior above.
             origin = "unexpected"
             decision = "flag"
 
@@ -433,28 +436,25 @@ def _audit_self_push_peercred(
 
 def _contained_secret_findings(request: Mapping[str, Any]) -> tuple[str, ...]:
     contained = request.get("contained") or {}
-    findings: list[str] = []
+    findings: set[str] = set()
     if isinstance(contained, Mapping):
-        _scan(contained.get("env") or {}, "contained.env", findings, keys_are_secret=True)
-        _scan(contained.get("argv") or (), "contained.argv", findings)
-        _scan(contained.get("fs") or {}, "contained.fs", findings, keys_are_secret=True)
-        _scan(contained.get("logs") or (), "contained.logs", findings)
+        _scan(contained, "contained", findings, keys_are_secret=True)
     return tuple(sorted(findings))
 
 
-def _scan(obj: object, path: str, findings: list[str], *, keys_are_secret: bool = False) -> None:
+def _scan(obj: object, path: str, findings: set[str], *, keys_are_secret: bool = False) -> None:
     if isinstance(obj, Mapping):
         for key, value in obj.items():
             key_s = str(key)
             child = f"{path}.{key_s}"
             if keys_are_secret and _SECRET_KEY_RE.search(key_s):
-                findings.append(child)
+                findings.add(child)
             _scan(value, child, findings)
     elif isinstance(obj, (list, tuple)):
         for idx, value in enumerate(obj):
             _scan(value, f"{path}[{idx}]", findings)
     elif isinstance(obj, str) and _TOKEN_VALUE_RE.search(obj):
-        findings.append(path)
+        findings.add(path)
 
 
 def _assert_response_secret_free(response: dict[str, Any]) -> dict[str, Any]:

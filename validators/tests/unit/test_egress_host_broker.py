@@ -528,8 +528,10 @@ def test_serve_unix_socket_rejects_unexpected_peercred_when_enabled(tmp_path):
     assert peercred["decision"] == "reject"
 
 
-def test_serve_unix_socket_flags_unexpected_peercred_by_default(tmp_path):
-    socket_path = tmp_path / "peercred-flag.sock"
+def test_serve_unix_socket_rejects_unexpected_peercred_by_default_when_expected_configured(
+    tmp_path,
+):
+    socket_path = tmp_path / "peercred-default-reject.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
@@ -543,16 +545,16 @@ def test_serve_unix_socket_flags_unexpected_peercred_by_default(tmp_path):
         expected_peer_uids=frozenset({os.getuid() + 1}),
     )
 
-    response = _send_socket_request(socket_path)
+    response = _send_socket_request(socket_path, send_request=False)
     server_thread.join(timeout=2)
 
-    assert response["status"] == 200
-    assert courier_calls == ["ce242-live-self-push"]
+    assert response == {"status": 403, "reason": "peer_credential_unexpected"}
+    assert courier_calls == []
     assert server_exceptions == []
     assert not server_thread.is_alive()
     peercred = _audit_records(tmp_path)[0]
     assert peercred["origin"] == "unexpected"
-    assert peercred["decision"] == "flag"
+    assert peercred["decision"] == "reject"
 
 
 def test_systemd_activation_helper_uses_fromfd_and_unsets_environment(tmp_path, monkeypatch):

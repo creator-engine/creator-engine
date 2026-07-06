@@ -6,6 +6,7 @@ mint requests serialize through the broker flock.
 """
 
 import json
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -42,10 +43,10 @@ def _config(tmp_path):
                     "installation_id": 242,
                     "allowed_credential_classes": ["model-api", "forge-scoped"],
                 },
-                "dev-4": {
-                    "app_id": "4085526",
-                    "app_owner": "cedev4vps-coder",
-                    "pem_path": "/dev/shm/ce-dev4/ce-forge-dev4.pem",
+                "dev-other": {
+                    "app_id": "98765",
+                    "app_owner": "fixture-seat-owner",
+                    "pem_path": "/dev/shm/ce-fixture/ce-forge-fixture.pem",
                     "installation_id": 242,
                     "allowed_credential_classes": [],
                 },
@@ -73,9 +74,19 @@ def _model_supplier(now, calls):
     return mint
 
 
-def test_mint_model_api_delivers_only_on_socket_not_env_argv_or_docker(tmp_path):
+def test_mint_model_api_delivers_only_on_socket_not_env_argv_subprocess_or_files(tmp_path):
     now_value = datetime(2026, 7, 6, 17, 0, tzinfo=timezone.utc)
     calls = []
+    env_before = dict(os.environ)
+    courier_calls = []
+
+    def forbidden_spawn(*args, **kwargs):  # pragma: no cover - would fail the test if invoked.
+        raise AssertionError(f"credential delivery must not invoke subprocess: {args!r} {kwargs!r}")
+
+    def forbidden_courier(*args, **kwargs):  # pragma: no cover - would fail the test if invoked.
+        courier_calls.append((args, kwargs))
+        raise AssertionError("credential mint must not route through file/subprocess courier")
+
     request = {
         "verb": "mint-seat-credential",
         "seat_id": "dev-3",
@@ -83,6 +94,8 @@ def test_mint_model_api_delivers_only_on_socket_not_env_argv_or_docker(tmp_path)
         "contained": {
             "env": {"CE_SEAT_ID": "dev-3"},
             "argv": ["ce", "credential", "mint"],
+            "subprocess": [{"argv": ["git", "status"], "env": {"CE_SEAT_ID": "dev-3"}}],
+            "files": {"/workspace/value-free.txt": "no credential here"},
             "docker": ["docker", "run", "creator-engine-seat"],
         },
     }
@@ -92,8 +105,10 @@ def test_mint_model_api_delivers_only_on_socket_not_env_argv_or_docker(tmp_path)
         config=_config(tmp_path),
         broker_seat_id="dev-3",
         host_repo_path="/host/workspace",
+        courier_fn=forbidden_courier,
         credential_store=SeatCredentialStore(tmp_path / "jit.lock"),
         model_mint_fn=_model_supplier(lambda: now_value, calls),
+        gh_spawn=forbidden_spawn,
         now=lambda: now_value,
     )
 
@@ -102,6 +117,8 @@ def test_mint_model_api_delivers_only_on_socket_not_env_argv_or_docker(tmp_path)
     assert response["credential"] == _MODEL_SECRET
     assert response["delivery"] == "broker-socket-stream"
     assert calls == [("dev-3", 300)]
+    assert courier_calls == []
+    assert dict(os.environ) == env_before
 
     contained_surface = json.dumps(request["contained"], sort_keys=True)
     assert _MODEL_SECRET not in contained_surface
@@ -109,6 +126,9 @@ def test_mint_model_api_delivers_only_on_socket_not_env_argv_or_docker(tmp_path)
     assert "docker run -e" not in contained_surface
     assert "docker exec --env" not in contained_surface
     assert _MODEL_SECRET not in (tmp_path / "audit.jsonl").read_text(encoding="utf-8")
+    for path in tmp_path.rglob("*"):
+        if path.is_file():
+            assert _MODEL_SECRET not in path.read_text(encoding="utf-8", errors="ignore")
 
 
 def test_unknown_class_refused_and_audited(tmp_path):
@@ -143,7 +163,7 @@ def test_credential_verb_refuses_wrong_bound_seat_and_request_token_field(tmp_pa
             "credential_class": "model-api",
         },
         config=_config(tmp_path),
-        broker_seat_id="dev-4",
+        broker_seat_id="dev-other",
         host_repo_path="/host/workspace",
         credential_store=store,
         model_mint_fn=lambda seat_id, ttl: ModelCredential(_MODEL_SECRET, "", "unused"),
@@ -215,6 +235,85 @@ def test_ttl_expiry_revokes_and_prevents_late_explicit_revoke(tmp_path):
     assert revoked == ["dev-3/model-api/short"]
     records = _records(tmp_path)
     assert any(rec["action"] == "expire" and rec["reason"] == "ttl_expired" for rec in records)
+
+
+def test_ttl_active_sweep_revokes_without_followup_request(tmp_path):
+    clock = datetime(2026, 7, 6, 17, 0, tzinfo=timezone.utc)
+    revoked = []
+    revoked_event = threading.Event()
+
+    def mint_model(seat_id, ttl_seconds):
+        return ModelCredential(
+            value=_MODEL_SECRET,
+            expires_at=(clock + timedelta(seconds=0.05)).isoformat().replace("+00:00", "Z"),
+            credential_ref=f"{seat_id}/model-api/active-sweep",
+        )
+
+    def revoke_model(material):
+        revoked.append(material.credential_ref)
+        revoked_event.set()
+        return True
+
+    response = handle_self_push_request(
+        {"verb": "mint-seat-credential", "seat_id": "dev-3", "credential_class": "model-api"},
+        config=_config(tmp_path),
+        broker_seat_id="dev-3",
+        host_repo_path="/host/workspace",
+        credential_store=SeatCredentialStore(tmp_path / "jit.lock"),
+        model_mint_fn=mint_model,
+        revoke_fn=revoke_model,
+        now=lambda: clock,
+    )
+
+    assert response["status"] == 200
+    assert revoked_event.wait(timeout=1.0)
+    assert revoked == ["dev-3/model-api/active-sweep"]
+    deadline = time.monotonic() + 1.0
+    records = []
+    while time.monotonic() < deadline:
+        records = _records(tmp_path)
+        if any(
+            rec["action"] == "expire"
+            and rec["reason"] == "ttl_expired"
+            and rec["ref"] == "dev-3/model-api/active-sweep"
+            for rec in records
+        ):
+            break
+        time.sleep(0.01)
+    assert any(
+        rec["action"] == "expire"
+        and rec["reason"] == "ttl_expired"
+        and rec["ref"] == "dev-3/model-api/active-sweep"
+        for rec in records
+    )
+
+
+def test_contained_secret_scan_recurses_into_docker_subtree(tmp_path):
+    response = handle_self_push_request(
+        {
+            "verb": "mint-seat-credential",
+            "seat_id": "dev-3",
+            "credential_class": "model-api",
+            "contained": {
+                "docker": {
+                    "create": {
+                        "env": {
+                            "GITHUB_TOKEN": _FORGE_SECRET,
+                        }
+                    }
+                }
+            },
+        },
+        config=_config(tmp_path),
+        broker_seat_id="dev-3",
+        host_repo_path="/host/workspace",
+        credential_store=SeatCredentialStore(tmp_path / "jit.lock"),
+        model_mint_fn=lambda seat_id, ttl: ModelCredential(_MODEL_SECRET, "", "unused"),
+    )
+
+    assert response["status"] == 403
+    assert response["reason"] == "contained_credential_material"
+    assert "contained.docker.create.env.GITHUB_TOKEN" in response["findings"]
 
 
 def test_concurrent_mint_uses_flock_and_keeps_single_active(tmp_path):

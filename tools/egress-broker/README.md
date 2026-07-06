@@ -82,6 +82,12 @@ It rejects request fields such as `command`, `remote`, `refspec`, `token`, `pem_
 and `config_path`; a request `apply` field is ignored. The seat cannot select a command,
 target remote, credential, host config, or dry-run/apply mode.
 
+That one-socket-per-seat binding is load-bearing for JIT credentials too: the active credential
+registry is process-local, so cross-process single-active behavior assumes exactly one live
+broker process owns the seat socket. Deployments must not start a second broker against the
+same seat/socket path; the bind-time existing-socket refusal and systemd single socket unit are
+part of the safety boundary.
+
 Host seam spec:
 
 - Transport: host-owned AF_UNIX stream socket, one JSON line per connection.
@@ -163,7 +169,10 @@ Credential classes are fail-closed and per-seat allowlisted with
 delivers the credential value only on the broker Unix stream; the broker does not create a
 container env, argv, Docker `-e`, Docker exec env, or persisted container-config delivery
 path. Every mint/refusal/revoke appends a secret-free audit line, and the broker keeps only
-one active credential per seat/class, with TTL expiry and explicit revoke support.
+one active credential per seat/class in the live broker process, with active TTL sweep,
+lazy expiry on subsequent requests, and explicit revoke support. For `forge-scoped`, the
+GitHub installation token lifetime remains about one hour at the API unless upstream revocation
+succeeds; the 300s TTL is the broker's bookkeeping and active-revocation deadline.
 
 ## Contained-seat self-review broker (ce-ops#243)
 
