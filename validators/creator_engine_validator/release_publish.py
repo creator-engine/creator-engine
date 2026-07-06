@@ -38,6 +38,11 @@ SHA256SUMS = "SHA256SUMS"
 INSTALL_SH = "install.sh"
 
 SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+PROSE_SEMVER_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])"
+    r"([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z]+(?:[0-9A-Za-z.-]*[0-9A-Za-z])?)?)"
+    r"(?=$|[^A-Za-z0-9_.-]|\.(?=\s|$))"
+)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -318,6 +323,33 @@ def _assert_anchor_recipe_match(text: str, signing_key_id: str) -> None:
         )
 
 
+def _assert_release_prose_versions_match(text: str, version: str) -> None:
+    in_comment = False
+    in_fence = False
+    for lineno, raw_line in enumerate(text.splitlines(), start=1):
+        stripped = raw_line.strip()
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if stripped.startswith("<!--"):
+            if "-->" not in stripped:
+                in_comment = True
+            continue
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        for match in PROSE_SEMVER_RE.finditer(raw_line):
+            found = match.group(1)
+            if found != version:
+                raise ReleasePublishError(
+                    "stale prose release version "
+                    f"{found!r} on line {lineno} does not match target release version {version!r}"
+                )
+
+
 def _replace_field(text: str, key: str, value: str) -> str:
     pattern = re.compile(rf"^(  {re.escape(key)}: ).*$", flags=re.MULTILINE)
     replaced, count = pattern.subn(rf"\g<1>{value}", text)
@@ -411,6 +443,7 @@ def _render_placeholder_spec(
     # must all agree before any canonical bytes (or artifact) are produced.
     _assert_anchor_recipe_match(text, signing_key_id)
     canonical = _canonical_install_spec(text)
+    _assert_release_prose_versions_match(canonical, version)
     canonical_sha = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     text = _replace_field(text, "value", PLACEHOLDER_SIGNATURE)
     text = _replace_field(text, "content_sha256", canonical_sha)
