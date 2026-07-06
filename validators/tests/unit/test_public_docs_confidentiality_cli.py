@@ -6,6 +6,7 @@ CI guard uses is exposed as ``scan-public-docs-confidentiality`` and runs in
 """
 from __future__ import annotations
 
+import io
 import subprocess
 from pathlib import Path
 
@@ -569,6 +570,40 @@ def test_push_guard_blocks_leaking_pre_receive_ref(tmp_path: Path):
     assert "docs/leak.md" in rendered
     assert "ce-ops#888" in rendered
     assert guard.REMINDER in rendered
+
+
+def test_push_guard_cli_passes_clean_pre_receive_stdin(
+    tmp_path: Path, monkeypatch, capsys
+):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
+    head = _commit(repo)
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(f"{guard.ZERO_OID} {head} refs/heads/feature\n")
+    )
+
+    rc = cli.main(["guard-public-docs-confidentiality-push", str(repo)])
+
+    assert rc == 0
+
+
+def test_push_guard_cli_blocks_leaking_pre_receive_stdin(
+    tmp_path: Path, monkeypatch, capsys
+):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#666.\n")
+    head = _commit(repo)
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(f"{guard.ZERO_OID} {head} refs/heads/feature\n")
+    )
+
+    rc = cli.main(["guard-public-docs-confidentiality-push", str(repo)])
+
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "docs/leak.md" in out
+    assert "ce-ops#666" in out
+    assert guard.REMINDER in out
 
 
 def test_push_guard_skips_pre_receive_zero_oid_deletion(tmp_path: Path):
