@@ -24,6 +24,7 @@ CODE_MISSING_SURFACE = "version_drift_missing_surface"
 CODE_VERSION_SOURCE = "version_drift_version_source"
 ANNOTATION = "ce-version-drift: allow-historical"
 SEMVER_RE = r"(?P<version>\d+\.\d+\.\d+)"
+SEMVER_LITERAL_RE = re.compile(r"\d+\.\d+\.\d+")
 
 
 @dataclass(frozen=True)
@@ -62,10 +63,15 @@ CE_IMAGE_VERSION_ARG = _pattern(
     "CE_IMAGE_VERSION default",
     rf"\bCE_IMAGE_VERSION={SEMVER_RE}\b",
 )
+DOWNLOADS_VERSION_URL = _pattern(
+    "current downloads URL",
+    rf"/downloads/{SEMVER_RE}/",
+)
 
 
 CURRENT_VERSION_SURFACES: tuple[CurrentVersionSurface, ...] = (
     CurrentVersionSurface("README.md", (PACKAGE_PIN, PACKAGE_VERSION_TEXT)),
+    CurrentVersionSurface("docs/llms.txt", (DOWNLOADS_VERSION_URL,)),
     CurrentVersionSurface("deploy/oci/README.md", (CE_VALIDATOR_IMAGE,)),
     CurrentVersionSurface("deploy/oci/build-image.sh", (CE_VALIDATOR_IMAGE,)),
     CurrentVersionSurface("deploy/daemons/Dockerfile", (CE_VALIDATOR_IMAGE,)),
@@ -74,6 +80,14 @@ CURRENT_VERSION_SURFACES: tuple[CurrentVersionSurface, ...] = (
     CurrentVersionSurface("deploy/runtime-image/Dockerfile", (CE_IMAGE_VERSION_ARG,)),
     CurrentVersionSurface("deploy/seat-image/Dockerfile", (CE_IMAGE_VERSION_ARG,)),
 )
+
+
+def _allowed_historical_versions(line: str) -> frozenset[str]:
+    marker_at = line.find(ANNOTATION)
+    if marker_at == -1:
+        return frozenset()
+    annotation_tail = line[marker_at + len(ANNOTATION) :]
+    return frozenset(SEMVER_LITERAL_RE.findall(annotation_tail))
 
 
 def _repo_root_for(path: Path) -> Path | None:
@@ -168,12 +182,13 @@ def evaluate(
             )
             continue
         for lineno, line in enumerate(lines, start=1):
-            if ANNOTATION in line:
-                continue
+            allowed_historical = _allowed_historical_versions(line)
             for pattern in surface.patterns:
                 for match in pattern.regex.finditer(line):
                     found = match.group("version")
                     if found == expected:
+                        continue
+                    if found in allowed_historical:
                         continue
                     errors.append(
                         make_error(

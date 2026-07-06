@@ -37,13 +37,45 @@ def test_historical_annotated_mention_passes(tmp_path: Path):
         tmp_path,
         line=(
             "Historical note: creator-engine-validator==0.3.1 was the prior "
-            f"release. <!-- {chk.ANNOTATION} -->"
+            f"release. <!-- {chk.ANNOTATION} 0.3.1 -->"
         ),
     )
 
     errors = chk.evaluate(tmp_path, surfaces=(_surface(),))
 
     assert errors == ()
+
+
+def test_allow_historical_without_matching_pin_fails_for_real_drift(tmp_path: Path):
+    _write_repo(
+        tmp_path,
+        line=(
+            "Install with `creator-engine-validator==0.3.1` for the current release. "
+            f"<!-- {chk.ANNOTATION} -->"
+        ),
+    )
+
+    errors = chk.evaluate(tmp_path, surfaces=(_surface(),))
+
+    assert len(errors) == 1
+    assert errors[0].code == chk.CODE_STALE
+    assert errors[0].path == "README.md:1"
+
+
+def test_allow_historical_wrong_pin_fails_for_real_drift(tmp_path: Path):
+    _write_repo(
+        tmp_path,
+        line=(
+            "Install with `creator-engine-validator==0.3.1` for the current release. "
+            f"<!-- {chk.ANNOTATION} 0.3.0 -->"
+        ),
+    )
+
+    errors = chk.evaluate(tmp_path, surfaces=(_surface(),))
+
+    assert len(errors) == 1
+    assert errors[0].code == chk.CODE_STALE
+    assert errors[0].path == "README.md:1"
 
 
 def test_current_version_claim_passes(tmp_path: Path):
@@ -55,6 +87,10 @@ def test_current_version_claim_passes(tmp_path: Path):
     errors = chk.evaluate(tmp_path, surfaces=(_surface(),))
 
     assert errors == ()
+
+
+def test_llms_txt_is_current_version_surface():
+    assert any(surface.path == "docs/llms.txt" for surface in chk.CURRENT_VERSION_SURFACES)
 
 
 def test_verify_version_drift_cli_returns_nonzero_for_stale_claim(tmp_path: Path, capsys):
