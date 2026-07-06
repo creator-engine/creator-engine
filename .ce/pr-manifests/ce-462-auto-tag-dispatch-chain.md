@@ -6,12 +6,13 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=3
+AUTHORIZED_PATHS_COUNT=4
 
-AUTHORIZED_PATHS_SHA256=9dc66a486c066b2c8c40093eeffe159f7ff19569698b589b4d5ead48ea1edf68
+AUTHORIZED_PATHS_SHA256=cd4102ddfab2bbbb45e8c8b6465364af7319c12d285fef76a8dbf12e1e889aa0
 
 ```text
 .ce/changelog/ce-462-auto-tag-dispatch-chain.md
 .ce/pr-manifests/ce-462-auto-tag-dispatch-chain.md
 .github/workflows/release-auto-tag.yml
+validators/tests/unit/test_release_auto_tag_workflow.py
 ```
