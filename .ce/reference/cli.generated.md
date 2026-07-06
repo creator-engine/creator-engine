@@ -1051,6 +1051,18 @@ Options:
 | `--playbooks-root`, `--root` | no |  | root used to resolve playbook ids (default: cwd) |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `posture`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--repo-root` | no |  | repo root to inspect (default: cwd) |
+| `--role` | no |  | override role for deterministic offline evidence (default: CE_* role env or unknown) |
+| `--harness` | no |  | override harness for deterministic offline evidence (default: CE_* harness env or claude) |
+| `--launch-mode` | no |  | override launch mode for deterministic offline evidence (default: CE_* launch env or derived) |
+| `--json` | no |  | emit machine-readable JSON |
+
 ### `pr`
 
 Positional arguments:

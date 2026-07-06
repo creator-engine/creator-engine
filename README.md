@@ -111,7 +111,7 @@ platform evolves:
   `ce launch`, `ce hud`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce dequeue`, `ce event`, `ce pcl`, `ce brain`, `ce orchestrator`, `ce connector`,
   `ce containment-probe`, `ce reviewer-triage`, `ce claim`, `ce pickup`,
-  `ce dispatch`, `ce playbook`, `ce surfaces`, `ce bootstrap`
+  `ce dispatch`, `ce playbook`, `ce surfaces`, `ce posture`, `ce bootstrap`
   (offline provisioning for a source-clone controller/seat venv),
   `ce init` (offline, idempotent CE-native project scaffolding for
   `.ce/` Scope templates, per-PR changelog fragments, path-manifest carriers,
@@ -150,7 +150,12 @@ platform evolves:
   seat's live PID with `ce containment-probe` semantics and reports
   `{seat, contained, backend, herdr_session, ring1}` as JSON or a table, failing
   closed for unprobeable seats and never deriving containment from config or
-  prose. `ce validate-pr` runs the governed PR preflight locally against the
+  prose. `ce posture` prints the read-only Controller posture banner as text or
+  `--json`; it reports role, harness, launch mode, Ring-0/Ring-1/Ring-2 status,
+  credential scrub posture, remote-control posture, approval-wall arming,
+  signing-deputy status, and the derived allowed posture without starting
+  daemons, signing, merging, changing settings, or performing takeover.
+  `ce validate-pr` runs the governed PR preflight locally against the
   committed `base..HEAD` state — the same gates CI enforces (check-examples,
   work-sizing, path-manifest, changelog, and the offline test suite) with a
   clean, scrubbed environment — so an author can confirm a PR is governance-valid

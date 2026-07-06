@@ -59,7 +59,7 @@ def test_as_built_ce_inventory_matches_expected():
         "orchestrator", "connector", "containment-probe", "reviewer-triage", "claim",
         "pickup", "dispatch", "playbook", "check", "doctor", "init", "launch", "hud",
         "verify-install", "update", "clean-main-install", "onboard", "bootstrap", "publish-branch", "harness-matrix",
-        "containment-status", "herdr", "validate-pr", "dequeue", "surfaces",
+        "containment-status", "posture", "herdr", "validate-pr", "dequeue", "surfaces",
         "automerge-decide", "automerge-status", "automerge-kill-switch",
         "ask", "support", "triage", "dependency-unlock",
         "seats", "fleet", "scope", "shape", "ratify", "drive", "collect", "pr",

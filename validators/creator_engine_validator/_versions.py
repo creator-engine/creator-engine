@@ -101,6 +101,10 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "integration_queue_dry_run",
         "packaging_runtime",
         "ce_provenance",
+        # ce-ops#478 Slice A: the read-only `ce posture` banner helper. Driven
+        # by ce_cli, reads v1 launch/hook posture and local value-free state
+        # only, imports no v3 runtime module, and mints no authority.
+        "controller_posture",
         # ce-ops#190: signed in-place `ce update` runtime. Driven by the v1
         # `ce` kernel; mirrors the installer trust path locally and imports no
         # v3 runtime module.

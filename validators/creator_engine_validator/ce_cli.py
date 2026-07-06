@@ -60,6 +60,7 @@ ce surfaces check-updates # read-only upstream version detection from surfaces/m
 ce surfaces fleet-rollout # seat-by-seat fleet rollout of updated surface versions
 ce init              # scaffold a CE-governed project with local templates
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
+ce posture          # print a deterministic read-only Controller posture banner
 ce validate-pr          # run local PR preflight against committed base..HEAD state
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
 ce automerge-status     # read dry-run automerge decision logs (read-only; no merge)
@@ -112,6 +113,7 @@ from . import (
     ce_onboard,
     ce_provenance,
     connector_runtime,
+    controller_posture,
     dependency_unlock,
     dispatch_plan,
     doctor_runtime,
@@ -1518,6 +1520,28 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="json_output",
         help="emit the machine-readable JSON fleet status",
     )
+
+    posture = groups.add_parser(
+        "posture",
+        help="print the read-only Controller posture banner",
+    )
+    posture.add_argument("--repo-root", default=".", help="repo root to inspect (default: cwd)")
+    posture.add_argument(
+        "--role",
+        default=None,
+        help="override role for deterministic offline evidence (default: CE_* role env or unknown)",
+    )
+    posture.add_argument(
+        "--harness",
+        default=None,
+        help="override harness for deterministic offline evidence (default: CE_* harness env or claude)",
+    )
+    posture.add_argument(
+        "--launch-mode",
+        default=None,
+        help="override launch mode for deterministic offline evidence (default: CE_* launch env or derived)",
+    )
+    posture.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # INTERNAL command (see INTERNAL_COMMAND_GROUPS): hidden from `ce --help` and
     # not on the public product surface yet. Graduates to a public product command
@@ -4069,6 +4093,21 @@ def _harness_matrix(args) -> int:
     return 0
 
 
+def _posture(args) -> int:
+    banner = controller_posture.collect_posture(
+        repo_root=args.repo_root,
+        environ=os.environ,
+        role=getattr(args, "role", None),
+        harness=getattr(args, "harness", None),
+        launch_mode=getattr(args, "launch_mode", None),
+    )
+    if getattr(args, "json_output", False):
+        print(controller_posture.render_json(banner), end="")
+    else:
+        print(controller_posture.render_text(banner), end="")
+    return 0
+
+
 def _launch(args, invoked_as: str = "launch") -> int:
     harness_args = None
     if args.harness == "claude":
@@ -5563,6 +5602,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _launch(args, invoked_as=args.group)
     if args.group == "harness-matrix":
         return _harness_matrix(args)
+    if args.group == "posture":
+        return _posture(args)
 
     parser.print_usage(sys.stderr)
     return 2
