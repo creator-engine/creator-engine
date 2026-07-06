@@ -1063,9 +1063,10 @@ def test_launch_refuses_missing_brain_ledger_before_spawn(tmp_path):
     repo.mkdir()
     adapter = FakeAdapter()
 
-    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused):
+    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused) as ei:
         launch_runtime.launch(harness="claude", backend="host", repo_root=repo, tmux_adapter=adapter)
 
+    assert "recovery: run `ce brain init` from the tenant repo root" in str(ei.value)
     assert adapter.spawned == []
     assert not (repo / ".ce" / "state" / "dispatches").exists()
 
@@ -1078,9 +1079,10 @@ def test_launch_refuses_tampered_brain_ledger_before_spawn(tmp_path):
     ledger.write_text(ledger.read_text(encoding="utf-8").replace("ready", "tampered"), encoding="utf-8")
     adapter = FakeAdapter()
 
-    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused):
+    with pytest.raises(launch_runtime.BrainBootstrapLaunchRefused) as ei:
         launch_runtime.launch(harness="claude", backend="host", repo_root=repo, tmux_adapter=adapter)
 
+    assert "recovery: run `ce brain init` from the tenant repo root" in str(ei.value)
     assert adapter.spawned == []
     assert not (repo / ".ce" / "state" / "dispatches").exists()
 

@@ -1632,7 +1632,8 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
     except brain_bootstrap.BrainBootstrapRefused as exc:
         details = "; ".join(exc.errors) if exc.errors else str(exc)
         raise BrainBootstrapLaunchRefused(
-            f"refusing Controller launch before spawn: {details}"
+            "refusing Controller launch before spawn: "
+            f"{details}; recovery: run `ce brain init` from the tenant repo root"
         ) from exc
     config = _controller_recall_config_from_env()
     if not config.configured:

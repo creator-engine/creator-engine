@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from creator_engine_validator import onboard_apply, v3_installer, version as ce_version
+from creator_engine_validator import (
+    brain_runtime,
+    launch_runtime,
+    onboard_apply,
+    v3_installer,
+    version as ce_version,
+)
 from creator_engine_validator.checks import ce_runtime_policy
+from creator_engine_validator.tmux_adapter import TmuxPane
 
 
 def _schema() -> dict[str, Any]:
@@ -312,6 +320,23 @@ class FakeDriver(onboard_apply.ApplyDriver):
         )
 
 
+class LaunchAdapter:
+    kind = "tmux"
+
+    def __init__(self):
+        self.spawned: list[tuple[str, str, list[str]]] = []
+
+    def is_available(self) -> bool:
+        return True
+
+    def session_exists(self, session: str) -> bool:
+        return False
+
+    def ensure_pane(self, *, session, window, command):
+        self.spawned.append((session, window, list(command)))
+        return TmuxPane(session_id="$1", window_id="@2", pane_id="%3", pane_tty="/dev/pts/7", pane_pid=999)
+
+
 def _apply(tmp_path: Path, driver: FakeDriver, **request_kwargs):
     return onboard_apply.apply_onboard(
         _request(tmp_path, **request_kwargs),
@@ -415,17 +440,56 @@ def test_greenfield_success_writes_ledger_and_honest_counters(tmp_path):
     assert summary["refused"] == 0
     assert summary["legs_total"] == len(onboard_apply.LEG_IDS)
     assert len(summary["legs"]) == len(onboard_apply.LEG_IDS)
-    # ce-ops#85: the 7 adoption legs SKIP in a greenfield run; the 12 greenfield legs converge.
+    # ce-ops#85: the adoption legs SKIP in a greenfield run; greenfield legs converge.
     assert summary["skipped"] == len(onboard_apply.ADOPTION_LEG_IDS)
     assert (
         summary["applied"] + summary["already_satisfied"] + summary["skipped"]
         == len(onboard_apply.LEG_IDS)
     )
+    brain_leg = _leg(summary, "brain_genesis")
+    assert brain_leg["status"] == "applied"
+    assert brain_leg["verification"]["ledger_path"] == str(tmp_path / "state" / "brain" / "assertions.yaml")
+    verify = brain_runtime.verify_ledger(tmp_path / "state")
+    assert verify.ok is True
+    assert verify.summary["record_count"] == 1
     assert summary["greenfield_repos_created"] == 1
     assert summary["brownfield_adopted"] == 0
     ledger_lines = (tmp_path / "state" / "onboard" / "ledger.ndjson").read_text(encoding="utf-8").splitlines()
     assert len(ledger_lines) == len(onboard_apply.LEG_IDS)
     assert {json.loads(line)["leg_id"] for line in ledger_lines} == set(onboard_apply.LEG_IDS)
+
+
+def test_greenfield_reapply_does_not_clobber_existing_brain_ledger(tmp_path):
+    first = _apply(tmp_path, FakeDriver())
+    path = brain_runtime.ledger_path(tmp_path / "state")
+    original = path.read_text(encoding="utf-8")
+    original_head = brain_runtime.verify_ledger(tmp_path / "state").summary["head_content_hash"]
+
+    second = _apply(tmp_path, FakeDriver())
+
+    assert path.read_text(encoding="utf-8") == original
+    assert brain_runtime.verify_ledger(tmp_path / "state").summary["head_content_hash"] == original_head
+    assert _leg(first, "brain_genesis")["status"] == "applied"
+    assert _leg(second, "brain_genesis")["status"] == "already_satisfied"
+
+
+def test_greenfield_apply_brain_genesis_allows_fresh_repo_launch(tmp_path):
+    repo = tmp_path / "fresh-repo"
+    state_root = repo / ".ce" / "state"
+    request = replace(_request(tmp_path, answers=_answers(tmp_path), spawn_smoke=False), state_root=state_root)
+    summary = onboard_apply.apply_onboard(
+        request,
+        verifier=_verifier(),
+        driver=FakeDriver(),
+        invocation_id="fresh-launch-regression",
+    )
+    adapter = LaunchAdapter()
+
+    result = launch_runtime.launch(harness="claude", backend="host", repo_root=repo, tmux_adapter=adapter)
+
+    assert _leg(summary, "brain_genesis")["status"] == "applied"
+    assert result.spawned is True
+    assert adapter.spawned
 
 
 def test_secret_ref_resolves_only_at_token_probe_and_never_enters_summary(tmp_path):

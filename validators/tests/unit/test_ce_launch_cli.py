@@ -872,7 +872,9 @@ def test_launch_claim_ticket_refuses_tampered_brain_before_work_claim_acquire(
     assert ret != 0
     assert calls == []
     assert adapter.spawned == []
-    assert "G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED" in err
+    assert "recovery: run `ce brain init` from the tenant repo root" in err
 
 
 def test_launch_resume_refuses_missing_session(use_fake_tmux):
