@@ -1,6 +1,14 @@
 import pytest
 
+from creator_engine_validator import check_profiles
+from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.cli import main
+
+
+def _render_checks(checks):
+    if not checks:
+        return "No checks registered yet.\n"
+    return "".join(f"{name}: {', '.join(defn.frs)}\n" for name, defn in checks.items())
 
 
 def test_list_checks_includes_identity(capsys):
@@ -29,6 +37,34 @@ def test_list_checks_includes_ce_runtime_evidence(capsys):
     out = capsys.readouterr().out
     assert "ce_runtime_evidence" in out
     assert "runtime_evidence_chain_link" in out
+
+
+def test_list_checks_unprofiled_matches_full_inventory(capsys):
+    assert main(["--list-checks"]) == 0
+    captured = capsys.readouterr()
+
+    assert captured.out == _render_checks(registered_checks())
+    assert captured.err == ""
+
+
+def test_list_checks_client_repo_profile_shows_effective_inventory(capsys):
+    assert main(["--list-checks", "--profile", check_profiles.CLIENT_REPO_PROFILE]) == 0
+    captured = capsys.readouterr()
+
+    omitted = set(check_profiles.CLIENT_REPO_OMITTED_CHECK_REASONS)
+    expected_checks = {
+        name: defn
+        for name, defn in registered_checks().items()
+        if name not in omitted
+    }
+    assert captured.out == _render_checks(expected_checks)
+    assert "identity:" in captured.out
+    for name in omitted:
+        assert f"{name}:" not in captured.out
+    assert captured.err == "".join(
+        f"NOTICE: omitted check {name} for profile client-repo because {reason}.\n"
+        for name, reason in sorted(check_profiles.CLIENT_REPO_OMITTED_CHECK_REASONS.items())
+    )
 
 
 def test_check_well_formed_identity_returns_zero(capsys):
