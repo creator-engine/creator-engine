@@ -14,11 +14,14 @@ Out of scope for this slice:
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import re
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from creator_engine_validator.forge._redact import redact_gh_stderr
@@ -58,6 +61,7 @@ _WRITEISH_FIELDS = frozenset(
         "token",
     }
 )
+_LOCK_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 class ForgeReadRefused(Exception):
@@ -163,6 +167,24 @@ def _audit(
     if reason:
         record["reason"] = reason
     return append_audit(config.audit_log, record, now=now)
+
+
+def _forge_read_lock_path(config: BrokerConfig, seat_id: str) -> Path:
+    audit_path = Path(config.audit_log).expanduser()
+    safe_seat = _LOCK_SAFE_RE.sub("_", seat_id).strip("._") or "unknown"
+    return audit_path.with_name(f"{audit_path.name}.{safe_seat}.forge-read.lock")
+
+
+@contextmanager
+def _forge_read_rate_lock(config: BrokerConfig, seat_id: str):
+    lock_path = _forge_read_lock_path(config, seat_id)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def parse_request(payload: Mapping[str, Any]) -> ForgeReadRequest:
@@ -361,7 +383,19 @@ def handle_forge_read_request(
     audit_now = submit_options.get("audit_now")
     try:
         request = parse_request(payload)
-        result = submit_forge_read(request, config=config, **submit_options)
+        with _forge_read_rate_lock(config, request.seat_id):
+            result = submit_forge_read(request, config=config, **submit_options)
+            audit_record = _audit(
+                config,
+                request=request,
+                decision="allow",
+                request_path=result.request_path,
+                status=int(result.metadata.get("status") or 200),
+                now=audit_now,
+            )
+            out = result.to_dict()
+            out["audit_record"] = audit_record
+            return out
     except ForgeReadRefused as exc:
         audit_record = _audit(
             config,
@@ -387,18 +421,6 @@ def handle_forge_read_request(
             now=audit_now,
         )
         return {"ok": False, "error": "internal broker error", "audit_record": audit_record}
-
-    audit_record = _audit(
-        config,
-        request=request,
-        decision="allow",
-        request_path=result.request_path,
-        status=int(result.metadata.get("status") or 200),
-        now=audit_now,
-    )
-    out = result.to_dict()
-    out["audit_record"] = audit_record
-    return out
 
 
 def cli_payload(verb: str, repo: str, number: int, *, seat_id: str) -> dict[str, Any]:

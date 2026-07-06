@@ -1,6 +1,9 @@
 import json
 import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Barrier, Lock
 
 from creator_engine_validator.forge.scoped_token import ScopedToken, TokenRequest
 from egress_broker.audit import append_audit
@@ -183,6 +186,60 @@ def test_rate_cap_refusal_happens_before_mint_and_emits_audit(tmp_path):
     assert [r["decision"] for r in records] == ["allow", "deny"]
     assert records[-1]["verb"] == "list-comments"
     assert records[-1]["resource"] == f"{_REPO}#475"
+
+
+def test_rate_cap_count_check_mint_is_serialized_at_cap_minus_one(tmp_path):
+    config = _config(tmp_path, cap=2)
+    append_audit(
+        config.audit_log,
+        {
+            "event": "forge_read",
+            "seat_id": "dev-4",
+            "repo": _REPO,
+            "resource": f"{_REPO}#1",
+            "verb": "get-issue",
+            "decision": "allow",
+        },
+        now=_at(_T0),
+    )
+    start = Barrier(2)
+    minted: list[str] = []
+    minted_lock = Lock()
+
+    def mint(req):
+        with minted_lock:
+            minted.append(req.run_id)
+        return _token(req)
+
+    def gh_get(path, runner):
+        time.sleep(0.15)
+        return {"path": path}, {"status": 200}
+
+    def invoke(number):
+        start.wait(timeout=5)
+        return handle_forge_read_request(
+            cli_payload("get-issue", _REPO, number, seat_id="dev-4"),
+            config=config,
+            signer=lambda data: b"sig",
+            resolve_id_fn=lambda seat: 475,
+            mint_fn=mint,
+            revoke_fn=lambda token: True,
+            gh_get_fn=gh_get,
+            audit_now=_at(_T0),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = (pool.submit(invoke, 475), pool.submit(invoke, 476))
+        results = [future.result(timeout=5) for future in futures]
+
+    assert [result["ok"] for result in results].count(True) == 1
+    assert [result["ok"] for result in results].count(False) == 1
+    assert len(minted) == 1
+    refused = next(result for result in results if not result["ok"])
+    assert "rate cap exceeded" in refused["error"]
+    records = _audit_records(tmp_path)
+    assert [r["decision"] for r in records].count("allow") == 2
+    assert [r["decision"] for r in records].count("deny") == 1
 
 
 def test_parse_request_accepts_only_forge_read_verbs():

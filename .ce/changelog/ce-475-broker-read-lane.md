@@ -14,3 +14,6 @@ rate cap, mints short-lived read-only GitHub App installation tokens at request
 time, injects them only into trusted host `gh api` child environments, revokes
 them, and emits audit lines for allow/refuse outcomes. Documents deferred seams
 for `kind:own` parity and governed `web-fetch`.
+
+No existing broker behavior is modified; the `audit.py` change is an additive
+forge-read counter used by this lane.

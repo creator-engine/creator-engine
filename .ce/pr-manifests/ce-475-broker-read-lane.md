@@ -8,6 +8,8 @@ the authorized path-set below; this carrier lists itself.
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
+- **Wording note:** no existing broker behavior is modified; `audit.py` is
+  additively extended for forge-read counting used by this lane.
 
 AUTHORIZED_PATHS_COUNT=7
 
