@@ -312,8 +312,8 @@ def use_fake_tmux(monkeypatch):
     return _install
 
 
-@pytest.mark.parametrize("argv", [["launch", "--help"], ["hud", "--help"]])
-def test_launch_and_hud_help_reachable(argv):
+@pytest.mark.parametrize("argv", [["launch", "--help"], ["hud", "--help"], ["takeover", "--help"]])
+def test_launch_hud_and_takeover_help_reachable(argv):
     with pytest.raises(SystemExit) as exc:
         ce_cli.main(argv)
     assert exc.value.code == 0
