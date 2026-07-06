@@ -44,6 +44,22 @@ write lifecycle state, or perform resource-bound launch-confirm. The CLI still
 performs preflight checks and any requested `--claim-ticket` acquisition before
 it enters the launch runtime, so omit `--claim-ticket` for a no-claim preview.
 
+`ce posture` is the companion read-only posture banner. It emits the same field
+set in text form or as `--json`: `role`, `harness`, `launch_mode`,
+`ring0_confirmed`, `ring1_active`, `ring2_closeout_support`,
+`credential_scrub_status`, `remote_control_status`, `approval_wall_armed`,
+`signing_deputy_status`, and `allowed_posture`. It does not start daemons,
+resolve secret values, sign, merge, change settings, or perform takeover. When
+available, it derives Ring 0 from the launch preflight gates, Ring 1 from the
+managed hook-pack confirmations, Ring 2 from closeout markers, and
+approval-wall arming from the durable local state bit. Deterministic offline
+evidence may pin those same facts through the documented status environment
+markers: `CE_CONTROLLER_ROLE`, `CE_CONTROLLER_HARNESS`, `CE_LAUNCH_MODE`,
+`CE_RING0_CONFIRMED`, `CE_RING1_ACTIVE`, `CE_RING2_CLOSEOUT_SUPPORT`,
+`CE_CREDENTIAL_SCRUB_STATUS`, `CE_REMOTE_CONTROL_STATUS`,
+`CE_APPROVAL_WALL_ARMED`, and `CE_SIGNING_DEPUTY_STATUS`. Free-form status
+values are not echoed; unrecognized status tokens fall back to safe defaults.
+
 Operator-relevant `ce launch` flags:
 
 | Flag | Contract |
