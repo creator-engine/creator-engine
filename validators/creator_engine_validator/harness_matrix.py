@@ -1,19 +1,9 @@
-"""Probed CE harness-support capability matrix.
+"""Probed CE harness-support and promotion capability matrix.
 
-The matrix is the single source of truth for which external agent harnesses CE
-supports, and to what governance extent. It is deliberately derived from
-committed wiring and importable validator modules where CE has wiring; rows that
-are not actor harnesses, or whose support is not yet verified, are marked as
-such instead of being promoted by prose.
-
-Columns:
-
-* ring0 - launch envelope / credential scrub before the harness starts.
-* ring1 - per-tool-call hook surface.
-* ring2 - Stop / closeout surface.
-* containment - sandbox / PTY containment.
-* native_fanout - whether the harness or surface can fan out natively.
-* status - full / partial / deferred / none rollup.
+The matrix separates code support from live controller promotion. A row may be
+gate-capable only when code support exists, launch wiring exists, live evidence
+exists, and promotion has been approved, or when an explicit Operator-ratified
+exception is recorded on that same row.
 """
 from __future__ import annotations
 
@@ -23,18 +13,23 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-CAPABILITIES = ("ring0", "ring1", "ring2", "containment", "native_fanout", "status")
+SUPPORT_COLUMNS = ("code-support", "launch-wired", "live-proven", "promotion-approved")
+CAPABILITIES = SUPPORT_COLUMNS
+DISPLAY_COLUMNS = ("provider", "ring", *SUPPORT_COLUMNS, "gate-capable", "exception")
 HARNESSES = (
     "claude_code",
     "codex",
-    "lane",
-    "hermes",
-    "opencode",
-    "copilot_cli",
-    "nanoclaw",
-    "discord",
-    "slack",
+    "lane_worker",
+    "contained_controller_scaffold",
+    "ephemeral_controller_providers",
 )
+
+GREEN = "green"
+YELLOW = "yellow"
+RED = "red"
+GATE_YES = "yes"
+GATE_NO = "no"
+NO_EXCEPTION = "none"
 
 STATUS_FULL = "full"
 STATUS_PARTIAL = "partial"
@@ -61,14 +56,45 @@ class Cell:
 
 
 @dataclass(frozen=True)
+class PromotionException:
+    """Operator-ratified exception permitting a non-all-green gate row."""
+
+    date: str
+    ratification_ref: str
+    provenance: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "date": self.date,
+            "ratification_ref": self.ratification_ref,
+            "provenance": self.provenance,
+        }
+
+    def render(self) -> str:
+        return f"{self.date} {self.ratification_ref}"
+
+
+@dataclass(frozen=True)
 class HarnessRow:
-    harness: str
+    provider: str
+    ring: str
     cells: dict[str, Cell] = field(default_factory=dict)
+    gate_capable: Cell = field(default_factory=lambda: _gate_no("not evaluated"))
+    exception: PromotionException | None = None
+
+    @property
+    def harness(self) -> str:
+        """Compatibility alias for call sites that enumerate matrix providers."""
+
+        return self.provider
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "harness": self.harness,
-            "cells": {capability: self.cells[capability].to_dict() for capability in CAPABILITIES},
+            "provider": self.provider,
+            "ring": self.ring,
+            "cells": {capability: self.cells[capability].to_dict() for capability in SUPPORT_COLUMNS},
+            "gate_capable": self.gate_capable.to_dict(),
+            "exception": self.exception.to_dict() if self.exception else None,
         }
 
 
@@ -78,9 +104,9 @@ class HarnessMatrix:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "kind": "harness-support-matrix",
-            "issue": "harness-support-matrix",
-            "capabilities": list(CAPABILITIES),
+            "kind": "harness-support-promotion-matrix",
+            "issue": "ticket-479",
+            "capabilities": list(SUPPORT_COLUMNS),
             "rows": [row.to_dict() for row in self.rows],
         }
 
@@ -137,34 +163,58 @@ def _module_has(dotted: str, *symbols: str) -> bool:
     return all(hasattr(module, symbol) for symbol in symbols)
 
 
-def _full(provenance: str) -> Cell:
-    return Cell(STATUS_FULL, provenance, verified=True)
+def _green(provenance: str) -> Cell:
+    return Cell(GREEN, provenance, verified=True)
 
 
-def _partial(provenance: str, *, verified: bool = True) -> Cell:
-    return Cell(STATUS_PARTIAL, provenance, verified=verified)
+def _yellow(provenance: str) -> Cell:
+    return Cell(YELLOW, provenance, verified=False)
 
 
-def _deferred(provenance: str, *, verified: bool = False) -> Cell:
-    return Cell(STATUS_DEFERRED, provenance, verified=verified)
+def _red(provenance: str) -> Cell:
+    return Cell(RED, provenance, verified=True)
 
 
-def _none(provenance: str, *, verified: bool = True) -> Cell:
-    return Cell(STATUS_NONE, provenance, verified=verified)
+def _gate_yes(provenance: str) -> Cell:
+    return Cell(GATE_YES, provenance, verified=True)
 
 
-def _claude_row(repo_root: Path) -> HarnessRow:
+def _gate_no(provenance: str) -> Cell:
+    return Cell(GATE_NO, provenance, verified=True)
+
+
+def _row(
+    provider: str,
+    ring: str,
+    *,
+    code_support: Cell,
+    launch_wired: Cell,
+    live_proven: Cell,
+    promotion_approved: Cell,
+    gate_capable: Cell | None = None,
+    exception: PromotionException | None = None,
+) -> HarnessRow:
+    cells = {
+        "code-support": code_support,
+        "launch-wired": launch_wired,
+        "live-proven": live_proven,
+        "promotion-approved": promotion_approved,
+    }
+    gate = gate_capable or (
+        _gate_yes("all four promotion cells are green")
+        if all(cell.value == GREEN and cell.verified for cell in cells.values())
+        else _gate_no("one or more promotion cells are not green")
+    )
+    return HarnessRow(provider, ring, cells, gate, exception)
+
+
+def _claude_rows(repo_root: Path) -> tuple[HarnessRow, ...]:
     launch_path = _module_file("claude_launch_spec")
     hook_confirm_path = _module_file("hook_pack_confirm")
     hook_check_path = _module_file("hook_check")
+    settings_path = repo_root / ".claude" / "settings.json"
 
     ring0_ok = _module_has("claude_launch_spec", "evaluate_claude_launch", "build_governed_claude_command")
-    ring0 = (
-        _full(f"{_rel(launch_path)}: evaluate_claude_launch + build_governed_claude_command")
-        if ring0_ok
-        else _none("claude_launch_spec evaluator/builder not importable", verified=False)
-    )
-
     try:
         confirm_mod = import_module("creator_engine_validator.hook_pack_confirm")
         confirmation = confirm_mod.confirm_hook_pack(
@@ -174,82 +224,107 @@ def _claude_row(repo_root: Path) -> HarnessRow:
     except Exception:
         confirmation = None
     ring1_ok = bool(confirmation and confirmation.pretooluse_registered and confirmation.validator_reachable)
-    ring1 = (
-        _full(
-            f"{_rel(repo_root / '.claude/settings.json', repo_root=repo_root)}: PreToolUse hook-pack "
-            f"confirmed via {_rel(hook_confirm_path)}"
-        )
-        if ring1_ok
-        else _none(".claude PreToolUse hook-pack could not be confirmed", verified=False)
-    )
-
     ring2_ok = bool(confirmation and confirmation.stop_registered and _module_has("hook_check", "evaluate", "HookContext"))
-    ring2 = (
-        _full(
-            f"{_rel(repo_root / '.claude/settings.json', repo_root=repo_root)}: Stop hook + "
-            f"{_rel(hook_check_path)}: evaluate(HookContext)"
-        )
-        if ring2_ok
-        else _none("Claude Stop/closeout hook could not be confirmed", verified=False)
+
+    return (
+        _row(
+            "claude_code",
+            "Ring 0",
+            code_support=_green(f"{_rel(launch_path)}: evaluate_claude_launch + build_governed_claude_command")
+            if ring0_ok
+            else _red("claude_launch_spec evaluator/builder not importable"),
+            launch_wired=_green(f"{_rel(launch_path)}: governed Claude command builder is wired before harness start")
+            if ring0_ok
+            else _red("Claude Ring 0 launch builder is not wired"),
+            live_proven=_green(f"{_rel(launch_path)}: launch envelope evaluator is covered by committed probes")
+            if ring0_ok
+            else _red("Claude Ring 0 live proof is absent"),
+            promotion_approved=_green("Claude Ring 0 is full per existing matrix"),
+        ),
+        _row(
+            "claude_code",
+            "Ring 1",
+            code_support=_green(f"{_rel(hook_confirm_path)}: confirm_hook_pack")
+            if ring1_ok
+            else _red("Claude PreToolUse hook-pack could not be confirmed"),
+            launch_wired=_green(f"{_rel(settings_path, repo_root=repo_root)}: PreToolUse hook registered")
+            if ring1_ok
+            else _red("Claude Ring 1 hook is not launch-wired"),
+            live_proven=_green(f"{_rel(hook_confirm_path)}: validator-reachable PreToolUse confirmation")
+            if ring1_ok
+            else _red("Claude Ring 1 live proof is absent"),
+            promotion_approved=_green("Claude Ring 1 is full per existing matrix"),
+        ),
+        _row(
+            "claude_code",
+            "Ring 2",
+            code_support=_green(f"{_rel(hook_check_path)}: evaluate(HookContext)")
+            if ring2_ok
+            else _red("Claude Stop/closeout hook could not be confirmed"),
+            launch_wired=_green(f"{_rel(settings_path, repo_root=repo_root)}: Stop hook registered")
+            if ring2_ok
+            else _red("Claude Ring 2 closeout hook is not launch-wired"),
+            live_proven=_green(f"{_rel(hook_confirm_path)}: Stop hook confirmation")
+            if ring2_ok
+            else _red("Claude Ring 2 live proof is absent"),
+            promotion_approved=_green("Claude Ring 2 is full per existing matrix"),
+        ),
     )
 
-    containment = _containment_cell()
-    native_fanout = _partial(
-        "CE fan-out is provided by worker_spawn / lane launch rather than Claude Code native background agents, "
-        "which Ring 0 refuses for governed seats"
-    )
-    status = _status_from_cells(ring0, ring1, ring2)
-    return HarnessRow(
-        "claude_code",
-        {
-            "ring0": ring0,
-            "ring1": ring1,
-            "ring2": ring2,
-            "containment": containment,
-            "native_fanout": native_fanout,
-            "status": status,
-        },
-    )
 
-
-def _codex_row(repo_root: Path) -> HarnessRow:
+def _codex_rows(_repo_root: Path) -> tuple[HarnessRow, ...]:
     launch_path = _module_file("codex_launch_spec")
     confirm_path = _module_file("hook_pack_confirm")
-
+    containment_path = _module_file("runner.herdr_containment")
     ring0_ok = _module_has("codex_launch_spec", "evaluate_codex_launch", "build_governed_codex_command")
-    ring0 = (
-        _full(f"{_rel(launch_path)}: evaluate_codex_launch + build_governed_codex_command scrubs ambient repo credentials")
-        if ring0_ok
-        else _none("codex_launch_spec evaluator/builder not importable", verified=False)
-    )
+    ring1_candidate = _module_has("hook_pack_confirm", "confirm_codex_managed_hook_pack")
+    containment_candidate = _module_has("runner.herdr_containment", "plan_herdr_containment")
 
-    # The matrix's SSOT truth is intentionally conservative: Codex is supported
-    # at Ring 0 today; Codex Ring 1 remains a follow-on capability.
-    # The probe cites any candidate managed-hook predicate but does not promote
-    # the support cell until that follow-on is accepted as the support boundary.
-    if _module_has("hook_pack_confirm", "confirm_codex_managed_hook_pack"):
-        provenance = (
-            f"{_rel(confirm_path)}: confirm_codex_managed_hook_pack exists, but the matrix records "
-            "Codex Ring 1 support as deferred pending containment acceptance"
-        )
-    else:
-        provenance = "no Codex per-tool-call hook confirmation predicate is importable; deferred pending containment acceptance"
-    ring1 = _deferred(provenance)
-
-    ring2 = _none(f"{_rel(launch_path)}: no Codex-owned Stop/closeout hook surface is wired")
-    containment = _containment_cell()
-    native_fanout = _none("no Codex native governed fan-out wiring is present in CE")
-    status = _status_from_cells(ring0, ring1, ring2)
-    return HarnessRow(
-        "codex",
-        {
-            "ring0": ring0,
-            "ring1": ring1,
-            "ring2": ring2,
-            "containment": containment,
-            "native_fanout": native_fanout,
-            "status": status,
-        },
+    return (
+        _row(
+            "codex",
+            "Ring 0",
+            code_support=_green(
+                f"{_rel(launch_path)}: evaluate_codex_launch + build_governed_codex_command scrubs ambient repo credentials"
+            )
+            if ring0_ok
+            else _red("codex_launch_spec evaluator/builder not importable"),
+            launch_wired=_green(f"{_rel(launch_path)}: governed Codex command builder is wired before harness start")
+            if ring0_ok
+            else _red("Codex Ring 0 launch builder is not wired"),
+            live_proven=_green(f"{_rel(launch_path)}: Ring 0 evaluator is committed and probed")
+            if ring0_ok
+            else _red("Codex Ring 0 live proof is absent"),
+            promotion_approved=_green("Codex Ring 0 is full per known state"),
+        ),
+        _row(
+            "codex",
+            "Ring 1",
+            code_support=_green(f"{_rel(confirm_path)}: confirm_codex_managed_hook_pack exists")
+            if ring1_candidate
+            else _red("Codex managed hook-pack predicate is absent"),
+            launch_wired=_yellow("deferred pending containment acceptance; promotion evidence packet = ticket 480"),
+            live_proven=_red("not live-proven until the ticket 480 evidence packet and Ring 1 smoke are accepted"),
+            promotion_approved=_red("promotion deferred pending containment acceptance and ticket 480"),
+        ),
+        _row(
+            "codex",
+            "Ring 2",
+            code_support=_red(f"{_rel(launch_path)}: no Codex-owned Stop/closeout hook surface is wired"),
+            launch_wired=_red("no Codex Ring 2 closeout launch wiring"),
+            live_proven=_red("no Codex Ring 2 live proof"),
+            promotion_approved=_red("Codex Ring 2 promotion is not approved"),
+        ),
+        _row(
+            "codex",
+            "containment",
+            code_support=_green(f"{_rel(containment_path)}: plan_herdr_containment exists")
+            if containment_candidate
+            else _red("containment plan probe is absent"),
+            launch_wired=_yellow("containment deferred; live launch still fails closed / is not wired"),
+            live_proven=_red("Codex containment is not live-proven"),
+            promotion_approved=_red("Codex containment promotion is deferred"),
+        ),
     )
 
 
@@ -271,236 +346,178 @@ def _lane_ledger_root_env_wired() -> bool:
         source = inspect.getsource(launch)
     except (OSError, TypeError):
         return False
-    return (
-        "CE_LEDGER_ROOT_ENV" in source
-        and "pane_env" in source
-        and "env=pane_env" in source
-    )
+    return "CE_LEDGER_ROOT_ENV" in source and "pane_env" in source and "env=pane_env" in source
 
 
-def _lane_ring1_probe(repo_root: Path) -> Cell:
-    """Derive lane Ring 1 from the real wrapped-harness hook invariant."""
+def _lane_rows(repo_root: Path) -> tuple[HarnessRow, ...]:
     lane_path = _module_file("lane_runtime")
     settings_path = repo_root / ".claude" / "settings.json"
-
-    pretooluse_ok = False
+    ring0_ok = _module_has("lane_runtime", "launch", "ClaudeLaunchRefused")
+    ring1_ok = _lane_ledger_root_env_wired()
     try:
         confirm_mod = import_module("creator_engine_validator.hook_pack_confirm")
-        pretooluse_ok = confirm_mod.confirm_hook_pack(repo_root).pretooluse_registered
+        ring1_ok = ring1_ok and bool(confirm_mod.confirm_hook_pack(repo_root).pretooluse_registered)
     except Exception:
-        pretooluse_ok = False
-
-    env_wired = _lane_ledger_root_env_wired()
-
-    if pretooluse_ok and env_wired:
-        return _full(
-            f"{_rel(settings_path, repo_root=repo_root)}: committed PreToolUse hook-pack + "
-            f"{_rel(lane_path)}: launch() exports CE_LEDGER_ROOT into the pane env so the wrapped "
-            "harness's in-band Ring 1 hook resolves posture from the seat's real claim"
-        )
-
-    missing = []
-    if not pretooluse_ok:
-        missing.append("no committed .claude/settings.json PreToolUse hook-pack")
-    if not env_wired:
-        missing.append("lane_runtime.launch does not wire the CE_LEDGER_ROOT pane env")
-    provenance = (
-        f"{_rel(lane_path)}: lane Ring 1 invariant unconfirmed - {'; '.join(missing)}"
-    )
-    if pretooluse_ok or env_wired:
-        return _partial(provenance, verified=False)
-    return _none(provenance, verified=False)
-
-
-def _lane_row(repo_root: Path) -> HarnessRow:
-    lane_path = _module_file("lane_runtime")
-
-    ring0_ok = _module_has("lane_runtime", "launch", "ClaudeLaunchRefused")
-    ring0 = (
-        _full(
-            f"{_rel(lane_path)}: launch() runs governed lane Ring 0 refusal before side effects"
-        )
-        if ring0_ok
-        else _none("lane_runtime launch / ClaudeLaunchRefused not importable", verified=False)
-    )
-
-    ring1 = _lane_ring1_probe(repo_root)
-
+        ring1_ok = False
     ring2_ok = _module_has("lane_runtime", "verify", "verify_closeout")
-    ring2 = (
-        _full(f"{_rel(lane_path)}: verify() + verify_closeout provide lane closeout checks")
-        if ring2_ok
-        else _none("lane_runtime verify / verify_closeout not importable", verified=False)
-    )
 
-    containment = _containment_cell()
-    native_fanout = (
-        _full(f"{_rel(lane_path)}: launch() materializes governed worker lane fan-out")
-        if _module_has("lane_runtime", "launch")
-        else _none("lane_runtime launch not importable", verified=False)
-    )
-    status = _status_from_cells(ring0, ring1, ring2)
-    return HarnessRow(
-        "lane",
-        {
-            "ring0": ring0,
-            "ring1": ring1,
-            "ring2": ring2,
-            "containment": containment,
-            "native_fanout": native_fanout,
-            "status": status,
-        },
-    )
-
-
-def _hermes_row(_repo_root: Path) -> HarnessRow:
-    launch_path = _module_file("hermes_launch_spec")
-    ring0_candidate = _module_has("hermes_launch_spec", "evaluate_hermes_launch", "build_governed_hermes_command")
-    ring0 = (
-        _partial(
-            f"{_rel(launch_path)}: Hermes launch evaluator/builder exists, but the matrix classifies "
-            "Hermes governance extent as unverified until a harness audit promotes it",
-            verified=False,
-        )
-        if ring0_candidate
-        else _deferred("Hermes support is unverified; no launch-spec probe found")
-    )
-    ring1 = _deferred("Hermes per-tool-call hook support is unverified")
-    ring2 = _deferred("Hermes Stop/final-answer hook support is unverified")
-    containment = _containment_cell()
-    native_fanout = _deferred("Hermes native fan-out support is unverified")
-    status = _deferred("Hermes support is explicitly unverified in this matrix")
-    return HarnessRow(
-        "hermes",
-        {
-            "ring0": ring0,
-            "ring1": ring1,
-            "ring2": ring2,
-            "containment": containment,
-            "native_fanout": native_fanout,
-            "status": status,
-        },
+    return (
+        _row(
+            "lane_worker",
+            "Ring 0",
+            code_support=_green(f"{_rel(lane_path)}: launch() runs governed lane Ring 0 refusal before side effects")
+            if ring0_ok
+            else _red("lane_runtime launch / ClaudeLaunchRefused not importable"),
+            launch_wired=_green(f"{_rel(lane_path)}: governed worker lane launch is wired")
+            if ring0_ok
+            else _red("lane worker Ring 0 launch wiring is absent"),
+            live_proven=_green(f"{_rel(lane_path)}: worker-lane Ring 0 path is committed and probed")
+            if ring0_ok
+            else _red("lane worker Ring 0 live proof is absent"),
+            promotion_approved=_green("lane is approved as worker fan-out, not live controller authority"),
+        ),
+        _row(
+            "lane_worker",
+            "Ring 1",
+            code_support=_green(f"{_rel(settings_path, repo_root=repo_root)}: committed PreToolUse hook-pack")
+            if ring1_ok
+            else _red("lane worker Ring 1 hook invariant is absent"),
+            launch_wired=_green(f"{_rel(lane_path)}: launch() exports CE_LEDGER_ROOT into the pane env")
+            if ring1_ok
+            else _red("lane worker Ring 1 launch wiring is absent"),
+            live_proven=_green(f"{_rel(lane_path)}: wrapped harness resolves posture from the real seat claim")
+            if ring1_ok
+            else _red("lane worker Ring 1 live proof is absent"),
+            promotion_approved=_green("lane is approved as worker fan-out, not live controller authority"),
+        ),
+        _row(
+            "lane_worker",
+            "Ring 2",
+            code_support=_green(f"{_rel(lane_path)}: verify() + verify_closeout provide lane closeout checks")
+            if ring2_ok
+            else _red("lane_runtime verify / verify_closeout not importable"),
+            launch_wired=_green(f"{_rel(lane_path)}: closeout verification is wired for worker lanes")
+            if ring2_ok
+            else _red("lane worker Ring 2 launch wiring is absent"),
+            live_proven=_green(f"{_rel(lane_path)}: worker-lane closeout checks are committed and probed")
+            if ring2_ok
+            else _red("lane worker Ring 2 live proof is absent"),
+            promotion_approved=_green("lane is approved as worker fan-out, not live controller authority"),
+        ),
     )
 
 
-def _unverified_actor_row(harness: str, label: str) -> HarnessRow:
-    status = _deferred(f"{label} support is unverified; no CE harness adapter wiring is probed")
-    return HarnessRow(
-        harness,
-        {
-            "ring0": _deferred(f"{label} launch envelope / cred-scrub support is unverified"),
-            "ring1": _deferred(f"{label} per-tool-call hook support is unverified"),
-            "ring2": _deferred(f"{label} Stop/closeout support is unverified"),
-            "containment": _deferred(f"{label} sandbox / PTY containment support is unverified"),
-            "native_fanout": _deferred(f"{label} native fan-out support is unverified"),
-            "status": status,
-        },
+def _contained_controller_rows() -> tuple[HarnessRow, ...]:
+    return (
+        _row(
+            "contained_controller_scaffold",
+            "C1 static/dry-run",
+            code_support=_green("contained-controller scaffold exists only as static/dry-run support"),
+            launch_wired=_yellow("dry-run scaffold only; no live controller promotion wiring"),
+            live_proven=_red("contained controller scaffold is not live-proven"),
+            promotion_approved=_red("contained controller scaffold is not promotion-approved"),
+        ),
+        _row(
+            "contained_controller_scaffold",
+            "C2",
+            code_support=_yellow("C2 scaffold is unproven beyond static/dry-run design"),
+            launch_wired=_red("C2 launch wiring is unproven"),
+            live_proven=_red("C2 is not live-proven"),
+            promotion_approved=_red("C2 promotion is not approved"),
+        ),
+        _row(
+            "contained_controller_scaffold",
+            "C3",
+            code_support=_yellow("C3 scaffold is unproven beyond static/dry-run design"),
+            launch_wired=_red("C3 launch wiring is unproven"),
+            live_proven=_red("C3 is not live-proven"),
+            promotion_approved=_red("C3 promotion is not approved"),
+        ),
+        _row(
+            "contained_controller_scaffold",
+            "C4",
+            code_support=_yellow("C4 scaffold is unproven beyond static/dry-run design"),
+            launch_wired=_red("C4 launch wiring is unproven"),
+            live_proven=_red("C4 is not live-proven"),
+            promotion_approved=_red("C4 promotion is not approved"),
+        ),
     )
 
 
-def _emission_only_row(surface: str) -> HarnessRow:
-    notify_path = _module_file("runner.notify_feed")
-    webhook_ok = _module_has("runner.notify_feed", "SINK_WEBHOOK", "parse_notify_config", "SinkConfig")
-    fanout = (
-        _full(f"{_rel(notify_path)}: first-class webhook sink covers {surface} emission")
-        if webhook_ok
-        else _none("notify_feed webhook sink is not importable", verified=False)
+def _ephemeral_controller_rows() -> tuple[HarnessRow, ...]:
+    return (
+        _row(
+            "ephemeral_controller_providers",
+            "design-stage",
+            code_support=_yellow("ephemeral-controller providers are design-stage only"),
+            launch_wired=_red("ephemeral-controller provider launch wiring is not present"),
+            live_proven=_red("ephemeral-controller providers are not live-proven"),
+            promotion_approved=_red("ephemeral-controller provider promotion is not approved"),
+        ),
     )
-    status = _none(f"{surface} is an emission-only non-actor surface; there is no Ring 1 actor to gate")
-    return HarnessRow(
-        surface,
-        {
-            "ring0": _none(f"{surface} is not an actor harness; no launch envelope applies"),
-            "ring1": _none(f"{surface} is not an actor harness; no per-tool-call hook applies"),
-            "ring2": _none(f"{surface} is not an actor harness; no Stop/closeout applies"),
-            "containment": _none(f"{surface} is not an actor harness; no sandbox / PTY applies"),
-            "native_fanout": fanout,
-            "status": status,
-        },
-    )
-
-
-def _containment_cell() -> Cell:
-    herdr_path = _module_file("runner.herdr_containment")
-    if not _module_has("runner.herdr_containment", "plan_herdr_containment"):
-        return _none("runner.herdr_containment plan probe is not importable", verified=False)
-    if _herdr_launch_is_wired():
-        return _full(f"{_rel(herdr_path)}: HerdrContainmentLaunch.launch is wired")
-    return _deferred(
-        f"{_rel(herdr_path)}: containment plan exists, but live launch still fails closed / is not wired"
-    )
-
-
-def _herdr_launch_is_wired() -> bool:
-    try:
-        herdr = import_module("creator_engine_validator.runner.herdr_containment")
-        plan = herdr.plan_herdr_containment(
-            {"mount_manifest": [], "egress_allowlist": []},
-            run_id="harness-matrix-probe",
-            seat_command=("true",),
-        )
-        launcher = herdr.HerdrContainmentLaunch(plan)
-        launcher.launch()
-    except Exception:
-        return False
-    return True
-
-
-def _status_from_cells(ring0: Cell, ring1: Cell, ring2: Cell) -> Cell:
-    present = sum(1 for cell in (ring0, ring1, ring2) if cell.verified and cell.value in {STATUS_FULL, STATUS_PARTIAL})
-    if present == 3:
-        value = STATUS_FULL
-    elif present:
-        value = STATUS_PARTIAL
-    else:
-        value = STATUS_NONE
-    return Cell(value, f"rollup of verified Ring 0/1/2 support: {present}/3", verified=True)
 
 
 def build_matrix(repo_root: Path | str = ".") -> HarnessMatrix:
     root = Path(repo_root).resolve()
     return HarnessMatrix(
         rows=(
-            _claude_row(root),
-            _codex_row(root),
-            _lane_row(root),
-            _hermes_row(root),
-            _unverified_actor_row("opencode", "OpenCode"),
-            _unverified_actor_row("copilot_cli", "Copilot CLI"),
-            _emission_only_row("nanoclaw"),
-            _emission_only_row("discord"),
-            _emission_only_row("slack"),
+            *_claude_rows(root),
+            *_codex_rows(root),
+            *_lane_rows(root),
+            *_contained_controller_rows(),
+            *_ephemeral_controller_rows(),
         )
     )
 
 
+def row_all_green(row: HarnessRow) -> bool:
+    return all(cell.value == GREEN and cell.verified for cell in row.cells.values())
+
+
+def row_has_ratified_exception(row: HarnessRow) -> bool:
+    return bool(row.exception and row.exception.date and row.exception.ratification_ref)
+
+
 def render_markdown(matrix: HarnessMatrix) -> str:
-    headers = ["harness", "Ring 0", "Ring 1", "Ring 2", "containment", "native fan-out", "status"]
     lines = [
         "# CE harness-support capability matrix",
         "",
-        "This is the authoritative CE harness-support matrix. It is rendered from "
-        "`creator_engine_validator.harness_matrix`; `*` marks a cell whose support "
-        "is deferred or otherwise not verified by committed wiring.",
+        "This is the authoritative CE harness-support and promotion matrix. It is rendered from "
+        "`creator_engine_validator.harness_matrix`; `yellow *` marks deferred or design-stage "
+        "support, and `red` marks an absent or refused promotion requirement.",
         "",
-        "| " + " | ".join(headers) + " |",
-        "| " + " | ".join(["---"] * len(headers)) + " |",
+        "A row is gate-capable only when `code-support`, `launch-wired`, `live-proven`, and "
+        "`promotion-approved` are all `green`, or when the row records an explicit "
+        "Operator-ratified exception with date and ratification reference.",
+        "",
+        "| " + " | ".join(DISPLAY_COLUMNS) + " |",
+        "| " + " | ".join(["---"] * len(DISPLAY_COLUMNS)) + " |",
     ]
     for row in matrix.rows:
-        values = [row.harness]
-        for capability in CAPABILITIES:
+        values = [row.provider, row.ring]
+        for capability in SUPPORT_COLUMNS:
             cell = row.cells[capability]
-            marker = "" if cell.verified else " *"
+            marker = " *" if cell.value == YELLOW or not cell.verified else ""
             values.append(f"{cell.value}{marker}")
+        values.append(row.gate_capable.value)
+        values.append(row.exception.render() if row.exception else NO_EXCEPTION)
         lines.append("| " + " | ".join(values) + " |")
 
     lines += ["", "## Provenance", ""]
     for row in matrix.rows:
-        lines.append(f"### {row.harness}")
-        for capability in CAPABILITIES:
+        lines.append(f"### {row.provider} - {row.ring}")
+        for capability in SUPPORT_COLUMNS:
             cell = row.cells[capability]
-            marker = "" if cell.verified else " [unverified/deferred]"
+            marker = " [deferred/design-stage]" if cell.value == YELLOW or not cell.verified else ""
             lines.append(f"- **{capability}** = `{cell.value}`{marker} - {cell.provenance}")
+        lines.append(f"- **gate-capable** = `{row.gate_capable.value}` - {row.gate_capable.provenance}")
+        if row.exception:
+            lines.append(
+                "- **exception** = "
+                f"`{row.exception.render()}` - {row.exception.provenance}"
+            )
+        else:
+            lines.append("- **exception** = `none` - no Operator-ratified exception recorded")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

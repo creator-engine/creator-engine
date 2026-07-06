@@ -1123,6 +1123,25 @@ def run_preflight(
     )
     checks.append(
         _run_check(
+            "Creator Engine validator - harness promotion matrix gate",
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - harness promotion matrix gate",
+                    [py, "-m", "creator_engine_validator", "verify-harness-promotion-matrix", "."],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "gate-capable rows are all-green or carry a dated Operator exception",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Creator Engine validator - brain drift check",
             brain_drift_gate,
             out,

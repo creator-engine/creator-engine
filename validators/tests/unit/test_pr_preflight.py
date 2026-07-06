@@ -270,6 +270,13 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
         sys.executable,
         "-m",
         "creator_engine_validator",
+        "verify-harness-promotion-matrix",
+        ".",
+    ] in calls
+    assert [
+        sys.executable,
+        "-m",
+        "creator_engine_validator",
         "verify-path-manifest",
         "--base",
         "abc1234",
