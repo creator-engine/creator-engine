@@ -106,9 +106,9 @@ platform evolves:
   `launch`, `lane`, `worker`, `ledger`, `fanin`, `queue`, `dequeue`, `event`, `pcl`,
   `brain`, `orchestrator`, `connector`, `containment-probe`, `reviewer-triage`, `claim`,
   `pickup`, `dispatch`, `playbook`, `surfaces`, `bootstrap`, `verify-install`, `update`, `clean-main-install`, `onboard`, `publish-branch`,
-  `harness-matrix`, `containment-status`, `takeover`, `validate-pr`, `automerge-decide`, and `automerge-status`.
+  `harness-matrix`, `containment-status`, `takeover`, `continuity-drill`, `validate-pr`, `automerge-decide`, and `automerge-status`.
   The as-built v1 command groups are `ce check`, `ce doctor`, `ce init`,
-  `ce launch`, `ce hud`, `ce takeover`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
+  `ce launch`, `ce hud`, `ce takeover`, `ce continuity-drill`, `ce lane`, `ce worker`, `ce ledger`, `ce fanin`,
   `ce queue`, `ce dequeue`, `ce event`, `ce pcl`, `ce brain`, `ce orchestrator`, `ce connector`,
   `ce containment-probe`, `ce reviewer-triage`, `ce claim`, `ce pickup`,
   `ce dispatch`, `ce playbook`, `ce surfaces`, `ce posture`, `ce bootstrap`
@@ -127,7 +127,11 @@ platform evolves:
   entries in `surfaces/manifest.yaml`),
   `ce publish-branch` (host-side publish gate for contained
   seats' commit-only branches), `ce takeover` (a read-only continuity
-  planner/evidence packet for governed controller succession), and `ce onboard` (the first-run one-shot
+  planner/evidence packet for governed controller succession),
+  `ce continuity-drill` (a scheduled benign continuity proof that composes
+  posture and takeover dry-run evidence without approving, merging, enqueueing,
+  signing, changing settings, mutating live daemons, re-arming real watchers, or
+  performing takeover), and `ce onboard` (the first-run one-shot
   orchestrator: it sequences the
   preflight doctor, install detection/acquisition, the `ce verify-install`
   provenance gate, the managed profile PATH block, the local CE state init leg

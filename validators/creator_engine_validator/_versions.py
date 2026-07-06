@@ -126,6 +126,10 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # Driven by the v1 ``ce`` kernel and deliberately reuses the v1
         # ``launch_runtime`` Ring-0 preflight; no v3 import or live mutation.
         "takeover_runtime",
+        # ce-ops#477 Slice D: scheduled benign continuity drill record.
+        # Driven by the v1 ``ce`` kernel and composes the read-only posture and
+        # takeover surfaces; no v3 import or live mutation.
+        "continuity_drill_runtime",
         # ce-ops#367: public CE-native `ce init` project scaffolding. This is
         # an offline v1 CLI runtime with embedded templates and no v3 imports.
         "project_init",

@@ -448,6 +448,20 @@ Options:
 | `--ring1-tool` | no |  | Ring-1 guarded tool to probe via each target PATH (default: git) |
 | `--json` | no |  | emit the machine-readable JSON fleet status |
 
+### `continuity-drill`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--from` | yes |  | predecessor seat id or session name to detect in continuity state |
+| `--harness` | yes | `claude, codex` | replacement Controller-seat harness to validate |
+| `--repo-root` | yes |  | repo root whose .ce state is inspected |
+| `--as-of` | no |  | drill schedule date as YYYY-MM-DD (default: current UTC date) |
+| `--prior-run` | no |  | prior drill result as YYYY-MM-DD:clean or YYYY-MM-DD:failed; repeatable |
+| `--promotion-candidate` | no |  | mark this drill as required before a controller substrate promotion |
+| `--json` | no |  | emit machine-readable JSON |
+
 ### `controller-inbox`
 
 Positional arguments:

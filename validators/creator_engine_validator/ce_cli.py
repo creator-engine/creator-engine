@@ -66,6 +66,7 @@ ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE dec
 ce automerge-status     # read dry-run automerge decision logs (read-only; no merge)
 ce automerge-kill-switch # read or toggle durable live-policy automerge kill-switch
 ce takeover             # read-only controller continuity takeover evidence packet
+ce continuity-drill     # scheduled benign Controller continuity drill proof
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -114,6 +115,7 @@ from . import (
     ce_onboard,
     ce_provenance,
     connector_runtime,
+    continuity_drill_runtime,
     controller_posture,
     dependency_unlock,
     dispatch_plan,
@@ -2205,6 +2207,41 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     takeover.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    continuity_drill = groups.add_parser(
+        "continuity-drill",
+        help="scheduled benign Controller continuity drill proof",
+    )
+    continuity_drill.add_argument(
+        "--from",
+        required=True,
+        dest="takeover_from",
+        help="predecessor seat id or session name to detect in continuity state",
+    )
+    continuity_drill.add_argument(
+        "--harness",
+        required=True,
+        choices=sorted(takeover_runtime.SUPPORTED_HARNESSES),
+        help="replacement Controller-seat harness to validate",
+    )
+    continuity_drill.add_argument("--repo-root", required=True, help="repo root whose .ce state is inspected")
+    continuity_drill.add_argument(
+        "--as-of",
+        default=None,
+        help="drill schedule date as YYYY-MM-DD (default: current UTC date)",
+    )
+    continuity_drill.add_argument(
+        "--prior-run",
+        action="append",
+        default=[],
+        help="prior drill result as YYYY-MM-DD:clean or YYYY-MM-DD:failed; repeatable",
+    )
+    continuity_drill.add_argument(
+        "--promotion-candidate",
+        action="store_true",
+        help="mark this drill as required before a controller substrate promotion",
+    )
+    continuity_drill.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     for name, (help_text, _v3_name) in V3_FORWARDING_SHIMS.items():
         shim = groups.add_parser(name, help=help_text, add_help=False)
         shim.add_argument("v3_args", nargs=argparse.REMAINDER)
@@ -4279,6 +4316,35 @@ def _takeover(args) -> int:
     return 0 if plan.ring0_ok else 1
 
 
+def _continuity_drill(args) -> int:
+    try:
+        prior_runs = tuple(
+            continuity_drill_runtime.parse_prior_run(value)
+            for value in getattr(args, "prior_run", ())
+        )
+        record = continuity_drill_runtime.build_record(
+            predecessor=args.takeover_from,
+            harness=args.harness,
+            repo_root=args.repo_root,
+            as_of=getattr(args, "as_of", None),
+            prior_runs=prior_runs,
+            promotion_candidate=getattr(args, "promotion_candidate", False),
+            environ=os.environ,
+        )
+    except continuity_drill_runtime.ContinuityDrillError as exc:
+        print(f"ERROR: ce continuity-drill refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 2
+    except takeover_runtime.TakeoverError as exc:
+        print(f"ERROR: ce continuity-drill refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 2
+    if getattr(args, "json_output", False):
+        print(continuity_drill_runtime.render_json(record), end="")
+    else:
+        for line in record.format_lines():
+            print(line)
+    return record.exit_code
+
+
 def _doctor(args) -> int:
     target_python = _target_python_from_args(args, Path(args.repo_root))
     report = doctor_runtime.run_doctor(
@@ -5692,6 +5758,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _launch(args, invoked_as=args.group)
     if args.group == "takeover":
         return _takeover(args)
+    if args.group == "continuity-drill":
+        return _continuity_drill(args)
     if args.group == "harness-matrix":
         return _harness_matrix(args)
     if args.group == "posture":
