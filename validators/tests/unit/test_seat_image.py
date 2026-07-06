@@ -172,9 +172,9 @@ def test_surfaces_manifest_records_pinned_seat_image_digest() -> None:
         surface for surface in doc["surfaces"] if surface["name"] == "CE seat image"
     )
 
-    assert seat["version"] == "0.3.2"
+    assert seat["version"] == "0.3.3"
     assert seat["commit_or_digest"] == (
-        "sha256:1955e3418f1913bb7a1f73fd259bf4baba6ccf98e1a3428a59ef9f75a03b5d43"
+        "sha256:1def5b0cd1e5e465cb42fa73934bc6ee4b1c93fe005bbd7d111a4589dc96b698"
     )
     assert seat["source"] == "ghcr.io/creator-engine/creator-engine/ce-seat"
     assert "manifest-list digest" in seat["update_policy"]
