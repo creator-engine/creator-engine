@@ -118,6 +118,10 @@ V1_RUNTIME: frozenset[str] = frozenset(
         # imports no v3 forge modules, with git push authority behind an
         # injectable host runner and Side-Effect Ledger audit trail.
         "publish_gate",
+        # ce-ops#477 Slice B: read-only controller continuity takeover planner.
+        # Driven by the v1 ``ce`` kernel and deliberately reuses the v1
+        # ``launch_runtime`` Ring-0 preflight; no v3 import or live mutation.
+        "takeover_runtime",
         # ce-ops#367: public CE-native `ce init` project scaffolding. This is
         # an offline v1 CLI runtime with embedded templates and no v3 imports.
         "project_init",
