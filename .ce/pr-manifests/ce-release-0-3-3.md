@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** epic
 
-AUTHORIZED_PATHS_COUNT=46
+AUTHORIZED_PATHS_COUNT=47
 
-AUTHORIZED_PATHS_SHA256=f3bd21f8ce81c19ab1613bbe28921072ef697dc09cdb06e91d9ba7fccb7bdaf7
+AUTHORIZED_PATHS_SHA256=2e95fba8114006fc8359e1c92790f7469b9b1f1eff24c7e78812361d2dd924dd
 
 ```text
 .ce/brain/assertions.yaml
@@ -57,4 +57,5 @@ validators/creator_engine_validator/version.py
 validators/pyproject.toml
 validators/tests/integration/test_release_finalize_integration.py
 validators/tests/unit/test_ce_brain_drift.py
+validators/tests/unit/test_wheel_bake.py
 ```
