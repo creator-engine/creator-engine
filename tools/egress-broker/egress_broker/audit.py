@@ -127,3 +127,46 @@ def count_recent_pushes(
         if (cutoff_now - when).total_seconds() <= window_seconds:
             count += 1
     return count
+
+
+def count_recent_forge_reads(
+    path: str | Path,
+    seat_id: str,
+    *,
+    window_seconds: int,
+    now: Callable[[], datetime] | None = None,
+) -> int:
+    """Count this seat's allowed forge-read audit records within the rate window.
+
+    Mirrors :func:`count_recent_pushes` for the read lane: missing logs count as zero,
+    malformed JSONL lines are skipped, and refusals never consume the per-seat budget.
+    """
+    p = Path(path).expanduser()
+    if not p.is_file():
+        return 0
+    cutoff_now = (now or (lambda: datetime.now(timezone.utc)))()
+    if cutoff_now.tzinfo is None:
+        cutoff_now = cutoff_now.replace(tzinfo=timezone.utc)
+    count = 0
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if (
+            rec.get("event") != "forge_read"
+            or rec.get("seat_id") != seat_id
+            or rec.get("decision") != "allow"
+        ):
+            continue
+        when = _parse_recorded_at(rec.get("recorded_at"))
+        if when is None:
+            continue
+        if (cutoff_now - when).total_seconds() <= window_seconds:
+            count += 1
+    return count

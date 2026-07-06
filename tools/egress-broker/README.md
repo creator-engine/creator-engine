@@ -194,6 +194,44 @@ and refuses if the requesting seat is the PR's own author — for any event, fai
 author cannot be resolved. This mirrors the existing `forge/plan_approval.py` /
 `forge/review_pickup.py` non-author guard.
 
+## Contained-seat forge read broker (ce-ops#475)
+
+The forge read lane adds host-side read-only verbs for contained seats that cannot carry `gh`,
+`curl`, or forge credentials in the sandbox:
+
+```bash
+python tools/egress-broker/ce_egress_forge_read_broker.py \
+  --config ~/.ce-egress/broker.json \
+  --seat dev-4 \
+  get-issue creator-engine/creator-engine 475
+```
+
+Supported verbs are:
+
+```text
+get-issue <repo> <number>
+get-pr <repo> <number>
+list-comments <repo> <number>
+```
+
+Each request carries only values: seat id, verb, repo, and issue/PR number. The host broker
+resolves the configured seat App, enforces the broker policy's per-seat rate window against
+`forge_read` audit records, mints a short-lived installation token with read-only permissions
+(`metadata:read`, `issues:read`, `pull_requests:read`), injects that token only into the trusted
+host child `gh api` environment, revokes it, and returns JSON containing the response body plus
+metadata. The contained seat never receives the credential and cannot request HTTP methods,
+payloads, permissions, or write-shaped operations through these verbs.
+
+Every read attempt appends a secret-free `forge_read` audit line, including refusals. The record
+includes `seat_id`, `repo`, `resource`, `verb`, decision, and timestamp fields.
+
+Deferred seams:
+
+- `kind:own` solo parity is intentionally not routed in this slice; the request shape is
+  mode-neutral so a later slice can add that lane without changing the contained-seat read verbs.
+- Governed `web-fetch` is out of scope for this slice and must use a separate policy and audit
+  surface.
+
 ## Before a live `--apply`
 
 1. **Host trust store** — the CE dev signing public keys must be in the broker host's gpg
