@@ -156,6 +156,17 @@ Scope is ratified. You can run a sharpening pass:
 ce shape activity-empty-state
 ```
 
+If you already have a PRD or requirements document, seed Shape from that file:
+
+```bash
+ce shape --from docs/prd/onboarding.md
+```
+
+CE reads the document as context, identifies one first candidate Scope, runs the
+same Shape grill, and previews Goal, Done-when gaps, and Change-type. It also
+adds `Source PRD: docs/prd/onboarding.md` as the Scope note when you explicitly
+confirm the shape; no Scope is recorded before that confirmation.
+
 **What you see.**
 
 ```text

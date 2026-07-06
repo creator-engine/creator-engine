@@ -11,6 +11,12 @@ Every place CE shapes something is the same move: the agent **drafts** a proposa
 ### One grill-me engine + per-locus rubrics
 Build **one reusable engine**, not five bespoke dialogues. Only the **rubric** and the **human-only field set** vary per locus — and the rubrics are mostly **existing CE checks** (the Scope-shaping rubric *is* the `definition_of_ready` predicate; the plan-approval rubric is plan-completeness; …), so the engine reuses governance rather than re-deriving "ready." The five shaping loci map onto BMAD's four phases: (1) discovery/analysis · (2) Scope-shaping (`SHAPE → READY`) · (3) plan-approval (solutioning) · (4) run-escalation · (5) review.
 
+`ce shape --from <path>` is the existing-PRD entry into that same engine. The
+document is context: CE reads it, identifies one first candidate Scope, cites
+`Source PRD: <path>`, and runs the normal Scope-shaping rubric. It does not
+authorize Build, and it does not record anything until the user explicitly
+confirms the shaped Scope. Multi-Scope decomposition stays outside this path.
+
 ## Frame is the free, pre-Scope zone — which resolves the trigger
 
 A **Scope artifact does not exist during Frame.** Free chat — questions, exploring, thinking out loud — is Frame, untracked. A Scope crystallizes only at the **Frame→Shape transition**. So *"when does chat become a Scope?"* is exactly *"when does Frame become Shape?"* — and that one move both answers the trigger question and **bounds Scope proliferation** (nothing is tracked until intent is concrete enough to draft a Scope).
