@@ -3,7 +3,7 @@ slug: ce-461b-adoption-template-merge-group
 date: 2026-07-06
 kind: fixed
 scope: validators
-issue: 461
+issue: ce-ops#473
 ---
 
 **adoption workflow template merge_group trigger parity.**

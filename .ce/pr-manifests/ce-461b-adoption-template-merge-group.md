@@ -1,4 +1,4 @@
-# PR path manifest — 461 · adoption workflow template merge_group trigger parity
+# PR path manifest — ce-ops#473 · adoption workflow template merge_group trigger parity
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-461b-adoption-template-merge-group` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
