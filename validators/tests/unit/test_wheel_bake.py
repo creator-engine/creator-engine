@@ -13,6 +13,7 @@ import pytest
 from creator_engine_validator.version import __version__
 from creator_engine_validator.wheel_bake import (
     WheelBakeError,
+    WheelManifest,
     build_app_wheel_from_source,
 )
 
@@ -44,6 +45,54 @@ def _console_surface(repo_root: Path, wheel: Path) -> tuple[dict[str, str], str,
         _wheel_text(wheel, "ce_cli.py"),
         _wheel_text(wheel, "v3_cli.py"),
     )
+
+
+def _remove_checkout_build_artifacts(repo_root: Path) -> None:
+    for rel in ("build", "creator_engine_validator.egg-info"):
+        shutil.rmtree(repo_root / "validators" / rel, ignore_errors=True)
+
+
+def _assert_surface_deterministic(repo_root: Path, tmp_path: Path, build_wheel) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+
+    # Ignore any stale gitignored checkout artifacts before the cleanliness assertion.
+    # build_app_wheel_from_source stages an isolated source tree; this scrub keeps
+    # leftover local artifacts from making the test report a false RED.
+    _remove_checkout_build_artifacts(repo_root)
+
+    left_manifest = build_wheel(repo_root, left, build_dir=tmp_path / "left-build-root")
+    right_manifest = build_wheel(repo_root, right, build_dir=tmp_path / "right-build-root")
+    left_wheel = left / left_manifest.wheel_name
+    right_wheel = right / right_manifest.wheel_name
+
+    assert left_manifest.version == right_manifest.version
+    assert left_manifest.source_commit == right_manifest.source_commit
+    assert left_manifest.sha256 == right_manifest.sha256
+    assert left_wheel.read_bytes() == right_wheel.read_bytes()
+    assert _console_surface(repo_root, left_wheel) == _console_surface(repo_root, right_wheel)
+    assert not (repo_root / "validators" / "build").exists()
+    assert not (repo_root / "validators" / "creator_engine_validator.egg-info").exists()
+
+
+def _write_surface_wheel(path: Path, *, nonce: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "creator_engine_validator-0.0.0.dist-info/entry_points.txt",
+            "\n".join(
+                [
+                    "[console_scripts]",
+                    "ce = creator_engine_validator.ce_cli:main",
+                    "cev3 = creator_engine_validator.v3_cli:main",
+                    "creator-engine-validator = creator_engine_validator.ce_cli:main",
+                    "",
+                ]
+            ),
+        )
+        zf.writestr("creator_engine_validator/ce_cli.py", "def main(): pass\n")
+        zf.writestr("creator_engine_validator/v3_cli.py", "def main(): pass\n")
+        zf.writestr("creator_engine_validator/build-nonce.txt", nonce)
 
 
 @pytest.mark.xdist_group("wheel-build")
@@ -80,33 +129,39 @@ def test_build_app_wheel_from_source_returns_recomputed_manifest(
 
 @pytest.mark.xdist_group("wheel-build")
 def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, tmp_path: Path):
-    left = tmp_path / "left"
-    right = tmp_path / "right"
+    _assert_surface_deterministic(repo_root, tmp_path, build_app_wheel_from_source)
 
-    # Record pre-existing build artifacts so we assert only that build_app_wheel_from_source
-    # did NOT CREATE new ones, not that the directory is unconditionally absent (a concurrent
-    # test in the same xdist group may transiently create/clean validators/build/ around us).
-    build_existed_before = (repo_root / "validators" / "build").exists()
-    egg_existed_before = (repo_root / "validators" / "creator_engine_validator.egg-info").exists()
 
-    left_manifest = build_app_wheel_from_source(
-        repo_root, left, build_dir=tmp_path / "left-build-root"
+@pytest.mark.xdist_group("wheel-build")
+def test_surface_determinism_ignores_stale_checkout_artifact_dirs(repo_root: Path, tmp_path: Path):
+    (repo_root / "validators" / "build" / "lib").mkdir(parents=True, exist_ok=True)
+    (repo_root / "validators" / "build" / "lib" / "stale.py").write_text("stale\n", encoding="utf-8")
+    (repo_root / "validators" / "creator_engine_validator.egg-info").mkdir(parents=True, exist_ok=True)
+    (repo_root / "validators" / "creator_engine_validator.egg-info" / "PKG-INFO").write_text(
+        "stale\n", encoding="utf-8"
     )
-    right_manifest = build_app_wheel_from_source(
-        repo_root, right, build_dir=tmp_path / "right-build-root"
-    )
-    left_wheel = left / left_manifest.wheel_name
-    right_wheel = right / right_manifest.wheel_name
 
-    assert left_manifest.version == right_manifest.version
-    assert left_manifest.source_commit == right_manifest.source_commit
-    assert left_manifest.sha256 == right_manifest.sha256
-    assert left_wheel.read_bytes() == right_wheel.read_bytes()
-    assert _console_surface(repo_root, left_wheel) == _console_surface(repo_root, right_wheel)
-    if not build_existed_before:
-        assert not (repo_root / "validators" / "build").exists()
-    if not egg_existed_before:
-        assert not (repo_root / "validators" / "creator_engine_validator.egg-info").exists()
+    _assert_surface_deterministic(repo_root, tmp_path, build_app_wheel_from_source)
+
+
+@pytest.mark.xdist_group("wheel-build")
+def test_surface_determinism_still_flags_nondeterministic_wheel(repo_root: Path, tmp_path: Path):
+    calls = 0
+
+    def nondeterministic_build(_repo_root: Path, out_dir: Path, *, build_dir: Path | None = None):
+        nonlocal calls
+        calls += 1
+        wheel = Path(out_dir) / "creator_engine_validator-0.0.0-py3-none-any.whl"
+        _write_surface_wheel(wheel, nonce=f"build-{calls}")
+        return WheelManifest(
+            wheel_name=wheel.name,
+            sha256="0" * 64,
+            version="0.0.0",
+            source_commit="1" * 40,
+        )
+
+    with pytest.raises(AssertionError):
+        _assert_surface_deterministic(repo_root, tmp_path, nondeterministic_build)
 
 
 @pytest.mark.wheel_bake_gate
