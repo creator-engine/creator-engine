@@ -83,6 +83,12 @@ def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, t
     left = tmp_path / "left"
     right = tmp_path / "right"
 
+    # Record pre-existing build artifacts so we assert only that build_app_wheel_from_source
+    # did NOT CREATE new ones, not that the directory is unconditionally absent (a concurrent
+    # test in the same xdist group may transiently create/clean validators/build/ around us).
+    build_existed_before = (repo_root / "validators" / "build").exists()
+    egg_existed_before = (repo_root / "validators" / "creator_engine_validator.egg-info").exists()
+
     left_manifest = build_app_wheel_from_source(
         repo_root, left, build_dir=tmp_path / "left-build-root"
     )
@@ -97,8 +103,10 @@ def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, t
     assert left_manifest.sha256 == right_manifest.sha256
     assert left_wheel.read_bytes() == right_wheel.read_bytes()
     assert _console_surface(repo_root, left_wheel) == _console_surface(repo_root, right_wheel)
-    assert not (repo_root / "validators" / "build").exists()
-    assert not (repo_root / "validators" / "creator_engine_validator.egg-info").exists()
+    if not build_existed_before:
+        assert not (repo_root / "validators" / "build").exists()
+    if not egg_existed_before:
+        assert not (repo_root / "validators" / "creator_engine_validator.egg-info").exists()
 
 
 @pytest.mark.wheel_bake_gate

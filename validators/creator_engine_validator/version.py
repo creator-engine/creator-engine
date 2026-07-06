@@ -35,7 +35,7 @@ from pathlib import Path
 #: reads it via AST (``packaging_runtime._source_declared_version``) and asserts
 #: it equals ``pyproject [project].version``. Semver-compatible for package
 #: consumers (``creator_engine_validator.__version__``).
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 #: The ``<semver>`` half of the CE token (== :data:`__version__`).
 SEMVER = __version__

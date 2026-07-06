@@ -6,7 +6,26 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
-(nothing yet — use this section for features landing after 0.3.2 while waiting for the next tag)
+(nothing yet — use this section for features landing after 0.3.3 while waiting for the next tag)
+
+## v0.3.3 — canary-C / Arad unblock: CLI-exposure fix + release-chain dispatch + tenant denylist (2026-07-06)
+
+Minimal point release to unblock canary C and the Arad live tenant. Rolls up six changelog fragments merged to main since the 0.3.2 tag.
+
+### Fixed
+
+- **verify_cli predicate tolerates onboard→install verb rename.** `verify_cli()` grepped for the legacy `onboard` verb string which was renamed to `install` in 0.3.2; changed to top-level `--help` invocation and checks `usage: <command>` in stdout.
+- **Release auto-tag explicitly dispatches publish chain in ordered sequence.** `release-auto-tag` now explicitly dispatches `publish-runtime-image`, `publish-seat-image` (gated on runtime success), and `release.yml` in order after pushing the annotated tag, bypassing `GITHUB_TOKEN` recursive-event suppression that silenced all downstream `push:tags:` triggers.
+- **Docs version currency: bump stale 0.3.0 references to 0.3.2.** Updates two current-version claims in README.md.
+
+### Changed
+
+- **Arm dependency-unlock LIVE preconditions.** Rechecked LIVE apply targets against freshly read candidate state and blocker resolutions before removing dependency hold labels; added fail-closed evidence for missing GitHub credentials and missing `gh` paths; removed unused `workflow_dispatch.apply` input.
+- **Tenant denylist matrix.** Added a data-driven tenant confidentiality denylist matrix loader; threaded it through the public confidentiality scan so CE forbidden patterns stay unconditional while tenant identifiers are blocked on CE public and cross-tenant surfaces; added focused coverage for denylist refs, bidirectional enforcement, CE-floor enforcement in tenant venues, tenant allowlist ratchets, and PR/issue/evidence scan surfaces.
+
+### Added
+
+- **Mediated brain-ledger append ADR.** ADR-0005 for `.ce/brain/assertions.yaml` append serialization, evaluating queue-daemon mediation, merge-queue-native chain recomputation, and a ledger-file lock primitive; recommends a separate brain-append daemon for the minimal Phase-1 slice; records fail-closed, containment, gate-singleton, and duplicate-ID/tombstone invariant requirements. Design only: no implementation, no ledger schema change.
 
 ## v0.3.2 — release-automation + brownfield-installer hardening (2026-07-05)
 

@@ -309,7 +309,7 @@ MIRROR_USERSPACE_WHEELS: dict[str, MirrorUserspaceWheel] = {
         tool="uv",
         filename="uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
         url=(
-            "https://creator-engine.dev/downloads/0.3.2/"
+            "https://creator-engine.dev/downloads/0.3.3/"
             "uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
         ),
         sha256="b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd",
