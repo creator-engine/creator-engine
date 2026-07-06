@@ -398,6 +398,72 @@ def test_launch_dry_run_json(use_fake_tmux, capsys):
     assert payload["spawned"] is False
 
 
+def test_raw_controller_role_launch_refuses_with_recovery_command_json(
+    tmp_path, use_fake_tmux, monkeypatch, capsys
+):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_gh_runner",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before claim acquisition")),
+    )
+
+    ret = ce_cli.main(
+        [
+            "launch",
+            "--role",
+            "controller",
+            "--harness",
+            "codex",
+            "--repo-root",
+            str(tmp_path),
+            "--claim-ticket",
+            "95",
+            "--json",
+        ]
+    )
+
+    assert ret == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED"
+    assert payload["role"] == "controller"
+    assert payload["read_only"] is True
+    assert payload["required_evidence"] == "ce-takeover-evidence-packet"
+    assert payload["recovery_command"] == (
+        f"ce takeover --from ce-controller --harness codex --repo-root {tmp_path} --dry-run"
+    )
+    assert adapter.spawned == []
+
+
+def test_raw_controller_role_launch_refusal_teaches_recovery_command_text(
+    tmp_path, use_fake_tmux, capsys
+):
+    adapter = FakeAdapter()
+    use_fake_tmux(adapter)
+
+    ret = ce_cli.main(
+        [
+            "launch",
+            "--role",
+            "controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert ret == 1
+    err = capsys.readouterr().err
+    assert "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED" in err
+    assert (
+        f"ce takeover --from ce-controller --harness claude --repo-root {tmp_path} --dry-run"
+        in err
+    )
+    assert adapter.spawned == []
+
+
 def test_launch_backend_dry_run_json_carries_runtime_policy(use_fake_tmux, tmp_path, capsys):
     policy = _write_runtime_policy(tmp_path)
     ret = ce_cli.main([

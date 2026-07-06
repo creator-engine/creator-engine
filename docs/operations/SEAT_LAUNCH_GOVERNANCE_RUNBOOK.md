@@ -70,6 +70,8 @@ Operator-relevant `ce launch` flags:
 | `--resume` | Attaches an existing launcher session. If the named session does not exist, launch is refused instead of spawning or continuing hidden. |
 | `--dry-run` | Builds the deterministic launch plan at the launch-runtime layer. No tmux spawn, provider login, lifecycle write, or resource-bound launch-confirm occurs; requested `--claim-ticket` acquisition still happens before the runtime call. |
 | `--no-tmux` | Refuse-only request for a non-visible/headless Controller seat. Governed authoring seats require a visible tmux surface, so this refuses before side effects. |
+| `--role controller` | Explicit raw Controller-role launch request. Without a `ce takeover --dry-run --json` evidence packet, launch refuses as `READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED` and prints the exact recovery command. |
+| `--takeover-evidence <path>` | Machine-readable takeover evidence packet that permits an explicit `--role controller` launch to proceed through the normal governed launch gates. |
 | `--mcp-config <path>` | Claude-only governed MCP config path. The launcher requires a CE-owned repo-relative path, pins `--strict-mcp-config`, provisions the file under `--repo-root` when absent, and refuses absolute, `~`, or escaping paths. |
 | `--completion-report-ref <ref>` | Deterministic completion-report pointer accepted for closeout verification surfaces. The governed Claude command builder does not emit it as a Claude argv flag. |
 | `--closeout-file <path>` | Deterministic closeout text pointer accepted for closeout verification surfaces. The governed Claude command builder does not emit it as a Claude argv flag. |
@@ -171,6 +173,15 @@ evidence, not a chat statement or prompt convention:
   or valid envelope, restricted reviewer actions remain denied.
 - Source ratification and mechanics authority are separate from seat launch.
   Launch evidence can support ratification; it cannot ratify itself.
+- Continuity takeover starts with `ce takeover --from <seat-or-session>
+  --harness <claude|codex> --repo-root <path> --dry-run --json`. The packet
+  includes `raw_controller_launch_refusal` evidence and a `re_arm_plan`.
+  Watcher and daemon re-arm actions come only from a machine-readable duty
+  manifest discovered at `.ce/state/watchers/duty-manifest.yaml`,
+  `.ce/state/duty-manifest.yaml`, `.ce/duty-manifest.yaml`, or an explicit
+  `--duty-manifest <path>`. Each duty entry names `id`, `type`
+  (`watcher` or `daemon`), and `rearm_command`; dry-run lists the actions with
+  `execute: false` and does not start processes.
 
 A seat is considered governed only when the live seat identity points at the
 expected claim and the claim remains unreleased. If that binding is missing,

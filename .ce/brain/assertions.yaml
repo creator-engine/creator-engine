@@ -3828,4 +3828,56 @@ records:
   verification_method:
     evidence_ref: validators/pyproject.toml
     type: static
+- claim:
+    details: Governed seats relaunch through the canonical launch path; missing launch
+      or claim prerequisites are stop conditions rather than a reason to use a raw
+      harness.
+    evidence_sha256: 802f3b9c1d7f05d16a6fc383624ec2570930c16227061344660c73fb2e9420cc
+    item: 33
+    object: canonical-seat-launch-only
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: d39bca0df6f1ecbecad210644b01db3bd4c0615e32851a5a3042ef1cfa7185c8
+  evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+  id: brain-assertion-d1b-33-canonical-seat-launch-only-v2
+  kind: brain-assertion
+  prev_hash: 3175a480aa45ea4486e6fa8bc95a68046e0246fb1067d5e2a503febc2396cc8d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 146
+  statement: Governed seats relaunch through the canonical launch path; missing launch
+    or claim prerequisites are stop conditions rather than a reason to use a raw harness.
+  status: superseded
+  superseded_by: brain-assertion-d1b-33-canonical-seat-launch-only-v3
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+    type: static
+- claim:
+    details: Governed seats relaunch through the canonical launch path; missing launch
+      or claim prerequisites are stop conditions rather than a reason to use a raw
+      harness.
+    evidence_sha256: d32b508831023513d325a5b911e956ddedc3e66fe16e9f1f076abb720efa7a5a
+    item: 33
+    object: canonical-seat-launch-only
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: eaaed649269e80742aac64476b592e35d05358347d331e67473e8b08b443c359
+  evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+  id: brain-assertion-d1b-33-canonical-seat-launch-only-v3
+  kind: brain-assertion
+  prev_hash: d39bca0df6f1ecbecad210644b01db3bd4c0615e32851a5a3042ef1cfa7185c8
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 147
+  statement: Governed seats relaunch through the canonical launch path; missing launch
+    or claim prerequisites are stop conditions rather than a reason to use a raw harness.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+    type: static
 schema_version: '1'

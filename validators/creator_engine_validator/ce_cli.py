@@ -2066,6 +2066,23 @@ def _build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="refuse-only flag: request a non-visible/headless seat (always refused)",
         )
+        p.add_argument(
+            "--role",
+            choices=[launch_runtime.CONTROLLER_ROLE],
+            default=None,
+            help=(
+                "raw role=controller launch request; refuses until a governed "
+                "takeover evidence packet is supplied"
+            ),
+        )
+        p.add_argument(
+            "--takeover-evidence",
+            default=None,
+            help=(
+                "path to a ce takeover --dry-run --json evidence packet that "
+                "authorizes role=controller launch"
+            ),
+        )
         # CC-G-D Ring 0 governed-Claude surfaces. Pass dashed values with `=`
         # (e.g. --claude-arg=--dangerously-skip-permissions).
         p.add_argument(
@@ -2173,6 +2190,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="replacement Controller-seat harness to validate",
     )
     takeover.add_argument("--repo-root", required=True, help="repo root whose .ce state is inspected")
+    takeover.add_argument(
+        "--duty-manifest",
+        default=None,
+        help=(
+            "machine-readable watcher/daemon duty manifest used to plan "
+            "dry-run re-arm actions"
+        ),
+    )
     takeover.add_argument(
         "--dry-run",
         action="store_true",
@@ -4134,12 +4159,30 @@ def _posture(args) -> int:
     return 0
 
 
+def _print_launch_refusal(args, invoked_as: str, exc: launch_runtime.LaunchError) -> int:
+    if getattr(args, "json_output", False) and hasattr(exc, "to_dict"):
+        print(json.dumps(exc.to_dict(), indent=2, sort_keys=True))
+        return 1
+    print(f"ERROR: ce {invoked_as} refused [{exc.code}]: {exc}", file=sys.stderr)
+    return 1
+
+
 def _launch(args, invoked_as: str = "launch") -> int:
     harness_args = None
     if args.harness == "claude":
         harness_args = getattr(args, "claude_arg", None)
     elif args.harness == "codex":
         harness_args = getattr(args, "codex_arg", None)
+    try:
+        launch_runtime._validate_governed_controller_launch(  # type: ignore[attr-defined]
+            role=getattr(args, "role", None),
+            harness=args.harness,
+            repo_root=getattr(args, "repo_root", None),
+            session=args.session,
+            takeover_evidence=getattr(args, "takeover_evidence", None),
+        )
+    except launch_runtime.LaunchError as exc:
+        return _print_launch_refusal(args, invoked_as, exc)
     if getattr(args, "preflight", False):
         report = launch_runtime.preflight_launch(
             harness=args.harness,
@@ -4177,6 +4220,8 @@ def _launch(args, invoked_as: str = "launch") -> int:
             resume=args.resume,
             dry_run=args.dry_run,
             visible=not args.no_tmux,
+            role=getattr(args, "role", None),
+            takeover_evidence=getattr(args, "takeover_evidence", None),
             extra_args=harness_args,
             mcp_config_path=getattr(args, "mcp_config", None),
             closeout_file=getattr(args, "closeout_file", None),
@@ -4193,8 +4238,7 @@ def _launch(args, invoked_as: str = "launch") -> int:
         )
     except launch_runtime.LaunchError as exc:
         _release_claim_context(claim_ctx, reason="launch-refused-before-side-effect")
-        print(f"ERROR: ce {invoked_as} refused [{exc.code}]: {exc}", file=sys.stderr)
-        return 1
+        return _print_launch_refusal(args, invoked_as, exc)
     if getattr(args, "json_output", False):
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     else:
@@ -4222,6 +4266,7 @@ def _takeover(args) -> int:
             harness=args.harness,
             repo_root=args.repo_root,
             dry_run=args.dry_run,
+            duty_manifest=getattr(args, "duty_manifest", None),
         )
     except takeover_runtime.TakeoverError as exc:
         print(f"ERROR: ce takeover refused [{exc.code}]: {exc}", file=sys.stderr)
