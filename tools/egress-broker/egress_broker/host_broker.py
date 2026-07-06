@@ -23,6 +23,7 @@ from typing import Any
 
 from egress_broker.audit import append_audit
 from egress_broker.config import BrokerConfig
+from egress_broker.jit_credential import mint_seat_credential, revoke_seat_credential
 from egress_broker.orchestrator import (
     ContainedSeatSelfPushRequest,
     EgressRefused,
@@ -137,6 +138,72 @@ def handle_self_push_request(
     if not isinstance(request, Mapping):
         return {"status": 400, "reason": "bad_request"}
 
+    verb = str(request.get("verb") or "").strip()
+    if verb in {"mint-seat-credential", "revoke-seat-credential"}:
+        seat_id = str(request.get("seat_id") or "").strip()
+        credential_class = str(request.get("credential_class") or "").strip()
+        if not seat_id or not credential_class:
+            return {"status": 400, "reason": "missing_required_field"}
+        unsupported = sorted(str(k) for k in request if str(k) in _UNSUPPORTED_REQUEST_FIELDS)
+        if unsupported:
+            return _audit_credential_refusal(
+                config,
+                seat_id=seat_id,
+                credential_class=credential_class,
+                action="mint" if verb == "mint-seat-credential" else "revoke",
+                status=400,
+                reason="unsupported_request_field",
+                extra={"fields": unsupported},
+            )
+        findings = _contained_secret_findings(request)
+        if findings:
+            return _audit_credential_refusal(
+                config,
+                seat_id=seat_id,
+                credential_class=credential_class,
+                action="mint" if verb == "mint-seat-credential" else "revoke",
+                status=403,
+                reason="contained_credential_material",
+                extra={"findings": list(findings)},
+            )
+        broker_seat_id = str(broker_seat_id or "").strip()
+        if not broker_seat_id:
+            return {"status": 500, "reason": "broker_seat_id_missing"}
+        if seat_id != broker_seat_id:
+            return _audit_credential_refusal(
+                config,
+                seat_id=seat_id,
+                credential_class=credential_class,
+                action="mint" if verb == "mint-seat-credential" else "revoke",
+                status=403,
+                reason="wrong_seat",
+                extra={"expected_seat_id": broker_seat_id},
+            )
+        if verb == "mint-seat-credential":
+            return mint_seat_credential(
+                seat_id,
+                credential_class,
+                config=config,
+                store=host_courier_options.get("credential_store"),
+                signer=host_courier_options.get("signer"),
+                transport=host_courier_options.get("transport"),
+                gh_spawn=host_courier_options.get("gh_spawn"),
+                now=host_courier_options.get("now"),
+                audit_now=host_courier_options.get("audit_now"),
+                resolve_id_fn=host_courier_options.get("resolve_id_fn"),
+                mint_fn=host_courier_options.get("mint_fn"),
+                revoke_fn=host_courier_options.get("revoke_fn"),
+                model_mint_fn=host_courier_options.get("model_mint_fn"),
+            )
+        return revoke_seat_credential(
+            seat_id,
+            credential_class,
+            config=config,
+            store=host_courier_options.get("credential_store"),
+            now=host_courier_options.get("now"),
+            audit_now=host_courier_options.get("audit_now"),
+        )
+
     unsupported = sorted(str(k) for k in request if str(k) in _UNSUPPORTED_REQUEST_FIELDS)
     if unsupported:
         return {"status": 400, "reason": "unsupported_request_field", "fields": unsupported}
@@ -221,6 +288,8 @@ def handle_self_push_json_line(
             courier_fn=courier_fn,
             **host_courier_options,
         )
+    if _is_socket_credential_response(response):
+        return json.dumps(response, sort_keys=True, separators=(",", ":")) + "\n"
     return json.dumps(_assert_response_secret_free(response), sort_keys=True, separators=(",", ":")) + "\n"
 
 
@@ -393,6 +462,46 @@ def _assert_response_secret_free(response: dict[str, Any]) -> dict[str, Any]:
     if _TOKEN_VALUE_RE.search(rendered):
         return {"status": 500, "reason": "response_secret_material_refused"}
     return response
+
+
+def _audit_credential_refusal(
+    config: BrokerConfig,
+    *,
+    seat_id: str,
+    credential_class: str,
+    action: str,
+    status: int,
+    reason: str,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    audit_record = append_audit(
+        config.audit_log,
+        {
+            "event": "seat_jit_credential",
+            "seat_id": seat_id,
+            "class": credential_class,
+            "action": action,
+            "decision": "deny",
+            "reason": reason,
+        },
+    )
+    return {
+        "status": status,
+        "reason": reason,
+        "seat_id": seat_id,
+        "credential_class": credential_class,
+        "audit_record": audit_record,
+        **dict(extra or {}),
+    }
+
+
+def _is_socket_credential_response(response: dict[str, Any]) -> bool:
+    """The JIT mint path intentionally returns the secret on this socket only."""
+    return (
+        response.get("status") == 200
+        and response.get("delivery") == "broker-socket-stream"
+        and isinstance(response.get("credential"), str)
+    )
 
 
 __all__ = [

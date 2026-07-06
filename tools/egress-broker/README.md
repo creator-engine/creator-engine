@@ -144,6 +144,27 @@ python tools/egress-broker/ce_egress_broker.py \
   --apply
 ```
 
+## JIT Seat Credential Socket Verb (ce-ops#228)
+
+The host broker accepts value-only JSON socket requests for short-lived seat credentials:
+
+```json
+{"verb":"mint-seat-credential","seat_id":"dev-3","credential_class":"forge-scoped"}
+```
+
+and explicit revocation:
+
+```json
+{"verb":"revoke-seat-credential","seat_id":"dev-3","credential_class":"forge-scoped"}
+```
+
+Credential classes are fail-closed and per-seat allowlisted with
+`allowed_credential_classes`. v1 classes are `model-api` and `forge-scoped`. The response
+delivers the credential value only on the broker Unix stream; the broker does not create a
+container env, argv, Docker `-e`, Docker exec env, or persisted container-config delivery
+path. Every mint/refusal/revoke appends a secret-free audit line, and the broker keeps only
+one active credential per seat/class, with TTL expiry and explicit revoke support.
+
 ## Contained-seat self-review broker (ce-ops#243)
 
 This repository does not currently contain a separate `ce_egress_self_push_broker.py`; the

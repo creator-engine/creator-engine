@@ -81,6 +81,7 @@ class SeatAppConfig:
     installation_id: int | None
     secret_ref: Optional[VaultSecretRef] = None
     repo: str = ""
+    allowed_credential_classes: frozenset[str] = frozenset()
 
     def __repr__(self) -> str:  # keep App id / pem path out of incidental log/repr surfaces
         key_source = (
@@ -91,7 +92,8 @@ class SeatAppConfig:
         return (
             f"SeatAppConfig(seat_id={self.seat_id!r}, app_owner={self.app_owner!r}, "
             f"app_id=<redacted>, {key_source}, "
-            f"installation_id={'<discover>' if self.installation_id is None else '<set>'})"
+            f"installation_id={'<discover>' if self.installation_id is None else '<set>'}, "
+            f"allowed_credential_classes={sorted(self.allowed_credential_classes)!r})"
         )
 
     __str__ = __repr__
@@ -243,6 +245,18 @@ def _build_seat(seat_id: str, raw: object, *, default_repo: str | None) -> SeatA
             ) from None
         if installation_id <= 0:
             raise BrokerConfigError(f"{where} 'installation_id' must be positive when set")
+
+    raw_classes = raw.get("allowed_credential_classes", raw.get("credential_classes", ()))
+    if raw_classes is None:
+        raw_classes = ()
+    if not isinstance(raw_classes, (list, tuple, set, frozenset)):
+        raise BrokerConfigError(
+            f"{where} 'allowed_credential_classes' must be a list of credential class names"
+        )
+    allowed_credential_classes = frozenset(
+        str(item).strip() for item in raw_classes if str(item).strip()
+    )
+
     return SeatAppConfig(
         seat_id=seat_id,
         app_id=app_id,
@@ -251,6 +265,7 @@ def _build_seat(seat_id: str, raw: object, *, default_repo: str | None) -> SeatA
         installation_id=installation_id,
         secret_ref=secret_ref,
         repo=repo,
+        allowed_credential_classes=allowed_credential_classes,
     )
 
 

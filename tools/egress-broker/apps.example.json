@@ -50,6 +50,7 @@
       "repo": "creator-engine/creator-engine-sandbox",
       "app_id": "REPLACE_WITH_DEV3_APP_ID",
       "app_owner": "ce-dev-3",
+      "allowed_credential_classes": ["model-api", "forge-scoped"],
       "secret_ref": {
         "mount": "ce-kv",
         "path": "forge/dev-3",
