@@ -10,6 +10,8 @@ issue: ce-ops#464
 
 - Added a design-only classified sweep proposal for accumulated `.ce/wt-*` and
   `/var/tmp/ce-*` directories.
-- Defined deterministic classes, dry-run/default safety invariants, archive
-  and undo-window apply flow, `ce worktree sweep` command shape, rollout, and a
-  read-only appendix grounded in current host sample directories.
+- Defined deterministic classes, an artifact-only dirt-clearing pass before
+  re-evaluation, lifecycle ownership and retirement rules, dry-run/default
+  safety invariants, archive and undo-window apply flow, `ce worktree sweep`
+  command shape, rollout, and a read-only appendix grounded in current host
+  sample directories.

@@ -53,6 +53,68 @@ Discovery must record whether a path is a Git worktree according to
 `git worktree list --porcelain`. Those are separate signals: a directory can be
 a useful staging root without being a registered git worktree.
 
+## Artifact-Only Dirt-Clearing Pass
+
+Before the final safety classification, the sweep should run an artifact-only
+dirt-clearing pass. The purpose is not to make a worktree look clean; it is to
+remove generated noise that would otherwise mask the real disposition. The
+sequence is:
+
+1. Discover candidates and record the pre-clear snapshot.
+2. Identify generated or derived artifacts with deterministic signals.
+3. Clear only those artifacts, using configured safe commands or path removals.
+4. Re-run git/status/stat inspection and classify only what remains dirty.
+5. Record both snapshots in the manifest so operators can audit what changed.
+
+A derived artifact is a file or directory that can be recreated from committed
+source, declared dependencies, or a documented generator without carrying
+reviewable human intent. Deterministic signals include:
+
+- path is under a configured build/cache/test-output location such as
+  `build/`, `dist/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`,
+  `__pycache__/`, `.coverage`, `htmlcov/`, `node_modules/`, or known validator
+  scratch stems like `/tmp/ce-validate-pr-base-*`;
+- file is ignored by the repo's own ignore rules and has no explicit evidence
+  retention rule;
+- file is produced by a command listed in the manifest policy, for example
+  test cache, coverage output, generated package metadata, or downloaded
+  release-staging payloads;
+- file content is reproducible from checked-in inputs or external immutable
+  references recorded in metadata;
+- path has no active claim, no PR carrier role, no evidence-hold role, and no
+  operator-authored marker.
+
+A work product is any file or directory that may contain human-authored intent,
+coordination state, review evidence, or unrecoverable host-local facts.
+Deterministic signals include:
+
+- tracked source, docs, specs, tests, migrations, or configuration changes;
+- untracked files outside configured generated-artifact paths;
+- `.ce/changelog/**`, `.ce/pr-manifests/**`, `.ce/state/**`,
+  `.ce/claims/**`, `.ce/leases/**`, `.ce/locks/**`, `evidence/**`, `runs/**`,
+  `review/**`, or `gate/**`;
+- git commits ahead of upstream or `origin/main`;
+- files containing operator approval, validation logs, canary output, branch
+  disposition, claim ownership, or archive metadata;
+- any path whose origin cannot be proven by the derived-artifact policy.
+
+The pass must never delete or rewrite work product. If a dirty candidate
+contains both derived artifacts and possible work product, the sweep clears the
+derived artifacts first, records the clear operation, and then re-classifies the
+remaining state. For example, a pytest scratch directory such as
+`/var/tmp/ce-445-g9-pytest.5Qds6m` can be recognized as validator scratch by
+files like `started`, `stop`, and `engine-argv.txt`, but this design still keeps
+non-git scratch as `unknown` until a retention policy says those files are
+discardable. In contrast, a clean registered worktree such as
+`/var/tmp/ce-294-press-merge-read` should not need dirt clearing before its
+merged-safe check; clearing would be a no-op recorded in the manifest.
+
+The initial implementation should support a dry-run clear report before it
+supports apply. A row that becomes clean after artifact clearing may continue to
+`merged-safe` only when all other merged-safe requirements hold. A row with
+remaining tracked or untracked work product becomes `unpushed-work`,
+`evidence-hold`, or `unknown` according to the ordered taxonomy below.
+
 ## Classification Taxonomy
 
 Classification is ordered. The first matching class wins, and a candidate that
@@ -127,6 +189,47 @@ Mtime signals:
 6. Record apply evidence: manifest hash, archive path, bundle verification
    result, paths moved or removed, operator approval reference, and kill-switch
    state.
+
+## Worktree Lifecycle Rule
+
+Debt should stop accumulating at worktree creation time. Every CE worktree or
+host staging root must have a lifecycle record that names the owner, branch or
+claim, creation reason, and retirement trigger. Paths without such a record are
+allowed for emergency recovery only and immediately classify as `unknown` or
+`evidence-hold` until an operator records ownership.
+
+| Stage | Owner | Required record | Exit condition |
+|---|---|---|---|
+| `created` | dispatching controller or seat foreman | path, branch, claim/ticket, intended base, created_at, creating command, and owner seat | handoff to active owner with claim accepted |
+| `owned-active` | implementing or reviewing seat | heartbeat/lease, current branch, PR or claim reference, and expected next action | PR closed, claim released, or work explicitly handed off |
+| `validation-hold` | author seat until harvest, then controller/reviewer named in the record | validation artifacts, carrier paths, run IDs, and retention deadline | validation evidence copied to durable location or superseded |
+| `retirement-pending` | controller cleanup owner | merged/closed disposition, archive plan, undo-window deadline, and manifest row hash | archive verified and undo window elapsed |
+| `retired` | cleanup owner of record | archive path, bundle hash when git-backed, metadata hash, and final action timestamp | no further action; later restoration starts a new lifecycle |
+
+The default retirement trigger for a git-backed worktree is all of:
+
+- claim or ticket is closed or explicitly released;
+- associated branch is merged to `origin/main` or otherwise recorded as
+  abandoned with no ahead commits requiring preservation;
+- validation and review evidence has been copied or its retention window has
+  elapsed;
+- artifact-only dirt-clearing and re-classification still leave the candidate
+  `merged-safe`;
+- the configured undo window has elapsed after quarantine/archive verification.
+
+Ownership must be path-scoped. A branch name alone is not enough because the
+current host sample shows multiple kinds of roots: branch worktrees such as
+`/var/tmp/ce-351-queue-daemon-relocation`, detached validation/read worktrees
+such as `/var/tmp/ce-294-press-merge-read`, and non-git scratch such as
+`/var/tmp/ce-445-g9-pytest.5Qds6m`. The current repo-local `.ce` tree sampled on
+2026-07-06 had no `.ce/wt-*` directories, which is useful evidence but not an
+allowlist; lifecycle enforcement still applies when `.ce/wt-*` paths appear.
+
+The `ce worktree sweep --classify` command should report lifecycle gaps as
+classification reasons, for example `missing_lifecycle_owner`,
+`retirement_trigger_incomplete`, or `undo_window_open`. Apply must refuse a
+candidate whose lifecycle owner, branch, claim, archive hash, or retirement
+deadline changed since the approved manifest.
 
 ## Operator-Visible Manifest
 
