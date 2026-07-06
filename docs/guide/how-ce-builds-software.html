@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <link rel="icon" href="../assets/ce-favicon-v2.svg"/>
-<title>Understanding Creator Engine &#x2014; Creator Engine</title>
+<title>How CE Builds Software &#x2014; Creator Engine</title>
 <style>
   :root{
     --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
@@ -115,49 +115,82 @@
   <div class="wrap">
     <div class="page-header">
       <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
-      <span class="page-eyebrow">User guide</span>
-      <h1>Understanding Creator Engine</h1>
+      <span class="page-eyebrow">Concepts</span>
+      <h1>How CE Builds Software</h1>
     </div>
     <article class="article">
-<h1 id="understanding-creator-engine">Understanding Creator Engine</h1>
-<p>Creator Engine runs <strong>your own coding agent under governance.</strong> You keep using the agent you already know. CE adds a structured, evidence-backed loop around real work so changes are shaped, ratified, built, reviewed, and shipped on purpose.</p>
-<p>Start with the canonical <a href="quickstart.html"><code>quickstart.md</code></a> when you want commands. Read <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a> when you want the concepts behind the loop.</p>
-<h2 id="what-ce-is">What CE Is</h2>
-<p>The core idea is simple: the thing that decides whether work is good lives outside the agent. You judge artifacts: a Scope, a diff, checks, review evidence, and the Completion Report. You do not judge a transcript.</p>
-<p>CE is CLI-anchored. The everyday path is <code>ce brain init</code> once, then <code>ce launch --backend host</code> to open your governed agent session. Contained launch is hardening in progress; use the host backend unless your operator tells you a contained backend is ready for your repo.</p>
-<h2 id="the-five-stages">The Five Stages</h2>
-<p>CE names the loop with five plain words:</p>
-<pre><code class="language-text">Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship</code></pre>
-<ol>
-<li><strong>Frame</strong> - understand the problem, why it matters, and what good would look like. This is exploration only; nothing is tracked yet.</li>
-<li><strong>Shape</strong> - turn the framed problem into a Scope with Goal, Done-when, and Change-type.</li>
-<li><strong>Build</strong> - let the agent execute the ratified Scope in a governed run.</li>
-<li><strong>Review</strong> - grade the result against Done-when and evidence.</li>
-<li><strong>Ship</strong> - land the governed outcome: merged PR, delivered research, or no-change.</li>
-</ol>
-<p>This is a loop, not a waterfall. Review can send work back. A large Scope can spawn smaller Scopes.</p>
-<h2 id="the-scope">The Scope</h2>
-<p>When exploration becomes real work, CE records a <strong>Scope</strong>. The Scope is the contract for the run.</p>
+<h1 id="how-ce-builds-software">How CE Builds Software</h1>
+<p>Creator Engine turns intent into governed software delivery by enforcing gates, not by relying on agent convention. The Scope is the governing record: it says what will change, what Done-when means, and what Change-type applies. Natural language helps shape context; governed work begins at explicit <code>ce</code> verbs and the Scope record.</p>
+<h2 id="the-loop">The Loop</h2>
+<p>CE uses the same loop for a tiny fix, a feature, or a larger project:</p>
+<pre><code class="language-text">Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship
+              ^                 |
+              |_________________|</code></pre>
+<p>Review can bounce work back. A Scope can spawn smaller Scopes. The stages are an honest loop, not a waterfall.</p>
 <table>
-<thead><tr><th>Field</th><th>What it means</th></tr></thead>
+<thead><tr><th>Stage</th><th>What happens</th><th>Artifact</th><th>Mandatory</th></tr></thead>
 <tbody>
-<tr><td><strong>Goal</strong></td><td>What you are trying to accomplish</td></tr>
-<tr><td><strong>Done-when</strong></td><td>The checks that say the work is finished</td></tr>
-<tr><td><strong>Change-type</strong></td><td>What kind of change this is and how risky it is</td></tr>
-<tr><td><strong>Ready</strong></td><td>CE has enough valid information to run after ratification</td></tr>
+<tr><td>Frame</td><td>Explore the goal, constraints, and repo context in plain language</td><td>Framing notes or no artifact yet</td><td>Optional before a Scope</td></tr>
+<tr><td>Shape</td><td>Convert the framed goal into a Scope with Goal, Done-when, and Change-type</td><td>Scope record</td><td>Mandatory</td></tr>
+<tr><td>Build</td><td>Execute the ratified Scope in a governed run</td><td>Run evidence, branch, artifacts, often a PR</td><td>Mandatory for change work</td></tr>
+<tr><td>Review</td><td>Grade the result against Done-when and evidence</td><td>Review evidence and Completion Report</td><td>Mandatory</td></tr>
+<tr><td>Ship</td><td>Land the governed terminal outcome</td><td>Merged PR, delivered research, or no-change record</td><td>Mandatory</td></tr>
 </tbody></table>
-<p>Optional lane-aware cap: your operator may ask you to add a cap for a specific lane. Use <code>%</code> for a subscription lane with rolling windows, or <code>$</code> for an API lane. This is opt-in and should not be front-loaded in the default path.</p>
-<p>Nothing builds until you ratify a Ready Scope:</p>
-<pre><code class="language-bash">ce ratify &lt;scope-id&gt;</code></pre>
-<p>Natural-language chat can help shape the Scope, but it is not authorization. Governed work begins at explicit <code>ce</code> verbs, and the Scope record is the governing contract.</p>
-<h2 id="the-completion-report">The Completion Report</h2>
-<p>After a run, CE gives you a compact Completion Report:</p>
-<pre><code class="language-text">Outcome   PR opened -&gt; #24
-Verdict   Done-when 3/3 met · tests green · in scope
-Next      Review PR #24</code></pre>
-<p>Review the artifacts against Done-when. If they satisfy the Scope, Ship through the governed merge path. If they do not, send the work back with concrete Review feedback.</p>
-<h2 id="welcome-pack-rule">Welcome Pack Rule</h2>
-<p>Tenant welcome packs link the canonical Quickstart and concepts guide instead of duplicating the journey. Packs can add local setup details, but the CE journey stays in <a href="quickstart.html"><code>quickstart.md</code></a> and <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a>.</p>
+<h2 id="human-touchpoints">Human Touchpoints</h2>
+<p>CE leaves three decisions with you:</p>
+<ol>
+<li>Answer the shape questions so the Scope is concrete.</li>
+<li>Ratify the Scope when the Goal, Done-when, and Change-type are right.</li>
+<li>Review the artifacts and decide whether the result satisfies the Scope.</li>
+</ol>
+<p>That is the CEO-mode framing: you set direction, approve the governing record, and judge evidence. The agent handles mechanics inside the envelope.</p>
+<h2 id="scope-fields">Scope Fields</h2>
+<p>The required user-facing fields are:</p>
+<table>
+<thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>Goal</td><td>What the work is trying to accomplish</td></tr>
+<tr><td>Done-when</td><td>The checks the result must satisfy</td></tr>
+<tr><td>Change-type</td><td>The risk class of the change, such as docs, code, schema, or deploy</td></tr>
+<tr><td>Ready</td><td>CE has enough valid information to run after ratification</td></tr>
+</tbody></table>
+<p>Optional lane-aware cap: a Scope can also carry a cap when your lane requires one. Use <code>%</code> for a subscription lane with rolling windows, or <code>$</code> for an API lane. This is opt-in, not the default journey.</p>
+<h2 id="completion-report">Completion Report</h2>
+<p>CE reports the result in plain language:</p>
+<table>
+<thead><tr><th>Section</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>Outcome</td><td>What happened: PR opened, merged, research delivered, or no change needed</td></tr>
+<tr><td>Verdict</td><td>Whether Done-when, checks, and scope stayed green</td></tr>
+<tr><td>Next</td><td>The next human or CE action</td></tr>
+</tbody></table>
+<p>The report is evidence, not memory. Review the artifacts, not the transcript.</p>
+<h2 id="agile-and-scrum-mapping">Agile And Scrum Mapping</h2>
+<table>
+<thead><tr><th>Agile/Scrum</th><th>CE</th></tr></thead>
+<tbody>
+<tr><td>Epic / Story</td><td>Scope</td></tr>
+<tr><td>Sprint</td><td>Arc</td></tr>
+<tr><td>Definition of Done</td><td>Done-when</td></tr>
+<tr><td>Backlog</td><td>Ready Scopes</td></tr>
+<tr><td>Sprint review</td><td>Completion Report + evidence</td></tr>
+</tbody></table>
+<h2 id="existing-prd-pattern">Existing PRD Pattern</h2>
+<p>An existing PRD becomes a docs-only Scope first. That Scope records the PRD as context and does not authorize code by itself.</p>
+<p>Child Scopes cite it when they shape real work:</p>
+<pre><code class="language-bash">ce scope checkout-retry-copy \
+  --goal &quot;Clarify checkout retry copy from the approved PRD&quot; \
+  --done-when &quot;The checkout retry screen matches the PRD language&quot; \
+  --change-type code \
+  --note &quot;Source PRD: docs/prd/checkout-retry.md&quot;</code></pre>
+<p>The PRD informs the child Scope. The child Scope authorizes the governed run only after you ratify it.</p>
+<h2 id="launch-posture">Launch Posture</h2>
+<p>The proven tenant path today is:</p>
+<pre><code class="language-bash">ce brain init
+ce launch --backend host</code></pre>
+<p>Contained-by-default launch is hardening in progress. Treat contained backends as an operator-enabled path until your repo has been told otherwise.</p>
+<h2 id="anti-drift-rule">Anti-Drift Rule</h2>
+<p>Welcome packs link this concepts guide and <a href="quickstart.html"><code>quickstart.md</code></a>. They should not duplicate the CE journey, stage definitions, Scope field language, or Completion Report vocabulary.</p>
     </article>
   </div>
   <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>

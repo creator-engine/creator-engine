@@ -116,8 +116,8 @@ Frame -> Shape -> Build -> Review -> Ship
 `docs/architecture/stage-vocabulary.md` is the canon for these words (`docs/architecture/stage-vocabulary.md:1-11`). The short version:
 
 - Frame: understand and bound the problem.
-- Shape: turn it into a ratifiable bet: acceptance criteria, budget, mutation class, and plan.
-- Build: execute the ratified bet in a governed run.
+- Shape: turn it into a ratifiable Scope: acceptance criteria, change class, and plan.
+- Build: execute the ratified Scope in a governed run.
 - Review: grade the result against acceptance criteria.
 - Ship: land the governed terminal result (`docs/architecture/stage-vocabulary.md:13-17`).
 

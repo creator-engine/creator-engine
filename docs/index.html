@@ -572,8 +572,7 @@
             <p class="t">"Make a booking app for my workshop"</p>
             <div class="fld"><b>Goal</b><span>Working local app: booking form, admin list, saved reservations.</span></div>
             <div class="fld"><b>Done when</b><span>Form submits, validation works, tests pass, data persists.</span></div>
-            <div class="fld"><b>Budget</b><span>S — a fixed appetite cap, not an agent estimate.</span></div>
-            <div class="fld"><b>Change type</b><span>code — can build app files; cannot deploy or touch secrets.</span></div>
+            <div class="fld"><b>Change-type</b><span>code — can build app files; cannot deploy or touch secrets.</span></div>
           </div>
         </div>
         <div class="pcard report">
@@ -598,7 +597,7 @@
       </div>
       <div class="stages">
         <div class="stage"><span class="n">01</span><h3>Frame</h3><p>Understand the idea, the risk, and what done should mean.</p></div>
-        <div class="stage"><span class="n">02</span><h3>Shape</h3><p>Turn it into a Scope: Goal, Done-when, Budget, Change type.</p></div>
+        <div class="stage"><span class="n">02</span><h3>Shape</h3><p>Turn it into a Scope: Goal, Done-when, Change-type.</p></div>
         <div class="stage"><span class="n">03</span><h3>Build</h3><p>The agent runs inside the ratified envelope, side effects captured.</p></div>
         <div class="stage"><span class="n">04</span><h3>Review</h3><p>The external grader checks evidence against Done-when.</p></div>
         <div class="stage"><span class="n">05</span><h3>Ship</h3><p>A merged PR or ratified outcome — with the trail intact.</p></div>
@@ -630,7 +629,7 @@
         <h2>Every creator fear maps to a mechanism you can read in the repo.</h2>
       </div>
       <div class="safe">
-        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll spend a fortune looping."</p></div><div class="mech"><div class="lab">The mechanism</div><p>A fixed <strong>Budget</strong> per Scope caps the run — <code>can't outspend the cap</code>.</p></div></div>
+        <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll spend a fortune looping."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Optional lane-aware caps can stop or split a run — <code>bounded when your lane requires it</code>.</p></div></div>
         <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll change something dangerous."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Risk-tiered <strong>Change-type</strong> escalates deploy/secrets to <code>the human gate</code>.</p></div></div>
         <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"It'll leak my code or secrets."</p></div><div class="mech"><div class="lab">The mechanism</div><p>Boxed isolation + a credential broker + a redaction gate — <code>nothing leaks by default</code>.</p></div></div>
         <div class="srow"><div class="fear"><div class="lab">The worry</div><p>"How do I know it actually worked?"</p></div><div class="mech"><div class="lab">The mechanism</div><p>An external grader checks <strong>Done-when</strong> — <code>evidence, not the agent's say-so</code>.</p></div></div>
@@ -665,7 +664,7 @@
       <div class="sec-head">
         <span class="sec-eyebrow">Docs</span>
         <h2>Current docs for installing, piloting, and trusting CE.</h2>
-        <p>Start with the signed bootstrap, then read the walkthrough, user guide, pilot path, contributor rules, and security model.</p>
+        <p>Start with the canonical Quickstart, then read the concepts, walkthrough, pilot path, contributor rules, and security model.</p>
       </div>
       <div class="docs-grid">
         <a class="doc-card" href="what-is-creator-engine.html">
@@ -680,10 +679,22 @@
           <p>The agent-native bootstrap spec with SSHSIG metadata, pinned artifacts, trust-root verification, and installer contract references.</p>
           <span class="go">Open doc -&gt;</span>
         </a>
+        <a class="doc-card" href="guide/quickstart.html">
+          <span class="tag">Quickstart</span>
+          <h3>Creator Engine Quickstart</h3>
+          <p>The canonical copy-paste path: initialize CE brain, launch on the host backend, Shape, ratify, drive, report, and Ship.</p>
+          <span class="go">Open page -&gt;</span>
+        </a>
+        <a class="doc-card" href="guide/how-ce-builds-software.html">
+          <span class="tag">Concepts</span>
+          <h3>How CE builds software</h3>
+          <p>The enforced loop: Frame, Shape, Build, Review, and Ship through Scope records, evidence, and human touchpoints.</p>
+          <span class="go">Open page -&gt;</span>
+        </a>
         <a class="doc-card" href="guide/understanding-ce.html">
           <span class="tag">User guide</span>
           <h3>Understanding CE</h3>
-          <p>A plain-language guide to the five stages, Scope cards, budgets, change types, and the outside-the-agent grader.</p>
+          <p>A plain-language guide to the five stages, Scope records, change types, and the outside-the-agent grader.</p>
           <span class="go">Open page -&gt;</span>
         </a>
         <a class="doc-card" href="guide/complete-walkthrough.html">

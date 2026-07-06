@@ -175,6 +175,8 @@ is outside the agent, so the agent cannot reason around it.
 | You want to... | Read |
 | --- | --- |
 | The front door and big picture | [`welcome.md`](./welcome.md) |
+| The canonical command path | [`quickstart.md`](./quickstart.md) |
+| How CE builds software | [`how-ce-builds-software.md`](./how-ce-builds-software.md) |
 | The plain-language vocabulary tour | [`understanding-ce.md`](./understanding-ce.md) |
 | The Solo + CEO path | [`solo-ceo-onboarding.md`](./solo-ceo-onboarding.md) |
 | A worked SCRUM-to-CE mapping | [`agile-to-ce-sdlc.md`](./agile-to-ce-sdlc.md) |

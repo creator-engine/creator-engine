@@ -21,9 +21,10 @@ The key idea: **the thing that decides whether work is good lives *outside* the
 agent.** You judge artifacts — a plan, a diff, the evidence, the pull request —
 not a chat transcript.
 
-If you want the plain-language tour of the workflow and its vocabulary before
-going further, read [`understanding-ce.md`](./understanding-ce.md). It is the
-friendly companion to everything below.
+If you want the command path, start with [`quickstart.md`](./quickstart.md).
+If you want the plain-language workflow model, read
+[`how-ce-builds-software.md`](./how-ce-builds-software.md) and
+[`understanding-ce.md`](./understanding-ce.md).
 
 ---
 
@@ -113,12 +114,12 @@ the playbook under the same verification ceremony.
 
 Once the repo is onboarded, CE governs work there by keeping changes on pull
 requests, running gates before privileged actions, and launching coding agents
-inside the contained session path selected for that repo. Your first governed
-session should use the
-[`Zero to Governed Seat Quickstart`](./zero-to-governed-seat-quickstart.md) for
-the shortest command path, then the [Pilot Runbook](./pilot-runbook.md) when you
-are ready to walk a real change through Frame -> Shape -> Build -> Review ->
-Ship.
+inside the selected session backend. Today, the proven tenant path is
+`ce brain init` once, then `ce launch --backend host`. Contained-by-default is
+hardening in progress, not the current default path. Your first governed session
+should use [`quickstart.md`](./quickstart.md) for the shortest command path, then
+the [Pilot Runbook](./pilot-runbook.md) when you are ready for the full
+install-to-ship checklist.
 
 If something does not match the handoff, report it in the issue tracker or
 support channel named with your install materials. Include the command you ran,
@@ -163,8 +164,8 @@ want. CE adds a structured loop around the work — **Frame → Shape → Build 
 Review → Ship** — and surfaces only when it needs to:
 
 - when a real change emerges, CE offers to capture it as a small, ratifiable
-  unit of work (a **Scope** — your goal, what "done" means, and a budget you
-  set), and
+  unit of work (a **Scope** — your Goal, what Done-when means, and the
+  Change-type), and
 - when the agent attempts a privileged action, CE holds the gate until you
   approve.
 
@@ -195,11 +196,9 @@ artifacts (the initial scaffold, the install commit) are onboarding evidence
 only; **first value is the first real change that passes review and merges under
 governance.**
 
-When you're ready to walk that end-to-end path, the
-[Pilot Runbook](./pilot-runbook.md) is the full guided tour of
-Frame → Shape → Build → Review → Ship on your own agent and repo, and the
-[Quickstart](./zero-to-governed-seat-quickstart.md) is the shortest command
-sequence to get there.
+When you're ready to walk that end-to-end path, [`quickstart.md`](./quickstart.md)
+is the copy-paste command sequence and the [Pilot Runbook](./pilot-runbook.md) is
+the full guided checklist for your own agent and repo.
 
 ---
 
@@ -251,13 +250,19 @@ Start there once these four steps make sense.
 
 | You want to… | Read |
 | --- | --- |
-| **Follow a hands-on walkthrough start to finish (recommended first)** | [**`complete-walkthrough.md`**](./complete-walkthrough.md) |
+| **Follow the canonical command path (recommended first)** | [**`quickstart.md`**](./quickstart.md) |
+| Understand how CE builds software | [`how-ce-builds-software.md`](./how-ce-builds-software.md) |
 | Understand the workflow and its words | [`understanding-ce.md`](./understanding-ce.md) |
+| Follow a hands-on walkthrough start to finish | [`complete-walkthrough.md`](./complete-walkthrough.md) |
 | Map your Agile/SCRUM habits onto CE's SDLC | [`agile-to-ce-sdlc.md`](./agile-to-ce-sdlc.md) |
 | Get to a governed seat fast | [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md) |
 | Run CE from a Mac today | [`onboarding-macos-container.md`](./onboarding-macos-container.md) |
 | Walk the full install-to-ship pilot | [`pilot-runbook.md`](./pilot-runbook.md) |
 | Contribute to CE itself | [`contributing-to-ce.md`](./contributing-to-ce.md) |
+
+Welcome packs should link these canonical docs instead of duplicating the CE
+journey. Tenant-specific packs may add local prerequisites and support contacts;
+they should not copy the Quickstart or concepts narrative.
 | See the whole project at a glance | [`README`](../../README.md) · [`GOVERNANCE.md`](../../GOVERNANCE.md) |
 
 Welcome aboard. Type a prompt, and let CE hold the gate.

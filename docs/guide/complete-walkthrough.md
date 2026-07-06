@@ -1,10 +1,10 @@
 # Complete Walkthrough
 
-*This guide shows the whole Creator Engine loop in one continuous path: install,
-onboard, Frame a real ticket, Shape it into a Scope, Build it, Review it, and
-Ship it. If you only want the vocabulary tour, read
-[`understanding-ce.md`](./understanding-ce.md). If you want the full pilot
-operator checklist, read [`pilot-runbook.md`](./pilot-runbook.md).*
+*This guide shows the whole Creator Engine loop in one continuous path. For the
+canonical copy-paste command path, start with [`quickstart.md`](./quickstart.md).
+For the concepts, read [`how-ce-builds-software.md`](./how-ce-builds-software.md).
+If you want the full pilot operator checklist, read
+[`pilot-runbook.md`](./pilot-runbook.md).*
 
 ## 1. The Promise
 
@@ -15,8 +15,8 @@ before it lands.
 
 The useful mental model is simple:
 
-> You describe the change. CE turns it into a small bet. Your agent builds
-> inside that bet. The result is graded against the bet, not against the agent's
+> You describe the change. CE turns it into a Scope. Your agent builds inside
+> that Scope. The result is graded against the Scope, not against the agent's
 > confidence.
 
 If you get stuck at any point, start with `ce --help` or
@@ -41,6 +41,7 @@ The fast path is:
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
 ce onboard
+ce brain init
 ```
 
 `ce onboard` checks the host, verifies the installed CE surface, initializes
@@ -48,7 +49,7 @@ local state, and drops you into a governed agent pane. For daily work after
 that, use:
 
 ```bash
-ce launch
+ce launch --backend host
 ```
 
 That pane is still your normal coding agent. CE is not a separate dashboard or
@@ -66,8 +67,8 @@ more precise machine, and they match the canon in
 | Stage | Plain meaning | What CE is protecting |
 | --- | --- | --- |
 | **Frame** | Understand the problem and why it matters | The work is not tracked until the problem is clear |
-| **Shape** | Turn the problem into a ratifiable Scope | The bet has Goal, Done-when, Budget, Change type, and Ready |
-| **Build** | Let the agent execute the ratified Scope | The run stays inside the approved envelope |
+| **Shape** | Turn the problem into a ratifiable Scope | The Scope has Goal, Done-when, Change-type, and Ready |
+| **Build** | Let the agent execute the ratified Scope | The run stays inside the approved Scope |
 | **Review** | Grade the result against Done-when | Evidence matters more than transcript confidence |
 | **Ship** | Land the governed outcome | Merge, no-change, or delivered research happens through the gate |
 
@@ -126,12 +127,12 @@ Boundary: no backend data model or API changes.
 Next: Shape a Scope? › yes
 ```
 
-Frame ends when the problem is bounded enough to become a bet.
+Frame ends when the problem is bounded enough to become a Scope.
 
 ### Shape
 
-**What you do.** You create the Scope: the Goal, the Done-when checks, the
-Budget, and the Change type.
+**What you do.** You create the Scope: the Goal, the Done-when checks, and the
+Change-type.
 
 ```bash
 ce scope activity-empty-state \
@@ -139,17 +140,16 @@ ce scope activity-empty-state \
   --done-when "A new project activity page shows empty-state copy instead of a blank panel" \
   --done-when "The copy points users back to launching their first governed run" \
   --done-when "Existing populated activity pages are unchanged" \
-  --budget 25 \
-  --budget-unit '$' \
   --change-type code
 ```
 
-Budget is an effort cap you commit to. It is not a clock estimate, and it is not
-chosen by the agent.
+If your operator asks you to add a lane-aware cap, use `--budget <amount>
+--budget-unit %` for a subscription lane or `--budget <amount> --budget-unit
+'$'` for an API lane. Do not add a cap by default.
 
 **What CE does.** CE checks whether the Scope is Ready. If the Scope is vague,
 missing a testable Done-when, or under-declares risk, it tells you before the
-bet is placed. You can run a sharpening pass:
+Scope is ratified. You can run a sharpening pass:
 
 ```bash
 ce shape activity-empty-state
@@ -161,21 +161,20 @@ ce shape activity-empty-state
 ◆ CE · Shape → "activity-empty-state"
 Goal        Show a helpful empty state on the activity page before the first run
 Done-when   3 checks
-Budget      $25
-Change type code
+Change-type code
 Ready       ✓
 
 Front gate: ratify this Scope before Build.
 ```
 
-Then you place the bet:
+Then you ratify the Scope:
 
 ```bash
 ce ratify activity-empty-state --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
-Ratification is the human "yes": this is the work, this is the cap, and this is
-the risk tier.
+Ratification is the human "yes": this is the work, these are the Done-when
+checks, and this is the risk tier.
 
 ### Build
 
@@ -199,7 +198,7 @@ the agent tries to step outside the envelope, CE refuses and explains the gate.
 ◆ CE · Build
 Scope       activity-empty-state
 Run         activity-empty-state-1
-Envelope    Change type code · Budget $25 · Done-when 3
+Envelope    Change-type code · Done-when 3
 
 Agent plan:
 1. Locate activity page rendering.
@@ -234,7 +233,7 @@ scope, and what remains for Ship.
 ```text
 ┌─ ◆ CE COMPLETION REPORT · run activity-empty-state-1 · Scope activity-empty-state ──────────────────
 │ Outcome   — → #24
-│ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 0% of $25
+│ Verdict   Done-when 3/3 met · tests green · in scope ✓
 │ Next      —
 │ Artifacts PR #24 · Scope activity-empty-state · evidence-chain ✓ · spend
 │ Inspect   gh pr view 24   |   ce show activity-empty-state   |   ce artifacts activity-empty-state --run-id activity-empty-state-1
@@ -282,13 +281,13 @@ After setup, most days are smaller than the full walkthrough:
 1. Launch your governed pane with `ce launch`.
 2. Talk to the agent about the next problem.
 3. Let CE help Frame and Shape a small Scope.
-4. Ratify the Scope when the Goal, Done-when, Budget, and Change type are right.
+4. Ratify the Scope when the Goal, Done-when, and Change-type are right.
 5. Let the agent Build inside the envelope.
 6. Review the Completion Report and PR evidence.
 7. Ship through the gate, or send the work back with specific feedback.
 
 Use one branch per Scope unless your team's policy says otherwise. If a request
-starts to sprawl, split it before ratification. CE works best when the bet is
+starts to sprawl, split it before ratification. CE works best when the Scope is
 small enough that Review can be honest.
 
 The local help surface is useful throughout the loop:
@@ -311,7 +310,6 @@ CE automates a lot, but it intentionally leaves a few decisions with you.
 | You decide | CE and the agent handle |
 | --- | --- |
 | What problem is worth doing | Reading context and proposing a bounded Scope |
-| The Budget on the Scope | Tracking run spend against that cap |
 | Whether the Scope is ratified | Running only after the front gate is open |
 | Whether risk increases are acceptable | Making changes safer inside the envelope |
 | Whether evidence satisfies Done-when | Producing the report, artifacts, and PR |
@@ -326,12 +324,9 @@ authority to decide what should be true.
 
 ### Why no time estimates?
 
-Because CE Budgets are effort caps, not clock predictions. A Scope's Budget says
-how much appetite you are willing to commit before the work should stop, split,
-or come back for a new decision. In lower-level artifacts you may see this as
-work class or appetite; the meaning is still a cap on the bet, not a prediction
-about elapsed time. Runtime varies by repo, agent, dependencies, checks, and
-review depth. CE should not invent precision it does not have.
+Because CE is governed by Done-when and evidence, not clock predictions. If your
+lane requires an explicit cap, that cap is a stop or split signal for the run; it
+is still not a prediction about elapsed time.
 
 ### What if the agent wants to do more than I ratified?
 
@@ -355,9 +350,8 @@ they expect you to inspect before Ship.
 ### Do I need to understand the machine underneath?
 
 Not to start. The five-stage vocabulary is the everyday interface. When you
-want the deeper mapping, read
-[`stage-vocabulary.md`](../architecture/stage-vocabulary.md), then
-[`agentic-sdlc-operating-model.md`](../architecture/agentic-sdlc-operating-model.md).
+want the deeper user-facing model, read
+[`how-ce-builds-software.md`](./how-ce-builds-software.md).
 
 ---
 
@@ -370,15 +364,16 @@ want to inspect how the governance works.
 
 | You want to inspect | Read |
 | --- | --- |
-| Stage vocabulary and the machine mapping | [`stage-vocabulary.md`](../architecture/stage-vocabulary.md) |
-| The detailed SDLC operating model | [`agentic-sdlc-operating-model.md`](../architecture/agentic-sdlc-operating-model.md) |
-| The Scope contract | [`scope.md`](../contracts/scope.md) |
-| Review evidence | [`review-evidence.md`](../contracts/review-evidence.md) |
+| Canonical command path | [`quickstart.md`](./quickstart.md) |
+| How CE builds software | [`how-ce-builds-software.md`](./how-ce-builds-software.md) |
+| Plain-language vocabulary | [`understanding-ce.md`](./understanding-ce.md) |
 
 ## 9. Where Next
 
 | You want to understand | Read |
 | --- | --- |
+| The canonical command path | [`quickstart.md`](./quickstart.md) |
+| How CE builds software | [`how-ce-builds-software.md`](./how-ce-builds-software.md) |
 | The plain-language CE concepts | [`understanding-ce.md`](./understanding-ce.md) |
 | The full install-to-ship pilot checklist | [`pilot-runbook.md`](./pilot-runbook.md) |
 | The quick first-host path | [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md) |

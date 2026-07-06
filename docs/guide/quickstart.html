@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <link rel="icon" href="../assets/ce-favicon-v2.svg"/>
-<title>Understanding Creator Engine &#x2014; Creator Engine</title>
+<title>Creator Engine Quickstart &#x2014; Creator Engine</title>
 <style>
   :root{
     --violet:#A06BFF;--violet-bright:#B98CFF;--violet-deep:#6E3CD6;
@@ -115,49 +115,57 @@
   <div class="wrap">
     <div class="page-header">
       <a class="back-link" href="../index.html#docs"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg> Docs</a>
-      <span class="page-eyebrow">User guide</span>
-      <h1>Understanding Creator Engine</h1>
+      <span class="page-eyebrow">Quickstart</span>
+      <h1>Creator Engine Quickstart</h1>
     </div>
     <article class="article">
-<h1 id="understanding-creator-engine">Understanding Creator Engine</h1>
-<p>Creator Engine runs <strong>your own coding agent under governance.</strong> You keep using the agent you already know. CE adds a structured, evidence-backed loop around real work so changes are shaped, ratified, built, reviewed, and shipped on purpose.</p>
-<p>Start with the canonical <a href="quickstart.html"><code>quickstart.md</code></a> when you want commands. Read <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a> when you want the concepts behind the loop.</p>
-<h2 id="what-ce-is">What CE Is</h2>
-<p>The core idea is simple: the thing that decides whether work is good lives outside the agent. You judge artifacts: a Scope, a diff, checks, review evidence, and the Completion Report. You do not judge a transcript.</p>
-<p>CE is CLI-anchored. The everyday path is <code>ce brain init</code> once, then <code>ce launch --backend host</code> to open your governed agent session. Contained launch is hardening in progress; use the host backend unless your operator tells you a contained backend is ready for your repo.</p>
-<h2 id="the-five-stages">The Five Stages</h2>
-<p>CE names the loop with five plain words:</p>
-<pre><code class="language-text">Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship</code></pre>
-<ol>
-<li><strong>Frame</strong> - understand the problem, why it matters, and what good would look like. This is exploration only; nothing is tracked yet.</li>
-<li><strong>Shape</strong> - turn the framed problem into a Scope with Goal, Done-when, and Change-type.</li>
-<li><strong>Build</strong> - let the agent execute the ratified Scope in a governed run.</li>
-<li><strong>Review</strong> - grade the result against Done-when and evidence.</li>
-<li><strong>Ship</strong> - land the governed outcome: merged PR, delivered research, or no-change.</li>
-</ol>
-<p>This is a loop, not a waterfall. Review can send work back. A large Scope can spawn smaller Scopes.</p>
-<h2 id="the-scope">The Scope</h2>
-<p>When exploration becomes real work, CE records a <strong>Scope</strong>. The Scope is the contract for the run.</p>
-<table>
-<thead><tr><th>Field</th><th>What it means</th></tr></thead>
-<tbody>
-<tr><td><strong>Goal</strong></td><td>What you are trying to accomplish</td></tr>
-<tr><td><strong>Done-when</strong></td><td>The checks that say the work is finished</td></tr>
-<tr><td><strong>Change-type</strong></td><td>What kind of change this is and how risky it is</td></tr>
-<tr><td><strong>Ready</strong></td><td>CE has enough valid information to run after ratification</td></tr>
-</tbody></table>
-<p>Optional lane-aware cap: your operator may ask you to add a cap for a specific lane. Use <code>%</code> for a subscription lane with rolling windows, or <code>$</code> for an API lane. This is opt-in and should not be front-loaded in the default path.</p>
-<p>Nothing builds until you ratify a Ready Scope:</p>
-<pre><code class="language-bash">ce ratify &lt;scope-id&gt;</code></pre>
-<p>Natural-language chat can help shape the Scope, but it is not authorization. Governed work begins at explicit <code>ce</code> verbs, and the Scope record is the governing contract.</p>
-<h2 id="the-completion-report">The Completion Report</h2>
-<p>After a run, CE gives you a compact Completion Report:</p>
+<h1 id="creator-engine-quickstart">Creator Engine Quickstart</h1>
+<p>This is the canonical, copy-paste path for a first governed change with Creator Engine. It starts from the proven tenant path: initialize the local CE brain once, launch your own coding agent through CE on the host backend, Shape a Scope, ratify it, let CE drive the governed run, then review the Completion Report.</p>
+<p>Contained-by-default launch remains hardening work in progress. Today, use the host backend unless your operator has explicitly told you a contained backend is ready for your repo.</p>
+<h2 id="1-initialize-ce-brain-once">1. Initialize CE Brain Once</h2>
+<pre><code class="language-bash">ce brain init</code></pre>
+<p>Artifact: a local CE brain store for this repo.</p>
+<p>State after this step: CE can remember governed project context across sessions. Run this once per repo, then leave it alone unless CE tells you to refresh it.</p>
+<h2 id="2-launch-your-governed-agent-session">2. Launch Your Governed Agent Session</h2>
+<pre><code class="language-bash">ce launch --backend host</code></pre>
+<p>Artifact: a governed terminal session around the coding agent you already use.</p>
+<p>State after this step: you are in Frame. You can explore the goal in plain language, ask questions, and inspect the repo. This exploration shapes context only; it is not the contract for work.</p>
+<p>Slash commands, harness skills, and agent-specific shortcuts can be convenient sugar, but the canonical journey is the <code>ce</code> CLI.</p>
+<h2 id="3-shape-the-work">3. Shape The Work</h2>
+<pre><code class="language-bash">ce shape</code></pre>
+<p>Artifact: a sharpened candidate Scope boundary: goal, constraints, and questions that must be answered before work can start.</p>
+<p>State after this step: CE has enough context to draft a Scope, or it has named the missing details you need to answer.</p>
+<h2 id="4-create-the-scope">4. Create The Scope</h2>
+<pre><code class="language-bash">ce scope login-empty-state \
+  --goal &quot;Show helpful copy when the login activity view has no events yet&quot; \
+  --done-when &quot;A new repo shows empty-state copy instead of a blank panel&quot; \
+  --done-when &quot;The copy points the user to launching the first governed run&quot; \
+  --done-when &quot;Existing populated activity views are unchanged&quot; \
+  --change-type code</code></pre>
+<p>Artifact: a Scope record. The Scope is the governing contract for the run.</p>
+<p>State after this step: the work is in Shape. CE can check whether the Scope is Ready. The required fields are Goal, Done-when, and Change-type. Use the smallest honest Change-type that describes the risk.</p>
+<p>Optional lane-aware cap: if your operator asks you to cap spend explicitly, add <code>--budget &lt;amount&gt; --budget-unit %</code> for a subscription lane with rolling windows, or <code>--budget &lt;amount&gt; --budget-unit &#x27;$&#x27;</code> for an API lane. Do not add a cap by default.</p>
+<h2 id="5-ratify-the-scope">5. Ratify The Scope</h2>
+<pre><code class="language-bash">ce ratify login-empty-state</code></pre>
+<p>Artifact: a ratification record bound to the Scope.</p>
+<p>State after this step: the front gate is open. CE may Build exactly this Scope. If the goal, Done-when, or Change-type changes later, shape a revised Scope instead of treating the chat transcript as authorization.</p>
+<h2 id="6-drive-the-governed-run">6. Drive The Governed Run</h2>
+<pre><code class="language-bash">ce drive login-empty-state --spawn</code></pre>
+<p>Artifact: a governed run with evidence, a changed branch, and usually a pull request. If there is no change to make, the run records that outcome instead.</p>
+<p>State after this step: CE is in Build, then Review. The agent works inside the ratified Scope. If review finds a problem, the loop can go back to Shape or Build; this is not a waterfall.</p>
+<h2 id="7-read-the-completion-report">7. Read The Completion Report</h2>
+<pre><code class="language-bash">ce report login-empty-state</code></pre>
+<p>Artifact: a Completion Report with three plain sections:</p>
 <pre><code class="language-text">Outcome   PR opened -&gt; #24
 Verdict   Done-when 3/3 met · tests green · in scope
 Next      Review PR #24</code></pre>
-<p>Review the artifacts against Done-when. If they satisfy the Scope, Ship through the governed merge path. If they do not, send the work back with concrete Review feedback.</p>
-<h2 id="welcome-pack-rule">Welcome Pack Rule</h2>
-<p>Tenant welcome packs link the canonical Quickstart and concepts guide instead of duplicating the journey. Packs can add local setup details, but the CE journey stays in <a href="quickstart.html"><code>quickstart.md</code></a> and <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a>.</p>
+<p>State after this step: you have the evidence needed to Review. Judge the diff, tests, and report against the Done-when you ratified.</p>
+<h2 id="8-ship-or-loop">8. Ship Or Loop</h2>
+<p>If the result satisfies the Scope and your review gate is green, ship through the governed merge path your repo uses. If it does not satisfy the Scope, send the work back with feedback tied to Done-when.</p>
+<p>Artifact: a shipped outcome: merged PR, delivered research, or ratified no-change.</p>
+<p>State after this step: the Scope is done, or it has looped back with concrete Review feedback.</p>
+<h2 id="anti-drift-rule">Anti-Drift Rule</h2>
+<p>Welcome packs must link this Quickstart and <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a> instead of copying their journey text. Tenant-specific packs may add local prerequisites and contacts, but the CE journey itself lives here.</p>
     </article>
   </div>
   <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
