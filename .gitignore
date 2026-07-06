@@ -10,6 +10,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
+# validators/build/ is created transiently by python-build during wheel bakes and
+# local test runs; it is never tracked and must not be committed.
+validators/build/
 .venv/
 
 # Claude Code local settings override (CC-G-C / D4). A gitignored local-override
