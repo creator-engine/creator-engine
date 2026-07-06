@@ -40,6 +40,7 @@ _FALSE_VALUES = frozenset({"0", "false", "no", "off", "unarmed", "disabled", "in
 _CREDENTIAL_STATUSES = frozenset({"clean", "scrubbed", "not-reported", "not-applicable", "unknown", "failed"})
 _REMOTE_STATUSES = frozenset({"disabled", "brokered", "enabled-supervisory-only", "enabled", "unknown"})
 _SIGNING_STATUSES = frozenset({"unavailable", "interim-ce-signer", "openbao-backed", "unknown"})
+_GATE_CAPABLE_SIGNING_STATUSES = frozenset({"interim-ce-signer", "openbao-backed"})
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,16 @@ def _env_bool(environ: Mapping[str, str], names: tuple[str, ...]) -> bool | None
     normalized = value.strip().lower()
     if normalized in _TRUE_VALUES:
         return True
+    if normalized in _FALSE_VALUES:
+        return False
+    return None
+
+
+def _env_false_override(environ: Mapping[str, str], names: tuple[str, ...]) -> bool | None:
+    value = _first_env(environ, names)
+    if value is None:
+        return None
+    normalized = value.strip().lower()
     if normalized in _FALSE_VALUES:
         return False
     return None
@@ -132,7 +143,7 @@ def _approval_wall_armed(repo_root: Path) -> bool:
 
 def _default_credential_scrub_status(harness: str) -> str:
     if harness == "codex":
-        return "scrubbed"
+        return "unknown"
     if harness in launch_runtime.SUPPORTED_HARNESSES:
         return "not-applicable"
     return "unknown"
@@ -146,7 +157,7 @@ def _derive_allowed_posture(
     approval_wall_armed: bool,
     signing_deputy_status: str,
 ) -> str:
-    if approval_wall_armed and signing_deputy_status != "unavailable":
+    if approval_wall_armed and signing_deputy_status in _GATE_CAPABLE_SIGNING_STATUSES:
         return "gate-capable"
     if role in {"controller", "foreman"} and ring0_confirmed and ring1_active:
         return "foreman"
@@ -173,24 +184,27 @@ def collect_posture(
         default=launch_runtime.DEFAULT_HARNESS,
     )
 
-    ring0 = _env_bool(env, ("CE_RING0_CONFIRMED", "CE_POSTURE_RING0_CONFIRMED"))
-    if ring0 is None:
-        try:
-            ring0 = _ring0_confirmed(harness=resolved_harness, repo_root=root)
-        except launch_runtime.LaunchError:
-            ring0 = False
+    try:
+        ring0 = _ring0_confirmed(harness=resolved_harness, repo_root=root)
+    except launch_runtime.LaunchError:
+        ring0 = False
+    ring0_override = _env_false_override(env, ("CE_RING0_CONFIRMED", "CE_POSTURE_RING0_CONFIRMED"))
+    if ring0_override is not None:
+        ring0 = ring0_override
 
-    ring1 = _env_bool(env, ("CE_RING1_ACTIVE", "CE_POSTURE_RING1_ACTIVE"))
-    if ring1 is None:
-        ring1 = _ring1_active(harness=resolved_harness, repo_root=root)
+    ring1 = _ring1_active(harness=resolved_harness, repo_root=root)
+    ring1_override = _env_false_override(env, ("CE_RING1_ACTIVE", "CE_POSTURE_RING1_ACTIVE"))
+    if ring1_override is not None:
+        ring1 = ring1_override
 
     ring2 = _env_bool(env, ("CE_RING2_CLOSEOUT_SUPPORT", "CE_CLOSEOUT_SUPPORT"))
     if ring2 is None:
         ring2 = bool(_first_env(env, ("CE_CLOSEOUT_FILE", "CE_COMPLETION_REPORT_REF")))
 
-    approval_wall = _env_bool(env, ("CE_APPROVAL_WALL_ARMED", "CE_APPROVAL_CAPABILITY_WALL_ARMED"))
-    if approval_wall is None:
-        approval_wall = _approval_wall_armed(root)
+    approval_wall = _approval_wall_armed(root)
+    approval_wall_override = _env_false_override(env, ("CE_APPROVAL_WALL_ARMED", "CE_APPROVAL_CAPABILITY_WALL_ARMED"))
+    if approval_wall_override is not None:
+        approval_wall = approval_wall_override
 
     resolved_launch_mode = _clean_token(
         launch_mode or _first_env(env, ("CE_LAUNCH_MODE", "CE_POSTURE_LAUNCH_MODE")),
