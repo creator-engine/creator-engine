@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=17
+AUTHORIZED_PATHS_COUNT=19
 
-AUTHORIZED_PATHS_SHA256=83907da21c79991016826e2c786dc414aa0628c22d3e9fda89497d7795766f20
+AUTHORIZED_PATHS_SHA256=ac56fba0188f8732d4edbaf04066aa3264fef11efc6dfbc2ffdfe3e62b808e3d
 
 ```text
 .ce/brain/assertions.yaml
@@ -25,6 +25,8 @@ validators/creator_engine_validator/lane_runtime.py
 validators/creator_engine_validator/schemas/reviewer-authority-envelope.schema.yaml
 validators/tests/unit/test_cred_injection_proxy.py
 validators/tests/unit/test_egress_self_review_broker.py
+validators/tests/unit/test_hook_check.py
+validators/tests/unit/test_hook_check_cli_reviewer_authority_ref.py
 validators/tests/unit/test_hook_check_reviewer_authority.py
 validators/tests/unit/test_lane_runtime_reviewer_venue.py
 validators/tests/unit/test_reviewer_authority_envelope.py

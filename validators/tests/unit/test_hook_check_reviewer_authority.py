@@ -47,8 +47,12 @@ def test_pr_review_denied_without_authority():
     assert hc._mechanics_would_deny("gh pr review 106 --approve", _ctx(None)) is not None
 
 
-def test_pr_review_allowed_with_matching_envelope():
-    assert hc._mechanics_would_deny("gh pr review 106 --approve", _ctx(_envelope())) is None
+def test_pr_review_comment_allowed_with_matching_envelope():
+    assert hc._mechanics_would_deny("gh pr review 106 --comment --body governed-redo", _ctx(_envelope())) is None
+
+
+def test_pr_review_approve_denied_even_with_matching_envelope():
+    assert hc._mechanics_would_deny("gh pr review 106 --approve", _ctx(_envelope())) is not None
 
 
 @pytest.mark.parametrize(
@@ -77,6 +81,24 @@ def test_gh_api_review_approve_denied_without_authority_at_runtime(command):
 
 def test_gh_api_review_approve_denied_even_with_matching_pr_review_envelope():
     command = "gh api -X POST repos/creator-engine/creator-engine/pulls/106/reviews -f event=APPROVE -f body=LGTM"
+    decision = hc.evaluate(
+        _bash_event(command),
+        hc.HookContext(
+            posture="governed",
+            manifest_paths=(),
+            side_effect_authority=_envelope(),
+            seat_class="worker",
+        ),
+    )
+
+    assert hc.classify_mechanics(command) == "pr_review"
+    assert decision.decision == "deny"
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert "restricted mechanic (pr_review)" in decision.reason
+
+
+def test_gh_pr_review_approve_denied_even_with_matching_pr_review_envelope_at_runtime():
+    command = "gh pr review 106 --approve --body LGTM"
     decision = hc.evaluate(
         _bash_event(command),
         hc.HookContext(
@@ -198,7 +220,7 @@ def test_build_context_resolves_inline_envelope():
     ctx = hc.build_context(event)
     assert isinstance(ctx.side_effect_authority, dict)
     assert ctx.side_effect_authority.get("pr_number") == 106
-    assert hc._mechanics_would_deny("gh pr review 106 --approve", ctx) is None
+    assert hc._mechanics_would_deny("gh pr review 106 --comment --body governed-redo", ctx) is None
 
 
 def test_build_context_resolves_ref_envelope(tmp_path):
