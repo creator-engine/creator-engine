@@ -20,6 +20,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
     parser.add_argument("--tenant", help="restrict cross-artifact checks to one tenant")
     parser.add_argument("--list-checks", action="store_true", help="list enabled checks and their FRs")
+    parser.add_argument(
+        "--profile",
+        choices=CHECK_PROFILES,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     sub = parser.add_subparsers(dest="subcommand")
 
     check = sub.add_parser("check", help="run all enabled checks")
@@ -498,10 +504,14 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_checks(json_output: bool) -> int:
+def _print_checks(json_output: bool, profile: str | None = None) -> int:
     from .checks import registered_checks
 
     checks = registered_checks()
+    omissions = omitted_checks_for_profile(profile)
+    if omissions and profile is not None:
+        emit_profile_notices(profile, omissions)
+        checks = {name: defn for name, defn in checks.items() if name not in omissions}
     if json_output:
         print(json.dumps({"checks": {name: list(defn.frs) for name, defn in checks.items()}}, indent=2, sort_keys=True))
     else:
@@ -673,7 +683,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.list_checks:
-        return _print_checks(args.json_output)
+        return _print_checks(args.json_output, getattr(args, "profile", None))
 
     subcommand = args.subcommand or "check"
     if subcommand == "check":
