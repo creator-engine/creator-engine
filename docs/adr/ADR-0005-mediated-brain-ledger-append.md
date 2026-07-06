@@ -1,7 +1,6 @@
 # ADR-0005 — Mediated brain ledger append
 
-- **Status:** Proposed — awaiting Operator ratification of the mediated append
-  authority model.
+- **Status:** Ratified (Operator, 2026-07-06, day-arc D3 batch ratification).
 - **Date:** 2026-07-05
 - **Gate:** Brain ledger append serialization design.
 - **Mutation class:** docs/governance documentation only. This ADR changes no
@@ -43,7 +42,11 @@ Recent evidence shows the scaling limit:
   avoid a chain-position collision.
 - On 2026-07-05, ce-452 needed the same controller-side manual serialization.
   Together with the 2026-07-02 incident, this was the third manual
-  serialization event that week.
+  serialization event that week. Later on 2026-07-05, PRs #838, #835, and #836
+  produced a three-way chain-position collision — the 0.3.1 release branch and
+  two completion PRs each re-chained in locked order — while PR #843 required a
+  further branch recompute; counting the day's earlier incidents, 2026-07-05
+  alone required five serialized ledger interventions.
 
 The Phase B multi-coordinator ADR is separately designing write-authority
 partitioning. This ADR does not preempt that partitioning decision; it defines
@@ -174,7 +177,7 @@ The brain-append daemon should be a narrow singleton for final ledger writes.
 It receives append intent as data, derives the current ledger head from a
 daemon-owned checkout, assigns chain position, validates append-only and
 ce-411 invariants, and emits a reviewable change. The merge gate remains the
-policy singleton for merge admission and may require evidence that a
+policy singleton for merge admission and must require evidence that a
 ledger-touching branch was produced by, or reconciled through, the append
 daemon.
 
@@ -211,6 +214,9 @@ This ADR defers:
 - a general lock-service design beyond any short-lived compatibility guard;
 - changes to reviewer assignment, auto-merge, or merge-queue policy outside
   the evidence requirement for ledger-touching PRs.
+
+Once the daemon ships, out-of-band ledger appends that bypass it are refused at
+the merge gate for lack of mediation evidence.
 
 ## 9. Non-goals
 
