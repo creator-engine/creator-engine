@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=16
+AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=5bd7d0b9dc516540b09f08d9e0ede8309bd2656eb88b8c43566c66ad5c7aafaf
+AUTHORIZED_PATHS_SHA256=83907da21c79991016826e2c786dc414aa0628c22d3e9fda89497d7795766f20
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-426-g11-reviewer-authority-minting.md
 .ce/pr-manifests/ce-426-g11-reviewer-authority-minting.md
 .ce/reference/cli.generated.md
