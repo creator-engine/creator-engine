@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import claim_lifecycle as lifecycle
+from creator_engine_validator import claim_lifecycle as lifecycle
 
 
 NOW = "2026-07-06T14:00:00Z"
@@ -42,20 +42,24 @@ def test_transition_moves_forward_and_emits_structured_log(tmp_path: Path) -> No
     result = lifecycle.transition_claim(
         tmp_path,
         "ce-476-claim-lifecycle",
-        "ready",
+        "in-build",
         pr="https://github.com/creator-engine/creator-engine/pull/123",
         now=NOW,
     )
 
     assert result.old_state == "claimed"
-    assert result.new_state == "ready"
+    assert result.new_state == "in-build"
     payload = json.loads(lifecycle.structured_log_line(result))
     assert payload["event"] == "ce_claim_transition"
     assert payload["pr"].endswith("/123")
     written = (tmp_path / ".ce" / "claims" / "ce-476-claim-lifecycle.md").read_text(encoding="utf-8")
-    assert "state: ready" in written
+    assert "state: in-build" in written
     assert "transitioned_at: 2026-07-06T14:00:00Z" in written
     assert "human notes" in written
+
+
+def test_claim_lifecycle_imports_from_packaged_path() -> None:
+    assert lifecycle.__name__ == "creator_engine_validator.claim_lifecycle"
 
 
 def test_backward_transition_requires_force(tmp_path: Path) -> None:
@@ -72,6 +76,45 @@ def test_backward_transition_requires_force(tmp_path: Path) -> None:
         now=NOW,
     )
     assert result.new_state == "in-build"
+
+
+def test_illegal_forward_skip_is_refused(tmp_path: Path) -> None:
+    _write_claim(tmp_path, "ce-476-claim-lifecycle")
+
+    with pytest.raises(lifecycle.ClaimLifecycleError, match="illegal"):
+        lifecycle.transition_claim(tmp_path, "ce-476-claim-lifecycle", "landed", sha="abc123", now=NOW)
+
+
+def test_terminal_transition_without_evidence_is_refused(tmp_path: Path) -> None:
+    _write_claim(tmp_path, "ce-476-claim-lifecycle", state="harvested")
+
+    with pytest.raises(lifecycle.ClaimLifecycleError, match="requires merge/release SHA evidence"):
+        lifecycle.transition_claim(tmp_path, "ce-476-claim-lifecycle", "landed", now=NOW)
+
+
+def test_claimed_to_abandoned_is_refused_without_force(tmp_path: Path) -> None:
+    _write_claim(tmp_path, "ce-476-claim-lifecycle")
+
+    with pytest.raises(lifecycle.ClaimLifecycleError, match="illegal"):
+        lifecycle.transition_claim(tmp_path, "ce-476-claim-lifecycle", "abandoned", now=NOW)
+
+
+def test_same_state_same_sha_transition_is_byte_identical_noop(tmp_path: Path) -> None:
+    path = _write_claim(tmp_path, "ce-476-claim-lifecycle", state="landed")
+    original = path.read_text(encoding="utf-8").replace("merge_sha: null", "merge_sha: abc123")
+    path.write_text(original, encoding="utf-8")
+
+    result = lifecycle.transition_claim(
+        tmp_path,
+        "ce-476-claim-lifecycle",
+        "landed",
+        sha="abc123",
+        now="2026-07-06T15:00:00Z",
+    )
+
+    assert result.old_state == "landed"
+    assert result.new_state == "landed"
+    assert path.read_text(encoding="utf-8") == original
 
 
 def test_legacy_claim_is_upgraded_from_prose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

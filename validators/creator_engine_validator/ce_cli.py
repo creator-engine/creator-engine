@@ -4903,7 +4903,7 @@ def _claim_status(args) -> int:
 
 
 def _claim_lifecycle_module():
-    return importlib.import_module("claim_lifecycle")
+    return importlib.import_module("creator_engine_validator.claim_lifecycle")
 
 
 def _claim_transition(args) -> int:

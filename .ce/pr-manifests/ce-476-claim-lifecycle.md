@@ -8,15 +8,15 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=9
 
-AUTHORIZED_PATHS_SHA256=cdf50a747a3cd4dc51300c3648be9df4b4f6fec93158ae8339b5acf19e01e6e4
+AUTHORIZED_PATHS_SHA256=4db05a7973a9981025d8ffca834ae579ce9150382fd2d365c84a7db75d85eba6
 
 ```text
 .ce/changelog/ce-476-claim-lifecycle.md
 .ce/pr-manifests/ce-476-claim-lifecycle.md
 .github/workflows/ce-claim-closeout.yml
 docs/claims-lifecycle.md
-validators/claim_lifecycle.py
 validators/creator_engine_validator/ce_cli.py
+validators/creator_engine_validator/claim_lifecycle.py
 validators/tests/unit/test_ce_claim_closeout_workflow.py
 validators/tests/unit/test_ce_claim_lifecycle_cli.py
 validators/tests/unit/test_claim_lifecycle.py

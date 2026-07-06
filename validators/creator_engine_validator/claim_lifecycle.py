@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -15,6 +16,16 @@ import yaml
 ORDERED_STATES = ("claimed", "in-build", "ready", "harvested", "landed", "released")
 TERMINAL_STATES = ("landed", "released", "abandoned")
 STATES = (*ORDERED_STATES, "abandoned")
+LEGAL_TRANSITIONS: dict[str, frozenset[str]] = {
+    "claimed": frozenset({"in-build"}),
+    "in-build": frozenset({"ready"}),
+    "ready": frozenset({"harvested"}),
+    "harvested": frozenset({"landed"}),
+    "landed": frozenset({"released"}),
+    "released": frozenset(),
+    "abandoned": frozenset(),
+}
+EVIDENCE_REQUIRED_STATES = frozenset({"landed", "released"})
 
 _STATE_RANK = {state: index for index, state in enumerate(ORDERED_STATES)}
 _SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -90,6 +101,26 @@ def transition_claim(
     data, body = parse_claim_text(text, slug=slug, now=now)
     old_state = str(data["state"])
     _assert_transition_allowed(old_state, new_state, force=force)
+    _assert_terminal_evidence(repo_root, new_state, sha)
+
+    next_pr = pr if pr is not None else _nullable_str(data.get("pr"))
+    next_sha = sha if sha is not None else _nullable_str(data.get("merge_sha"))
+    if (
+        old_state == new_state
+        and next_pr == _nullable_str(data.get("pr"))
+        and next_sha == _nullable_str(data.get("merge_sha"))
+    ):
+        return TransitionResult(
+            slug=slug,
+            path=path,
+            old_state=old_state,
+            new_state=new_state,
+            transitioned_at=str(data["transitioned_at"]),
+            pr=_nullable_str(data.get("pr")),
+            merge_sha=_nullable_str(data.get("merge_sha")),
+            seat=str(data["seat"]),
+            controller=str(data["controller"]),
+        )
 
     transitioned_at = now or utc_now_iso()
     data["state"] = new_state
@@ -211,16 +242,57 @@ def _assert_transition_allowed(old_state: str, new_state: str, *, force: bool) -
     _validate_state(new_state)
     if force or old_state == new_state:
         return
-    if old_state in {"released", "abandoned"}:
-        raise ClaimLifecycleError(f"cannot transition from terminal state {old_state!r} without --force")
-    if new_state == "abandoned":
-        return
-    if old_state == "abandoned":
-        raise ClaimLifecycleError("cannot transition from abandoned without --force")
-    if _STATE_RANK[new_state] < _STATE_RANK[old_state]:
+    if new_state not in LEGAL_TRANSITIONS[old_state]:
+        if old_state in TERMINAL_STATES:
+            raise ClaimLifecycleError(f"cannot transition from terminal state {old_state!r} without --force")
+        if (
+            new_state in _STATE_RANK
+            and old_state in _STATE_RANK
+            and _STATE_RANK[new_state] < _STATE_RANK[old_state]
+        ):
+            direction = "backward"
+        else:
+            direction = "illegal"
         raise ClaimLifecycleError(
-            f"refusing backward claim transition {old_state!r} -> {new_state!r} without --force"
+            f"refusing {direction} claim transition {old_state!r} -> {new_state!r} without --force"
         )
+
+
+def _assert_terminal_evidence(repo_root: str | Path, new_state: str, sha: str | None) -> None:
+    if new_state not in EVIDENCE_REQUIRED_STATES:
+        return
+    if not sha:
+        raise ClaimLifecycleError(f"transition to {new_state!r} requires merge/release SHA evidence")
+    root = Path(repo_root)
+    if not (root / ".git").exists():
+        return
+
+    main_refs = _existing_git_refs(root, ("origin/main", "main", "refs/remotes/origin/main", "refs/heads/main"))
+    if not main_refs:
+        return
+    for ref in main_refs:
+        if _git_success(root, "merge-base", "--is-ancestor", sha, ref):
+            return
+    refs = ", ".join(main_refs)
+    raise ClaimLifecycleError(f"SHA evidence {sha!r} is not reachable from main ref(s): {refs}")
+
+
+def _existing_git_refs(root: Path, refs: Iterable[str]) -> list[str]:
+    return [ref for ref in refs if _git_success(root, "rev-parse", "--verify", "--quiet", ref)]
+
+
+def _git_success(root: Path, *args: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
 
 
 def _legacy_claim_data(slug: str, *, now: str | None) -> dict[str, Any]:

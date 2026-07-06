@@ -38,7 +38,7 @@ def test_ce_claim_transition_json(tmp_path: Path, capsys) -> None:
             "claim",
             "transition",
             "ce-476-claim-lifecycle",
-            "landed",
+            "in-build",
             "--sha",
             "abc123",
             "--repo-root",
@@ -49,7 +49,7 @@ def test_ce_claim_transition_json(tmp_path: Path, capsys) -> None:
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["new_state"] == "landed"
+    assert payload["new_state"] == "in-build"
     assert payload["merge_sha"] == "abc123"
 
 
@@ -94,3 +94,30 @@ def test_ce_claim_list_filters(tmp_path: Path, capsys) -> None:
     assert rc == 0
     rows = json.loads(capsys.readouterr().out)
     assert [row["slug"] for row in rows] == ["ce-476-claim-lifecycle"]
+
+
+def test_ce_claim_closeout_rerun_same_landed_sha_is_noop(tmp_path: Path) -> None:
+    _write_claim(tmp_path)
+    claim = tmp_path / ".ce" / "claims" / "ce-476-claim-lifecycle.md"
+    original = claim.read_text(encoding="utf-8")
+    landed = original.replace("state: claimed", "state: landed").replace(
+        "merge_sha: null",
+        "merge_sha: abc123",
+    )
+    claim.write_text(landed, encoding="utf-8")
+
+    rc = ce_cli.main(
+        [
+            "claim",
+            "transition",
+            "ce-476-claim-lifecycle",
+            "landed",
+            "--sha",
+            "abc123",
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert rc == 0
+    assert claim.read_text(encoding="utf-8") == landed
