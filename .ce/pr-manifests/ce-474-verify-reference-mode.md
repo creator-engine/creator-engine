@@ -6,15 +6,16 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=8
+AUTHORIZED_PATHS_COUNT=9
 
-AUTHORIZED_PATHS_SHA256=167e3959881c6c0c43a29a6dc9d84fd02294daa614bd73783a0e98029558c7a5
+AUTHORIZED_PATHS_SHA256=ac2c5e85e178d36f8a388a43283c5a5c115e21479bcd5283676a6da01fb6e659
 
 ```text
 .ce/changelog/ce-474-verify-reference-mode.md
 .ce/pr-manifests/ce-474-verify-reference-mode.md
 docs/contracts/brownfield-adoption.md
 docs/contracts/installer.md
+validators/creator_engine_validator/forge/protection_diagnostics.py
 validators/creator_engine_validator/onboard_apply.py
 validators/creator_engine_validator/onboard_apply_live.py
 validators/tests/unit/test_onboard_apply.py

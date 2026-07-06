@@ -11,3 +11,4 @@ issue: ce-ops#474
 - Honor an explicit `github.protections: reference` declaration when preserved-check verification hits a GitHub plan/capability 403.
 - Keep undeclared 403 responses fail-closed as `protection_floor_unenforceable`.
 - Record `protection_floor: documented-not-enforced` evidence with repo, branch, and declared mode.
+- Require an explicit HTTP 403/status signal before treating plan/remediation text as documented-not-enforced.

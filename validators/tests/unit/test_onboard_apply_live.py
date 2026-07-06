@@ -1700,6 +1700,24 @@ def test_adoption_preserved_checks_declared_reference_accepts_plan_403_with_evid
     driver.close()
 
 
+def test_adoption_preserved_checks_declared_reference_refuses_plan_text_without_403():
+    forge = _AdoptionForge(
+        protection_rc=1,
+        protection_out=_PLAN_403,
+        protection_err="gh: Upgrade to GitHub Pro or make this repository public (HTTP 502)",
+    )
+    driver = _adoption_driver(forge)
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        driver.read_preserved_checks(
+            repo=_REPO,
+            base="main",
+            expected_checks=["lint"],
+            declared_protections="reference",
+        )
+    assert exc.value.code == "brownfield_protection_read_failed"
+    driver.close()
+
+
 def test_adoption_preserved_checks_reference_declaration_does_not_skip_readable_floor():
     driver = _adoption_driver(_AdoptionForge())
     result = driver.read_preserved_checks(
