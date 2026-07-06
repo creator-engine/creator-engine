@@ -20,6 +20,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import _versions as ver
+from creator_engine_validator import journey_guidance
 from creator_engine_validator import pickup_search
 from creator_engine_validator import onboard_apply, v3_cli, v3_installer, v3_seat_bridge
 from creator_engine_validator.forge.approval_capability import ApprovalCapabilityVerifier
@@ -111,6 +112,28 @@ def test_invalid_scope_id_refused(tmp_path):
     assert v3_cli.main(["scope", "BAD ID", "--goal", "x", "--change-type", "code", "--root", str(tmp_path)]) == 2
 
 
+def test_shape_success_teaches_next_scope_command_without_budget(capsys):
+    code = v3_cli.main([
+        "shape", "rate-limit-login",
+        "--goal", "rate-limit POST /api/login",
+        "--done-when", "returns 429 over 100/min",
+        "--change-type", "code",
+    ])
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert code == 0
+    assert lines[-1] == journey_guidance.shape_next("rate-limit-login")
+    assert "--budget" not in lines[-1]
+
+
+def test_scope_success_teaches_next_ratify_command(tmp_path, capsys):
+    code = _file_ready(tmp_path)
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert code == 0
+    assert lines[-1] == journey_guidance.scope_next("rate-limit-login")
+
+
 # ---------------------------------------------------------------------------
 # the front gate — drive REFUSES unless Ready AND ratified
 # ---------------------------------------------------------------------------
@@ -155,6 +178,17 @@ def test_ratify_places_value_free_bet(tmp_path):
     assert set(rat) == {"approver_ref", "ratified_scope_sha"}
 
 
+def test_ratify_success_teaches_next_drive_spawn_command(tmp_path, capsys):
+    _file_ready(tmp_path)
+    capsys.readouterr()
+
+    code = v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert code == 0
+    assert lines[-1] == journey_guidance.ratify_next("rate-limit-login")
+
+
 def test_drive_assembles_run_inputs_with_appetite_cap(tmp_path, capsys):
     _file_ready(tmp_path, budget_amount=7, budget_unit="$")
     v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
@@ -171,6 +205,20 @@ def test_drive_assembles_run_inputs_with_appetite_cap(tmp_path, capsys):
     # default drive stays assemble-only (additive --spawn opt-in; no behavior change)
     assert payload["live_spawn"] == "available_via_--spawn"
     assert payload["action"] == "dispatch_assembled"
+
+
+def test_drive_spawn_success_teaches_next_report_command(tmp_path, monkeypatch, capsys):
+    calls = _fake_bridge(monkeypatch)
+    _file_ready(tmp_path)
+    v3_cli.main(["ratify", "rate-limit-login", "--approver-ref", APPROVER, "--root", str(tmp_path)])
+    capsys.readouterr()
+
+    code = v3_cli.main(["drive", "rate-limit-login", "--root", str(tmp_path), "--spawn"])
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert code == 0
+    assert calls["spawn"]
+    assert lines[-1] == journey_guidance.drive_spawn_next("rate-limit-login")
 
 
 def test_drive_refuses_missing_policy_file(tmp_path, capsys):
@@ -205,6 +253,14 @@ def test_drive_merges_envelope_additively_into_operator_policy(tmp_path, capsys)
     envs = payload["runtime_policy"]["spend_envelopes"]
     scopes = sorted(e["scope"] for e in envs)
     assert scopes == ["global", "run"]  # operator global retained + run cap added
+
+
+def test_report_success_teaches_journey_complete(tmp_path, capsys):
+    code = v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path)])
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert code == 0
+    assert lines[-1] == journey_guidance.report_next()
 
 
 # ---------------------------------------------------------------------------

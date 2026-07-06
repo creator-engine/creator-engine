@@ -12,6 +12,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from creator_engine_validator import _versions as ver
+from creator_engine_validator import journey_guidance
 from creator_engine_validator import v3_report as rep
 from creator_engine_validator.runtime_evidence_spine import (
     RUN_OUTCOMES,
@@ -133,6 +134,10 @@ def test_report_block_shape():
     assert any(l.startswith("│ Verdict") for l in lines)
     assert any(l.startswith("│ Next") for l in lines)
     assert lines[-1].startswith("└")
+
+
+def test_report_journey_completion_hint_is_shared_constant():
+    assert journey_guidance.report_next() == "Journey complete."
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from creator_engine_validator import ce_cli
+from creator_engine_validator import ce_cli, journey_guidance
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _VALIDATORS = _REPO_ROOT / "validators"
@@ -185,3 +185,5 @@ def test_bare_ce_keeps_usage_exit_2() -> None:
     assert via_ce.returncode == 2
     assert via_ce.stdout == ""
     assert "usage: ce" in via_ce.stderr
+    for line in journey_guidance.STAGE_MAP_LINES:
+        assert line in via_ce.stderr

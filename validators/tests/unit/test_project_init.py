@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from creator_engine_validator import project_init
+from creator_engine_validator import ce_cli, journey_guidance, project_init
 
 
 def test_embedded_templates_are_ce_native():
@@ -33,6 +33,8 @@ def test_init_project_creates_right_sized_ce_scaffold(tmp_path: Path):
     assert (root / ".gitignore").read_text(encoding="utf-8") == ".hermes/\n.ce/state/\n"
     readme = (root / "README.md").read_text(encoding="utf-8")
     assert "Frame -> Shape -> Build -> Review -> Ship" in readme
+    for line in journey_guidance.STAGE_MAP_LINES:
+        assert line in readme
     assert "`XS`: `scope_card` only" in readme
     assert "`S`: `intent` + `scope` + `tasks`" in readme
     assert "`M`: full `spec.md` + `plan.md` + `tasks.md`" in readme
@@ -40,6 +42,15 @@ def test_init_project_creates_right_sized_ce_scaffold(tmp_path: Path):
     assert "Declared work class: XS|S|M|L" in (
         root / ".ce" / "pr-manifests" / "_template.md"
     ).read_text(encoding="utf-8")
+
+
+def test_ce_init_output_prints_shared_stage_map(tmp_path: Path, capsys):
+    code = ce_cli.main(["init", str(tmp_path / "project")])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    for line in journey_guidance.STAGE_MAP_LINES:
+        assert line in out
 
 
 def test_init_project_is_idempotent(tmp_path: Path):

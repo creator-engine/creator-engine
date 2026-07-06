@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
 
+from . import journey_guidance
+
 Status = Literal["created", "skipped", "overwritten"]
 
 
@@ -64,19 +66,21 @@ class ProjectInitResult:
         }
 
 
-README = """# CE-Governed Project
+README = f"""# CE-Governed Project
 
 This project is prepared for Creator Engine governed development.
 
 ## CE Workflow
 
-CE uses the stage vocabulary `Frame -> Shape -> Build -> Review -> Ship`:
+CE uses the stage vocabulary `{journey_guidance.STAGE_SEQUENCE_TEXT}`:
 
 - Frame: understand the request, bounds, and done condition.
-- Shape: declare the Scope, acceptance criteria, appetite, mutation class, and plan.
+- Shape: declare the Scope with Goal, Done-when, Change-type, and a plan.
 - Build: make the ratified change in a governed run.
 - Review: grade the result against evidence and acceptance criteria.
 - Ship: deliver the governed terminal outcome.
+
+{journey_guidance.stage_map_text()}
 
 ## Work Sizing
 
@@ -103,7 +107,7 @@ path-manifest fidelity, work-sizing declarations, and the local test gate.
 """
 
 
-CE_README = """# CE Project Files
+CE_README = f"""# CE Project Files
 
 This directory carries project-local Creator Engine governance artifacts.
 
@@ -112,7 +116,9 @@ This directory carries project-local Creator Engine governance artifacts.
 - `pr-manifests/_template.md` is the path-manifest carrier template.
 - `skills/` contains CE-native local skill prompts for governed shaping and review.
 
-The CE stages are `Frame -> Shape -> Build -> Review -> Ship`.
+The CE stages are `{journey_guidance.STAGE_SEQUENCE_TEXT}`.
+
+{journey_guidance.stage_map_text()}
 """
 
 
@@ -168,7 +174,7 @@ In scope:
 
 Out of scope:
 
-Appetite:
+Budget (optional):
 
 ## Tasks
 
@@ -192,11 +198,11 @@ Done when:
 
 ## Shape
 
-Acceptance criteria:
+Done-when:
 
-Mutation class:
+Change-type:
 
-Appetite:
+Budget (optional):
 
 Risks:
 
@@ -280,14 +286,14 @@ starting points, not mandatory global policy.
 """
 
 
-SHAPE_SCOPE_SKILL = """# CE Shape Scope
+SHAPE_SCOPE_SKILL = f"""# CE Shape Scope
 
 Use this skill when turning a framed request into a CE Scope.
 
 1. Confirm the work class: XS, S, M, or L.
 2. Keep the artifact bundle right-sized to that class.
-3. State the stage handoff in CE terms: Frame -> Shape -> Build -> Review -> Ship.
-4. Record acceptance criteria, mutation class, appetite, and out-of-scope items.
+3. State the stage handoff in CE terms: {journey_guidance.STAGE_SEQUENCE_TEXT}.
+4. Record Goal, Done-when, Change-type, and out-of-scope items.
 5. Produce the changelog and path-manifest requirements before Build starts.
 """
 
