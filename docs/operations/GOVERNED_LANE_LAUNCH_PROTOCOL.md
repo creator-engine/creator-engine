@@ -66,8 +66,8 @@ G2.002.1 operating-mode carriers (optional): `--operating-mode` (default
 `--reviewer-authority-ref` (a reviewer-authority envelope ref for a distinct
 reviewer venue) or G11 `--mint-reviewer-authority` with
 `--reviewer-authority-pr`, `--reviewer-authority-head-sha`, and
-`--reviewer-authority-actor` to mint a lane-scoped envelope in ignored ledger
-state; see step 0b and
+`--reviewer-authority-actor`, and `--reviewer-authority-pr-author` to mint a
+lane-scoped envelope in ignored ledger state; see step 0b and
 [`./REVIEWER_VENUE_AUTHORITY.md`](./REVIEWER_VENUE_AUTHORITY.md) §4).
 
 The launch sequence, **with every refusal raised before any side effect**:
@@ -89,10 +89,15 @@ The launch sequence, **with every refusal raised before any side effect**:
    lane must be a distinct reviewer venue — `--role reviewer` **and** `--lane-kind review`
    (`is_distinct_reviewer_venue`); otherwise refuse `G3-REVIEWER-VENUE-IDENTITY`.
    An explicit ref must resolve (under `--repo-root` or as an absolute path) to a
-   schema-valid reviewer-authority envelope. A minted envelope must include the
-   PR number, head SHA, reviewer actor login, and ratified prompt SHA (default:
-   `--prompt-sha`) and is written to the lane-scoped ignored ledger path before
-   pane spawn. Invalid or incomplete authority refuses
+   schema-valid reviewer-authority envelope, and a spent or expired envelope is
+   refused. A minted envelope must include the PR number, head SHA, reviewer
+   actor login, target PR author login, and ratified prompt SHA (default:
+   `--prompt-sha`). Minting hard-refuses when the actor equals the target PR
+   author. Minted envelopes carry `capability: independent_review_venue`,
+   `expires_at` (short TTL), and `single_use: true`; the first venue launch
+   stamps `consumed_at`, `consumed_by_controller_id`, and
+   `consumed_by_lane_id` before pane spawn so the ref cannot be reused as a
+   standing grant. Invalid or incomplete authority refuses
    `G3-REVIEWER-AUTHORITY-INVALID`; `--reviewer-authority-ref` and
    `--mint-reviewer-authority` are mutually exclusive. On success the validated
    ref is exported into the pane environment as `CE_REVIEWER_AUTHORITY_REF` (via

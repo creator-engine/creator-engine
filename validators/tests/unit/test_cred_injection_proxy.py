@@ -382,6 +382,33 @@ def test_contained_seat_review_approve_refuses_invalid_envelope_before_mint():
     assert transport.calls == []
 
 
+def test_contained_seat_review_approve_refuses_review_venue_only_capability_before_mint():
+    minter = FakeMinter(_token())
+    transport = FakeTransport()
+
+    with pytest.raises(CredentialProxyRefused) as exc:
+        submit_contained_seat_pr_review(
+            ContainedSeatReview(
+                seat_id="seat-reviewer-1",
+                repo=_REPO,
+                pr_number=7,
+                head_sha=_HEAD,
+                event="APPROVE",
+                run_mode="strangeLoop",
+                reviewer_authority_envelope=_reviewer_authority_envelope(
+                    capability="independent_review_venue",
+                ),
+            ),
+            binding=_binding(),
+            minter=minter,
+            transport=transport,
+        )
+
+    assert "review-venue-only" in str(exc.value)
+    assert minter.calls == []
+    assert transport.calls == []
+
+
 @pytest.mark.parametrize("substrate", ["contained", "non-contained"])
 def test_approve_allowed_for_independent_valid_envelope_and_permitting_mode(substrate):
     minter = FakeMinter(_token())

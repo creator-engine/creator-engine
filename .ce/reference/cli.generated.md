@@ -762,6 +762,7 @@ Options:
 | `--reviewer-authority-pr` | no |  | PR number bound into a minted reviewer-authority envelope |
 | `--reviewer-authority-head-sha` | no |  | PR head SHA bound into a minted reviewer-authority envelope |
 | `--reviewer-authority-actor` | no |  | reviewer login bound into a minted reviewer-authority envelope (never a token) |
+| `--reviewer-authority-pr-author` | no |  | target PR author login bound into a minted reviewer-authority envelope; must differ from --reviewer-authority-actor |
 | `--reviewer-authority-ratified-prompt-sha` | no |  | ratified reviewer prompt SHA bound into a minted envelope; defaults to --prompt-sha |
 | `--reviewer-authority-emitting-role` | no | `agent_reviewer, architect, controller, implementer, operator, reviewer, verification` | canonical non-ratifying emitting role for a minted reviewer-authority envelope |
 | `--seat-env-file` | no |  | v3.1-G2f (F4/D2): path to an owner-only (0600-class) env file sourced into the seat process via an exec-wrap before launch — the per-seat credential contract (e.g. a reviewer token). The file PATH transits argv; the secret VALUE never enters argv, the tmux server, or any record. Refused if missing or group/world-accessible |

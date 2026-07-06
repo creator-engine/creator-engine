@@ -56,6 +56,7 @@ from .runtime_evidence_spine import (
 )
 
 CONTRACT = "docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md"
+REVIEWER_AUTHORITY_CAPABILITY = "independent_review_venue"
 
 # Tools whose target file_path is subject to the scope gate.
 SCOPE_TOOLS = frozenset({"Edit", "Write", "MultiEdit"})
@@ -1126,6 +1127,9 @@ def _authority_covers(envelope: Any, action: str, command: Any) -> bool:
         return False
     rec = envelope.get("reviewer_authority_envelope", envelope)
     if not isinstance(rec, dict):
+        return False
+    capability = rec.get("capability")
+    if capability is not None and str(capability).strip() != REVIEWER_AUTHORITY_CAPABILITY:
         return False
     if str(rec.get("mechanic", "")).strip().lower() != action:
         return False

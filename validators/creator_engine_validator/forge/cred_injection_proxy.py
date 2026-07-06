@@ -23,6 +23,8 @@ from .github_repo_config import ForgeConfigRefused
 from .scoped_token import ScopedToken, TokenRequest
 from .transport_deputy_policy import Decision, TransportRequest, evaluate
 
+REVIEWER_VENUE_ONLY_CAPABILITY = "independent_review_venue"
+
 CredentialMinter = Callable[[TokenRequest], ScopedToken]
 TransportAdapter = Callable[["OutboundTransportRequest"], Any]
 PolicyEvaluator = Callable[[TransportRequest], Decision]
@@ -469,6 +471,10 @@ def validate_approve_authority(
     if not isinstance(rec, Mapping):
         raise CredentialProxyRefused(
             "APPROVE refused: invalid reviewer-authority-envelope"
+        )
+    if str(rec.get("capability", "")).strip() == REVIEWER_VENUE_ONLY_CAPABILITY:
+        raise CredentialProxyRefused(
+            "APPROVE refused: reviewer-authority-envelope capability is review-venue-only"
         )
     if str(rec.get("mechanic", "")).strip() != "pr_review":
         raise CredentialProxyRefused(

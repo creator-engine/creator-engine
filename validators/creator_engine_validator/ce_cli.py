@@ -640,6 +640,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="reviewer login bound into a minted reviewer-authority envelope (never a token)",
     )
     launch.add_argument(
+        "--reviewer-authority-pr-author",
+        default=None,
+        help="target PR author login bound into a minted reviewer-authority envelope; "
+        "must differ from --reviewer-authority-actor",
+    )
+    launch.add_argument(
         "--reviewer-authority-ratified-prompt-sha",
         default=None,
         help="ratified reviewer prompt SHA bound into a minted envelope; defaults to --prompt-sha",
@@ -2374,6 +2380,7 @@ def _lane_launch(args) -> int:
             reviewer_authority_pr_number=getattr(args, "reviewer_authority_pr_number", None),
             reviewer_authority_head_sha=getattr(args, "reviewer_authority_head_sha", None),
             reviewer_authority_actor=getattr(args, "reviewer_authority_actor", None),
+            reviewer_authority_pr_author=getattr(args, "reviewer_authority_pr_author", None),
             reviewer_authority_ratified_prompt_sha=getattr(args, "reviewer_authority_ratified_prompt_sha", None),
             reviewer_authority_emitting_role=getattr(args, "reviewer_authority_emitting_role", "controller"),
             seat_env_file=getattr(args, "seat_env_file", None),

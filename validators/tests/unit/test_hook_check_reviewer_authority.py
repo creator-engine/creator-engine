@@ -166,6 +166,13 @@ def test_pr_review_denied_on_mechanic_mismatch_envelope():
     assert hc._mechanics_would_deny("gh pr review 106 --approve", _ctx(_envelope(mechanic="merge"))) is not None
 
 
+def test_pr_review_denied_on_wrong_capability_envelope():
+    assert hc._mechanics_would_deny(
+        "gh pr review 106 --approve",
+        _ctx(_envelope(capability="approval")),
+    ) is not None
+
+
 @pytest.mark.parametrize("command", [
     "gh pr merge 106 --squash",
     "git push origin main",

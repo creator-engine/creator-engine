@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -198,6 +199,8 @@ def test_minted_reviewer_authority_is_exported_and_recorded(tmp_path):
         reviewer_authority_pr_number=108,
         reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
         reviewer_authority_actor="ubuntuaws745-cmyk",
+        reviewer_authority_pr_author="some-other-author",
+        now=datetime(2026, 6, 1, 10, 43, 13, tzinfo=UTC),
     )
 
     assert result.reviewer_authority_ref
@@ -211,18 +214,57 @@ def test_minted_reviewer_authority_is_exported_and_recorded(tmp_path):
 
     envelope = yaml.safe_load(minted.read_text(encoding="utf-8"))["reviewer_authority_envelope"]
     assert envelope["mechanic"] == "pr_review"
+    assert envelope["capability"] == lane_runtime.REVIEWER_AUTHORITY_CAPABILITY
     assert envelope["pr_number"] == 108
     assert envelope["actor"] == "ubuntuaws745-cmyk"
+    assert envelope["target_pr_author"] == "some-other-author"
     assert envelope["head_sha"] == "aa02b0ceb192b38f52da0d99f798e1e2710a8a22"
     assert envelope["ratified_prompt_sha"] == hashlib.sha256(
         (_prompt(tmp_path)[0]).read_bytes()
     ).hexdigest()
     assert envelope["emitting_role"] == "controller"
     assert envelope["operating_mode"] == "strict"
+    assert envelope["recorded_at"] == "2026-06-01T10:43:13Z"
+    assert envelope["expires_at"] == "2026-06-01T10:58:13Z"
+    assert envelope["single_use"] is True
+    assert envelope["consumed_at"] == "2026-06-01T10:43:13Z"
+    assert envelope["consumed_by_controller_id"] == CID
+    assert envelope["consumed_by_lane_id"] == LID
 
     sidecar = lane_runtime._governance_sidecar_path(_ledger(tmp_path), CID, LID)
     data = json.loads(sidecar.read_text(encoding="utf-8"))
     assert data["reviewer_authority_ref"] == str(minted)
+
+
+def test_minted_reviewer_authority_refuses_self_review_before_spawn(tmp_path):
+    adapter = RecordingAdapter()
+    with pytest.raises(lane_runtime.ReviewerAuthorityInvalid) as exc:
+        _launch_reviewer(
+            tmp_path,
+            adapter=adapter,
+            mint_reviewer_authority=True,
+            reviewer_authority_pr_number=108,
+            reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+            reviewer_authority_actor="ubuntuaws745-cmyk",
+            reviewer_authority_pr_author="ubuntuaws745-cmyk",
+        )
+    assert "self-review refused" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_minted_reviewer_authority_allows_non_author(tmp_path):
+    adapter = RecordingAdapter()
+    result = _launch_reviewer(
+        tmp_path,
+        adapter=adapter,
+        mint_reviewer_authority=True,
+        reviewer_authority_pr_number=108,
+        reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+        reviewer_authority_actor="ubuntuaws745-cmyk",
+        reviewer_authority_pr_author="different-author",
+    )
+    assert result.reviewer_authority_ref
+    assert adapter.spawned
 
 
 def test_reviewer_venue_identity_recorded_in_sidecar(tmp_path):
@@ -280,6 +322,7 @@ def test_minted_authority_requires_complete_schema_bindings_before_spawn(tmp_pat
             mint_reviewer_authority=True,
             reviewer_authority_pr_number=108,
             reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+            reviewer_authority_pr_author="some-other-author",
             # actor intentionally omitted
         )
     assert adapter.spawned == []
@@ -296,6 +339,7 @@ def test_minted_authority_requires_reviewer_venue_identity_before_spawn(tmp_path
             reviewer_authority_pr_number=108,
             reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
             reviewer_authority_actor="ubuntuaws745-cmyk",
+            reviewer_authority_pr_author="some-other-author",
         )
     assert adapter.spawned == []
 
@@ -313,6 +357,47 @@ def test_minted_authority_and_explicit_ref_are_mutually_exclusive(tmp_path):
             reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
             reviewer_authority_actor="ubuntuaws745-cmyk",
         )
+    assert adapter.spawned == []
+
+
+def test_expired_reviewer_authority_refused_before_spawn(tmp_path):
+    ref = _write_envelope(
+        tmp_path,
+        capability=lane_runtime.REVIEWER_AUTHORITY_CAPABILITY,
+        expires_at="2026-06-01T10:00:00Z",
+        single_use=True,
+    )
+    adapter = RecordingAdapter()
+    with pytest.raises(lane_runtime.ReviewerAuthorityInvalid) as exc:
+        _launch_reviewer(
+            tmp_path,
+            adapter=adapter,
+            reviewer_authority_ref=ref,
+            now=datetime(2026, 6, 1, 10, 1, 0, tzinfo=UTC),
+        )
+    assert "expired" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_reused_reviewer_authority_refused_before_spawn(tmp_path):
+    ref = _write_envelope(
+        tmp_path,
+        capability=lane_runtime.REVIEWER_AUTHORITY_CAPABILITY,
+        expires_at="2026-06-01T10:58:13Z",
+        single_use=True,
+        consumed_at="2026-06-01T10:43:13Z",
+        consumed_by_controller_id=CID,
+        consumed_by_lane_id=LID,
+    )
+    adapter = RecordingAdapter()
+    with pytest.raises(lane_runtime.ReviewerAuthorityInvalid) as exc:
+        _launch_reviewer(
+            tmp_path,
+            adapter=adapter,
+            reviewer_authority_ref=ref,
+            now=datetime(2026, 6, 1, 10, 44, 0, tzinfo=UTC),
+        )
+    assert "already spent" in str(exc.value)
     assert adapter.spawned == []
 
 
