@@ -1,6 +1,6 @@
 """JIT seat credential broker tests.
 
-These tests cover the failure direction for ce-ops#228: no Docker/env delivery,
+These tests cover the failure direction for the JIT credential mechanism: no Docker/env delivery,
 unknown classes fail closed with audit, TTL expiry is enforced, and concurrent
 mint requests serialize through the broker flock.
 """
@@ -30,14 +30,14 @@ def _config(tmp_path):
                 "allowed_branch_namespaces": ["ce-"],
                 "forbidden_branches": [],
                 "authorized_emails": [],
-                "authorized_logins": ["ce-dev-3"],
+                "authorized_logins": ["seat-dev-test"],
                 "max_pushes_per_window": 10,
                 "window_seconds": 3600,
             },
             "seats": {
                 "dev-3": {
                     "app_id": "12345",
-                    "app_owner": "ce-dev-3",
+                    "app_owner": "seat-dev-test",
                     "pem_path": "/dev/shm/ce-dev3/ce-forge-dev3.pem",
                     "installation_id": 242,
                     "allowed_credential_classes": ["model-api", "forge-scoped"],

@@ -6,9 +6,9 @@ scope: Add mint-seat-credential / revoke-seat-credential to egress host broker; 
 issue: 228
 ---
 
-**feat(broker): add JIT seat credential lane (ce-ops#228 slice 1).**
+**feat(broker): add JIT seat credential lane.**
 
-Add JIT seat credential lane to the egress host broker (ce-ops#228 slice 1).
+Add JIT seat credential lane to the egress host broker.
 
 Contained seats can now request short-TTL credentials at run time via the broker
 socket (`mint-seat-credential` / `revoke-seat-credential` verbs). The host
@@ -28,4 +28,4 @@ Failure-direction coverage: no-env-delivery impossible-by-construction assertion
 unknown class refused and audited, TTL expiry enforced, concurrent mint serialized
 through flock.
 
-Harvested from contained seat dev-3 (self-push gap, ce-ops#337).
+Harvested from contained seat dev-3 (self-push gap).

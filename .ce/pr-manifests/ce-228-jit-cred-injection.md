@@ -1,4 +1,4 @@
-# PR path manifest — 228 · feat(broker): add JIT seat credential lane (ce-ops#228 slice 1)
+# PR path manifest — 228 · feat(broker): add JIT seat credential lane
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-228-jit-cred-injection` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
