@@ -113,6 +113,8 @@ def test_continuity_drill_json_proves_benign_gate_cycle_without_mutation(
 ):
     _seed_takeover_state(tmp_path)
     _patch_drill_pass(monkeypatch)
+    monkeypatch.setattr(drill, "_current_run_at", lambda: "2026-07-06T17:00:00Z")
+    monkeypatch.setattr(drill.seat_lifecycle, "default_host_id", lambda: "host-a")
     before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
 
     rc = ce_cli.main(
@@ -133,6 +135,8 @@ def test_continuity_drill_json_proves_benign_gate_cycle_without_mutation(
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "ce-continuity-drill-record"
+    assert payload["run_at"] == "2026-07-06T17:00:00Z"
+    assert payload["host_id"] == "host-a"
     assert payload["cadence"]["phase"] == "weekly-until-two-clean-runs"
     assert payload["cadence"]["required"] is True
     assert payload["benign_gate_cycle"]["without_predecessor_chat_history"] is True
@@ -174,3 +178,69 @@ def test_continuity_drill_reports_missing_predecessor_as_not_clean(
     assert payload["takeover_evidence"]["predecessor"]["detected"] is False
     assert payload["benign_gate_cycle"]["no_side_effects"] is True
 
+
+def test_continuity_drill_json_abort_record_on_exception_path(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(drill, "_current_run_at", lambda: "2026-07-06T17:01:00Z")
+    monkeypatch.setattr(drill.seat_lifecycle, "default_host_id", lambda: "host-a")
+
+    rc = ce_cli.main(
+        [
+            "continuity-drill",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--prior-run",
+            "not-a-run",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    payload = json.loads(captured.out)
+    assert payload["kind"] == "ce-continuity-drill-record"
+    assert payload["clean"] is False
+    assert payload["aborted"] is True
+    assert payload["error_code"] == "CE-CONTINUITY-DRILL-BAD-HISTORY"
+    assert payload["run_at"] == "2026-07-06T17:01:00Z"
+    assert payload["host_id"] == "host-a"
+    assert payload["predecessor"] == "ce-controller"
+    assert payload["selected_harness"] == "claude"
+    assert "ERROR: ce continuity-drill refused [CE-CONTINUITY-DRILL-BAD-HISTORY]" in captured.err
+
+
+def test_continuity_drill_json_abort_record_on_takeover_exception(tmp_path, monkeypatch, capsys):
+    _patch_drill_pass(monkeypatch)
+    monkeypatch.setattr(drill, "_current_run_at", lambda: "2026-07-06T17:02:00Z")
+    monkeypatch.setattr(drill.seat_lifecycle, "default_host_id", lambda: "host-a")
+
+    def fail_plan(**_kwargs):
+        raise drill.takeover_runtime.LiveTakeoverNotImplemented("live takeover refused")
+
+    monkeypatch.setattr(drill.takeover_runtime, "build_plan", fail_plan)
+
+    rc = ce_cli.main(
+        [
+            "continuity-drill",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    payload = json.loads(captured.out)
+    assert payload["clean"] is False
+    assert payload["aborted"] is True
+    assert payload["error_code"] == "CE-TAKEOVER-LIVE-DEFERRED"
+    assert payload["run_at"] == "2026-07-06T17:02:00Z"
+    assert payload["host_id"] == "host-a"
+    assert "ERROR: ce continuity-drill refused [CE-TAKEOVER-LIVE-DEFERRED]" in captured.err

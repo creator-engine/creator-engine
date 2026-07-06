@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from . import controller_posture, takeover_runtime
+from . import controller_posture, seat_lifecycle, takeover_runtime
 
 DRILL_KIND = "ce-continuity-drill-record"
 SCHEMA_VERSION = 1
@@ -86,6 +86,8 @@ class DrillRecord:
     predecessor: str
     harness: str
     repo_root: Path
+    run_at: str
+    host_id: str
     cadence: CadenceStatus
     posture: controller_posture.PostureBanner
     takeover_plan: takeover_runtime.TakeoverPlan
@@ -111,6 +113,8 @@ class DrillRecord:
             "repo_root": str(self.repo_root),
             "predecessor": self.predecessor,
             "selected_harness": self.harness,
+            "run_at": self.run_at,
+            "host_id": self.host_id,
             "cadence": self.cadence.to_dict(),
             "posture": self.posture.to_dict(),
             "takeover_evidence": self.takeover_plan.to_dict(),
@@ -129,6 +133,8 @@ class DrillRecord:
             f"predecessor: {self.predecessor} "
             f"({'detected' if self.takeover_plan.predecessor_detected else 'not detected'})",
             f"selected harness: {self.harness}",
+            f"run at: {self.run_at}",
+            f"host id: {self.host_id}",
             f"Ring-0 verify: {'PASS' if self.takeover_plan.ring0_ok else 'WOULD-REFUSE'}",
             f"posture allowed: {self.posture.allowed_posture}",
             "benign governed gate cycle:",
@@ -182,6 +188,10 @@ def _parse_as_of(value: str | date | None) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise InvalidRunHistory(f"invalid --as-of date {value!r}") from exc
+
+
+def _current_run_at() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def compute_cadence(
@@ -270,6 +280,8 @@ def build_record(
         predecessor=predecessor,
         harness=harness,
         repo_root=root,
+        run_at=_current_run_at(),
+        host_id=seat_lifecycle.default_host_id(),
         cadence=cadence,
         posture=posture,
         takeover_plan=takeover_plan,
@@ -318,19 +330,91 @@ def _gate_cycle_proof(
     ]
     step_side_effects = [step for step in steps if step.get("execute") is not False]
     takeover_side_effects = [action for action in takeover_actions if action.get("execute") is not False]
+    forbidden_mechanics = _forbidden_mechanics(steps=steps, takeover_actions=takeover_actions)
     return {
         "without_predecessor_chat_history": True,
         "proof_mode": "plan-only",
         "steps": steps,
         "takeover_actions": takeover_actions,
-        "forbidden_mechanics": [
-            {"mechanic": mechanic, "present": False} for mechanic in FORBIDDEN_MECHANICS
-        ],
-        "forbidden_mechanics_present": False,
+        "forbidden_mechanics": forbidden_mechanics,
+        "forbidden_mechanics_present": any(item["present"] for item in forbidden_mechanics),
         "side_effect_violations": [*step_side_effects, *takeover_side_effects],
         "no_side_effects": not step_side_effects and not takeover_side_effects,
     }
 
 
+def _forbidden_mechanics(
+    *,
+    steps: Sequence[Mapping[str, Any]],
+    takeover_actions: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    candidates = [*steps, *takeover_actions]
+    return [
+        {"mechanic": mechanic, "present": _mechanic_present(mechanic, candidates)}
+        for mechanic in FORBIDDEN_MECHANICS
+    ]
+
+
+def _mechanic_present(mechanic: str, candidates: Sequence[Mapping[str, Any]]) -> bool:
+    needles = _mechanic_needles(mechanic)
+    for candidate in candidates:
+        if candidate.get("execute") is False:
+            continue
+        text = " ".join(
+            str(candidate.get(key, ""))
+            for key in ("name", "action", "detail", "status")
+        ).lower()
+        if any(needle in text for needle in needles):
+            return True
+    return False
+
+
+def _mechanic_needles(mechanic: str) -> tuple[str, ...]:
+    normalized = mechanic.replace("_", "-")
+    return (mechanic, normalized, *tuple(part for part in normalized.split("-") if part))
+
+
+def abort_record(
+    *,
+    predecessor: str,
+    harness: str,
+    repo_root: str | Path,
+    error: Exception,
+) -> dict[str, Any]:
+    code = getattr(error, "code", ContinuityDrillError.code)
+    return {
+        "kind": DRILL_KIND,
+        "schema_version": SCHEMA_VERSION,
+        "repo_root": str(Path(repo_root).resolve()),
+        "predecessor": predecessor,
+        "selected_harness": harness,
+        "run_at": _current_run_at(),
+        "host_id": seat_lifecycle.default_host_id(),
+        "clean": False,
+        "aborted": True,
+        "error_code": code,
+        "error": str(error),
+    }
+
+
 def render_json(record: DrillRecord) -> str:
     return json.dumps(record.to_dict(), indent=2, sort_keys=True) + "\n"
+
+
+def render_abort_json(
+    *,
+    predecessor: str,
+    harness: str,
+    repo_root: str | Path,
+    error: Exception,
+) -> str:
+    return json.dumps(
+        abort_record(
+            predecessor=predecessor,
+            harness=harness,
+            repo_root=repo_root,
+            error=error,
+        ),
+        indent=2,
+        sort_keys=True,
+    ) + "\n"

@@ -4332,9 +4332,29 @@ def _continuity_drill(args) -> int:
             environ=os.environ,
         )
     except continuity_drill_runtime.ContinuityDrillError as exc:
+        if getattr(args, "json_output", False):
+            print(
+                continuity_drill_runtime.render_abort_json(
+                    predecessor=args.takeover_from,
+                    harness=args.harness,
+                    repo_root=args.repo_root,
+                    error=exc,
+                ),
+                end="",
+            )
         print(f"ERROR: ce continuity-drill refused [{exc.code}]: {exc}", file=sys.stderr)
         return 2
     except takeover_runtime.TakeoverError as exc:
+        if getattr(args, "json_output", False):
+            print(
+                continuity_drill_runtime.render_abort_json(
+                    predecessor=args.takeover_from,
+                    harness=args.harness,
+                    repo_root=args.repo_root,
+                    error=exc,
+                ),
+                end="",
+            )
         print(f"ERROR: ce continuity-drill refused [{exc.code}]: {exc}", file=sys.stderr)
         return 2
     if getattr(args, "json_output", False):
