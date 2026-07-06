@@ -109,6 +109,8 @@ name: Validate governance artifacts
 
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
 
