@@ -1268,7 +1268,16 @@ def test_ce_workflow_uses_signed_download_wheel_url_shape():
     assert f'CE_DOWNLOAD_BASE: "{base}"' in workflow
     assert f'CE_APP_WHEEL: "{wheel}"' in workflow
     assert f'CE_APP_WHEEL_URL: "{base}/{wheel}"' in workflow
-    assert 'curl -fsSLo .ce-validator-dist/SHA256SUMS "${CE_DOWNLOAD_BASE}/SHA256SUMS"' in workflow
+    assert 'CE_SPEC_URL: "https://creator-engine.dev/llms-install.md"' in workflow
+    assert 'CE_TRUST_ROOT_URL: "https://creator-engine.dev/keys/ce-root-v1"' in workflow
+    assert 'CE_TRUST_ANCHOR_URL: "https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT"' in workflow
+    assert 'curl -fsSLo .ce-validator-dist/SHA256SUMS "${CE_DOWNLOAD_BASE}/SHA256SUMS"' not in workflow
+    assert '"ssh-keygen",' in workflow
+    assert '"-Y",' in workflow
+    assert '"verify",' in workflow
+    assert r"SHA256:[A-Za-z0-9+/]{{43}}" in workflow
+    assert 'sha256s_sha = spec_field(spec_text, "artifact_manifest", "sha256s_sha256")' in workflow
+    assert "SHA256SUMS does not match the signed CE spec" in workflow
     assert "hashlib.sha256(target.read_bytes()).hexdigest()" in workflow
 
 
