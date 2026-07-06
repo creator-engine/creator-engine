@@ -6,13 +6,15 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** epic
 
-AUTHORIZED_PATHS_COUNT=42
+AUTHORIZED_PATHS_COUNT=52
 
-AUTHORIZED_PATHS_SHA256=b56b9056808e807f22e0acd5eda851947712e1063686a9068e04c7c1bdd997f2
+AUTHORIZED_PATHS_SHA256=5fa15bddf01041e04d33c7dd99f997ed566a557a8138e29302e14f1b6708b3a6
 
 ```text
 .ce/brain/assertions.yaml
+.ce/changelog/ce-466-c5-adapter-mixed-uid.md
 .ce/changelog/ce-release-0-3-3.md
+.ce/pr-manifests/ce-466-c5-adapter-mixed-uid.md
 .ce/pr-manifests/ce-release-0-3-3.md
 .ce/release-staging/0.3.3/INSTALL_SPEC_TO_SIGN
 .ce/release-staging/0.3.3/SIGNING-INSTRUCTIONS.md
@@ -36,6 +38,9 @@ AUTHORIZED_PATHS_SHA256=b56b9056808e807f22e0acd5eda851947712e1063686a9068e04c7c1
 .ce/release-staging/0.3.3/release-stage-manifest.yml
 .ce/release-staging/0.3.3/schemas/install-answers.schema.yaml
 CHANGELOG.md
+deploy/daemons/README.md
+deploy/daemons/run-daemon-container.sh
+deploy/daemons/smoke-daemon-container.sh
 docs/downloads/0.3.3/SHA256SUMS
 docs/downloads/0.3.3/attrs-26.1.0-py3-none-any.whl
 docs/downloads/0.3.3/creator_engine_validator-0.3.3-py3-none-any.whl
@@ -51,6 +56,11 @@ docs/downloads/0.3.3/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aa
 docs/downloads/0.3.3/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 docs/llms-install.md
 validators/creator_engine_validator/_version.py
+validators/creator_engine_validator/onboard_apply_live.py
 validators/creator_engine_validator/version.py
 validators/pyproject.toml
+validators/tests/integration/test_release_finalize_integration.py
+validators/tests/unit/test_ce_brain_drift.py
+validators/tests/unit/test_daemon_container_smoke.py
+validators/tests/unit/test_daemon_lease.py
 ```
