@@ -279,6 +279,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_test_coupling.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_version_drift = sub.add_parser(
+        "verify-version-drift",
+        help="version_drift current-version surface gate (compares unsigned docs/deploy defaults against version.py)",
+    )
+    verify_version_drift.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     pco_allocate = sub.add_parser(
         "pco-allocate",
         help="PCO-027: allocate a worktree lane (acquire lease, run git worktree add, write claim + event)",
@@ -835,6 +841,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.base,
             pr_body=pr_body,
         )
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-version-drift":
+        from .checks.version_drift import run as _run_version_drift
+
+        result = _run_version_drift([Path(p) for p in args.paths])
         return _emit_results([result], args.json_output)
     if subcommand == "hook-check":
         return _hook_check(args)

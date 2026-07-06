@@ -548,6 +548,12 @@ jobs:
             verify-test-coupling --base "${comparison_base}" \
             --pr-body-file "${pr_body_file}" .
 
+      - name: Creator Engine validator — version-drift current surface gate
+        run: |
+          set -euo pipefail
+          PYTHONPATH=validators python -m creator_engine_validator \
+            verify-version-drift .
+
       - name: Creator Engine validator — path-manifest PR-diff gate (G-ii)
         if: ${{ github.event_name == 'pull_request' }}
         env:

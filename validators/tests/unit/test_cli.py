@@ -39,6 +39,13 @@ def test_list_checks_includes_ce_runtime_evidence(capsys):
     assert "runtime_evidence_chain_link" in out
 
 
+def test_list_checks_excludes_explicit_version_drift_gate(capsys):
+    assert main(["--list-checks"]) == 0
+    out = capsys.readouterr().out
+    assert "version_drift_current_surfaces" not in out
+    assert "version_drift_stale_current_claim" not in out
+
+
 def test_list_checks_unprofiled_matches_full_inventory(capsys):
     assert main(["--list-checks"]) == 0
     captured = capsys.readouterr()

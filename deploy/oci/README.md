@@ -36,11 +36,11 @@ The build script stages a minimal temporary Docker context containing only
 Run it against this checkout:
 
 ```bash
-docker run --rm creator-engine/ce-validator:0.2.0 ce --help
+docker run --rm creator-engine/ce-validator:0.3.3 ce --help
 docker run --rm \
   -v "$PWD:/workspace/creator-engine" \
   -w /workspace/creator-engine \
-  creator-engine/ce-validator:0.2.0 \
+  creator-engine/ce-validator:0.3.3 \
   creator-engine-validator check-examples
 ```
 
