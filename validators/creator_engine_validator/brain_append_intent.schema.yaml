@@ -1,0 +1,43 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+additionalProperties: false
+required: [kind, schema_version, intent_kind]
+properties:
+  kind: {const: brain-append-intent}
+  schema_version: {const: "1"}
+  intent_kind: {enum: [active_assertion_append, ce411_supersede_pair]}
+  active_assertion: {$ref: "#/$defs/assertion_content"}
+  supersede_pair:
+    type: object
+    additionalProperties: false
+    required: [assertion_id, replacement]
+    properties:
+      assertion_id: {type: string}
+      replacement: {$ref: "#/$defs/assertion_content"}
+oneOf:
+  - properties: {intent_kind: {const: active_assertion_append}}
+    required: [active_assertion]
+    not: {required: [supersede_pair]}
+  - properties: {intent_kind: {const: ce411_supersede_pair}}
+    required: [supersede_pair]
+    not: {required: [active_assertion]}
+$defs:
+  assertion_content:
+    type: object
+    additionalProperties: false
+    required: [claim, scope, evidence_ref]
+    properties:
+      assertion_id: {type: string}
+      new_assertion_id: {type: string}
+      claim: {type: object, minProperties: 1}
+      scope:
+        oneOf:
+          - {type: string, minLength: 1}
+          - {type: object, minProperties: 1}
+      evidence_ref: {type: string, minLength: 1}
+      statement: {type: string}
+      assertion_type: {enum: [capability, convention, decision, gotcha]}
+      verification_method:
+        oneOf:
+          - {type: string}
+          - {type: object}
