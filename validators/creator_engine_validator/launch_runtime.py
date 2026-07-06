@@ -42,6 +42,7 @@ from . import (
     brain_embedding_openai_endpoint,
     brain_recall_surface,
     claude_launch_spec,
+    codex_controller_evidence,
     codex_launch_spec,
     hermes_launch_spec,
     resource_bound_spec,
@@ -469,6 +470,12 @@ class LaunchPlan:
     resource_bound: dict | str | None = None
     runtime_policy: dict | None = None
     codex_bypass_mode: str | None = None
+    codex_controller_authority: str | None = None
+    codex_promotion_packet_ref: str | None = None
+    codex_promotion_packet_status: dict[str, Any] | None = None
+    codex_argv_after_rewrite: list[str] | None = None
+    codex_cdxd_result: dict[str, Any] | None = None
+    codex_managed_hook_confirmed: bool | None = None
     brain_bootstrap_ref: str | None = None
     brain_bootstrap_sha256: str | None = None
     brain_recall_status: dict[str, Any] | None = None
@@ -488,6 +495,12 @@ class LaunchPlan:
             "resource_bound": self.resource_bound,
             "runtime_policy": self.runtime_policy,
             "codex_bypass_mode": self.codex_bypass_mode,
+            "codex_controller_authority": self.codex_controller_authority,
+            "codex_promotion_packet_ref": self.codex_promotion_packet_ref,
+            "codex_promotion_packet_status": self.codex_promotion_packet_status,
+            "codex_argv_after_rewrite": self.codex_argv_after_rewrite,
+            "codex_cdxd_result": self.codex_cdxd_result,
+            "codex_managed_hook_confirmed": self.codex_managed_hook_confirmed,
             "brain_bootstrap_ref": self.brain_bootstrap_ref,
             "brain_bootstrap_sha256": self.brain_bootstrap_sha256,
             "brain_recall_status": self.brain_recall_status,
@@ -1237,6 +1250,7 @@ def _evaluate_harness_governance(
     mcp_config_path: str | None,
     closeout_file: str | None,
     completion_report_ref: str | None,
+    host_id: str | None = None,
 ) -> _HarnessGateResult:
     resolved_mcp: str | None = None
     if harness == "claude":
@@ -1276,7 +1290,8 @@ def _evaluate_harness_governance(
 
     elif harness == "codex":
         requested = list(extra_args) if extra_args else []
-        if not _confirm_codex_managed_pack(repo_root):
+        managed_confirmed = _confirm_codex_managed_pack(repo_root)
+        if not managed_confirmed:
             raise CodexLaunchRefused(
                 f"refusing governed Codex launch: {codex_launch_spec.CLAUSE_MANAGED_HOOK_PACK} "
                 "(managed-hook-pack) — Ring 0 refuses before any side effect"
@@ -1304,12 +1319,43 @@ def _evaluate_harness_governance(
                 f"refusing governed Codex launch: {exc} — "
                 "Ring 0 refuses before any side effect"
             ) from exc
+        promotion = codex_controller_evidence.read_packet(repo_root, host_id=host_id)
+        remote_control_status = codex_controller_evidence.normalize_remote_control_status()
+        authority = "foreman" if promotion.ok else "read-only"
+        authority_reason = (
+            "promotion evidence packet complete"
+            if promotion.ok
+            else f"promotion evidence packet {promotion.status}; controller authority downgraded"
+        )
+        if authority == "foreman" and remote_control_status == "explicit-posture":
+            authority = "read-only"
+            authority_reason = (
+                "remote-control explicit posture is non-authoring; controller authority downgraded"
+            )
+        env_overrides = {
+            "CE_CONTROLLER_ROLE": authority,
+            "CE_CONTROLLER_AUTHORITY": authority,
+            "CE_CODEX_PROMOTION_PACKET": str(promotion.path),
+            "CE_CODEX_PROMOTION_STATUS": promotion.status,
+            "CE_REMOTE_CONTROL_STATUS": remote_control_status,
+        }
+        governed = codex_launch_spec.build_governed_codex_command(
+            base_argv=requested, codex_bin=codex_bin, env_overrides=env_overrides
+        )
         plan = replace(
             plan,
-            command=codex_launch_spec.build_governed_codex_command(
-                base_argv=requested, codex_bin=codex_bin
-            ),
+            command=governed,
             codex_bypass_mode=spec_result.bypass_mode,
+            codex_controller_authority=authority,
+            codex_promotion_packet_ref=str(promotion.path),
+            codex_promotion_packet_status={
+                **promotion.to_dict(),
+                "authority_reason": authority_reason,
+                "remote_control_status": remote_control_status,
+            },
+            codex_argv_after_rewrite=list(governed),
+            codex_cdxd_result=spec_result.to_dict(),
+            codex_managed_hook_confirmed=managed_confirmed,
         )
 
     elif harness == "hermes":
@@ -1763,6 +1809,7 @@ def launch(
         mcp_config_path=mcp_config_path,
         closeout_file=closeout_file,
         completion_report_ref=completion_report_ref,
+        host_id=host_id,
     )
     plan = harness_gate.plan
     resolved_mcp = harness_gate.resolved_mcp
@@ -2042,6 +2089,42 @@ def launch(
             raise SeatLifecycleRegistrationFailed(str(exc)) from exc
         seat_lifecycle_state = seat_lifecycle.REGISTRATION_STATE_UNGOVERNED
 
+    if harness == "codex" and plan.codex_cdxd_result is not None:
+        packet = codex_controller_evidence.build_packet(
+            repo_root=repo_root,
+            host_id=host_id,
+            argv_after_rewrite=plan.codex_argv_after_rewrite or plan.command,
+            managed_hook_confirmed=bool(plan.codex_managed_hook_confirmed),
+            cdxd_result=plan.codex_cdxd_result,
+            bypass_mode_source=plan.codex_bypass_mode,
+            remote_control_status=codex_controller_evidence.normalize_remote_control_status(),
+            lifecycle_sentinel_refs=(str(sentinel.events_path), str(sentinel.wrapper_path)),
+            ring1_smoke_result={
+                "status": "pass",
+                "checks": [
+                    "cdxd-ring0-evaluator-pass",
+                    "managed-hook-pack-confirmed",
+                    "sentinel-wrapper-materialized",
+                    "visible-surface-spawned",
+                ],
+                "events_ref": str(sentinel.events_path),
+                "wrapper_ref": str(sentinel.wrapper_path),
+            },
+        )
+        packet_ref = codex_controller_evidence.write_packet(repo_root, packet)
+        validation = codex_controller_evidence.validate_packet(
+            packet, path=packet_ref, host_id=host_id
+        )
+        plan = replace(
+            plan,
+            codex_promotion_packet_ref=str(packet_ref),
+            codex_promotion_packet_status={
+                **validation.to_dict(),
+                "written": True,
+                "authority_this_launch": plan.codex_controller_authority,
+            },
+        )
+
     return LaunchResult(
         plan=plan,
         spawned=True,
@@ -2149,6 +2232,7 @@ def preflight_launch(
                 mcp_config_path=mcp_config_path,
                 closeout_file=closeout_file,
                 completion_report_ref=completion_report_ref,
+                host_id=None,
             )
         except LaunchError as exc:
             gates.append(_gate_refusal("harness-governance", exc))
@@ -2156,6 +2240,16 @@ def preflight_launch(
             plan = harness_gate.plan
             resolved_mcp = harness_gate.resolved_mcp
             gates.append(_gate_pass("harness-governance"))
+
+    if plan is None or harness != "codex":
+        gates.append(_gate_skip("codex-controller-promotion", "Codex-only promotion packet gate"))
+    else:
+        status = plan.codex_promotion_packet_status or {}
+        authority = plan.codex_controller_authority or "read-only"
+        detail = f"authority={authority}; packet={status.get('status', 'unknown')}"
+        if status.get("missing_field_classes"):
+            detail += "; missing=" + ",".join(str(v) for v in status["missing_field_classes"])
+        gates.append(_gate_pass("codex-controller-promotion", detail))
 
     try:
         if allow_hidden or not visible:

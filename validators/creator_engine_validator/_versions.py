@@ -48,6 +48,10 @@ V1_RUNTIME: frozenset[str] = frozenset(
         "lane_runtime",
         "launch_runtime",
         "claude_launch_spec",
+        # ce-ops#480: Codex controller-promotion packet reader/writer. It is
+        # driven by ``launch_runtime`` and ``takeover_runtime`` as repo-local
+        # evidence over existing CDX-D/hook/sentinel facts; no v3 import.
+        "codex_controller_evidence",
         "codex_launch_spec",
         "codex_pretooluse",
         "hermes_launch_spec",
