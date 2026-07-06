@@ -651,6 +651,8 @@ Options:
 | `--dry-run` | no |  | plan only; no tmux spawn, no provider login |
 | `--preflight` | no |  | diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state; exit 0 = all evaluable gates pass and no critical gates skipped; exit 1 = at least one gate WOULD-REFUSE; exit 3 = all evaluable gates pass but one or more critical gates (e.g. containment provisioning) could not be evaluated without a live launch |
 | `--no-tmux` | no |  | refuse-only flag: request a non-visible/headless seat (always refused) |
+| `--role` | no | `controller` | raw role=controller launch request; refuses until a governed takeover evidence packet is supplied |
+| `--takeover-evidence` | no |  | path to a ce takeover --dry-run --json evidence packet that authorizes role=controller launch |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |
 | `--mcp-config` | no |  | CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config) |
@@ -794,6 +796,8 @@ Options:
 | `--dry-run` | no |  | plan only; no tmux spawn, no provider login |
 | `--preflight` | no |  | diagnose launch pre-spawn gates without mutating seat, tmux, ledger, or runtime state; exit 0 = all evaluable gates pass and no critical gates skipped; exit 1 = at least one gate WOULD-REFUSE; exit 3 = all evaluable gates pass but one or more critical gates (e.g. containment provisioning) could not be evaluated without a live launch |
 | `--no-tmux` | no |  | refuse-only flag: request a non-visible/headless seat (always refused) |
+| `--role` | no | `controller` | raw role=controller launch request; refuses until a governed takeover evidence packet is supplied |
+| `--takeover-evidence` | no |  | path to a ce takeover --dry-run --json evidence packet that authorizes role=controller launch |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |
 | `--mcp-config` | no |  | CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config) |
@@ -1320,6 +1324,7 @@ Options:
 | `--from` | yes |  | predecessor seat id or session name to detect in continuity state |
 | `--harness` | yes | `claude, codex` | replacement Controller-seat harness to validate |
 | `--repo-root` | yes |  | repo root whose .ce state is inspected |
+| `--duty-manifest` | no |  | machine-readable watcher/daemon duty manifest used to plan dry-run re-arm actions |
 | `--dry-run` | no |  | print every action that would be taken; do not mutate state |
 | `--json` | no |  | emit machine-readable JSON |
 

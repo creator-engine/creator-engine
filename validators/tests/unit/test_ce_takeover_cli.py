@@ -26,7 +26,20 @@ def _seed_takeover_state(root: Path, predecessor: str = "ce-controller") -> None
     _write(state / "active-work-ledger" / "ledger.jsonl", "{}\n")
     _write(state / "merge-queue" / "queue.json", "[]\n")
     _write(state / "approval-wall" / "state.json", '{"armed": true}\n')
-    _write(state / "watchers" / "manifest.yaml", "watchers: []\n")
+    _write(
+        state / "watchers" / "duty-manifest.yaml",
+        (
+            "kind: ce-controller-duty-manifest\n"
+            "schema_version: 1\n"
+            "duties:\n"
+            "  - id: queue-watch\n"
+            "    type: watcher\n"
+            "    rearm_command: [ce, queue, status, --json]\n"
+            "  - id: conveyor-daemon\n"
+            "    type: daemon\n"
+            "    rearm_command: [ce, conveyor-daemon, run, --dry-run]\n"
+        ),
+    )
 
 
 def _patch_ring0_pass(monkeypatch) -> None:
@@ -73,6 +86,9 @@ def test_takeover_dry_run_text_reports_actions_without_mutation(tmp_path, monkey
     assert "Ring-0 verify: PASS" in out
     assert "initial state: AWAITING-OPERATOR" in out
     assert "enter-awaiting-operator" in out
+    assert "would re-arm duties:" in out
+    assert "re-arm-watcher queue-watch" in out
+    assert "re-arm-daemon conveyor-daemon" in out
     after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
     assert after == before
 
@@ -98,11 +114,26 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "ce-takeover-evidence-packet"
+    assert payload["generated_at"].endswith("Z")
+    assert payload["host_id"] == ce_cli.launch_runtime.takeover_evidence_host_id()
     assert payload["predecessor"] == {"requested": "ce-controller", "detected": True}
     assert payload["selected_harness"] == "claude"
     assert payload["ring0_verify"]["ok"] is True
     assert payload["initial_state"] == "AWAITING-OPERATOR"
     assert {action["execute"] for action in payload["hydration_plan"]} == {False}
+    assert payload["raw_controller_launch_refusal"]["code"] == (
+        "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED"
+    )
+    assert payload["raw_controller_launch_refusal"]["recovery_command"] == (
+        f"ce takeover --from ce-controller --harness claude --repo-root {tmp_path} --dry-run --json"
+    )
+    rearm = payload["re_arm_plan"]
+    assert rearm["status"] == "found"
+    assert {action["execute"] for action in rearm["actions"]} == {False}
+    assert {(action["duty_id"], action["duty_type"]) for action in rearm["actions"]} == {
+        ("queue-watch", "watcher"),
+        ("conveyor-daemon", "daemon"),
+    }
     assert {source["name"] for source in payload["evidence_sources"]} >= {
         "lifecycle_records",
         "brain_bootstrap",
@@ -136,6 +167,50 @@ def test_takeover_reports_missing_inputs_as_evidence_gaps(tmp_path, monkeypatch,
     gap_names = {gap["name"] for gap in payload["evidence_gaps"]}
     assert "ce_state_root" in gap_names
     assert "watcher_manifest" in gap_names
+    assert payload["re_arm_plan"]["status"] == "missing"
+
+
+def test_takeover_duty_manifest_dry_run_never_executes_rearm_commands(
+    tmp_path, monkeypatch, capsys
+):
+    _seed_takeover_state(tmp_path)
+    marker = tmp_path / "marker-created-by-rearm"
+    manifest = tmp_path / ".ce" / "state" / "watchers" / "duty-manifest.yaml"
+    manifest.write_text(
+        (
+            "kind: ce-controller-duty-manifest\n"
+            "schema_version: 1\n"
+            "duties:\n"
+            "  - id: marker-watch\n"
+            "    type: watcher\n"
+            f"    rearm_command: [sh, -c, 'touch {marker}']\n"
+        ),
+        encoding="utf-8",
+    )
+    _patch_ring0_pass(monkeypatch)
+
+    rc = ce_cli.main(
+        [
+            "takeover",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["re_arm_plan"]["actions"][0]["command"] == [
+        "sh",
+        "-c",
+        f"touch {marker}",
+    ]
+    assert not marker.exists()
 
 
 def test_takeover_harness_validation_refusal_is_machine_readable(

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from . import brain_runtime, launch_runtime
+from .loader import LoaderError, load_yaml
 
 INITIAL_STATE = "AWAITING-OPERATOR"
 TAKEOVER_KIND = "ce-takeover-evidence-packet"
@@ -28,6 +29,10 @@ class UnsupportedHarness(TakeoverError):
 
 class LiveTakeoverNotImplemented(TakeoverError):
     code = "CE-TAKEOVER-LIVE-DEFERRED"
+
+
+class DutyManifestError(TakeoverError):
+    code = "CE-TAKEOVER-DUTY-MANIFEST"
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,48 @@ class EvidenceSource:
 
 
 @dataclass(frozen=True)
+class ReArmAction:
+    duty_id: str
+    duty_type: str
+    command: tuple[str, ...]
+    source: str
+    enabled: bool = True
+
+    @property
+    def action(self) -> str:
+        return f"re-arm-{self.duty_type}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "duty_id": self.duty_id,
+            "duty_type": self.duty_type,
+            "execute": False,
+            "enabled": self.enabled,
+            "command": list(self.command),
+            "source": self.source,
+            "detail": f"would run: {' '.join(self.command)}",
+        }
+
+
+@dataclass(frozen=True)
+class ReArmPlan:
+    manifest_path: str
+    status: str
+    detail: str
+    actions: tuple[ReArmAction, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "manifest_path": self.manifest_path,
+            "status": self.status,
+            "detail": self.detail,
+            "dry_run": True,
+            "actions": [action.to_dict() for action in self.actions],
+        }
+
+
+@dataclass(frozen=True)
 class TakeoverPlan:
     predecessor: str
     harness: str
@@ -66,6 +113,7 @@ class TakeoverPlan:
     evidence_sources: tuple[EvidenceSource, ...]
     ring0_report: launch_runtime.LaunchPreflightReport
     hydration_actions: tuple[dict[str, Any], ...]
+    rearm_plan: ReArmPlan
 
     @property
     def predecessor_detected(self) -> bool:
@@ -97,6 +145,8 @@ class TakeoverPlan:
         return {
             "kind": TAKEOVER_KIND,
             "schema_version": 1,
+            "generated_at": launch_runtime.takeover_evidence_generated_at(),
+            "host_id": launch_runtime.takeover_evidence_host_id(),
             "predecessor": {
                 "requested": self.predecessor,
                 "detected": self.predecessor_detected,
@@ -111,6 +161,14 @@ class TakeoverPlan:
             "evidence_sources": [source.to_dict() for source in self.evidence_sources],
             "evidence_gaps": list(self.evidence_gaps),
             "hydration_plan": list(self.hydration_actions),
+            "re_arm_plan": self.rearm_plan.to_dict(),
+            "raw_controller_launch_refusal": (
+                launch_runtime.raw_controller_launch_refusal_evidence(
+                    harness=self.harness,
+                    repo_root=self.repo_root,
+                    predecessor=self.predecessor,
+                )
+            ),
             "initial_state": self.initial_state,
         }
 
@@ -126,6 +184,13 @@ class TakeoverPlan:
         ]
         for action in self.hydration_actions:
             lines.append(f"  - {action['action']}: {action['detail']}")
+        lines.append(f"duty manifest: {self.rearm_plan.status} ({self.rearm_plan.detail})")
+        if self.rearm_plan.actions:
+            lines.append("would re-arm duties:")
+            for action in self.rearm_plan.actions:
+                lines.append(
+                    f"  - {action.action} {action.duty_id}: {' '.join(action.command)}"
+                )
         if self.evidence_gaps:
             lines.append("evidence gaps:")
             for gap in self.evidence_gaps:
@@ -155,6 +220,7 @@ def build_plan(
     harness: str,
     repo_root: Path | str,
     dry_run: bool,
+    duty_manifest: Path | str | None = None,
     which: Any | None = None,
 ) -> TakeoverPlan:
     if harness not in SUPPORTED_HARNESSES:
@@ -177,6 +243,7 @@ def build_plan(
         which=which,
     )
     actions = _hydration_actions(evidence)
+    rearm_plan = _plan_rearm_actions(root, duty_manifest=duty_manifest)
     return TakeoverPlan(
         predecessor=predecessor,
         harness=harness,
@@ -186,6 +253,7 @@ def build_plan(
         evidence_sources=evidence,
         ring0_report=ring0,
         hydration_actions=actions,
+        rearm_plan=rearm_plan,
     )
 
 
@@ -237,6 +305,9 @@ def _detect_predecessor_state(repo_root: Path, predecessor: str) -> tuple[Eviden
         _first_existing_source(
             "watcher_manifest",
             (
+                state_root / "watchers" / "duty-manifest.yaml",
+                state_root / "duty-manifest.yaml",
+                repo_root / ".ce" / "duty-manifest.yaml",
                 state_root / "watchers" / "manifest.yaml",
                 state_root / "watcher-manifest.yaml",
                 repo_root / ".ce" / "watcher-manifest.yaml",
@@ -245,6 +316,116 @@ def _detect_predecessor_state(repo_root: Path, predecessor: str) -> tuple[Eviden
         ),
     ]
     return tuple(sources)
+
+
+def _default_duty_manifest_paths(repo_root: Path) -> tuple[Path, ...]:
+    state_root = repo_root / ".ce" / "state"
+    return (
+        state_root / "watchers" / "duty-manifest.yaml",
+        state_root / "duty-manifest.yaml",
+        repo_root / ".ce" / "duty-manifest.yaml",
+        state_root / "watchers" / "manifest.yaml",
+        state_root / "watcher-manifest.yaml",
+        repo_root / ".ce" / "watcher-manifest.yaml",
+    )
+
+
+def _resolve_duty_manifest(repo_root: Path, duty_manifest: Path | str | None) -> Path:
+    if duty_manifest is not None:
+        return Path(duty_manifest)
+    for candidate in _default_duty_manifest_paths(repo_root):
+        if candidate.exists():
+            return candidate
+    return _default_duty_manifest_paths(repo_root)[0]
+
+
+def _plan_rearm_actions(
+    repo_root: Path,
+    *,
+    duty_manifest: Path | str | None,
+) -> ReArmPlan:
+    manifest_path = _resolve_duty_manifest(repo_root, duty_manifest)
+    if not manifest_path.exists():
+        return ReArmPlan(
+            str(manifest_path),
+            "missing",
+            "no machine-readable duty manifest found",
+        )
+    try:
+        raw = load_yaml(manifest_path)
+    except LoaderError as exc:
+        return ReArmPlan(str(manifest_path), "unreadable", str(exc))
+    if not isinstance(raw, dict):
+        return ReArmPlan(
+            str(manifest_path),
+            "invalid",
+            "duty manifest must be a YAML mapping",
+        )
+    actions: list[ReArmAction] = []
+    errors: list[str] = []
+    for duty in _iter_manifest_duties(raw):
+        try:
+            action = _parse_rearm_duty(duty, source=str(manifest_path))
+        except DutyManifestError as exc:
+            errors.append(str(exc))
+            continue
+        if action.enabled:
+            actions.append(action)
+    if errors:
+        return ReArmPlan(str(manifest_path), "invalid", "; ".join(errors))
+    return ReArmPlan(
+        str(manifest_path),
+        "found",
+        f"planned {len(actions)} re-arm action(s) from duty manifest",
+        tuple(actions),
+    )
+
+
+def _iter_manifest_duties(raw: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    duties: list[dict[str, Any]] = []
+    top_level = raw.get("duties")
+    if isinstance(top_level, list):
+        duties.extend(duty for duty in top_level if isinstance(duty, dict))
+    for duty_type in ("watcher", "daemon"):
+        entries = raw.get(f"{duty_type}s")
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict):
+                    item = dict(entry)
+                    item.setdefault("type", duty_type)
+                    duties.append(item)
+    return tuple(duties)
+
+
+def _parse_rearm_duty(raw: dict[str, Any], *, source: str) -> ReArmAction:
+    duty_id = str(raw.get("id") or raw.get("name") or "").strip()
+    if not duty_id:
+        raise DutyManifestError("duty entry is missing id")
+    duty_type = str(raw.get("type") or raw.get("kind") or "").strip().lower()
+    if duty_type not in {"watcher", "daemon"}:
+        raise DutyManifestError(f"duty {duty_id!r} has unsupported type {duty_type!r}")
+    command = raw.get("rearm_command", raw.get("command"))
+    argv = _normalize_command(command)
+    if not argv:
+        raise DutyManifestError(f"duty {duty_id!r} is missing rearm_command")
+    enabled = raw.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise DutyManifestError(f"duty {duty_id!r} enabled must be boolean")
+    return ReArmAction(
+        duty_id=duty_id,
+        duty_type=duty_type,
+        command=argv,
+        source=source,
+        enabled=enabled,
+    )
+
+
+def _normalize_command(command: Any) -> tuple[str, ...]:
+    if isinstance(command, list):
+        return tuple(str(part) for part in command if str(part).strip())
+    if isinstance(command, str):
+        return tuple(part for part in command.split() if part)
+    return ()
 
 
 def _path_source(name: str, path: Path, *, predecessor: str) -> EvidenceSource:
@@ -418,4 +599,3 @@ def _hydration_actions(evidence: Sequence[EvidenceSource]) -> tuple[dict[str, An
 
 def render_json(plan: TakeoverPlan) -> str:
     return json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n"
-
