@@ -987,7 +987,12 @@ class ApplyDriver:
         return {"ok": False, "reason": "no_adoption_pr_driver"}
 
     def read_preserved_checks(
-        self, *, repo: str, base: str, expected_checks: Sequence[str]
+        self,
+        *,
+        repo: str,
+        base: str,
+        expected_checks: Sequence[str],
+        declared_protections: str | None = None,
     ) -> dict[str, Any]:
         """Read (via the inherited READ token) the repo's live checks; confirm none dropped (leg 6).
 
@@ -2301,7 +2306,12 @@ def _run_adoption_leg(
 
     if leg_id == "brownfield_verify_preserved_checks":
         expected = [str(c) for c in (plan.get("ci") or {}).get("checks_to_preserve", ())]
-        action = driver.read_preserved_checks(repo=repo, base=base, expected_checks=expected)
+        action = driver.read_preserved_checks(
+            repo=repo,
+            base=base,
+            expected_checks=expected,
+            declared_protections=_declared_github_protections(request.answers),
+        )
         if not action.get("ok"):
             raise ApplyFailed(
                 "brownfield_verify_checks_failed", str(action.get("reason", "preserved-checks read failed"))
@@ -2320,6 +2330,11 @@ def _run_adoption_leg(
                 "ok": True,
                 "existing_checks": list(action.get("existing_checks") or ()),
                 "preserved": True,
+                **{
+                    key: action[key]
+                    for key in ("protection_floor", "repo", "branch", "declared_protections")
+                    if key in action
+                },
             },
         )
 
@@ -2479,6 +2494,16 @@ def _fold_counters(summary: dict[str, Any]) -> None:
 def _target_repo_from_answers(schema: dict[str, Any], answers: dict[str, Any], detected: Mapping[str, Any]) -> str:
     merged = v3_installer.merge_answers(schema, answers=answers or None, detected=dict(detected or {}))
     return str(merged.value("github.repo", ""))
+
+
+def _declared_github_protections(answers: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(answers, Mapping):
+        return None
+    github = answers.get("github")
+    if not isinstance(github, Mapping) or "protections" not in github:
+        return None
+    value = github.get("protections")
+    return value if isinstance(value, str) else None
 
 
 def _workspace_root_from_answers(schema: dict[str, Any], answers: dict[str, Any], detected: Mapping[str, Any]) -> str:
