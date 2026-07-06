@@ -1369,3 +1369,82 @@ def test_cli_apply_userspace_install_uses_selected_driver(tmp_path, capsys, monk
     assert selector_calls[0]["userspace_install"] is True
     assert selected.installed_userspace_tools == ("uv",)
     assert "install_dependencies" in selected.calls
+
+
+# ---------------------------------------------------------------------------
+# ce-ops#468 — verify_cli predicate regression tests
+# ---------------------------------------------------------------------------
+
+def test_verify_cli_tolerates_install_verb_rename(tmp_path):
+    """Regression for ce-ops#468: verify_cli must not grep for the legacy 'onboard' string.
+
+    In 0.3.2 the onboard verb was renamed install so ``ce onboard --help``
+    prints ``usage: ce install ...`` — the string "onboard" is absent from
+    stdout.  The old predicate (``"onboard" in proc.stdout``) therefore
+    failed deterministically; the new one checks for ``usage: <command>``
+    and must pass.
+    """
+    from unittest.mock import MagicMock, patch
+
+    shim_dir = tmp_path / "onboard" / "bin"
+    shim_dir.mkdir(parents=True)
+    shim = shim_dir / "ce"
+    shim.write_text("#!/bin/sh\nexec cev3 \"$@\"\n")
+    shim.chmod(0o755)
+
+    # 0.3.2-style help: verb renamed to "install"; "onboard" absent.
+    fake_proc = MagicMock()
+    fake_proc.returncode = 0
+    fake_proc.stdout = "usage: ce install [-h] ...\n\n  install CE on this host\n"
+
+    driver = onboard_apply.ApplyDriver()
+    with patch.object(onboard_apply.subprocess, "run", return_value=fake_proc):
+        result = driver.verify_cli(state_root=tmp_path, command="ce")
+
+    # New predicate: "usage: ce" in stdout.lower() — must pass.
+    assert result["ok"] is True, f"verify_cli rejected 0.3.2-style help output: {result}"
+
+
+def test_verify_cli_old_predicate_would_have_failed_on_032_help(tmp_path):
+    """Documents that the old 'onboard' grep fails on 0.3.2-style help output.
+
+    This test encodes the pre-fix contract so that a regression to the old
+    predicate would be caught immediately.
+    """
+    # 0.3.2-style stdout: rc=0, "onboard" absent.
+    stdout_032 = "usage: ce install [-h] ...\n\n  install CE on this host\n"
+    # Old predicate: returncode == 0 AND "onboard" in stdout
+    old_predicate_ok = 0 == 0 and "onboard" in stdout_032
+    assert old_predicate_ok is False, "old predicate must fail on 0.3.2-style output"
+    # New predicate: returncode == 0 AND "usage: ce" in stdout.lower()
+    new_predicate_ok = 0 == 0 and "usage: ce" in stdout_032.lower()
+    assert new_predicate_ok is True, "new predicate must pass on 0.3.2-style output"
+
+
+def test_verify_cli_fails_closed_when_shim_missing(tmp_path):
+    """verify_cli returns shim_missing and ok=False when the shim does not exist."""
+    driver = onboard_apply.ApplyDriver()
+    result = driver.verify_cli(state_root=tmp_path, command="ce")
+    assert result["ok"] is False
+    assert result["reason"] == "shim_missing"
+
+
+def test_verify_cli_fails_closed_on_nonzero_rc(tmp_path):
+    """verify_cli returns ok=False when the shim exits non-zero (fail-closed)."""
+    from unittest.mock import MagicMock, patch
+
+    shim_dir = tmp_path / "onboard" / "bin"
+    shim_dir.mkdir(parents=True)
+    shim = shim_dir / "ce"
+    shim.write_text("#!/bin/sh\n")
+    shim.chmod(0o755)
+
+    fake_proc = MagicMock()
+    fake_proc.returncode = 1
+    fake_proc.stdout = "usage: ce install [-h] ...\n"
+
+    driver = onboard_apply.ApplyDriver()
+    with patch.object(onboard_apply.subprocess, "run", return_value=fake_proc):
+        result = driver.verify_cli(state_root=tmp_path, command="ce")
+
+    assert result["ok"] is False

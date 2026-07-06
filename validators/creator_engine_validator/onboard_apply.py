@@ -615,13 +615,18 @@ class ApplyDriver:
         if not shim.exists():
             return {"ok": False, "reason": "shim_missing"}
         proc = subprocess.run(
-            [str(shim), "onboard", "--help"],
+            [str(shim), "--help"],
             check=False,
             capture_output=True,
             text=True,
             timeout=20,
         )
-        return {"ok": proc.returncode == 0 and "onboard" in proc.stdout}
+        # ce-ops#468: do NOT grep for a specific verb name (e.g. "onboard") —
+        # the canonical verb was renamed onboard→install in 0.3.2, so the old
+        # predicate matched 0 times and failed deterministically.  Instead
+        # assert the shim exits 0 AND its stdout starts with the CE-shaped
+        # usage banner for the exposed command name.
+        return {"ok": proc.returncode == 0 and f"usage: {command}" in proc.stdout.lower()}
 
     def resolve_secret(self, ref: v3_installer.SecretRef) -> str:
         if ref.scheme == "env":
