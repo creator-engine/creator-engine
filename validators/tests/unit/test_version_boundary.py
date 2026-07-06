@@ -98,7 +98,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#367 adds ``project_init`` as the CE-native public `ce init`
     # scaffolder: 38 -> 39. ce-ops#478 adds ``controller_posture`` as the
     # read-only `ce posture` banner helper driven by the v1 CLI: 39 -> 40.
-    assert len(ver.V1_RUNTIME) == 40
+    # ce-ops#477 Slice B adds ``takeover_runtime`` as the read-only continuity
+    # takeover planner over the existing v1 launch runtime: 40 -> 41.
+    assert len(ver.V1_RUNTIME) == 41
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
@@ -198,6 +200,7 @@ def test_classify_lines():
     assert ver.classify("worker_run") == ver.V1
     assert ver.classify("project_init") == ver.V1
     assert ver.classify("controller_posture") == ver.V1
+    assert ver.classify("takeover_runtime") == ver.V1
     assert ver.classify("runtime_backend_bridge") == ver.V1
     assert ver.classify("orchestrator") == ver.V3
     assert ver.classify("onboard_apply") == ver.V3

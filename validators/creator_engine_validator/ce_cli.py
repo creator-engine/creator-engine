@@ -65,6 +65,7 @@ ce validate-pr          # run local PR preflight against committed base..HEAD st
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
 ce automerge-status     # read dry-run automerge decision logs (read-only; no merge)
 ce automerge-kill-switch # read or toggle durable live-policy automerge kill-switch
+ce takeover             # read-only controller continuity takeover evidence packet
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -135,6 +136,7 @@ from . import (
     seat_lifecycle,
     support_runtime,
     side_effect_ledger_runtime,
+    takeover_runtime,
     transcript_archive,
     update as update_runtime,
     version,
@@ -2153,6 +2155,30 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_launch_args(launch)
     hud = groups.add_parser("hud", help="alias/seam label for `ce launch` (not a CE-native TUI)")
     _add_launch_args(hud)
+
+    takeover = groups.add_parser(
+        "takeover",
+        help="read-only controller continuity takeover planner and evidence packet",
+    )
+    takeover.add_argument(
+        "--from",
+        required=True,
+        dest="takeover_from",
+        help="predecessor seat id or session name to detect in continuity state",
+    )
+    takeover.add_argument(
+        "--harness",
+        required=True,
+        choices=sorted(takeover_runtime.SUPPORTED_HARNESSES),
+        help="replacement Controller-seat harness to validate",
+    )
+    takeover.add_argument("--repo-root", required=True, help="repo root whose .ce state is inspected")
+    takeover.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print every action that would be taken; do not mutate state",
+    )
+    takeover.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     for name, (help_text, _v3_name) in V3_FORWARDING_SHIMS.items():
         shim = groups.add_parser(name, help=help_text, add_help=False)
@@ -4189,6 +4215,25 @@ def _launch(args, invoked_as: str = "launch") -> int:
     return 0
 
 
+def _takeover(args) -> int:
+    try:
+        plan = takeover_runtime.build_plan(
+            predecessor=args.takeover_from,
+            harness=args.harness,
+            repo_root=args.repo_root,
+            dry_run=args.dry_run,
+        )
+    except takeover_runtime.TakeoverError as exc:
+        print(f"ERROR: ce takeover refused [{exc.code}]: {exc}", file=sys.stderr)
+        return 2
+    if getattr(args, "json_output", False):
+        print(takeover_runtime.render_json(plan), end="")
+    else:
+        for line in plan.format_lines():
+            print(line)
+    return 0 if plan.ring0_ok else 1
+
+
 def _doctor(args) -> int:
     target_python = _target_python_from_args(args, Path(args.repo_root))
     report = doctor_runtime.run_doctor(
@@ -5600,6 +5645,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _init(args)
     if args.group in ("launch", "hud"):
         return _launch(args, invoked_as=args.group)
+    if args.group == "takeover":
+        return _takeover(args)
     if args.group == "harness-matrix":
         return _harness_matrix(args)
     if args.group == "posture":

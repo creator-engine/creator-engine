@@ -1311,6 +1311,18 @@ Options:
 | `--timeout` | no |  | herdr readiness timeout per seat (seconds) |
 | `--dry-run` | no |  | show plan without executing |
 
+### `takeover`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--from` | yes |  | predecessor seat id or session name to detect in continuity state |
+| `--harness` | yes | `claude, codex` | replacement Controller-seat harness to validate |
+| `--repo-root` | yes |  | repo root whose .ce state is inspected |
+| `--dry-run` | no |  | print every action that would be taken; do not mutate state |
+| `--json` | no |  | emit machine-readable JSON |
+
 ### `update`
 
 Options:

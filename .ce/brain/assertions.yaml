@@ -3751,7 +3751,7 @@ records:
 - claim:
     details: Adding a top-level ce CLI group couples docs reconciliation and generated
       CLI reference updates in the same change.
-    evidence_sha256: b99fafa31e5e2170d085f608b2be78a2e4e20965544627667eafd0e493c03fd4
+    evidence_sha256: c6614e7e864622ef8f3f860eb3c0bfdedd52983e47845eb3e5e46590d29bc27e
     item: 9
     object: ce-cli-doc-coupling
     predicate: asserts
@@ -3759,7 +3759,7 @@ records:
     - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
     - README.md
     subject: doctrine-item
-  content_hash: 490762ad56730b531761291db84d7e65b16c3efd86eb0c511fa20b05933e2ec5
+  content_hash: 0edba41d9d7d051ad8fb1fbc4c1161ec57b2a6047861680866564df6c799b306
   evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
   id: brain-assertion-d1b-09-ce-cli-doc-coupling-v4
   kind: brain-assertion
@@ -3785,11 +3785,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: b0195b2ca0e7f99330aadf5479fcdc48d225b1b5fbccd9b0151deec7f33e0f27
+  content_hash: 6c465deb9a5985a922cb27034fa236e71af28c93eabda13485837cf33ebce1ea
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v5
   kind: brain-assertion
-  prev_hash: 490762ad56730b531761291db84d7e65b16c3efd86eb0c511fa20b05933e2ec5
+  prev_hash: 0edba41d9d7d051ad8fb1fbc4c1161ec57b2a6047861680866564df6c799b306
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3812,11 +3812,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: 84278d23cca3c0c8c1de69886370ae2a1cf4bae61330ba24baedee3f60b8134a
+  content_hash: 3175a480aa45ea4486e6fa8bc95a68046e0246fb1067d5e2a503febc2396cc8d
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-c33afd0c91dc4b8a693d251a
   kind: brain-assertion
-  prev_hash: b0195b2ca0e7f99330aadf5479fcdc48d225b1b5fbccd9b0151deec7f33e0f27
+  prev_hash: 6c465deb9a5985a922cb27034fa236e71af28c93eabda13485837cf33ebce1ea
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1

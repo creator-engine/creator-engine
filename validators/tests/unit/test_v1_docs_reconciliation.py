@@ -58,6 +58,7 @@ def test_as_built_ce_inventory_matches_expected():
         "lane", "ledger", "worker", "fanin", "queue", "event", "pcl", "brain",
         "orchestrator", "connector", "containment-probe", "reviewer-triage", "claim",
         "pickup", "dispatch", "playbook", "check", "doctor", "init", "launch", "hud",
+        "takeover",
         "verify-install", "update", "clean-main-install", "onboard", "bootstrap", "publish-branch", "harness-matrix",
         "containment-status", "posture", "herdr", "validate-pr", "dequeue", "surfaces",
         "automerge-decide", "automerge-status", "automerge-kill-switch",
