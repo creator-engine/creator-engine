@@ -14,3 +14,8 @@ dedicated `ce-signer` OS-user bridge if OpenBao recovery blocks. The design
 binds each signing act to canonical release hashes, install-spec content SHA,
 release id, ratification ref, and a short-lived single-use Operator co-sign
 artifact minted off controller hosts.
+
+Round-2 revision clarifies per-request short-TTL backend authorization,
+break-glass escalation after three failed ceremony attempts, deputy-compromise
+response, Operator-controlled co-sign verification, and hash-check ordering for
+referenced canonical bytes.

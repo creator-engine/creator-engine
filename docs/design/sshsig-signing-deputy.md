@@ -86,6 +86,7 @@ Ratified bridge if OpenBao recovery blocks:
 | Worker or PR author swaps mirror bytes after approval | Sign verb binds artifact canonical-bytes hash, install-spec content SHA, release id, and ratification ref; release verification still checks SHA256SUMS and signed manifest hashes. |
 | Replay of an old Operator approval | Co-sign includes `expires_at`, `nonce`, and `single_use_id`; deputy records single use before signing and refuses reuse. |
 | Operator approval copied from a controller host | Co-sign must be minted on an Operator-controlled device or channel never on a controller host; controller may only carry the detached artifact. |
+| Deputy compromise signs or attempts to sign unauthorized release bytes | Evidence and release verification compare ratified hashes, co-sign identity, deputy identity, and single-use ledger decisions; response is immediate deputy disablement, Operator incident review, revocation of outstanding co-sign artifacts, and migration to a new release-signing key if unauthorized SSHSIG output may have escaped. |
 | Deputy tricked into raw Vault/Transit signing | Deputy verifies request fields and emits OpenSSH SSHSIG for namespace `ce-spec-v1`; raw transit signatures are not accepted as release signatures. |
 | Evidence becomes an approval substitute | Evidence record is value-free: it records identifiers, hashes, and verdicts only; it carries no private key material, no raw unsigned artifact bytes, and no Operator signing secret. |
 | Namespace confusion | Deputy hard-codes or allow-lists `ce-spec-v1` for install-spec release signing and records the namespace in evidence. |
@@ -126,13 +127,21 @@ Request fields:
 Required checks before signing:
 
 - `namespace == "ce-spec-v1"` and `key_id == "ce-root-v1"`.
+- `canonical_bytes_ref` resolves to immutable bytes and the deputy checks their
+  SHA-256 against `artifact_canonical_sha256` before parsing, staging,
+  envelope construction, signing, evidence emission, or any other use.
 - `artifact_canonical_sha256` is the SHA-256 of the exact canonical bytes the
   deputy signs.
 - `spec_content_sha256` matches the install spec's `signature.content_sha256`
   value to be embedded after signing.
 - The Operator co-sign detached JSON verifies under an Operator-controlled
   identity, was minted off controller hosts, has not expired, and has not been
-  used before.
+  used before. Operator-controlled identity means an Operator-owned public
+  identity reference enrolled through the Operator ratification process, not a
+  controller-supplied key, seat identity, GitHub account assertion, or deputy
+  local configuration value.
+- `signature_alg` is on the Operator-ratified co-signature algorithm allow-list;
+  unknown, legacy, experimental, or deputy-local algorithms fail closed.
 - Co-sign `release_id`, `content_sha256`, and `spec_content_sha256` exactly
   match the sign request.
 - `ratification_ref` resolves to the approved release action and names the same
@@ -176,11 +185,27 @@ Rules:
 
 - Minted only on an Operator-controlled device or channel, never on a controller
   host.
+- Verifies only against an Operator-ratified identity and algorithm allow-list.
 - Short TTL; default target is minutes, not hours.
 - Single-use; deputy stores `single_use_id` and refuses replay even before TTL
   expiry.
 - Detached from the release bytes; it authorizes a specific hash tuple, not a
   mutable file path or branch.
+
+## Deputy Authorization and Backend Access
+
+The deputy has no standing OpenBao token, controller-carried token, reusable
+service token, or cached authority that survives across requests. For each sign
+request, the deputy acquires the minimum OpenBao signing authority through the
+ratified deputy identity and approved auth method, with a short TTL scoped to
+`ce-transit/governance/signing/ce-root-v1` and the single requested operation.
+The token is discarded before the response is returned and is not recorded in
+evidence.
+
+If per-request authority cannot be acquired, the request fails closed. The
+deputy must not fall back to a standing token, local private key access,
+controller-provided credential, weaker backend, raw Transit output path, or
+cached prior authorization.
 
 ## Evidence Record
 
@@ -247,6 +272,31 @@ sequenceDiagram
   OpenSSH-->>Controller: Good signature or failure
   Controller->>Evidence: Attach verify result to release packet
 ```
+
+## Break-Glass and Failure Escalation
+
+Signing failures are operational stops, not autonomous recovery triggers. The
+deputy and controller must not retry indefinitely, self-recover custody,
+substitute a weaker signing path, bypass OpenBao, reuse stale authorization, or
+perform direct controller signing.
+
+Escalation cases:
+
+- Deputy unreachable: stop the release signing ceremony, preserve request and
+  health evidence, and count the failed attempt against the ceremony.
+- OpenBao unavailable or refusing the per-request short-TTL grant: stop the
+  ceremony, preserve the OpenBao error class without recording secrets, and
+  count the failed attempt against the ceremony.
+- Repeated ceremony failure, including co-sign verification failures,
+  single-use ledger write failures, SSHSIG construction failures, or
+  post-signature verification failures: stop after the third failed attempt for
+  the same release action.
+
+Three strikes escalate to the Operator. Only the Operator may decide whether to
+repair OpenBao, replace or disable the deputy, issue a fresh ratification and
+co-sign artifact, activate the ratified `ce-signer` bridge, or stop the release.
+This is a manual break-glass decision under the ratified no-autonomous-retry
+rule: no autonomous retry, self-recovery, or weaker-path fallback is allowed.
 
 ## Migration Path
 
