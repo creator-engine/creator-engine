@@ -36,9 +36,16 @@ from __future__ import annotations
 import re
 import stat
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from .reporting import CheckResult, ValidationError, make_error
+from .tenant_confidentiality import (
+    EMPTY_TENANT_DENYLIST_MATRIX,
+    TenantConfidentialityError,
+    TenantDenylistMatrix,
+    load_tenant_denylist_matrix,
+)
 
 CHECK_NAME = "public_docs_confidentiality"
 CONTRACT = "validators/tests/unit/test_public_docs_confidentiality.py"
@@ -347,6 +354,21 @@ _SELF = Path(__file__).resolve()
 _SELF_REL = "validators/creator_engine_validator/public_docs_confidentiality.py"
 
 
+@dataclass(frozen=True)
+class ConfidentialityScanConfig:
+    """Structured policy seam for CE-floor and tenant-matrix scans.
+
+    ``FORBIDDEN_PATTERNS`` remains the unconditional CE floor. The tenant matrix
+    is strictly additive and decides which tenant-specific patterns apply to a
+    repo-relative path.
+    """
+
+    tenant_matrix: TenantDenylistMatrix = EMPTY_TENANT_DENYLIST_MATRIX
+
+
+DEFAULT_SCAN_CONFIG = ConfidentialityScanConfig()
+
+
 class ConfidentialityScanError(Exception):
     """A scan-surface or file-read failure that must fail the check."""
 
@@ -358,6 +380,11 @@ def repo_root() -> Path:
     ``<repo>``.
     """
     return _SELF.parents[2]
+
+
+def load_default_scan_config(root: Path) -> ConfidentialityScanConfig:
+    """Load the repo's active tenant denylist matrix, if any."""
+    return ConfidentialityScanConfig(tenant_matrix=load_tenant_denylist_matrix(root))
 
 
 def _tracked_repo_paths(root: Path) -> list[str]:
@@ -517,14 +544,28 @@ def _is_structural_carrier_ticket_ref(
     return False
 
 
-def _offenses_from_bytes(*, rel: str, raw: bytes) -> list[str]:
+def _patterns_for_rel(
+    rel: str,
+    *,
+    config: ConfidentialityScanConfig,
+) -> tuple[tuple[str, re.Pattern[str]], ...]:
+    return (*FORBIDDEN_PATTERNS, *config.tenant_matrix.patterns_for_path(rel))
+
+
+def _offenses_from_bytes(
+    *,
+    rel: str,
+    raw: bytes,
+    config: ConfidentialityScanConfig | None = None,
+) -> list[str]:
     if BINARY_SENTINEL in raw:
         return []
+    scan_config = config or DEFAULT_SCAN_CONFIG
     text = raw.decode("utf-8", errors="replace")
     lines = text.splitlines()
     hits: list[str] = []
     for lineno, line in enumerate(lines, start=1):
-        for label, pattern in FORBIDDEN_PATTERNS:
+        for label, pattern in _patterns_for_rel(rel, config=scan_config):
             try:
                 matched = pattern.search(line)
             except Exception as exc:  # pragma: no cover - exercised by monkeypatch
@@ -544,14 +585,19 @@ def _offenses_from_bytes(*, rel: str, raw: bytes) -> list[str]:
     return hits
 
 
-def offenses(path: Path, *, repo_root: Path) -> list[str]:
+def offenses(
+    path: Path,
+    *,
+    repo_root: Path,
+    config: ConfidentialityScanConfig | None = None,
+) -> list[str]:
     """Return ``"<rel>:<line> [<label>] <line-text>"`` for each offending line."""
     rel = display_rel(path, repo_root=repo_root)
     try:
         raw = path.read_bytes()
     except OSError as exc:
         raise ConfidentialityScanError(f"{rel}: unreadable file: {exc}") from exc
-    return _offenses_from_bytes(rel=rel, raw=raw)
+    return _offenses_from_bytes(rel=rel, raw=raw, config=config)
 
 
 def _offense_key(formatted: str) -> tuple[str, str] | None:
@@ -568,7 +614,31 @@ def _scan_error(rel: str, message: str) -> str:
     return f"{rel}:0 [scan error] {message}"
 
 
-def scan_offenses(*, repo_root: Path | None = None) -> list[str]:
+def _load_scan_config_for_root(root: Path, config: ConfidentialityScanConfig | None) -> ConfidentialityScanConfig:
+    if config is not None:
+        return config
+    try:
+        return load_default_scan_config(root)
+    except TenantConfidentialityError as exc:
+        raise ConfidentialityScanError(str(exc)) from exc
+
+
+def _is_allowed_offense(
+    key: tuple[str, str] | None,
+    *,
+    config: ConfidentialityScanConfig,
+) -> bool:
+    if key is None:
+        return False
+    rel, label = key
+    return key in ALLOWED_OFFENSES or config.tenant_matrix.is_allowlisted(rel, label)
+
+
+def scan_offenses(
+    *,
+    repo_root: Path | None = None,
+    config: ConfidentialityScanConfig | None = None,
+) -> list[str]:
     """Scan the whole tracked text surface, honouring explicit baseline entries.
 
     Returns one formatted line per non-allowlisted offending line.
@@ -576,27 +646,43 @@ def scan_offenses(*, repo_root: Path | None = None) -> list[str]:
     root = (repo_root or globals()["repo_root"]()).resolve()
     offenders: list[str] = []
     try:
+        scan_config = _load_scan_config_for_root(root, config)
         files = public_repo_text_files(repo_root=root)
     except ConfidentialityScanError as exc:
         return [_scan_error(".", str(exc))]
     if not files:
         return [_scan_error(".", "tracked text scan found no files")]
+    raw_offense_keys: set[tuple[str, str]] = set()
+    existing_paths = {path.resolve().relative_to(root).as_posix() for path in files}
     for path in files:
         rel = path.resolve().relative_to(root).as_posix()
         try:
-            hits = offenses(path, repo_root=root)
+            hits = offenses(path, repo_root=root, config=scan_config)
         except ConfidentialityScanError as exc:
             offenders.append(_scan_error(rel, str(exc)))
             continue
         for hit in hits:
             key = _offense_key(hit)
-            if key is not None and key in ALLOWED_OFFENSES:
+            if key is not None:
+                raw_offense_keys.add(key)
+            if _is_allowed_offense(key, config=scan_config):
                 continue
             offenders.append(hit)
+    offenders.extend(
+        scan_config.tenant_matrix.stale_allowlist_lines(
+            raw_offense_keys=raw_offense_keys,
+            existing_paths=existing_paths,
+        )
+    )
     return offenders
 
 
-def scan_tree_offenses(object_ref: str, *, repo_root: Path | None = None) -> list[str]:
+def scan_tree_offenses(
+    object_ref: str,
+    *,
+    repo_root: Path | None = None,
+    config: ConfidentialityScanConfig | None = None,
+) -> list[str]:
     """Scan a commit/tree object without checking it out.
 
     This is the push-protection path: pre-push and pre-receive hooks receive
@@ -607,26 +693,37 @@ def scan_tree_offenses(object_ref: str, *, repo_root: Path | None = None) -> lis
     root = (repo_root or globals()["repo_root"]()).resolve()
     offenders: list[str] = []
     try:
+        scan_config = _load_scan_config_for_root(root, config)
         blobs = _tracked_tree_blobs(root, object_ref)
     except ConfidentialityScanError as exc:
         return [_scan_error(".", str(exc))]
     if not blobs:
         return [_scan_error(".", f"{object_ref}: tracked text scan found no files")]
+    raw_offense_keys: set[tuple[str, str]] = set()
+    existing_paths = {rel for rel, raw in blobs if BINARY_SENTINEL not in raw}
     for rel, raw in sorted(blobs):
         if rel == _SELF_REL:
             continue
         if BINARY_SENTINEL in raw:
             continue
         try:
-            hits = _offenses_from_bytes(rel=rel, raw=raw)
+            hits = _offenses_from_bytes(rel=rel, raw=raw, config=scan_config)
         except ConfidentialityScanError as exc:
             offenders.append(_scan_error(rel, str(exc)))
             continue
         for hit in hits:
             key = _offense_key(hit)
-            if key is not None and key in ALLOWED_OFFENSES:
+            if key is not None:
+                raw_offense_keys.add(key)
+            if _is_allowed_offense(key, config=scan_config):
                 continue
             offenders.append(hit)
+    offenders.extend(
+        scan_config.tenant_matrix.stale_allowlist_lines(
+            raw_offense_keys=raw_offense_keys,
+            existing_paths=existing_paths,
+        )
+    )
     return offenders
 
 
@@ -688,6 +785,17 @@ def _errors_from_scan_lines(
                     path=rel,
                     field="tracked text scan",
                     message=f"{context} confidentiality scan failed closed: {line}.",
+                    contract=CONTRACT,
+                )
+            )
+            continue
+        if "[tenant allowlist stale]" in line:
+            errors.append(
+                make_error(
+                    code="CE-TENANT-CONFIDENTIALITY-ALLOWLIST",
+                    path=rel,
+                    field="tenant denylist allowlist",
+                    message=f"{context} tenant confidentiality allowlist is stale: {line}.",
                     contract=CONTRACT,
                 )
             )
