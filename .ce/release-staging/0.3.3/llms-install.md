@@ -14,7 +14,7 @@ signature:
   algo: ssh-ed25519
   namespace: ce-spec-v1
   value: <RESIGN-REQUIRED-ce-root-v1>
-  content_sha256: 870c79e93f75885131a513d7d61d34b5329365d4e1607d995d661e513b4efa36
+  content_sha256: 4c30ae043e508c54391c8136a0ceeab8345fe8473b3f98b45a6b46e80f06d78c
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -23,7 +23,7 @@ artifact_manifest:
   python_requires: >=3.14
   artifact_base_url: https://creator-engine.dev/downloads/0.3.3
   sha256s_url: https://creator-engine.dev/downloads/0.3.3/SHA256SUMS
-  sha256s_sha256: 8bb9b8b9a4b3b849d8670cf557555c1ff7fd6b656c7f7b7c2a12b725c9d2f2fb
+  sha256s_sha256: 08d3eb520b3ddcbcffeb58d326395a5174d4a1f27668379ddaeee28b21ce71f7
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
@@ -36,7 +36,7 @@ artifact_manifest:
       platforms: all
     - filename: creator_engine_validator-0.3.3-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.3.3/creator_engine_validator-0.3.3-py3-none-any.whl
-      sha256: 719cfbcf76110a0eb4f27fced073ec1c29715cf3d1fb54ac3a66afc823473037
+      sha256: 03801acbf4b3d97955dc05b3bb1ab429cc8e2e69bf8581cf27749d7a141569ed
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
       url: https://creator-engine.dev/downloads/0.3.3/jsonschema-4.26.0-py3-none-any.whl
