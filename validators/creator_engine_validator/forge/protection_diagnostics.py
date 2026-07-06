@@ -31,6 +31,20 @@ def api_error_text(parsed: object, stderr: str) -> str:
     return " ".join(parts)
 
 
+def _has_forbidden_status_signal(parsed: object, stderr: str) -> bool:
+    if "http 403" in (stderr or "").lower():
+        return True
+    if not isinstance(parsed, Mapping):
+        return False
+    for key in ("status", "status_code", "http_status"):
+        value = parsed.get(key)
+        if value == 403:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {"403", "http 403"}:
+            return True
+    return False
+
+
 def protection_floor_unenforceable(parsed: object, stderr: str) -> bool:
     """Detect GitHub plan/capability 403s for branch protection/rulesets.
 
@@ -41,6 +55,8 @@ def protection_floor_unenforceable(parsed: object, stderr: str) -> bool:
     """
     text = api_error_text(parsed, stderr).lower()
     if not text:
+        return False
+    if not _has_forbidden_status_signal(parsed, stderr):
         return False
     unsupported_markers = (
         "protected branches are not available",
@@ -54,8 +70,6 @@ def protection_floor_unenforceable(parsed: object, stderr: str) -> bool:
         "upgrade to github team",
     )
     capability_markers = (
-        "http 403",
-        "forbidden",
         "private repositories",
         "this plan",
         "make this repository public",

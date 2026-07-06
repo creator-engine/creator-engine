@@ -948,17 +948,26 @@ class FakeAdoptionDriver(FakeDriver):
         self.opened_with = {"manifest_paths": list(manifest_paths), "plan_ref": plan_ref, "base": base}
         return self._pr_result
 
-    def read_preserved_checks(self, *, repo, base, expected_checks):
+    def read_preserved_checks(self, *, repo, base, expected_checks, declared_protections=None):
         self.calls.append("read_preserved_checks")
+        self.declared_protections = declared_protections
         return self._preserved_result
 
 
-def _adoption_apply(tmp_path: Path, driver: FakeAdoptionDriver, *, plan=None, probe=None, plan_override=None):
+def _adoption_apply(
+    tmp_path: Path,
+    driver: FakeAdoptionDriver,
+    *,
+    plan=None,
+    probe=None,
+    plan_override=None,
+    answers=None,
+):
     probe = probe if probe is not None else _brownfield_probe()
     plan = plan if plan is not None else _adoption_plan(tmp_path, probe)
     if plan_override:
         plan = {**plan, **plan_override}
-    answers = _answers(tmp_path, mode="existing")
+    answers = answers if answers is not None else _answers(tmp_path, mode="existing")
     answer_bytes = yaml.safe_dump(answers, sort_keys=True).encode("utf-8")
     request = onboard_apply.ApplyRequest(
         spec_bytes=_signed_spec(),
@@ -1001,6 +1010,37 @@ def test_adoption_opens_join_pr_and_skips_greenfield_forge_legs(tmp_path):
     plan = _adoption_plan(tmp_path, _brownfield_probe())
     assert driver.opened_with["plan_ref"] == plan["inventory_sha256"]
     assert onboard_apply.CE_WORKFLOW_PATH in driver.opened_with["manifest_paths"]
+
+
+def test_adoption_verify_preserved_checks_records_declared_reference_floor(tmp_path):
+    driver = FakeAdoptionDriver(
+        preserved_result={
+            "ok": True,
+            "existing_checks": [],
+            "dropped": [],
+            "protection_floor": "documented-not-enforced",
+            "repo": "octo/greenfield",
+            "branch": "main",
+            "declared_protections": "reference",
+        }
+    )
+    summary = _adoption_apply(tmp_path, driver)
+    leg = _leg(summary, "brownfield_verify_preserved_checks")
+    assert driver.declared_protections == "reference"
+    assert leg["status"] == "already_satisfied"
+    assert leg["verification"]["protection_floor"] == "documented-not-enforced"
+    assert leg["verification"]["repo"] == "octo/greenfield"
+    assert leg["verification"]["branch"] == "main"
+    assert leg["verification"]["declared_protections"] == "reference"
+
+
+def test_adoption_verify_preserved_checks_does_not_infer_reference_from_default(tmp_path):
+    answers = _answers(tmp_path, mode="existing")
+    del answers["github"]["protections"]
+    driver = FakeAdoptionDriver()
+    summary = _adoption_apply(tmp_path, driver, answers=answers)
+    assert summary["refused"] == 0 and summary["failed"] == 0
+    assert driver.declared_protections is None
 
 
 def test_adoption_runs_bootstrap_probe_identity_only_and_reaches_build_scaffold(tmp_path):

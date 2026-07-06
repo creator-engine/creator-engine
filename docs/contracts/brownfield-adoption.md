@@ -123,7 +123,12 @@ The adoption legs (the canonical `BROWNFIELD_APPLY_STEP_IDS`):
 5. `brownfield_open_join_pr` — open exactly one PR via `forge.open_change`
    (idempotent — a re-run claims the existing PR).
 6. `brownfield_verify_preserved_checks` — read the live checks and confirm the
-   join PR drops none (`brownfield_protection_loss` otherwise).
+   join PR drops none (`brownfield_protection_loss` otherwise). If the answers
+   file explicitly declares `github.protections: reference` and the forge
+   reports that branch protection cannot be enforced for the repo's plan,
+   verification records `protection_floor: documented-not-enforced` with the
+   repo, branch, and declared mode. Without that explicit declaration, the same
+   forge refusal remains `protection_floor_unenforceable`.
 7. `brownfield_record_apply_evidence` — append the value-free adoption record.
 
 ### Authorization (default-OFF, dual escalation)

@@ -2121,7 +2121,12 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
 
     # -- leg 6: confirm no existing check/workflow dropped (READ token) ------------------------
     def read_preserved_checks(
-        self, *, repo: str, base: str, expected_checks: Sequence[str]
+        self,
+        *,
+        repo: str,
+        base: str,
+        expected_checks: Sequence[str],
+        declared_protections: str | None = None,
     ) -> dict[str, Any]:
         # Rides the INHERITED READ token (administration:read) — the WRITE token is already
         # revoked after leg 5. The join PR is additive (leg 3 only WRITES new files and never
@@ -2142,6 +2147,17 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
                 # Affirmative 404/not-protected signal → no required checks exist to drop.
                 return {"ok": True, "existing_checks": [], "dropped": []}
             if protection_floor_unenforceable(parsed, stderr):
+                if declared_protections == "reference":
+                    return {
+                        "ok": True,
+                        "existing_checks": [],
+                        "expected_checks": list(expected_checks),
+                        "dropped": [],
+                        "protection_floor": "documented-not-enforced",
+                        "repo": repo,
+                        "branch": base,
+                        "declared_protections": declared_protections,
+                    }
                 diagnostic = protection_floor_unenforceable_diagnostic(
                     surface="classic", parsed=parsed, stderr=stderr
                 )

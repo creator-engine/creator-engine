@@ -132,6 +132,13 @@ file validation all derive from it (never hand-maintained). Mode is just
   educate_acknowledged: true}` (`valid_ratification`, generalizing the G-5
   opt-out into an installer-wide invariant). *An agent preparing an answers
   file can configure anything except a weaker grader.*
+- **Reference-mode protections are explicit:** `github.protections: reference`
+  documents the CE floor even when the forge cannot enforce it for the repo's
+  plan. Brownfield preserved-check verification records
+  `protection_floor: documented-not-enforced` with the repo, branch, and
+  declared mode only for that explicit answers-file declaration; an omitted
+  declaration keeps the same forge refusal fail-closed as
+  `protection_floor_unenforceable`.
 - **The scoped sudo pre-grant:** `host.sudo_grant` is an explicit package
   allowlist (a bare `sudo: true` is schema-invalid by construction);
   `sudo_grant_diff` stops on any planned privileged install OUTSIDE the
