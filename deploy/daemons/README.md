@@ -5,6 +5,10 @@ It runs the daemon in the CE runtime image selected by `CE_DAEMON_IMAGE` using
 the engine named by `CE_CONTAINER_ENGINE` (`docker` by default, `podman`
 supported through the same OCI flags).
 
+When `CE_DAEMON_IMAGE` is unset, the adapter defaults to
+`ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2`. Release automation
+should set a digest-pinned runtime reference for production cutovers.
+
 The runner mounts only:
 
 - the repository checkout read-only at `CE_DAEMON_REPO_CONTAINER_PATH`
@@ -34,8 +38,11 @@ the default is `10001`.
 
 For Docker, host-mounted daemon state must be owned by that image uid because the
 container process is non-root. On first boot the runner creates missing state
-roots when it can, but an existing root owned by another uid is refused with a
-copy-pasteable remediation:
+roots when it can. If an existing `0700` state root is already owned by the image
+uid and the invoking host user cannot traverse it, the runner defers child
+directory preparation under that state root to the container user so reruns over
+production-owned residual state remain idempotent. An existing root owned by
+another uid is refused with a copy-pasteable remediation:
 
 ```sh
 chown -R <uid>:<uid> <state_root>
@@ -50,6 +57,11 @@ chown -R 10001:10001 <state_root>
 The runner verifies mode `0700` and does not chmod or chown existing state
 directories implicitly.
 
+Each adapter invocation writes a fresh per-attempt log named
+`ce-wall-daemon-container-<daemon>-<timestamp>-<pid>.log` in
+`CE_DAEMON_LOG_DIR` (default `$HOME`). `ce-wall-daemon-container.log` is updated
+as a best-effort symlink to the latest attempt instead of being appended to.
+
 Lease mutation is serialized by adjacent `.lease.op.lock` files. If a host
 crashes while holding an operation lock, verify no launcher or daemon process is
 still running for that lease, then remove only the orphaned `.lease.op.lock`
@@ -61,7 +73,8 @@ automation should set `CE_CANONICAL_RUNTIME_IMAGE` or `CE_DAEMON_IMAGE` to the
 digest-pinned image reference governed by the release manifest.
 
 `smoke-daemon-container.sh <scratch-state-root>` is a host-operator smoke that
-runs the conveyor-daemon container twice against one scratch state root and
-verifies lease release/reacquisition, Docker uid ownership, and that no
-signing-secret content persists onto host state after stop; run it before
-cutting over a host from the uncontained daemon to the containerized adapter.
+runs a fake-engine mixed-uid host-prep probe, then runs the conveyor-daemon
+container twice against one scratch state root and verifies lease
+release/reacquisition, Docker uid ownership, and that no signing-secret content
+persists onto host state after stop; run it before cutting over a host from the
+uncontained daemon to the containerized adapter.

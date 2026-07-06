@@ -110,6 +110,43 @@ def _write_fake_container_engine(path: Path, argv_file: Path) -> None:
     path.chmod(0o755)
 
 
+def _write_fake_container_engine_with_output(path: Path, argv_file: Path) -> None:
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f'printf "%s\\n" "$@" > "{argv_file}"\n'
+        'printf "fake engine stdout\\n"\n'
+        'printf "fake engine stderr\\n" >&2\n',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def _write_fake_stat_for_preowned_state(path: Path, *, state_root: Path, owner_uid: int) -> None:
+    real_stat = Path("/usr/bin/stat")
+    if not real_stat.exists():
+        real_stat = Path("/bin/stat")
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f'if [[ "${{1:-}}" == "-c" && "${{3:-}}" == "--" && "${{4:-}}" == "{state_root}" ]]; then\n'
+        '  case "${2:-}" in\n'
+        "    %a)\n"
+        "      printf '700\\n'\n"
+        "      exit 0\n"
+        "      ;;\n"
+        "    %u)\n"
+        f"      printf '{owner_uid}\\n'\n"
+        "      exit 0\n"
+        "      ;;\n"
+        "  esac\n"
+        "fi\n"
+        f'exec "{real_stat}" "$@"\n',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def _container_runner_env(tmp_path: Path, fake_engine: Path) -> dict[str, str]:
     return {
         "PATH": os.environ.get("PATH", ""),
@@ -117,6 +154,7 @@ def _container_runner_env(tmp_path: Path, fake_engine: Path) -> dict[str, str]:
         "CE_DAEMON_REPO_ROOT": str(_repo_root()),
         "CE_DAEMON_STATE_ROOT": str(tmp_path / "state"),
         "CE_DAEMON_IMAGE": "example.invalid/ce-runtime@sha256:abc",
+        "CE_DAEMON_LOG_DIR": str(tmp_path / "logs"),
     }
 
 
@@ -694,6 +732,38 @@ def test_container_runner_creates_missing_state_and_lease_roots(tmp_path: Path):
     assert oct(lease_root.stat().st_mode & 0o777) == "0o700"
 
 
+@pytest.mark.skipif(os.getuid() == 0, reason="mixed-uid inaccessible-root simulation is for non-root callers")
+def test_container_runner_defers_lease_root_prep_for_preowned_mixed_uid_docker_state_root(tmp_path: Path):
+    fake_docker = tmp_path / "docker"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_docker, argv_file)
+    state_root = tmp_path / "state"
+    state_root.mkdir(mode=0o700)
+    state_root.chmod(0)
+    image_uid = os.getuid() + 1
+    fake_stat = tmp_path / "stat"
+    _write_fake_stat_for_preowned_state(fake_stat, state_root=state_root, owner_uid=image_uid)
+    env = _container_runner_env(tmp_path, fake_docker)
+    env.update(
+        {
+            "PATH": f"{tmp_path}:{os.environ.get('PATH', '')}",
+            "CE_DAEMON_IMAGE_UID": str(image_uid),
+            "CE_DAEMON_STATE_ROOT": str(state_root),
+            "CE_DAEMON_LEASE_ROOT": str(state_root / "daemon-leases"),
+        }
+    )
+
+    try:
+        proc = _run_container_runner("queue-daemon", env)
+    finally:
+        state_root.chmod(0o700)
+
+    assert proc.returncode == 0, proc.stderr
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert "run" in argv
+    assert f"{state_root}:/ce/state" in argv
+
+
 @pytest.mark.skipif(os.getuid() == 0, reason="non-root Docker creation branch is not exercised as root")
 def test_container_runner_creates_missing_docker_roots_for_non_root_caller_when_uid_matches(tmp_path: Path):
     fake_docker = tmp_path / "docker"
@@ -809,6 +879,41 @@ def test_container_runner_keeps_queue_default_invocation_byte_identical(tmp_path
             "/workspace/creator-engine/deploy/queue-daemon/launch-queue-daemon.sh",
         ]
     ) + "\n"
+
+
+def test_container_runner_default_image_uses_canonical_runtime_name(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    env = _container_runner_env(tmp_path, fake_engine)
+    env.pop("CE_DAEMON_IMAGE")
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert "ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2" in argv
+
+
+def test_container_runner_writes_per_attempt_logs_and_latest_symlink(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine_with_output(fake_engine, argv_file)
+    env = _container_runner_env(tmp_path, fake_engine)
+    log_dir = tmp_path / "attempt-logs"
+    env["CE_DAEMON_LOG_DIR"] = str(log_dir)
+
+    first = _run_container_runner("queue-daemon", env)
+    second = _run_container_runner("queue-daemon", env)
+
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+    logs = sorted(log_dir.glob("ce-wall-daemon-container-queue-daemon-*.log"))
+    assert len(logs) == 2
+    assert all("fake engine stdout" in path.read_text(encoding="utf-8") for path in logs)
+    latest = log_dir / "ce-wall-daemon-container.log"
+    assert latest.is_symlink()
+    assert latest.resolve() == logs[-1].resolve()
 
 
 def test_container_runner_keeps_conveyor_default_invocation_byte_identical(tmp_path: Path):
