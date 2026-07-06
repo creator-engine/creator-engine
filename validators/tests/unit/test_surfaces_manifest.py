@@ -299,6 +299,27 @@ def test_consistent_manifest_mismatched_dockerfile_digest_fails(tmp_path: Path):
     assert chk.CODE_DOCKERFILE_FROM_DIGEST_MISMATCH in _codes(result)
 
 
+def test_consistent_manifest_uppercase_dockerfile_digest_matches_manifest(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    dockerfile = tmp_path / "deploy" / "vps-runsc" / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join(
+            [
+                "FROM --platform=linux/amd64 rust:1-bookworm@sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA AS herdr-builder",
+                "ARG HERDR_SOURCE_REF=ff924966bd789afabec1a52d74f24392f45838ef",
+                "ARG ZIG_VERSION=0.15.2",
+                "FROM debian:bookworm-slim@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb AS runtime",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
 def test_consistent_manifest_mismatched_arg_version_and_ref_fail(tmp_path: Path):
     _write_consistent_repo(tmp_path)
     dockerfile = tmp_path / "deploy" / "vps-runsc" / "Dockerfile"
@@ -384,6 +405,47 @@ def test_consistent_manifest_mixed_sha256_digest_passes(tmp_path: Path):
     result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
 
     assert result.ok, [error.format() for error in result.errors]
+
+
+def test_consistent_manifest_uppercase_sha256_digest_passes(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"].append(  # type: ignore[union-attr]
+        _surface("CE seat image", commit_or_digest="SHA256:" + MIXED_SHA256.upper())
+    )
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert result.ok, [error.format() for error in result.errors]
+
+
+def test_consistent_manifest_manifest_list_surface_rejects_child_digests(tmp_path: Path):
+    doc = _consistent_doc()
+    doc["surfaces"].append(  # type: ignore[union-attr]
+        {
+            "name": "CE seat image",
+            "version": "1.0.0",
+            "commit_or_digest": {
+                "amd64": "sha256:" + "0" * 64,
+                "arm64": "sha256:" + "1" * 64,
+            },
+            "source": "ghcr.io/creator-engine/creator-engine/ce-seat",
+            "custody": "creator-engine image",
+            "update_policy": "manifest-list digest required before tenant launch use",
+            "last_evaluated": "2026-07-05",
+        }
+    )
+    _write_consistent_repo(tmp_path, doc)
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST in _codes(result)
+    assert any(
+        "CE seat image.commit_or_digest" in error.path
+        and "index/manifest-list sha256 digest" in error.message
+        and "per-architecture child-manifest digests are not sufficient" in error.message
+        for error in result.errors
+    )
 
 
 _TEST_UNSET_DIGEST_ALLOWLIST = frozenset(

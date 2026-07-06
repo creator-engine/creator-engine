@@ -221,7 +221,10 @@ def _surface_commit_or_digest(surface: dict[str, Any] | None) -> object:
 def _normal_sha256(value: object) -> str | None:
     if not isinstance(value, str):
         return None
-    stripped = value.removeprefix("sha256:")
+    stripped = value.strip()
+    if stripped.lower().startswith("sha256:"):
+        stripped = stripped.split(":", 1)[1]
+    stripped = stripped.lower()
     if SHA256_RE.fullmatch(stripped):
         return stripped
     return None
@@ -315,19 +318,39 @@ def _is_base_image_surface(surface: dict[str, Any]) -> bool:
     return source.startswith("docker.io/") and "docker-base-image" in custody
 
 
+def _requires_manifest_list_digest(surface: dict[str, Any]) -> bool:
+    update_policy = str(surface.get("update_policy", "")).lower()
+    return "manifest-list digest" in update_policy
+
+
 def _pinnable_null_digest_errors(path: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for key, surface in sorted(by_name.items()):
         commit_or_digest = surface.get("commit_or_digest")
+        name = surface.get("name", key)
+        if key in PHASE1_PENDING_DIGEST_SURFACES or _is_host_only(surface):
+            continue
+        if _requires_manifest_list_digest(surface) and isinstance(commit_or_digest, dict):
+            errors.append(
+                make_error(
+                    CODE_CONSISTENCY_PINNABLE_MISSING_DIGEST,
+                    path,
+                    f"{name}.commit_or_digest",
+                    (
+                        f"pinnable surface {name!r} requires an index/manifest-list sha256 digest; "
+                        "per-architecture child-manifest digests are not sufficient"
+                    ),
+                    CONSISTENT_CONTRACT,
+                )
+            )
+            continue
         if (
-            key in PHASE1_PENDING_DIGEST_SURFACES
-            or _is_host_only(surface)
-            or (not _is_unpinned_digest(commit_or_digest) and not _is_allowlisted_unset_digest(key, surface))
+            not _is_unpinned_digest(commit_or_digest)
+            and not _is_allowlisted_unset_digest(key, surface)
         ):
             continue
         if commit_or_digest == UNSET_DIGEST and _is_allowlisted_unset_digest(key, surface):
             continue
-        name = surface.get("name", key)
         if _is_placeholder_sha256_digest(commit_or_digest):
             message = (
                 f"pinnable non-host-only surface {name!r} uses a placeholder sha256 digest; "
@@ -456,6 +479,16 @@ def _surface_digest_for_arch(surface: dict[str, Any], arch: str | None) -> str |
     return None
 
 
+def _image_ref_sha256_digest(image: str) -> str | None:
+    _prefix, separator, digest_ref = image.rpartition("@")
+    if not separator:
+        return None
+    algorithm, separator, digest = digest_ref.partition(":")
+    if not separator or algorithm.lower() != "sha256":
+        return None
+    return _normal_sha256(digest.split(":", 1)[0])
+
+
 def _base_image_arch_digest_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> list[ValidationError]:
     used_arches: dict[str, set[str]] = {}
     surfaces_by_key: dict[str, dict[str, Any]] = {}
@@ -541,7 +574,8 @@ def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> l
                 manifest_digest = _normal_sha256(_surface_commit_or_digest(surface))
             if manifest_digest is None:
                 continue
-            if "@sha256:" not in image:
+            image_digest = _image_ref_sha256_digest(image)
+            if image_digest is None:
                 errors.append(
                     make_error(
                         CODE_DOCKERFILE_FROM_MISSING_DIGEST,
@@ -552,7 +586,6 @@ def _dockerfile_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> l
                     )
                 )
                 continue
-            image_digest = image.rsplit("@sha256:", 1)[1].split(":", 1)[0]
             if image_digest != manifest_digest:
                 errors.append(
                     make_error(
@@ -754,7 +787,7 @@ def _validate_zig(path: Path, surface: dict[str, Any] | None) -> list[Validation
     for arch in sorted(ZIG_ARCHES):
         entry = digests.get(arch)
         digest = entry.get("sha256") if isinstance(entry, dict) else None
-        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+        if _normal_sha256(digest) is None or _is_placeholder_sha256_digest(digest):
             errors.append(
                 make_error(
                     CODE_PINNABLE_MISSING_DIGEST,
