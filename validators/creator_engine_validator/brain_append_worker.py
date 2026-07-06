@@ -95,7 +95,13 @@ def validate_intent_doc(data: Any, path: Path | str = "<brain-append-intent>") -
     ]
 def load_intent(path: Path | str) -> tuple[Path, dict[str, Any]]:
     source = Path(path)
-    data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise BrainAppendRefusal(
+            "brain_append_intent_schema",
+            f"could not read or parse intent file: {exc}",
+        ) from exc
     errors = validate_intent_doc(data, source)
     if errors:
         raise BrainAppendRefusal(errors[0].code, errors[0].format())

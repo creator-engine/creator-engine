@@ -99,3 +99,16 @@ def test_refusal_when_origin_main_ledger_cannot_materialize(tmp_path: Path):
     outcome = _run(tmp_path, _active(), lambda _args, _cwd: (1, "", "missing origin/main"))
     assert outcome.outcome == "refused"
     assert outcome.invariant == "origin_main_ledger_materialized"
+
+def test_malformed_yaml_intent_is_refused_not_raised(tmp_path: Path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    (queue / "001.yaml").write_text("key: [unclosed", encoding="utf-8")
+    outcome = run_once(
+        queue_dir=queue,
+        repo_root=tmp_path,
+        out_dir=tmp_path / "out",
+        git_runner=_git_show(_base_ledger()),
+    )
+    assert outcome.outcome == "refused"
+    assert outcome.invariant == "brain_append_intent_schema"
