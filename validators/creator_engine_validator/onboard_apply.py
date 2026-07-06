@@ -127,14 +127,21 @@ jobs:
           CE_DOWNLOAD_BASE: "{download_base}"
           CE_APP_WHEEL: "{wheel_name}"
           CE_APP_WHEEL_URL: "{wheel_url}"
+          CE_SPEC_URL: "https://creator-engine.dev/llms-install.md"
+          CE_TRUST_ROOT_URL: "https://creator-engine.dev/keys/ce-root-v1"
+          CE_TRUST_ANCHOR_URL: "https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT"
         run: |
           set -euo pipefail
           mkdir -p .ce-validator-dist
-          curl -fsSLo .ce-validator-dist/SHA256SUMS "${{CE_DOWNLOAD_BASE}}/SHA256SUMS"
           python - <<'PY'
+          import base64
           import hashlib
+          import json
           import os
           import pathlib
+          import re
+          import shutil
+          import subprocess
           import sys
           import urllib.request
 
@@ -142,8 +149,142 @@ jobs:
           base = os.environ["CE_DOWNLOAD_BASE"].rstrip("/")
           app_wheel = os.environ["CE_APP_WHEEL"]
           expected_app_url = os.environ["CE_APP_WHEEL_URL"]
+          spec_url = os.environ["CE_SPEC_URL"]
+          trust_root_url = os.environ["CE_TRUST_ROOT_URL"]
+          trust_anchor_url = os.environ["CE_TRUST_ANCHOR_URL"]
+          if shutil.which("ssh-keygen") is None:
+              raise SystemExit("ssh-keygen is required to verify CE release downloads")
+
+          def fetch(url):
+              with urllib.request.urlopen(url, timeout=120) as response:
+                  return response.read()
+
+          def spec_field(text, section, key):
+              in_section = False
+              prefix = f"  {{key}}: "
+              for line in text.splitlines():
+                  if line == f"{{section}}:":
+                      in_section = True
+                      continue
+                  if in_section and line and not line.startswith("  "):
+                      break
+                  if in_section and line.startswith(prefix):
+                      return line[len(prefix):]
+              raise SystemExit(f"signed spec missing {{section}}.{{key}}")
+
+          spec = fetch(spec_url)
+          trust_root = fetch(trust_root_url)
+          (dist / "llms-install.md").write_bytes(spec)
+          (dist / "ce-root-v1").write_bytes(trust_root)
+          spec_text = spec.decode("utf-8")
+          key_id = spec_field(spec_text, "signature", "key_id")
+          algo = spec_field(spec_text, "signature", "algo")
+          namespace = spec_field(spec_text, "signature", "namespace")
+          sig_value = spec_field(spec_text, "signature", "value")
+          content_sha = spec_field(spec_text, "signature", "content_sha256")
+          if algo != "ssh-ed25519":
+              raise SystemExit(f"unsupported CE spec signature algorithm {{algo}}")
+          if namespace != "ce-spec-v1":
+              raise SystemExit(f"unsupported CE spec signature namespace {{namespace}}")
+          if not re.fullmatch(r"[0-9a-f]{{64}}", content_sha):
+              raise SystemExit("CE spec content_sha256 is not 64-hex")
+          canonical = re.sub(
+              rb"(?m)^(  value: ).*$",
+              rb"\1<published-with-this-spec>",
+              spec,
+          )
+          canonical = re.sub(
+              rb"(?m)^(  content_sha256: ).*$",
+              rb"\1<published-with-this-spec>",
+              canonical,
+          )
+          if hashlib.sha256(canonical).hexdigest() != content_sha:
+              raise SystemExit("CE signed spec content_sha256 mismatch")
+          sig = base64.b64decode(sig_value, validate=True)
+          (dist / "ce-spec.canonical").write_bytes(canonical)
+          (dist / "ce-spec.sig").write_bytes(sig)
+          verify = subprocess.run(
+              [
+                  "ssh-keygen",
+                  "-Y",
+                  "verify",
+                  "-f",
+                  str(dist / "ce-root-v1"),
+                  "-I",
+                  key_id,
+                  "-n",
+                  namespace,
+                  "-s",
+                  str(dist / "ce-spec.sig"),
+              ],
+              input=canonical,
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
+              check=False,
+          )
+          if verify.returncode != 0:
+              raise SystemExit("CE signed spec signature verification failed")
+          anchor_payload = fetch(trust_anchor_url).decode("utf-8", "replace")
+          anchor_text = anchor_payload
+          try:
+              parsed_anchor = json.loads(anchor_payload)
+          except json.JSONDecodeError:
+              parsed_anchor = None
+          if isinstance(parsed_anchor, dict):
+              anchor_text = " ".join(
+                  str(answer.get("data", ""))
+                  for answer in parsed_anchor.get("Answer", [])
+                  if isinstance(answer, dict)
+              )
+          anchor_match = re.search(
+              rf"{{re.escape(key_id)}}[ =](SHA256:[A-Za-z0-9+/]{{{{43}}}})",
+              anchor_text,
+          )
+          if anchor_match is None:
+              raise SystemExit(f"no out-of-band trust anchor found for {{key_id}}")
+          fingerprint = subprocess.run(
+              ["ssh-keygen", "-l", "-f", str(dist / "ce-root-v1"), "-E", "sha256"],
+              text=True,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.DEVNULL,
+              check=False,
+          )
+          actual_fingerprint = None
+          for line in fingerprint.stdout.splitlines():
+              parts = line.split()
+              if len(parts) >= 3 and parts[2] == key_id:
+                  actual_fingerprint = parts[1]
+                  break
+          if fingerprint.returncode != 0 or actual_fingerprint != anchor_match.group(1):
+              raise SystemExit(f"out-of-band trust anchor mismatch for {{key_id}}")
+
+          manifest_version = spec_field(spec_text, "artifact_manifest", "artifact_manifest_version")
+          package_name = spec_field(spec_text, "artifact_manifest", "package_name")
+          package_version = spec_field(spec_text, "artifact_manifest", "package_version")
+          artifact_base = spec_field(spec_text, "artifact_manifest", "artifact_base_url").rstrip("/")
+          sha256s_url = spec_field(spec_text, "artifact_manifest", "sha256s_url")
+          sha256s_sha = spec_field(spec_text, "artifact_manifest", "sha256s_sha256")
+          signed_app_wheel = spec_field(spec_text, "artifact_manifest", "app_wheel")
+          if manifest_version != "1" or package_name != "creator-engine-validator":
+              raise SystemExit("unexpected CE artifact manifest")
+          if package_version != os.environ["CE_VERSION"]:
+              raise SystemExit(f"signed spec version {{package_version}} != workflow version")
+          if artifact_base != base:
+              raise SystemExit(f"signed artifact_base_url {{artifact_base}} != workflow base")
+          if sha256s_url != f"{{base}}/SHA256SUMS":
+              raise SystemExit(f"unexpected signed SHA256SUMS URL {{sha256s_url}}")
+          if signed_app_wheel != app_wheel:
+              raise SystemExit(f"signed app wheel {{signed_app_wheel}} != workflow app wheel")
+          if not re.fullmatch(r"[0-9a-f]{{64}}", sha256s_sha):
+              raise SystemExit("signed sha256s_sha256 is not 64-hex")
+
+          sha256s = fetch(sha256s_url)
+          actual_sha256s = hashlib.sha256(sha256s).hexdigest()
+          if actual_sha256s != sha256s_sha:
+              raise SystemExit("SHA256SUMS does not match the signed CE spec")
+          (dist / "SHA256SUMS").write_bytes(sha256s)
           rows = []
-          for line in (dist / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+          for line in sha256s.decode("utf-8").splitlines():
               if not line.strip():
                   continue
               digest, filename = line.split(maxsplit=1)
@@ -158,8 +299,7 @@ jobs:
               if filename == app_wheel and url != expected_app_url:
                   raise SystemExit(f"unexpected app wheel URL {{url}}")
               target = dist / filename
-              with urllib.request.urlopen(url) as response:
-                  target.write_bytes(response.read())
+              target.write_bytes(fetch(url))
               actual = hashlib.sha256(target.read_bytes()).hexdigest()
               if actual != digest:
                   raise SystemExit(f"sha256 mismatch for {{filename}}")
