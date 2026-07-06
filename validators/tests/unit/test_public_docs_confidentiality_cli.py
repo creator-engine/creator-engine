@@ -6,6 +6,7 @@ CI guard uses is exposed as ``scan-public-docs-confidentiality`` and runs in
 """
 from __future__ import annotations
 
+import io
 import subprocess
 from pathlib import Path
 
@@ -23,12 +24,37 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+def _git_stdout(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ).stdout.strip()
+
+
 def _write_tracked(repo: Path, rel: str, text: str) -> Path:
     target = repo / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
     _git(repo, "add", "--", rel)
     return target
+
+
+def _commit(repo: Path, message: str = "test commit") -> str:
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.invalid",
+        "-c",
+        "user.name=CE Test",
+        "commit",
+        "-m",
+        message,
+    )
+    return _git_stdout(repo, "rev-parse", "HEAD")
 
 
 def _make_repo(tmp_path: Path) -> Path:
@@ -482,3 +508,140 @@ def test_cli_subcommand_leak_exits_nonzero(tmp_path: Path, capsys):
     out = capsys.readouterr().out
     assert "ce-ops#1234" in out
     assert guard.REMINDER in out
+
+
+def test_push_guard_passes_clean_pre_push_ref(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"refs/heads/feature {head} refs/heads/feature {guard.ZERO_OID}"],
+        repo_root=repo,
+    )
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_push_guard_blocks_leaking_pre_push_ref_before_push(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#999.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"refs/heads/feature {head} refs/heads/feature {guard.ZERO_OID}"],
+        repo_root=repo,
+    )
+
+    assert not result.ok
+    rendered = "\n".join(e.format() for e in result.errors)
+    assert "push guard refs/heads/feature@" in rendered
+    assert "docs/leak.md" in rendered
+    assert "ce-ops#999" in rendered
+    assert guard.REMINDER in rendered
+
+
+def test_push_guard_passes_clean_pre_receive_ref(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"{guard.ZERO_OID} {head} refs/heads/feature"],
+        repo_root=repo,
+    )
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_push_guard_blocks_leaking_pre_receive_ref(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#888.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"{guard.ZERO_OID} {head} refs/heads/feature"],
+        repo_root=repo,
+    )
+
+    assert not result.ok
+    rendered = "\n".join(e.format() for e in result.errors)
+    assert "push guard refs/heads/feature@" in rendered
+    assert "docs/leak.md" in rendered
+    assert "ce-ops#888" in rendered
+    assert guard.REMINDER in rendered
+
+
+def test_push_guard_cli_passes_clean_pre_receive_stdin(
+    tmp_path: Path, monkeypatch, capsys
+):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
+    head = _commit(repo)
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(f"{guard.ZERO_OID} {head} refs/heads/feature\n")
+    )
+
+    rc = cli.main(["guard-public-docs-confidentiality-push", str(repo)])
+
+    assert rc == 0
+
+
+def test_push_guard_cli_blocks_leaking_pre_receive_stdin(
+    tmp_path: Path, monkeypatch, capsys
+):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#666.\n")
+    head = _commit(repo)
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(f"{guard.ZERO_OID} {head} refs/heads/feature\n")
+    )
+
+    rc = cli.main(["guard-public-docs-confidentiality-push", str(repo)])
+
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "docs/leak.md" in out
+    assert "ce-ops#666" in out
+    assert guard.REMINDER in out
+
+
+def test_push_guard_skips_pre_receive_zero_oid_deletion(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#444.\n")
+    head = _commit(repo)
+
+    result = guard.run_push_guard(
+        [f"{head} {guard.ZERO_OID} refs/heads/feature"],
+        repo_root=repo,
+    )
+
+    assert result.ok, [e.format() for e in result.errors]
+
+
+def test_push_guard_fails_closed_on_malformed_ref_update(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/guide.md", "Public, product-lens prose.\n")
+    _commit(repo)
+
+    result = guard.run_push_guard(["malformed update"], repo_root=repo)
+
+    assert not result.ok
+    rendered = "\n".join(e.format() for e in result.errors)
+    assert "CE-CONFIDENTIALITY-PUSH-SCAN" in rendered
+    assert "malformed update" in rendered
+
+
+def test_push_guard_cli_blocks_explicit_leaking_object(tmp_path: Path, capsys):
+    repo = _make_repo(tmp_path)
+    _write_tracked(repo, "docs/leak.md", "Tracked in ce-ops#777.\n")
+    head = _commit(repo)
+
+    rc = cli.main(
+        ["guard-public-docs-confidentiality-push", str(repo), "--object", head]
+    )
+
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "docs/leak.md" in out
+    assert "ce-ops#777" in out

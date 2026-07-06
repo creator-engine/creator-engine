@@ -13,11 +13,14 @@ content:
 
 This module owns the rule (the public-doc file set, the forbidden patterns, the
 ``KNOWN_PENDING`` debt-ratchet allowlist, and the offense formatter). It is the
-ONE place the rule lives. Two callers reuse it without forking it:
+ONE place the rule lives. Three callers reuse it without forking it:
 
 * the CI test ``test_public_docs_confidentiality.py`` (fail-closed merge gate),
 * the fast standalone CLI check ``scan-public-docs-confidentiality`` that runs
-  in ``ce validate-pr`` so a leak is caught BEFORE push, not only at CI.
+  in ``ce validate-pr`` so a leak is caught before CI,
+* the push-guard CLI ``guard-public-docs-confidentiality-push`` for local
+  ``pre-push`` hooks or server-side ``pre-receive`` hooks, so a leaking ref can
+  be refused before it is accepted by the public remote.
 
 The ``KNOWN_PENDING`` allowlist is a *debt ratchet*: it enumerates the files
 that still carry internal references pending the separate redact/relocate
@@ -372,6 +375,45 @@ def _tracked_repo_paths(root: Path) -> list[str]:
     return [rel for rel in proc.stdout.decode("utf-8", errors="replace").split("\0") if rel]
 
 
+def _git_bytes(root: Path, argv: list[str]) -> bytes:
+    """Run git and return stdout, raising a fail-closed scan error on failure."""
+    try:
+        proc = subprocess.run(
+            ["git", *argv],
+            cwd=root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ConfidentialityScanError(f"git {' '.join(argv)} failed: {exc}") from exc
+    return proc.stdout
+
+
+def _tracked_tree_blobs(root: Path, object_ref: str) -> list[tuple[str, bytes]]:
+    """Return ``(repo-relative path, blob bytes)`` for regular files in a tree-ish."""
+    raw = _git_bytes(root, ["ls-tree", "-rz", "-r", object_ref])
+    blobs: list[tuple[str, bytes]] = []
+    for entry in raw.split(b"\0"):
+        if not entry:
+            continue
+        try:
+            meta_raw, path_raw = entry.split(b"\t", 1)
+            mode_raw, kind_raw, blob_raw = meta_raw.split(b" ", 2)
+        except ValueError as exc:
+            raise ConfidentialityScanError(
+                f"{object_ref}: malformed git ls-tree entry"
+            ) from exc
+        mode = mode_raw.decode("ascii", errors="replace")
+        kind = kind_raw.decode("ascii", errors="replace")
+        if kind != "blob" or not mode.startswith("100"):
+            continue
+        rel = path_raw.decode("utf-8", errors="replace")
+        blob = blob_raw.decode("ascii", errors="replace")
+        blobs.append((rel, _git_bytes(root, ["cat-file", "-p", blob])))
+    return blobs
+
+
 def _is_binary_file(path: Path) -> bool:
     """True for binary files that are outside this text-only scan."""
     return BINARY_SENTINEL in path.read_bytes()
@@ -475,18 +517,12 @@ def _is_structural_carrier_ticket_ref(
     return False
 
 
-def offenses(path: Path, *, repo_root: Path) -> list[str]:
-    """Return ``"<rel>:<line> [<label>] <line-text>"`` for each offending line."""
-    rel = display_rel(path, repo_root=repo_root)
-    hits: list[str] = []
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise ConfidentialityScanError(f"{rel}: unreadable file: {exc}") from exc
+def _offenses_from_bytes(*, rel: str, raw: bytes) -> list[str]:
     if BINARY_SENTINEL in raw:
         return []
     text = raw.decode("utf-8", errors="replace")
     lines = text.splitlines()
+    hits: list[str] = []
     for lineno, line in enumerate(lines, start=1):
         for label, pattern in FORBIDDEN_PATTERNS:
             try:
@@ -506,6 +542,16 @@ def offenses(path: Path, *, repo_root: Path) -> list[str]:
                     continue
                 hits.append(f"{rel}:{lineno} [{label}] {line.strip()}")
     return hits
+
+
+def offenses(path: Path, *, repo_root: Path) -> list[str]:
+    """Return ``"<rel>:<line> [<label>] <line-text>"`` for each offending line."""
+    rel = display_rel(path, repo_root=repo_root)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ConfidentialityScanError(f"{rel}: unreadable file: {exc}") from exc
+    return _offenses_from_bytes(rel=rel, raw=raw)
 
 
 def _offense_key(formatted: str) -> tuple[str, str] | None:
@@ -550,6 +596,40 @@ def scan_offenses(*, repo_root: Path | None = None) -> list[str]:
     return offenders
 
 
+def scan_tree_offenses(object_ref: str, *, repo_root: Path | None = None) -> list[str]:
+    """Scan a commit/tree object without checking it out.
+
+    This is the push-protection path: pre-push and pre-receive hooks receive
+    object IDs, not working-tree paths. The same formatter, structural carrier
+    exceptions, and ``ALLOWED_OFFENSES`` ratchet are used here so the push guard
+    cannot drift from the CI/``validate-pr`` scanner.
+    """
+    root = (repo_root or globals()["repo_root"]()).resolve()
+    offenders: list[str] = []
+    try:
+        blobs = _tracked_tree_blobs(root, object_ref)
+    except ConfidentialityScanError as exc:
+        return [_scan_error(".", str(exc))]
+    if not blobs:
+        return [_scan_error(".", f"{object_ref}: tracked text scan found no files")]
+    for rel, raw in sorted(blobs):
+        if rel == _SELF_REL:
+            continue
+        if BINARY_SENTINEL in raw:
+            continue
+        try:
+            hits = _offenses_from_bytes(rel=rel, raw=raw)
+        except ConfidentialityScanError as exc:
+            offenders.append(_scan_error(rel, str(exc)))
+            continue
+        for hit in hits:
+            key = _offense_key(hit)
+            if key is not None and key in ALLOWED_OFFENSES:
+                continue
+            offenders.append(hit)
+    return offenders
+
+
 def internal_tree_files(root: Path, *, repo_root: Path) -> frozenset[str]:
     """All files below an internal public-doc tree, repo-root relative."""
     if not root.exists():
@@ -579,22 +659,27 @@ def internal_tree_violations(*, repo_root: Path | None = None) -> tuple[list[str
     return unreviewed, stale
 
 
-def run(paths: list[Path] | None = None) -> CheckResult:
-    """Standalone-check entrypoint for the CLI.
+def internal_tree_violations_for_paths(paths: set[str]) -> tuple[list[str], list[str]]:
+    """Tree-object variant of :func:`internal_tree_violations`."""
+    unreviewed: list[str] = []
+    stale: list[str] = []
+    for root_rel, known_exceptions in INTERNAL_GUARDED_TREES:
+        prefix = f"{root_rel}/"
+        actual = frozenset(rel for rel in paths if rel.startswith(prefix))
+        unreviewed.extend(sorted(actual - known_exceptions))
+        stale.extend(sorted(known_exceptions - actual))
+    return unreviewed, stale
 
-    ``paths`` is accepted for signature parity with other checks; the rule
-    always scans the canonical public-doc surface rooted at the repo root, so
-    the argument is advisory only (the first path, if a repo root, is used).
-    """
-    root: Path | None = None
-    if paths:
-        first = paths[0].resolve()
-        if (first / "docs").is_dir() or (first / ".git").exists():
-            root = first
+
+def _errors_from_scan_lines(
+    *,
+    offenses: list[str],
+    unreviewed: list[str],
+    stale: list[str],
+    context: str,
+) -> list[ValidationError]:
     errors: list[ValidationError] = []
-
-    # 1) Confidential ce-ops# / internal-host pattern scan.
-    for line in scan_offenses(repo_root=root):
+    for line in offenses:
         rel = line.split(":", 1)[0]
         if "[scan error]" in line:
             errors.append(
@@ -602,7 +687,7 @@ def run(paths: list[Path] | None = None) -> CheckResult:
                     code="CE-CONFIDENTIALITY-SCAN",
                     path=rel,
                     field="tracked text scan",
-                    message=f"confidentiality scan failed closed: {line}.",
+                    message=f"{context} confidentiality scan failed closed: {line}.",
                     contract=CONTRACT,
                 )
             )
@@ -613,7 +698,7 @@ def run(paths: list[Path] | None = None) -> CheckResult:
                 path=rel,
                 field="public-doc line",
                 message=(
-                    f"public doc leaks a confidential/internal reference: {line}. "
+                    f"{context} public doc leaks a confidential/internal reference: {line}. "
                     "Remove the reference (product-lens rewrite). "
                     f"{REMINDER}"
                 ),
@@ -621,9 +706,6 @@ def run(paths: list[Path] | None = None) -> CheckResult:
             )
         )
 
-    # 2) Internal-tree guard (ce-ops#283): no net-new docs/operations or
-    #    docs/delivery files in the public tree, and no stale ratchet entries.
-    unreviewed, stale = internal_tree_violations(repo_root=root)
     for rel in unreviewed:
         errors.append(
             make_error(
@@ -631,7 +713,7 @@ def run(paths: list[Path] | None = None) -> CheckResult:
                 path=rel,
                 field="net-new internal file",
                 message=(
-                    "net-new internal file in the public docs tree; move it out "
+                    f"{context} net-new internal file in the public docs tree; move it out "
                     "of the served docs tree, or deliberately add it to the "
                     "ce-ops#283 exception ratchet. "
                     f"{REMINDER}"
@@ -646,10 +728,130 @@ def run(paths: list[Path] | None = None) -> CheckResult:
                 path=rel,
                 field="stale exception",
                 message=(
-                    "exception ratchet lists a file that no longer exists; the "
+                    f"{context} exception ratchet lists a file that no longer exists; the "
                     "list may only shrink, so remove this stale entry."
                 ),
                 contract=CONTRACT,
             )
         )
+    return errors
+
+
+ZERO_OID = "0" * 40
+
+
+def _is_zero_oid(value: str) -> bool:
+    return bool(value) and set(value) == {"0"}
+
+
+def _parse_push_updates(lines: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """Parse git pre-push/pre-receive stdin lines into ``(ref, new_oid)``.
+
+    Both formats put the new/local object ID in column 2 and the destination ref
+    in column 3:
+
+    * pre-push: ``<local-ref> <local-oid> <remote-ref> <remote-oid>``
+    * pre-receive: ``<old-oid> <new-oid> <ref>``
+    """
+    updates: list[tuple[str, str]] = []
+    malformed: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        fields = line.split()
+        if len(fields) not in (3, 4):
+            malformed.append(line)
+            continue
+        oid = fields[1]
+        if _is_zero_oid(oid):
+            continue
+        updates.append((fields[2], oid))
+    return updates, malformed
+
+
+def run_tree(object_ref: str, *, repo_root: Path | None = None, context: str | None = None) -> CheckResult:
+    """Run the confidentiality check against a commit/tree object."""
+    root = (repo_root or globals()["repo_root"]()).resolve()
+    label = context or f"{object_ref}"
+    offenses = scan_tree_offenses(object_ref, repo_root=root)
+    try:
+        tree_paths = {rel for rel, _raw in _tracked_tree_blobs(root, object_ref)}
+    except ConfidentialityScanError as exc:
+        offenses.append(_scan_error(".", str(exc)))
+        tree_paths = set()
+    unreviewed, stale = internal_tree_violations_for_paths(tree_paths)
+    return CheckResult(
+        name=CHECK_NAME,
+        errors=tuple(
+            _errors_from_scan_lines(
+                offenses=offenses,
+                unreviewed=unreviewed,
+                stale=stale,
+                context=f"push guard {label}",
+            )
+        ),
+    )
+
+
+def run_push_guard(
+    lines: list[str] | None = None,
+    *,
+    repo_root: Path | None = None,
+    object_refs: list[str] | None = None,
+) -> CheckResult:
+    """Pre-push/pre-receive style guard for refs about to be accepted.
+
+    ``lines`` is the raw hook stdin. ``object_refs`` is a test/operator escape
+    hatch for checking explicit tree-ish values without constructing hook input.
+    """
+    root = (repo_root or globals()["repo_root"]()).resolve()
+    updates, malformed = _parse_push_updates(lines or [])
+    targets: list[tuple[str, str]] = [(f"object {ref}", ref) for ref in (object_refs or [])]
+    targets.extend(updates)
+    errors: list[ValidationError] = []
+    for line in malformed:
+        errors.append(
+            make_error(
+                code="CE-CONFIDENTIALITY-PUSH-SCAN",
+                path=".",
+                field="push update",
+                message=f"push guard failed closed: malformed ref update line: {line!r}.",
+                contract=CONTRACT,
+            )
+        )
+    seen: set[str] = set()
+    for ref, oid in targets:
+        if oid in seen:
+            continue
+        seen.add(oid)
+        result = run_tree(oid, repo_root=root, context=f"{ref}@{oid[:12]}")
+        errors.extend(result.errors)
+    return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+
+def run(paths: list[Path] | None = None) -> CheckResult:
+    """Standalone-check entrypoint for the CLI.
+
+    ``paths`` is accepted for signature parity with other checks; the rule
+    always scans the canonical public-doc surface rooted at the repo root, so
+    the argument is advisory only (the first path, if a repo root, is used).
+    """
+    root: Path | None = None
+    if paths:
+        first = paths[0].resolve()
+        if (first / "docs").is_dir() or (first / ".git").exists():
+            root = first
+    # 1) Confidential ce-ops# / internal-host pattern scan.
+    offenses = scan_offenses(repo_root=root)
+
+    # 2) Internal-tree guard (ce-ops#283): no net-new docs/operations or
+    #    docs/delivery files in the public tree, and no stale ratchet entries.
+    unreviewed, stale = internal_tree_violations(repo_root=root)
+    errors = _errors_from_scan_lines(
+        offenses=offenses,
+        unreviewed=unreviewed,
+        stale=stale,
+        context="working tree",
+    )
     return CheckResult(name=CHECK_NAME, errors=tuple(errors))

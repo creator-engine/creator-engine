@@ -136,6 +136,24 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_public_docs_confidentiality.add_argument(
         "path", nargs="?", default=".", help="repo root to scan (default: .)"
     )
+    guard_public_docs_confidentiality_push = sub.add_parser(
+        "guard-public-docs-confidentiality-push",
+        help=(
+            "pre-push/pre-receive confidentiality guard: read git ref updates "
+            "from stdin and fail if any pushed tree leaks a ce-ops# ticket ref "
+            "or internal host identifier"
+        ),
+    )
+    guard_public_docs_confidentiality_push.add_argument(
+        "path", nargs="?", default=".", help="repo root to scan (default: .)"
+    )
+    guard_public_docs_confidentiality_push.add_argument(
+        "--object",
+        dest="objects",
+        action="append",
+        default=[],
+        help="explicit commit/tree object to scan instead of reading hook stdin; may be repeated",
+    )
 
     scan_portability_plane = sub.add_parser(
         "scan-portability-plane",
@@ -735,6 +753,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-public-docs-confidentiality":
         from .public_docs_confidentiality import run as _run_public_docs_confidentiality
         result = _run_public_docs_confidentiality([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "guard-public-docs-confidentiality-push":
+        from .public_docs_confidentiality import run_push_guard
+
+        lines = [] if args.objects else sys.stdin.read().splitlines()
+        result = run_push_guard(lines, repo_root=Path(args.path), object_refs=args.objects)
         return _emit_results([result], args.json_output)
     if subcommand == "scan-portability-plane":
         from .checks.portability_plane import run as _run_portability_plane
