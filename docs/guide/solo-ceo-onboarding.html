@@ -139,12 +139,12 @@
 <p>The key difference is <strong>Shape</strong>: in CEO mode you never run the Scope/Shape loop by hand. The agent does that work on your behalf and surfaces the result — a drafted Scope with its Goal, Done-when, and Change-type filled in — for your review before anything is ratified.</p>
 <hr>
 <h2 id="phase-0-what-you-need-before-you-start">Phase 0 — What you need before you start</h2>
-<p>You need a CE install and a governed session. If you have not done either, follow the install steps in <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a> first. Once installed, <code>ce launch</code> is your daily entry point.</p>
+<p>You need a CE install and a governed session. If you have not done either, follow the install steps in <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a> first. Once installed, <code>ce launch --backend host</code> is your daily entry point.</p>
 <h3 id="the-one-concept-to-anchor-on">The one concept to anchor on</h3>
 <p>In CEO mode the agent is your executor, not your co-typist. Instead of running <code>ce scope &lt;id&gt; --goal ... --change-type ...</code> and <code>ce shape &lt;id&gt;</code> yourself, you tell it <em>what you want to build</em>, in plain language. It translates that intent into the governed pipeline, then brings you the artifact to ratify. You are the CEO of the work: you set direction, you approve gates, you own the outcome. The agent handles the mechanics.</p>
 <hr>
 <h2 id="phase-1-launch-your-governed-session">Phase 1 — Launch your governed session</h2>
-<pre><code class="language-bash">ce launch</code></pre>
+<pre><code class="language-bash">ce launch --backend host</code></pre>
 <p>This opens your coding agent in a governed terminal pane — exactly the session you already know, with CE&#x27;s governance layer around it. There is no separate CEO-mode dashboard or interface; everything flows through the normal agent conversation. The governance layer is what changes the behavior.</p>
 <p>What you will see is your normal agent session. Tell it you want to work in CEO mode if it does not already know from your project configuration, and frame your first piece of work.</p>
 <hr>
