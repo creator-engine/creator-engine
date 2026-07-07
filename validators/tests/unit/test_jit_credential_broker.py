@@ -316,6 +316,32 @@ def test_ttl_expiry_revokes_and_prevents_late_explicit_revoke(tmp_path):
     assert any(rec["action"] == "expire" and rec["reason"] == "ttl_expired" for rec in records)
 
 
+def test_mint_model_api_caps_upstream_expiry_to_broker_jit_ttl(tmp_path):
+    clock = datetime(2026, 7, 6, 17, 0, tzinfo=timezone.utc)
+    upstream_expires_at = (clock + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+
+    response = handle_self_push_request(
+        {"verb": "mint-seat-credential", "seat_id": "dev-3", "credential_class": "model-api"},
+        config=_config(tmp_path),
+        broker_seat_id="dev-3",
+        host_repo_path="/host/workspace",
+        credential_store=SeatCredentialStore(tmp_path / "jit.lock"),
+        model_mint_fn=lambda seat_id, ttl: ModelCredential(
+            _MODEL_SECRET,
+            upstream_expires_at,
+            f"{seat_id}/model-api/long-upstream",
+        ),
+        now=lambda: clock,
+    )
+
+    assert response["status"] == 200
+    assert response["expires_at"] == (
+        clock + timedelta(seconds=300)
+    ).isoformat().replace("+00:00", "Z")
+    records = _records(tmp_path)
+    assert records[-1]["expires_at"] == response["expires_at"]
+
+
 def test_ttl_active_sweep_revokes_without_followup_request(tmp_path):
     clock = datetime(2026, 7, 6, 17, 0, tzinfo=timezone.utc)
     revoked = []
@@ -377,7 +403,7 @@ def test_contained_secret_scan_recurses_into_docker_subtree(tmp_path):
                 "docker": {
                     "create": {
                         "env": {
-                            "GITHUB_TOKEN": _FORGE_SECRET,
+                            "GITHUB_TOKEN": "configured",
                         }
                     }
                 }

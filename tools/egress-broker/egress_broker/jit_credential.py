@@ -86,15 +86,17 @@ def _iso(dt: datetime) -> str:
 
 
 def _parse_expires_at(value: str, *, fallback_now: datetime, ttl_seconds: int) -> datetime:
+    capped_expires_at = fallback_now + timedelta(seconds=ttl_seconds)
     raw = str(value or "").strip()
     if raw:
         try:
             normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
             parsed = datetime.fromisoformat(normalized)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return min(parsed, capped_expires_at)
         except ValueError:
             pass
-    return fallback_now + timedelta(seconds=ttl_seconds)
+    return capped_expires_at
 
 
 def _default_lock_path() -> Path:

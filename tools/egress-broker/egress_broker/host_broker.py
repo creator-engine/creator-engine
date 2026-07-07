@@ -458,10 +458,10 @@ def _scan(obj: object, path: str, findings: set[str], *, keys_are_secret: bool =
             child = f"{path}.{key_s}"
             if keys_are_secret and _SECRET_KEY_RE.search(key_s):
                 findings.add(child)
-            _scan(value, child, findings)
+            _scan(value, child, findings, keys_are_secret=keys_are_secret)
     elif isinstance(obj, (list, tuple)):
         for idx, value in enumerate(obj):
-            _scan(value, f"{path}[{idx}]", findings)
+            _scan(value, f"{path}[{idx}]", findings, keys_are_secret=keys_are_secret)
     elif isinstance(obj, str) and _TOKEN_VALUE_RE.search(obj):
         findings.add(path)
 
