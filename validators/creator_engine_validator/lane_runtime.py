@@ -1088,20 +1088,6 @@ def launch(
             "refusing lane launch before any side effect"
         )
 
-    # 5c. G11: in-launcher reviewer-authority minting. The envelope is lane-scoped
-    #     under ignored ledger state, validated with the same schema as supplied
-    #     refs, then passed through the existing launch-pinned env carrier.
-    if reviewer_authority_to_mint is not None:
-        reviewer_authority_ref = _write_reviewer_authority_envelope(
-            ledger_root=ledger_root,
-            controller_id=controller_id,
-            lane_id=lane_id,
-            envelope=reviewer_authority_to_mint,
-        )
-        reviewer_authority_ref = _validate_reviewer_authority_ref(
-            reviewer_authority_ref, repo_root, now=now
-        )
-
     resolved_state_root = (
         Path(state_root) if state_root is not None else Path(repo_root) / ".ce" / "state"
     )
@@ -1229,13 +1215,20 @@ def launch(
 
     # --- Side effects begin here ---
 
-    if reviewer_authority_ref is not None:
-        _consume_reviewer_authority_ref_if_single_use(
-            reviewer_authority_ref,
-            repo_root=repo_root,
+    # G11: in-launcher reviewer-authority minting is intentionally delayed until
+    # every pre-spawn refusal gate above has passed. A refused launch must not
+    # leave a valid, unconsumed reviewer-authority artifact behind.
+    minted_reviewer_authority_ref: str | None = None
+    if reviewer_authority_to_mint is not None:
+        reviewer_authority_ref = _write_reviewer_authority_envelope(
+            ledger_root=ledger_root,
             controller_id=controller_id,
             lane_id=lane_id,
-            now=now,
+            envelope=reviewer_authority_to_mint,
+        )
+        minted_reviewer_authority_ref = reviewer_authority_ref
+        reviewer_authority_ref = _validate_reviewer_authority_ref(
+            reviewer_authority_ref, repo_root, now=now
         )
 
     # 7. Spawn/attach the tmux pane running the (possibly governed) command. A
@@ -1271,6 +1264,7 @@ def launch(
     )
 
     runner_runtime: dict[str, Any] | None = None
+    surface_created = False
     try:
         if runtime_policy_stamp is not None:
             if runtime_policy_record is None:
@@ -1306,10 +1300,24 @@ def launch(
                 # the tmux backend ignores it (signature stays uniform).
                 seat_dir=str(seat_dir),
             )
+        surface_created = True
     except runtime_backend_bridge.RuntimeBackendBridgeError as exc:
+        if minted_reviewer_authority_ref is not None and not surface_created:
+            Path(minted_reviewer_authority_ref).unlink(missing_ok=True)
         raise RuntimePolicyRefused(str(exc)) from exc
     except TmuxUnavailable as exc:
+        if minted_reviewer_authority_ref is not None and not surface_created:
+            Path(minted_reviewer_authority_ref).unlink(missing_ok=True)
         raise TmuxUnavailableError(str(exc)) from exc
+
+    if reviewer_authority_ref is not None:
+        _consume_reviewer_authority_ref_if_single_use(
+            reviewer_authority_ref,
+            repo_root=repo_root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+            now=now,
+        )
 
     # 7b. v3.5-F launch-confirm: the seat scope must materialize. Write
     #     memory.oom.group=1 (the kernel kills the SEAT as a unit, never a

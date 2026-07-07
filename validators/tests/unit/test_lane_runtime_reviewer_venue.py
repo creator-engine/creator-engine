@@ -236,6 +236,31 @@ def test_minted_reviewer_authority_is_exported_and_recorded(tmp_path):
     assert data["reviewer_authority_ref"] == str(minted)
 
 
+def test_minted_reviewer_authority_tmux_unavailable_leaves_no_envelope(tmp_path):
+    adapter = RecordingAdapter(available=False)
+    expected = (
+        _ledger(tmp_path) / "panes" / CID / f"{LID}.reviewer-authority.yaml"
+    )
+
+    with pytest.raises(lane_runtime.TmuxUnavailableError) as exc:
+        _launch_reviewer(
+            tmp_path,
+            adapter=adapter,
+            mint_reviewer_authority=True,
+            reviewer_authority_pr_number=108,
+            reviewer_authority_head_sha="aa02b0ceb192b38f52da0d99f798e1e2710a8a22",
+            reviewer_authority_actor="ubuntuaws745-cmyk",
+            reviewer_authority_pr_author="some-other-author",
+            now=datetime(2026, 6, 1, 10, 43, 13, tzinfo=UTC),
+        )
+
+    assert exc.value.code == "G3-TMUX-UNAVAILABLE"
+    assert adapter.spawned == []
+    assert not expected.exists()
+    assert not (_ledger(tmp_path) / "panes" / CID / f"{LID}.yaml").exists()
+    assert not lane_runtime._governance_sidecar_path(_ledger(tmp_path), CID, LID).exists()
+
+
 def test_minted_reviewer_authority_refuses_self_review_before_spawn(tmp_path):
     adapter = RecordingAdapter()
     with pytest.raises(lane_runtime.ReviewerAuthorityInvalid) as exc:
