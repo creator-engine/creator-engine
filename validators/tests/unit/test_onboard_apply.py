@@ -473,6 +473,25 @@ def test_greenfield_reapply_does_not_clobber_existing_brain_ledger(tmp_path):
     assert _leg(second, "brain_genesis")["status"] == "already_satisfied"
 
 
+def test_greenfield_apply_refuses_invalid_existing_brain_ledger_without_clobber(tmp_path):
+    path = brain_runtime.ledger_path(tmp_path / "state")
+    original = b"[]\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(original)
+
+    summary = onboard_apply.apply_onboard(
+        _request(tmp_path),
+        verifier=_verifier(),
+        driver=FakeDriver(),
+        invocation_id="invalid-brain-ledger-regression",
+    )
+
+    brain_leg = _leg(summary, "brain_genesis")
+    assert brain_leg["status"] == "refused"
+    assert brain_leg["verification"]["code"] == "brain_genesis_invalid"
+    assert path.read_bytes() == original
+
+
 def test_greenfield_apply_brain_genesis_allows_fresh_repo_launch(tmp_path):
     repo = tmp_path / "fresh-repo"
     state_root = repo / ".ce" / "state"
