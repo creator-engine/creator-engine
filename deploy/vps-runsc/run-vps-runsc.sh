@@ -29,7 +29,7 @@ Environment:
   CE_VPS_CODEX_HOME            Host codex home (default: $HOME/.codex)
   CE_VPS_CODEX_HOME_MODE       Mount mode for codex home: rw or ro (default: rw)
   CE_VPS_CONTAINED_CODEX_CONFIG Host path for generated contained Codex config
-                                (default: /tmp/creator-engine-vps-runsc-codex-config-<uid>-<user>.toml)
+                                (default: <seat-log-dir>/launcher/codex-config.toml)
   CE_VPS_CODEX_BIN             Host standalone codex binary (default: first codex on PATH)
   CE_VPS_CODEX_PACKAGE_ROOT    Optional host @openai/codex npm package root. If unset,
                                 npm symlinks ending in @openai/codex/bin/codex.js are autodetected.
@@ -55,6 +55,9 @@ Environment:
                                 /run/ce-egress/<host-socket-basename>.
   CE_VPS_SEAT_LOG_DIR          Host log dir mounted at /var/log/ce-seat
                                 (default: ~/.ce/logs/seats/<seat-id>)
+  CE_VPS_HOST_WORKTREE_ROOT    Durable host root bind-mounted to the container worktree root
+                                (default: <seat-log-dir>/worktrees/<launch-id>)
+  CE_VPS_CONTAINER_WORKTREE_ROOT Container worktree root path (default: /var/tmp)
   CE_VPS_TTY_FLAGS             Docker TTY flags (default: -it; set to -i for non-TTY callers)
                                 Detached default is empty; herdr owns the in-container PTY.
   CE_VPS_DRY_RUN               Print docker argv instead of executing when set to 1
@@ -170,7 +173,10 @@ CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET="${CE_VPS_CONTAINER_EGRESS_BROKER_SOCKET:-
 CE_VPS_EGRESS_SELF_REVIEW_SOCKET="${CE_VPS_EGRESS_SELF_REVIEW_SOCKET:-}"
 CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET="${CE_VPS_CONTAINER_EGRESS_SELF_REVIEW_SOCKET:-}"
 CE_VPS_SEAT_LOG_DIR="${CE_VPS_SEAT_LOG_DIR:-${HOME:-/home/ce}/.ce/logs/seats/${CE_VPS_SEAT_ID}}"
-CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-vps-runsc-codex-config-${CE_VPS_UID}-${CE_VPS_CONTAINER_USER}.toml}"
+CE_VPS_LAUNCH_ID="${CE_VPS_LAUNCH_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+CE_VPS_CONTAINED_CODEX_CONFIG="${CE_VPS_CONTAINED_CODEX_CONFIG:-${CE_VPS_SEAT_LOG_DIR}/launcher/codex-config.toml}"
+CE_VPS_HOST_WORKTREE_ROOT="${CE_VPS_HOST_WORKTREE_ROOT:-${CE_VPS_SEAT_LOG_DIR}/worktrees/${CE_VPS_LAUNCH_ID}}"
+CE_VPS_CONTAINER_WORKTREE_ROOT="${CE_VPS_CONTAINER_WORKTREE_ROOT:-/var/tmp}"
 CE_VPS_CONTAINER_CODEX_PACKAGE_ROOT="/usr/local/lib/node_modules/@openai/codex"
 CE_VPS_CONTAINER_SEAT_LOG_DIR="/var/log/ce-seat"
 CE_VPS_CONTAINER_HERDR_SERVER_LOG="${CE_VPS_CONTAINER_SEAT_LOG_DIR}/herdr-server.log"
@@ -294,11 +300,39 @@ case "${CE_VPS_CONTAINED_CODEX_CONFIG}" in
     exit 2
     ;;
 esac
+case "${CE_VPS_CONTAINED_CODEX_CONFIG}" in
+  /tmp | /tmp/*)
+    printf 'CE_VPS_CONTAINED_CODEX_CONFIG must be durable and not under host /tmp, got %s\n' "${CE_VPS_CONTAINED_CODEX_CONFIG}" >&2
+    exit 2
+    ;;
+esac
 case "${CE_VPS_SEAT_LOG_DIR}" in
   /*)
     ;;
   *)
     printf 'CE_VPS_SEAT_LOG_DIR must be an absolute path, got %s\n' "${CE_VPS_SEAT_LOG_DIR}" >&2
+    exit 2
+    ;;
+esac
+case "${CE_VPS_HOST_WORKTREE_ROOT}" in
+  /*)
+    ;;
+  *)
+    printf 'CE_VPS_HOST_WORKTREE_ROOT must be an absolute path, got %s\n' "${CE_VPS_HOST_WORKTREE_ROOT}" >&2
+    exit 2
+    ;;
+esac
+case "${CE_VPS_HOST_WORKTREE_ROOT}" in
+  /tmp | /tmp/*)
+    printf 'CE_VPS_HOST_WORKTREE_ROOT must be durable and not under host /tmp, got %s\n' "${CE_VPS_HOST_WORKTREE_ROOT}" >&2
+    exit 2
+    ;;
+esac
+case "${CE_VPS_CONTAINER_WORKTREE_ROOT}" in
+  /*)
+    ;;
+  *)
+    printf 'CE_VPS_CONTAINER_WORKTREE_ROOT must be an absolute path, got %s\n' "${CE_VPS_CONTAINER_WORKTREE_ROOT}" >&2
     exit 2
     ;;
 esac
@@ -415,6 +449,9 @@ EOF
 }
 
 prepare_contained_codex_config
+mkdir -p "${CE_VPS_HOST_WORKTREE_ROOT}"
+chown "${CE_VPS_UID}:${CE_VPS_GID}" "${CE_VPS_HOST_WORKTREE_ROOT}" 2>/dev/null || true
+chmod 0700 "${CE_VPS_HOST_WORKTREE_ROOT}" 2>/dev/null || true
 
 if [ "${dry_run}" != "1" ]; then
   mkdir -p "${CE_VPS_SEAT_LOG_DIR}"
@@ -480,6 +517,7 @@ if [ "${CE_VPS_CODEX_HOME_MODE}" = "ro" ]; then
 fi
 seat_log_mount="type=bind,source=${CE_VPS_SEAT_LOG_DIR},target=${CE_VPS_CONTAINER_SEAT_LOG_DIR}"
 contained_codex_config_mount="type=bind,source=${CE_VPS_CONTAINED_CODEX_CONFIG},target=${CE_VPS_CONTAINER_CODEX_HOME}/config.toml,readonly"
+worktree_root_mount="type=bind,source=${CE_VPS_HOST_WORKTREE_ROOT},target=${CE_VPS_CONTAINER_WORKTREE_ROOT}"
 codex_mount_args=()
 if [ -n "${CE_VPS_CODEX_PACKAGE_ROOT}" ]; then
   codex_mount_args+=(
@@ -539,6 +577,7 @@ docker_cmd=(
   --mount "${codex_home_mount}"
   --mount "${seat_log_mount}"
   --mount "${contained_codex_config_mount}"
+  --mount "${worktree_root_mount}"
   "${codex_mount_args[@]}"
 )
 

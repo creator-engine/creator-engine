@@ -18,7 +18,9 @@ CE_VPS_DOCKER_NETWORK=host
 CE_VPS_HARNESS=codex
 CE_VPS_REPO=$(pwd)
 CE_VPS_CODEX_HOME=$HOME/.codex
-CE_VPS_CONTAINED_CODEX_CONFIG=/tmp/creator-engine-vps-runsc-codex-config-<uid>-<user>.toml
+CE_VPS_CONTAINED_CODEX_CONFIG=$HOME/.ce/logs/seats/<seat-id>/launcher/codex-config.toml
+CE_VPS_HOST_WORKTREE_ROOT=$HOME/.ce/logs/seats/<seat-id>/worktrees/<launch-id>
+CE_VPS_CONTAINER_WORKTREE_ROOT=/var/tmp
 CE_VPS_CODEX_BIN=$(command -v codex)
 CE_VPS_CODEX_PACKAGE_ROOT=<autodetected for npm @openai/codex installs>
 CE_VPS_CONTAINER_REPO=/workspace/creator-engine
@@ -44,6 +46,7 @@ The launcher always applies (in both foreground and detached mode):
 - `--cap-drop=ALL`
 - `--user uid:gid`
 - repo, Codex home, contained Codex config, and Codex binary/package bind mounts
+- a durable host-backed `/var/tmp` worktree-root bind mount
 - `CODEX_HOME`, `TERM`, and `CE_DGX_HARNESS` for the image entrypoint
 
 ## Building the image
@@ -158,6 +161,11 @@ the readonly config mount. Codex must run with `danger-full-access`/bypass
 because its inner bubblewrap/Landlock sandbox cannot nest inside runsc/gVisor;
 the gVisor container is the sandbox boundary.
 
+The generated config is staged under the durable seat log root by default:
+`${CE_VPS_SEAT_LOG_DIR}/launcher/codex-config.toml`. The launcher rejects
+generated config or host worktree roots under host `/tmp` so stopped containers
+remain restartable after tmpfiles cleanup.
+
 > **tmux is DEPRECATED/legacy** for driving these seats. The herdr pane via
 > `docker exec -it <name> herdr` is the supported attach surface.
 
@@ -213,7 +221,23 @@ nested bubblewrap or Landlock cannot run inside runsc/gVisor. The gVisor
 container is the sandbox boundary for this recipe, so Codex runs in bypass mode
 only inside that containment. Host auth stays in the mounted Codex home; the
 contained config is generated separately and can be redirected with
-`CE_VPS_CONTAINED_CODEX_CONFIG`.
+`CE_VPS_CONTAINED_CODEX_CONFIG`, provided the override is durable and not under
+host `/tmp`.
+
+## Durable Worktree Root
+
+The launcher bind-mounts a host-disk worktree root into the container at
+`/var/tmp` by default:
+
+```text
+CE_VPS_HOST_WORKTREE_ROOT=${CE_VPS_SEAT_LOG_DIR}/worktrees/<launch-id>
+CE_VPS_CONTAINER_WORKTREE_ROOT=/var/tmp
+```
+
+This keeps `/var/tmp` unit worktrees on host disk instead of the runsc writable
+overlay, so files remain inspectable from the host after sentry or container
+death. Operators may override the host or container path, but the host path must
+be absolute and must not live under host `/tmp`.
 
 ## Codex Binary Mounts
 
@@ -324,7 +348,8 @@ deploy/vps-runsc/run-vps-runsc.sh exec "hello"
 The printed argv must include `docker run`, `--runtime=runsc-gvproxy-ptrace`,
 `--network=host`, `--security-opt=no-new-privileges`, `--cap-drop=ALL`,
 `--user uid:gid`, the repo bind mount, the `.codex` bind mount, the contained
-Codex config bind mount, a Codex binary or npm package-root bind mount, and
+Codex config bind mount under the seat log root, the durable `/var/tmp`
+worktree-root bind mount, a Codex binary or npm package-root bind mount, and
 `CE_DGX_HARNESS=codex`. For `tui`, the image must be the final argv element; no
 literal `tui` subcommand is passed to the entrypoint.
 
