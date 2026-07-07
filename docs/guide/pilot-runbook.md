@@ -6,7 +6,7 @@ and get cost-safe PRs + merges on your own agent. Brand new? Begin at the
 [`Welcome / Start Here`](./welcome.md) front door. Plain-language intro:
 [`understanding-ce.md`](./understanding-ce.md). The mechanics live in the cited
 contracts/designs. For the shortest command sequence, see
-[`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md).*
+[`quickstart.md`](./quickstart.md).*
 
 > **Pilot scope.** The E1 one-liner now performs a real authenticated inventory
 > bootstrap: it verifies the signed spec, installs CE into a user-local venv from
@@ -76,11 +76,11 @@ belongs to the later apply path, not a system-wide E1 symlink.
 ### Cost safety (the #1 pilot question)
 
 Cost-runaway protection is **on by default** (`spend_cap_enforcement: enforce`).
-You may opt out of the per-run / per-fleet **budget caps** only with an explicit,
+You may opt out of the per-run / per-fleet lane caps only with an explicit,
 ratified choice — and CE educates you first:
 
 > Turning this off won't speed up your runs; it only removes per-run / per-fleet
-> budget friction. The runaway-detection net (global ceiling + anomaly → escalate)
+> lane-cap friction. The runaway-detection net (global ceiling + anomaly → escalate)
 > stays on.
 
 So even opted-out, you are never blind — see
@@ -163,19 +163,20 @@ checkpoint/`/clear` nudge. Vocabulary canon:
 1. **Frame** — just chat with your agent about what you want. Nothing is tracked.
 2. **Shape** — when a concrete change emerges, CE offers to crystallize it into a
    **Scope** (the chat→Scope detect-and-offer; cheap, inline, cancel-safe). The
-   Scope card fills in the canon labels — **Goal · Done-when · Budget ·
-   Change-type · Ready**. You set the **Budget** (your call); the agent drafts the
-   rest and may make a change *safer* on its own but only *you* can make it
-   riskier. Shaping design: [`../architecture/shaping-ux.md`](../architecture/shaping-ux.md).
-   When the card reads **Ready ✓**, place the bet: `ce ratify <scope>`.
+   Scope card fills in the required labels — **Goal · Done-when ·
+   Change-type**. Readiness is shown separately as the card state. The agent
+   drafts the Scope and may make a change *safer* on its own but only *you* can
+   make it riskier. Shaping design:
+   [`../architecture/shaping-ux.md`](../architecture/shaping-ux.md).
+   When the card reads **Ready ✓**, ratify the Scope: `ce ratify <scope>`.
 3. **Build** — `ce drive <scope>` dispatches one governed, boxed run (the front
-   gate refuses unless Ready + ratified; the appetite becomes the run's spend cap).
+   gate refuses unless Ready + ratified).
 4. **Review** — read the **◆ CE Completion Report**: `ce report <scope>`:
 
 ```
 ┌─ ◆ CE COMPLETION REPORT · run r-91a · Scope cs-4f2 ──────────────────
 │ Outcome   PR opened → #7
-│ Verdict   Done-when 3/3 met · tests green · in scope ✓ · 14% of Budget S
+│ Verdict   Done-when 3/3 met · tests green · in scope ✓
 │ Next      → Review PR #7  (Change-type code → your approval)
 │ Inspect   gh pr view 7   |   ce show cs-4f2   |   ce artifacts r-91a
 └──────────────────────────────────────────────────────────
@@ -204,7 +205,7 @@ ce install --spec llms-install.md --answers ce-install.answers.yaml --apply --no
 ```
 
 Authorize the App when prompted, then run `ce session` from the repo terminal.
-Chat in Frame, confirm a real first Scope, set the Budget, ratify it, drive the
+Chat in Frame, confirm a real first Scope, ratify it, drive the
 Build, review the PR in a distinct venue, and merge through `ce merge --apply`.
 From there, every change is a governed, cost-safe, evidence-backed Scope.
 

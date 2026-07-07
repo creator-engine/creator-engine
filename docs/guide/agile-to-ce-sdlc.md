@@ -52,7 +52,7 @@ allowed to touch.
 | Product backlog | Projects board and task queue | Ready work is tracked as ordered issues or tasks, with dependencies and ownership visible. |
 | User story | Scope or task shaped from product intent | The unit of work is tied back to the artifact set appropriate for its size and done criteria. |
 | Story points | Work class: `XS`, `S`, `M`, `L` | Size is declared as an execution and review floor, not a velocity accounting unit. |
-| Sprint planning | Shape | The team shapes intent before implementation and checks that scope, budget, risk, and dependencies are explicit. |
+| Sprint planning | Shape | The team shapes intent before implementation and checks that Goal, Done-when, Change-type, and dependencies are explicit. |
 | Backlog refinement | Frame and Shape | Ambiguity is resolved in durable artifacts before Build starts. |
 | Daily standup | Async governed workflow | Progress is reported through issue comments, PR state, CI, review evidence, and handoff notes rather than synchronous status meetings. |
 | Pull request review | Review plus ratification-aware Ship | A separate reviewer inspects the artifacts; authorization remains a ratification act, not a rubber stamp from green CI. |
@@ -173,7 +173,7 @@ For a CE change to be done, the evidence should show:
 - Independent review has checked the artifact.
 - Required ratification exists for the risk being shipped.
 
-The envelope is the boundary around the change: what paths, budget, authority,
+The envelope is the boundary around the change: what paths, authority,
 and risk class are allowed. A change can pass tests and still be refused if it
 escapes that envelope.
 

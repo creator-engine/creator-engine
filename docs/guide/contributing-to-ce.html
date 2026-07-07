@@ -190,16 +190,17 @@ fi</code></pre>
 <pre><code class="language-bash">TMPDIR=/var/tmp ce validate-pr</code></pre>
 <p><code>ce validate-pr</code> is the canonical local preflight. It is a superset of the individual pytest and validator commands above, resolves the committed comparison base, and prints one final <code>GREEN</code> or <code>FAIL</code> summary (<code>docs/contracts/authoring-a-governed-pr.md:18-61</code>, <code>validators/creator_engine_validator/pr_preflight.py:175-180</code>). Use the single preflight as the final local evidence pass before push.</p>
 <blockquote>
-<p><strong>Running from an isolated worktree?</strong> Set <code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/validators/README.md"><code>../../validators/README.md</code></a>.</p>
+<p><strong>Running from an isolated worktree?</strong> Set <code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/../validators/README.md"><code>../../validators/README.md</code></a>.</p>
 </blockquote>
+<p>If <code>ce validate-pr</code> or <code>ce brain verify</code>, <code>ce brain correct</code>, or <code>ce brain sync</code> refuses because the installed <code>creator-engine-validator</code> wheel is older than the source checkout, reinstall or update the wheel before treating the result as durable. For a deliberate one-off override, set <code>CE_ALLOW_STALE_WHEEL=1</code>; the literal value <code>1</code> is required, and CE logs that the command is proceeding by explicit override.</p>
 <h2 id="4-the-governed-cycle">4. The Governed Cycle</h2>
 <p>The user-facing cycle is:</p>
 <pre><code class="language-text">Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship</code></pre>
 <p><code>docs/architecture/stage-vocabulary.md</code> is the canon for these words (<code>docs/architecture/stage-vocabulary.md:1-11</code>). The short version:</p>
 <ul>
 <li>Frame: understand and bound the problem.</li>
-<li>Shape: turn it into a ratifiable bet: acceptance criteria, budget, mutation class, and plan.</li>
-<li>Build: execute the ratified bet in a governed run.</li>
+<li>Shape: turn it into a ratifiable Scope: acceptance criteria, change class, and plan.</li>
+<li>Build: execute the ratified Scope in a governed run.</li>
 <li>Review: grade the result against acceptance criteria.</li>
 <li>Ship: land the governed terminal result (<code>docs/architecture/stage-vocabulary.md:13-17</code>).</li>
 </ul>
@@ -255,7 +256,7 @@ fi</code></pre>
 <li>Deploy, publish, merge, or live external-tracker mutation on behalf of the project.</li>
 </ul>
 <p>The governance on-ramp lists these privileged repo/platform operations and says PRs attempting them without authorization are closed pending the appropriate spec/plan/tasks triple and Operator ratification (<code>GOVERNANCE.md:135-155</code>).</p>
-<h2 id="8-legal-apache-20-and-dco">8. Legal: Apache-2.0 And DCO</h2>
+<h2 id="8-legal-apache-2-0-and-dco">8. Legal: Apache-2.0 And DCO</h2>
 <p>Current <code>CONTRIBUTING.md</code> says contributions are licensed under Apache License, Version 2.0 (<code>CONTRIBUTING.md:150-158</code>). This guide documents the Developer Certificate of Origin mechanics that contributors should follow for auditable commit provenance.</p>
 <p>Contributor rule:</p>
 <pre><code class="language-text">Every commit must carry a Developer Certificate of Origin sign-off.

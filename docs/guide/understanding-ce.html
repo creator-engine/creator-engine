@@ -120,44 +120,44 @@
     </div>
     <article class="article">
 <h1 id="understanding-creator-engine">Understanding Creator Engine</h1>
-<p><em>A plain-language guide to what CE is and the words it uses. Brand new? Start at the <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>Welcome / Start Here</code></a> onboarding front door, then come back here for the workflow tour. If you want the full, precise mapping to the machine underneath, the canonical reference is <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>../architecture/stage-vocabulary.md</code></a>.</em></p>
-<h2 id="what-ce-is">What CE is</h2>
-<p>Creator Engine runs <strong>your own coding agent — under governance.</strong> You keep chatting with the agent you already use; CE wraps a structured, stateful, artifact-aware workflow around it so that real work is <strong>planned, tracked, checked, and merged on purpose</strong> — not in one undifferentiated blur of edits. The core idea: <strong>the thing that decides whether work is good lives <em>outside</em> the agent.</strong> You judge artifacts — a plan, a diff, the evidence, the PR — not a transcript.</p>
-<h2 id="the-five-stages-frame-shape-build-review-ship">The five stages: Frame → Shape → Build → Review → Ship</h2>
-<p>CE names where you are with five plain words. They describe <strong>what you&#x27;re doing right now</strong>, and they work at any size — a one-line fix or a whole project.</p>
+<p>Creator Engine runs <strong>your own coding agent under governance.</strong> You keep using the agent you already know. CE adds a structured, evidence-backed loop around real work so changes are shaped, ratified, built, reviewed, and shipped on purpose.</p>
+<p>Start with the canonical <a href="quickstart.html"><code>quickstart.md</code></a> when you want commands. Read <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a> when you want the concepts behind the loop.</p>
+<h2 id="what-ce-is">What CE Is</h2>
+<p>The core idea is simple: the thing that decides whether work is good lives outside the agent. You judge artifacts: a Scope, a diff, checks, review evidence, and the Completion Report. You do not judge a transcript.</p>
+<p>CE is CLI-anchored. The everyday path is <code>ce brain init</code> once, then <code>ce launch --backend host</code> to open your governed agent session. Contained launch is hardening in progress; use the host backend unless your operator tells you a contained backend is ready for your repo.</p>
+<h2 id="the-five-stages">The Five Stages</h2>
+<p>CE names the loop with five plain words:</p>
+<pre><code class="language-text">Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship</code></pre>
 <ol>
-<li><strong>Frame</strong> — <em>understand the problem.</em> What&#x27;s being asked, why, and what &quot;done&quot; looks like. This is just thinking; nothing is tracked yet.</li>
-<li><strong>Shape</strong> — <em>turn it into a bet.</em> You and the agent draft a small, ratifiable unit of work called a <strong>Scope</strong>: what done means, how much you&#x27;re willing to spend, what kind of change it is. When it&#x27;s complete, you place the bet.</li>
-<li><strong>Build</strong> — <em>do the work.</em> The agent executes the bet in one governed, sandboxed run.</li>
-<li><strong>Review</strong> — <em>check it.</em> The result is graded against what you said &quot;done&quot; was — with evidence, not vibes.</li>
-<li><strong>Ship</strong> — <em>land it.</em> The governed finish: a merged pull request, delivered research, or a reasoned &quot;no change needed.&quot;</li>
+<li><strong>Frame</strong> - understand the problem, why it matters, and what good would look like. This is exploration only; nothing is tracked yet.</li>
+<li><strong>Shape</strong> - turn the framed problem into a Scope with Goal, Done-when, and Change-type.</li>
+<li><strong>Build</strong> - let the agent execute the ratified Scope in a governed run.</li>
+<li><strong>Review</strong> - grade the result against Done-when and evidence.</li>
+<li><strong>Ship</strong> - land the governed outcome: merged PR, delivered research, or no-change.</li>
 </ol>
-<p>You&#x27;ll see the current stage in the status line as you work, so you&#x27;re never lost.</p>
-<h2 id="the-scope-card-your-unit-of-work">The Scope card: your unit of work</h2>
-<p>When a chat request turns into real work, CE drafts a <strong>Scope</strong> — a small card with five fields. The agent fills in what it can and asks you only what it must:</p>
+<p>This is a loop, not a waterfall. Review can send work back. A large Scope can spawn smaller Scopes.</p>
+<h2 id="the-scope">The Scope</h2>
+<p>When exploration becomes real work, CE records a <strong>Scope</strong>. The Scope is the contract for the run.</p>
 <table>
 <thead><tr><th>Field</th><th>What it means</th></tr></thead>
 <tbody>
-<tr><td><strong>Goal</strong></td><td>what you&#x27;re trying to do</td></tr>
-<tr><td><strong>Done when</strong></td><td>the checks that say it&#x27;s finished (these are what get graded)</td></tr>
-<tr><td><strong>Budget</strong></td><td>how much effort you&#x27;re willing to spend — a fixed cap you commit, <em>not</em> a time estimate</td></tr>
-<tr><td><strong>Change type</strong></td><td>what kind of change this is, and how risky (a docs tweak vs. a deploy)</td></tr>
-<tr><td><strong>Ready</strong></td><td>a ✓ that appears once the other four are filled in and valid</td></tr>
+<tr><td><strong>Goal</strong></td><td>What you are trying to accomplish</td></tr>
+<tr><td><strong>Done-when</strong></td><td>The checks that say the work is finished</td></tr>
+<tr><td><strong>Change-type</strong></td><td>What kind of change this is and how risky it is</td></tr>
 </tbody></table>
-<p>Once the card is <strong>Ready</strong>, you place the bet and the agent starts building. A card in progress looks like this:</p>
-<pre><code>◆ CE · Shape → &quot;rate-limit /api/login&quot;   (Goal ✓ · Done-when 3 · Budget S · Change-type code · Ready ✓)
-◆ CE · ratify &amp; dispatch the bet? › yes</code></pre>
-<p>A few things worth knowing:</p>
-<ul>
-<li><strong>You set the Budget.</strong> The agent never decides how much you&#x27;re willing to spend — that&#x27;s your call.</li>
-<li><strong>The agent can make a change <em>safer</em> on its own, but only you can make it <em>riskier</em>.</strong> If a change turns out to be higher-stakes than first drafted, that needs your explicit OK.</li>
-<li><strong>Nothing is tracked until you say yes.</strong> Plain chat stays plain chat; a Scope only appears when you confirm the bet.</li>
-</ul>
-<h2 id="seeing-the-machine-under-the-skin">Seeing the machine under the skin</h2>
-<p>These friendly words are a <strong>clear skin over a precise state machine.</strong> Under &quot;Ready&quot; is a real Definition-of-Ready check; under &quot;Ship&quot; is a governed, branch-protected merge; under the five stages is a conserved lifecycle that the evidence and governance run on. The skin makes CE approachable; the machine makes it trustworthy — and you can always look underneath.</p>
-<p>If you want the full mapping — every user-facing word to its mechanical state, the gates, and how the same five stages scale from a single ticket up to a whole project — read the canon: <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>../architecture/stage-vocabulary.md</code></a>.</p>
-<hr>
-<p><em>This is the seed of CE&#x27;s in-product help; the full interactive guide ships with the product surface.</em></p>
+<p>Readiness is the ratifiable state, not a Scope field: CE marks the Scope Ready when these fields are valid.</p>
+<p>Optional lane-aware cap: your operator may ask you to add a cap for a specific lane. Use <code>%</code> for a subscription lane with rolling windows, or <code>$</code> for an API lane. This is opt-in and should not be front-loaded in the default path.</p>
+<p>Nothing builds until you ratify a Ready Scope:</p>
+<pre><code class="language-bash">ce ratify &lt;scope-id&gt;</code></pre>
+<p>Natural-language chat can help shape the Scope, but it is not authorization. Governed work begins at explicit <code>ce</code> verbs, and the Scope record is the governing contract.</p>
+<h2 id="the-completion-report">The Completion Report</h2>
+<p>After a run, CE gives you a compact Completion Report:</p>
+<pre><code class="language-text">Outcome   PR opened -&gt; #24
+Verdict   Done-when 3/3 met · tests green · in scope
+Next      Review PR #24</code></pre>
+<p>Review the artifacts against Done-when. If they satisfy the Scope, Ship through the governed merge path. If they do not, send the work back with concrete Review feedback.</p>
+<h2 id="welcome-pack-rule">Welcome Pack Rule</h2>
+<p>Tenant welcome packs link the canonical Quickstart and concepts guide instead of duplicating the journey. Packs can add local setup details, but the CE journey stays in <a href="quickstart.html"><code>quickstart.md</code></a> and <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a>.</p>
     </article>
   </div>
   <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>

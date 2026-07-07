@@ -119,150 +119,197 @@
       <h1>Solo + Dev Mode Onboarding</h1>
     </div>
     <article class="article">
-<h1 id="solo-dev-mode-onboarding">Solo + Dev Mode Onboarding</h1>
-<p><em>This guide is for a solo developer who has chosen </em><em>Dev mode</em><em>: you drive the pipeline yourself by typing <code>ce</code> commands inside your governed agent session. You hold the Frame + Shape decisions directly at each step. If you prefer the agent to drive the pipeline under the hood while you frame intent and ratify gates, see <a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a> instead.</em></p>
+<h1 id="solo--dev-mode-onboarding">Solo + Dev Mode Onboarding</h1>
+<p><em>This guide is for a solo developer who has chosen <strong>Dev mode</strong>: you work
+directly in your own coding-agent terminal while Creator Engine wraps that
+session with governance. If you prefer a less hands-on tour, see
+<a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a> instead.</em></p>
 <blockquote>
-<p><strong>You are in: Solo + Dev mode.</strong> In this cell you type <code>ce</code> commands</p>
-<p>explicitly to move work through the pipeline: you file the Scope, optionally</p>
-<p>run the grill-me to sharpen it, ratify the bet, launch the build, review the</p>
-<p>artifacts, and gate the merge. Each gesture is a deliberate shell command —</p>
-<p>you see exactly what the governed pipeline is doing at every step.</p>
+<p><strong>You are in: Solo + Dev mode.</strong> You still type prompts to Claude Code or
+Codex yourself. CE's job is to start the governed session, keep the local
+state healthy, and hold privileged actions until the right human approval is
+present.</p>
 </blockquote>
-<hr>
-<h2 id="how-dev-mode-fits-the-five-stage-loop">How Dev mode fits the five-stage loop</h2>
-<p>Every piece of CE work follows the same loop: <strong>Frame → Shape → Build → Review → Ship</strong>. In Dev mode you drive each stage explicitly with shell commands:</p>
-<table>
-<thead><tr><th>Stage</th><th>What you do</th><th>Command</th></tr></thead>
-<tbody>
-<tr><td><strong>Frame</strong></td><td>Describe the problem conversationally with the agent</td><td><em>(conversation)</em></td></tr>
-<tr><td><strong>Shape</strong></td><td>File a Scope; optionally run the grill-me to sharpen it</td><td><code>ce scope</code>, <code>ce shape</code></td></tr>
-<tr><td><strong>Build</strong></td><td>Ratify the Scope; launch the governed run</td><td><code>ce ratify</code>, <code>ce drive --spawn</code></td></tr>
-<tr><td><strong>Review</strong></td><td>Inspect the run&#x27;s artifacts against your Done-when</td><td><code>ce artifacts</code>, <code>ce show</code></td></tr>
-<tr><td><strong>Ship</strong></td><td>Read the merge gate; apply the gated merge</td><td><code>ce merge</code>, <code>ce merge --apply</code></td></tr>
-</tbody></table>
-<hr>
-<h2 id="prerequisites">Prerequisites</h2>
-<p>You need a CE install and a governed session. If you have not done either, follow <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a> first. Once installed, <code>ce launch</code> is your daily entry point.</p>
-<hr>
-<h2 id="phase-0-launch-your-governed-session">Phase 0 — Launch your governed session</h2>
-<pre><code class="language-bash">ce launch</code></pre>
-<p>This opens your coding agent in a governed terminal pane. Everything flows through the agent conversation, with CE&#x27;s governance layer around it. You can confirm the install is healthy with <code>ce status</code> — it will show an empty scope list on a fresh workspace.</p>
-<hr>
-<h2 id="phase-1-frame-your-intent-conversational">Phase 1 — Frame your intent (conversational)</h2>
-<p>In your governed session, describe what you want to build in plain language. This is a conversational act — no commands to type here. For example:</p>
-<blockquote>
-<p>&quot;I want to add rate limiting to the public login API: per-IP throttling with</p>
-<p>configurable limits and a clear 429 response for authenticated traffic.&quot;</p>
-</blockquote>
-<p>The agent will ask any clarifying questions it needs. Answer them. This is the <strong>Frame</strong> stage: you are helping the agent understand the problem well enough for you to write a precise Scope.</p>
-<hr>
-<h2 id="phase-2-shape-file-the-scope">Phase 2 — Shape: file the Scope</h2>
-<p>Once you have framed the problem, file a Scope — the governed unit of work. Choose a stable slug (a short kebab-case identifier) for this piece of work:</p>
-<pre><code class="language-bash">ce scope rate-limit-login \
-  --goal &quot;Add per-IP rate limiting to the public login API with configurable limits and 429 responses&quot; \
-  --done-when &quot;Rate limiter returns 429 with Retry-After header when per-IP limit exceeded&quot; \
-  --done-when &quot;Limit thresholds are configurable via environment variable without code change&quot; \
-  --done-when &quot;Tests cover the limit boundary and the 429 response shape&quot; \
-  --budget 5 \
-  --change-type code</code></pre>
-<p><strong>Scope fields:</strong></p>
-<table>
-<thead><tr><th>Field</th><th>Flag</th><th>Meaning</th></tr></thead>
-<tbody>
-<tr><td>Slug</td><td>positional</td><td>Stable identifier for this piece of work (kebab-case)</td></tr>
-<tr><td>Goal</td><td><code>--goal</code></td><td>What you are building, in one line</td></tr>
-<tr><td>Done-when</td><td><code>--done-when</code> (repeatable)</td><td>Acceptance criteria the grader will check at Review time</td></tr>
-<tr><td>Budget</td><td><code>--budget</code></td><td>Effort cap — the governed run cannot exceed this</td></tr>
-<tr><td>Change-type</td><td><code>--change-type</code></td><td>Kind of change: <code>code</code>, <code>docs</code>, <code>schema</code>, <code>deploy</code>, etc.</td></tr>
-</tbody></table>
-<p><strong>The Done-when criteria are the most important part.</strong> Write them as testable statements. They become the grader&#x27;s checklist at Review — not a description of what the agent did, but a description of what you would accept as done.</p>
-<h3 id="optional-sharpen-the-scope-with-the-grill-me">Optional: sharpen the Scope with the grill-me</h3>
-<p>If the Scope has gaps or you are unsure about any field, run the Shape grill-me. It asks targeted questions and surfaces missing criteria:</p>
-<pre><code class="language-bash">ce shape rate-limit-login</code></pre>
-<p>Read the output and revise the Scope if the grill-me surfaces important gaps. You can also inspect the Scope at any time with:</p>
-<pre><code class="language-bash">ce show rate-limit-login</code></pre>
-<p>When the Scope reads <strong>Ready</strong>, move to Phase 3.</p>
-<hr>
-<h2 id="phase-3-ratify-the-scope-your-yes-build-this">Phase 3 — Ratify the Scope (your &quot;yes, build this&quot;)</h2>
-<p><strong>Read the Scope carefully</strong> before ratifying. Once ratified, the governed run is authorized to build inside the Scope&#x27;s envelope. Generate a fresh approver ref and pass it to <code>ce ratify</code>:</p>
-<pre><code class="language-bash">ce ratify rate-limit-login --approver-ref $(openssl rand -hex 32)</code></pre>
-<p>The <code>--approver-ref</code> is a value-free fingerprint. It records that a human ratified this Scope without encoding who or any credential. The governed run binds to this ratification: the agent cannot change the Scope or exceed the Budget after ratification, and it cannot self-ratify on your behalf.</p>
-<blockquote>
-<p><strong>Nothing builds until a Ready Scope is ratified.</strong> Ratification is your</p>
-<p>explicit authorization — the gate between planning and execution.</p>
-</blockquote>
-<hr>
-<h2 id="phase-4-drive-launch-the-governed-run">Phase 4 — Drive: launch the governed run</h2>
-<p>First do a dry-run to confirm the dispatch envelope looks right:</p>
-<pre><code class="language-bash">ce drive rate-limit-login</code></pre>
-<p>This prints the governed dispatch envelope without launching anything. When it looks right, spawn the run:</p>
-<pre><code class="language-bash">ce drive rate-limit-login --spawn</code></pre>
-<p>This launches the governed seat in the background. You can follow progress in the governed session pane. The seat works within the ratified envelope — it cannot push to a remote or access credentials without the gate surfacing that hold for you.</p>
-<hr>
-<h2 id="phase-5-review-inspect-the-artifacts">Phase 5 — Review: inspect the artifacts</h2>
-<p>When the run finishes and the pull request is open, review what was produced. The run identifier appears in the session output when the run completes.</p>
-<p>Enumerate the artifacts:</p>
-<pre><code class="language-bash">ce artifacts rate-limit-login --run-id &lt;run-id&gt;</code></pre>
-<p>This lists the evidence chain: the diff, test output, the coverage file, and any other artifacts the run produced.</p>
-<p>Inspect the Scope state after the run:</p>
-<pre><code class="language-bash">ce show rate-limit-login</code></pre>
-<p><strong>Now judge the artifacts.</strong> Read the PR diff and test evidence. Ask yourself: do the changes satisfy the Done-when criteria you wrote in Phase 2? You are reading a real diff against criteria you set — not evaluating a summary.</p>
-<hr>
-<h2 id="phase-6-gate-the-merge">Phase 6 — Gate the merge</h2>
-<p>When the PR looks right and CI is green, read the merge gate:</p>
-<pre><code class="language-bash">ce merge rate-limit-login --run &lt;run-id&gt;</code></pre>
-<p>Without <code>--apply</code>, this command reads the gate and tells you exactly what is satisfied and what is blocking. Run it plan-only as many times as you like. When everything is green, apply the gated merge:</p>
-<pre><code class="language-bash">ce merge rate-limit-login --run &lt;run-id&gt; --apply</code></pre>
-<p><strong>The merge gate checks:</strong> ratification bound to this Scope, independent review on the PR, CI green. Green CI is required but never sufficient — ratification is what authorizes the merge.</p>
-<hr>
-<h2 id="phase-7-completion-report-evidence-not-memory">Phase 7 — Completion report (evidence, not memory)</h2>
-<p>After the merge, render the Completion Report:</p>
-<pre><code class="language-bash">ce report rate-limit-login --run-id &lt;run-id&gt;</code></pre>
-<p>This renders a compact record of what was delivered: how it scored against your Done-when criteria, that tests were green, that the change stayed in scope, and what fraction of the Budget it used. Save this as your sprint-review artifact — the evidence is durable and replayable from a git clone.</p>
-<hr>
-<h2 id="your-daily-rhythm-in-dev-mode">Your daily rhythm in Dev mode</h2>
-<p>Once you have done the first Scope, every piece of work follows the same shape:</p>
+<hr />
+<h2 id="the-day-one-shape">The day-one shape</h2>
+<p>The first run is deliberately small:</p>
 <ol>
-<li><strong>Frame</strong> — describe what you want to build conversationally with the agent.</li>
-<li><strong>Scope</strong> — <code>ce scope &lt;slug&gt; --goal &quot;...&quot; --done-when &quot;...&quot; --budget N --change-type &lt;type&gt;</code>.</li>
-<li><strong>Shape (optional)</strong> — <code>ce shape &lt;slug&gt;</code> to sharpen criteria if needed.</li>
-<li><strong>Ratify</strong> — <code>ce ratify &lt;slug&gt; --approver-ref $(openssl rand -hex 32)</code> — your &quot;yes, build this.&quot;</li>
-<li><strong>Drive</strong> — <code>ce drive &lt;slug&gt; --spawn</code> — launch the governed run.</li>
-<li><strong>Review</strong> — <code>ce artifacts &lt;slug&gt; --run-id &lt;run-id&gt;</code> — read the diff against your Done-when.</li>
-<li><strong>Merge</strong> — <code>ce merge &lt;slug&gt; --run &lt;run-id&gt; --apply</code> — gate and apply.</li>
-<li><strong>Report</strong> — <code>ce report &lt;slug&gt; --run-id &lt;run-id&gt;</code> — capture the evidence.</li>
+<li>Prepare the host and repository.</li>
+<li>Run <code>ce onboard</code>.</li>
+<li>Use the governed agent pane that opens.</li>
+<li>Return later with <code>ce launch --backend host</code>.</li>
 </ol>
-<p>Check what is in flight at any time with <code>ce status</code>. Check items awaiting your attention with <code>ce inbox --repo &lt;owner/repo&gt;</code>.</p>
-<hr>
-<h2 id="your-irreducible-gestures-what-the-agent-cannot-do-for-you">Your irreducible gestures — what the agent cannot do for you</h2>
-<p>CE is designed so that a small set of decisions always stays with you:</p>
+<p>The detailed Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship loop happens inside that
+governed session. On day one, you do not need to memorize a command table before
+you can get value.</p>
+<hr />
+<h2 id="prerequisites">Prerequisites</h2>
+<p>Before onboarding, make sure these are true:</p>
+<ul>
+<li>
+<p>A supported coding-agent CLI is installed and usable from your shell, such as
+Claude Code or Codex.</p>
+</li>
+<li>
+<p>The repository ignores CE's local Hermes state:</p>
+<pre><code class="language-gitignore">.hermes/
+</code></pre>
+</li>
+<li>
+<p>You have a CE install. If you have not installed yet, follow
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>
+first.</p>
+</li>
+</ul>
+<p>The <code>.hermes/</code> ignore rule matters because CE refuses to create tracked local
+runtime state during onboarding. Add it before the first run, commit the ignore
+change through your normal project process if needed, then continue.</p>
+<hr />
+<h2 id="phase-0---first-run-onboard">Phase 0 - First run: onboard</h2>
+<p>From the repository you want to use with CE, run:</p>
+<pre><code class="language-bash">ce onboard
+</code></pre>
+<p><code>ce onboard</code> performs the first-run sequence: it verifies the local install,
+checks host readiness, initializes local CE state, prepares your path, and opens
+the first governed agent pane unless you explicitly opt out.</p>
+<p>If you want to prepare the host and state without opening the pane yet, run:</p>
+<pre><code class="language-bash">ce onboard --no-launch
+</code></pre>
+<p>If onboarding refuses, read the refusal text and fix that specific prerequisite
+before trying again. Re-run support is still being tightened; do not assume
+<code>ce onboard</code> is a general recovery command for partially reused state.</p>
+<hr />
+<h2 id="phase-1---daily-entry-point-launch">Phase 1 - Daily entry point: launch</h2>
+<p>After onboarding has completed, return to the governed session with:</p>
+<pre><code class="language-bash">ce launch --backend host
+</code></pre>
+<p><code>ce launch --backend host</code> opens or attaches the visible governed terminal
+launcher for your agent. It is the daily entry point after the repository has
+been onboarded; it is not the first command on a fresh host.</p>
+<p>For a dry-run of the launcher plan without opening a pane, use:</p>
+<pre><code class="language-bash">ce launch --backend host --dry-run
+</code></pre>
+<hr />
+<h2 id="phase-2---work-in-the-pane">Phase 2 - Work in the pane</h2>
+<p>Inside the governed pane, work the way you normally work with your coding
+agent:</p>
+<ol>
+<li>Describe the change you want.</li>
+<li>Answer clarifying questions.</li>
+<li>Read the proposed work boundary and acceptance criteria.</li>
+<li>Approve only the privileged actions you actually intend.</li>
+<li>Review the resulting diff, tests, and pull request evidence before anything
+ships.</li>
+</ol>
+<p>CE stays quiet until it has a reason to intervene. The important moment is when
+the agent reaches for something privileged, such as source-host mutation or
+credential access. CE refuses or holds that action outside the agent and tells
+you why.</p>
+<p>For the in-product vocabulary tour, run:</p>
+<pre><code class="language-bash">ce guide
+</code></pre>
+<p>For a host/environment preflight, run:</p>
+<pre><code class="language-bash">ce doctor
+</code></pre>
+<hr />
+<h2 id="repo-connected-install-rail">Repo-connected install rail</h2>
+<p><code>ce onboard</code> is the quick first-run rail for getting a governed local session.
+Connecting CE to a repository it can ship to is a separate, human-approved
+install rail. When you have the verified install artifacts and answers file, the
+shape is:</p>
+<pre><code class="language-bash">ce install \
+  --spec &lt;verified-spec&gt; \
+  --answers ce-install.answers.yaml \
+  --plan
+</code></pre>
+<p>Then, only after the plan is acceptable:</p>
+<pre><code class="language-bash">ce install \
+  --spec &lt;verified-spec&gt; \
+  --answers ce-install.answers.yaml \
+  --apply --non-interactive
+</code></pre>
+<p>The full version of that flow, including trust roots, anchors, and answer
+schema paths, lives in
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>.</p>
+<hr />
+<h2 id="your-irreducible-gestures">Your irreducible gestures</h2>
+<p>CE is designed so that a small set of decisions stays with you:</p>
 <table>
-<thead><tr><th>You always decide</th><th>The agent handles</th></tr></thead>
+<thead>
+<tr>
+<th>You always decide</th>
+<th>The agent handles</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>The <strong>Done-when</strong> criteria on every Scope</td><td>Goal drafting, plan, tasks, code, and test execution</td></tr>
-<tr><td>The <strong>Budget</strong> on every Scope</td><td>Spending within the ratified cap</td></tr>
-<tr><td><strong>Ratifying</strong> the Scope (<code>ce ratify</code>)</td><td>Running the build inside the ratified envelope</td></tr>
-<tr><td>Making a change <strong>riskier</strong></td><td>Making a change safer within its envelope</td></tr>
-<tr><td><strong>Judging the artifacts</strong> at Review</td><td>Producing the artifacts and the Completion Report</td></tr>
-<tr><td>The <strong>gated merge</strong> (<code>ce merge --apply</code>)</td><td>Opening the PR and reading the merge gate</td></tr>
-<tr><td>Authorizing <strong>privileged surfaces</strong></td><td>Refusing privileged actions and surfacing the reason</td></tr>
-</tbody></table>
-<p>In Dev mode you drive each gesture explicitly. You see every step of the pipeline. The governance layer is what checks the envelope — it is outside the agent, so it cannot be reasoned around.</p>
-<hr>
-<h2 id="a-note-on-spec-kit">A note on spec-kit</h2>
-<p>An earlier version of CE used <code>/speckit-*</code> slash commands to drive the Frame and Shape stages. Spec-kit is being retired. The <code>ce scope</code> / <code>ce shape</code> loop replaces it: it is the same conceptual pipeline with a governed shell interface instead of slash commands. If you have an existing project with spec-kit artifacts, they remain valid inputs to the agent conversation; you do not need to migrate them.</p>
-<hr>
+<tr>
+<td>What change is worth making</td>
+<td>Drafting a concrete implementation path</td>
+</tr>
+<tr>
+<td>What &quot;done&quot; means</td>
+<td>Producing the diff and test evidence</td>
+</tr>
+<tr>
+<td>Whether a privileged action is acceptable</td>
+<td>Surfacing the refusal or approval point</td>
+</tr>
+<tr>
+<td>Whether the pull request satisfies your intent</td>
+<td>Preparing the evidence for review</td>
+</tr>
+<tr>
+<td>Whether to connect CE to a repo through the install rail</td>
+<td>Running only the planned, approved install steps</td>
+</tr>
+</tbody>
+</table>
+<p>In Dev mode you stay close to the shell and the agent pane. The governance layer
+is outside the agent, so the agent cannot reason around it.</p>
+<hr />
 <h2 id="where-to-go-next">Where to go next</h2>
 <table>
-<thead><tr><th>You want to…</th><th>Read</th></tr></thead>
+<thead>
+<tr>
+<th>You want to...</th>
+<th>Read</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>The front door and big picture</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>welcome.md</code></a></td></tr>
-<tr><td>The plain-language vocabulary tour</td><td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td></tr>
-<tr><td>The Solo + CEO path (agent drives; you ratify)</td><td><a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a></td></tr>
-<tr><td>A worked SCRUM-to-CE mapping</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td></tr>
-<tr><td>The full install-to-ship pilot runbook</td><td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td></tr>
-<tr><td>Contribute to CE itself</td><td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td></tr>
-</tbody></table>
+<tr>
+<td>The front door and big picture</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>welcome.md</code></a></td>
+</tr>
+<tr>
+<td>The canonical command path</td>
+<td><a href="quickstart.html"><code>quickstart.md</code></a></td>
+</tr>
+<tr>
+<td>How CE builds software</td>
+<td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td>
+</tr>
+<tr>
+<td>The plain-language vocabulary tour</td>
+<td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td>
+</tr>
+<tr>
+<td>The Solo + CEO path</td>
+<td><a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a></td>
+</tr>
+<tr>
+<td>A worked SCRUM-to-CE mapping</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td>
+</tr>
+<tr>
+<td>The full install-to-ship pilot runbook</td>
+<td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td>
+</tr>
+<tr>
+<td>Contribute to CE itself</td>
+<td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td>
+</tr>
+</tbody>
+</table>
     </article>
   </div>
   <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>

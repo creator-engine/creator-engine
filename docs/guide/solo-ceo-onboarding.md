@@ -12,7 +12,7 @@ the Solo + Dev path.*
 > each gate. The agent owns inception through execution — planning, tasking,
 > building, reviewing — and brings decisions to you rather than waiting for you
 > to type commands. Your irreducible gestures are: framing intent, confirming
-> the Scope, ratifying the bet, reviewing artifacts, and gating the merge. All
+> the Scope, ratifying the work, reviewing artifacts, and gating the merge. All
 > the mechanical pipeline steps happen under the hood.
 
 ---
@@ -32,7 +32,7 @@ in every CE mode. What changes is who drives the stages and how:
 
 The key difference is **Shape**: in CEO mode you never run the Scope/Shape loop
 by hand. The agent does that work on your behalf and surfaces the result — a
-drafted Scope with its Goal, Done-when, Budget, and Change-type filled in — for
+drafted Scope with its Goal, Done-when, and Change-type filled in — for
 your review before anything is ratified.
 
 ---
@@ -41,7 +41,7 @@ your review before anything is ratified.
 
 You need a CE install and a governed session. If you have not done either, follow
 the install steps in [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md)
-first. Once installed, `ce launch` is your daily entry point.
+first. Once installed, `ce launch --backend host` is your daily entry point.
 
 ### The one concept to anchor on
 
@@ -56,7 +56,7 @@ approve gates, you own the outcome. The agent handles the mechanics.
 ## Phase 1 — Launch your governed session
 
 ```bash
-ce launch
+ce launch --backend host
 ```
 
 This opens your coding agent in a governed terminal pane — exactly the session
@@ -92,22 +92,23 @@ hand.
 ## Phase 3 — Review and ratify the Scope (your second gesture)
 
 Once the agent has run the pipeline, it will present you with a **Scope** — the
-governed unit of work. A Scope has five fields:
+governed unit of work. A Scope has three required fields:
 
 | Field | Meaning |
 | --- | --- |
 | **Goal** | what you are building, in one line |
 | **Done-when** | the acceptance criteria that get graded at Review time |
-| **Budget** | the effort cap you commit — the agent cannot spend beyond this |
 | **Change-type** | what kind of change this is (code, docs, deploy, etc.) |
-| **Ready** | CE flags this when all four fields are valid and the Scope is ratifiable |
+
+CE may mark the Scope Ready after those fields are valid. Ready is the
+ratifiable state, not another Scope field.
 
 **Read the Scope carefully.** The Done-when criteria are the most important part:
 they are what the external grader will check against at Review time, not a
 transcript of what the agent says. Make sure they reflect what you would actually
 accept as done. If anything is wrong, tell the agent and it will revise the Scope.
 
-When the Scope looks right and reads **Ready**, ratify it:
+When the Scope looks right and is marked **Ready**, ratify it:
 
 ```bash
 ce ratify <scope-id> --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
@@ -134,7 +135,7 @@ do not need to intervene. While it runs:
 - The gate **refuses** any privileged action (push to a remote, access to
   credentials) and holds it for you — you will see the refusal in the session,
   with the exact rule that denied it. That is governance from outside the agent.
-- Your Budget becomes the run's hard spend cap. The agent cannot exceed it.
+- If your lane has an explicit cap, CE tracks the run against that cap.
 
 When the build finishes, the agent opens the pull request and dispatches an
 independent reviewer. You will see the PR URL in the session.
@@ -174,14 +175,13 @@ ce report <scope-id> --run-id <run-id>
 ```
 
 This renders the **CE Completion Report** — a compact record of what was
-delivered, how it scored against your Done-when criteria, that tests were green,
-that the change stayed in scope, and what fraction of the Budget it used. The
-following is illustrative output:
+delivered, how it scored against your Done-when criteria, and that tests were
+green and the change stayed in scope. The following is illustrative output:
 
 ```text
 ┌─ CE COMPLETION REPORT · run <run-id> · Scope <scope-id> ──────
 │ Outcome   PR opened → #N (merged)
-│ Verdict   Done-when 3/3 met · tests green · in scope · 14% of Budget
+│ Verdict   Done-when 3/3 met · tests green · in scope
 │ Next      → (done)
 │ Inspect   gh pr view N  |  ce show <scope-id>  |  ce artifacts <scope-id> --run-id <run-id>
 └──────────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ Once you have done the first Scope, every piece of work follows the same shape:
 
 1. **Frame** — tell the agent what you want to build, in plain language.
 2. **Review the Scope** — read the Goal and Done-when the agent assembled;
-   adjust if needed; confirm the Budget.
+   adjust if needed; confirm any lane-required cap.
 3. **Ratify** — `ce ratify <id> --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef` — your "yes, build this."
 4. **Watch the build** — the agent drives; the gate holds privileged actions for you.
 5. **Judge the PR** — read the diff and evidence against your Done-when.
@@ -235,7 +235,6 @@ CE is designed so that a small set of decisions always stays with you:
 
 | You always decide | The agent handles |
 | --- | --- |
-| The **Budget** on every Scope | Goal, Done-when, plan, tasks, code, and test execution |
 | **Ratifying** the Scope (`ce ratify <id> --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`) | Running the build inside the ratified envelope |
 | Making a change **riskier** | Making a change safer within its envelope |
 | **Judging the artifacts** at Review | Producing the artifacts and the Completion Report |
@@ -270,7 +269,7 @@ still not the one who clears its review.
 Ratification stays exactly as personal as before. Your collaborator opening
 and getting a Scope reviewed does not ratify anything on your behalf, and you
 do not ratify on theirs. Merges that fall inside a Scope's ratified envelope —
-budget, Done-when, change-type — still go through automatically once the gate
+Done-when and Change-type — still go through automatically once the gate
 is green. Anything outside that envelope, from either of you, still waits for
 an explicit, ratified decision. Adding a second person to the repo does not
 widen anyone's envelope.
@@ -288,6 +287,8 @@ in the Completion Report and the PR history.
 | You want to… | Read |
 | --- | --- |
 | The front door and big picture | [`welcome.md`](./welcome.md) |
+| The canonical command path | [`quickstart.md`](./quickstart.md) |
+| How CE builds software | [`how-ce-builds-software.md`](./how-ce-builds-software.md) |
 | The plain-language vocabulary tour | [`understanding-ce.md`](./understanding-ce.md) |
 | The Solo + Dev hands-on path | [`solo-dev-onboarding.md`](./solo-dev-onboarding.md) |
 | The complete start-to-ship walkthrough | [`complete-walkthrough.md`](./complete-walkthrough.md) |
