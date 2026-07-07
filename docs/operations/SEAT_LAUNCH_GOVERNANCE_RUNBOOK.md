@@ -60,6 +60,33 @@ markers: `CE_CONTROLLER_ROLE`, `CE_CONTROLLER_HARNESS`, `CE_LAUNCH_MODE`,
 `CE_APPROVAL_WALL_ARMED`, and `CE_SIGNING_DEPUTY_STATUS`. Free-form status
 values are not echoed; unrecognized status tokens fall back to safe defaults.
 
+`ce continuity-drill` is the scheduled benign Controller succession drill. It
+reuses `ce posture` and the `ce takeover --dry-run` planning core to prove that
+a replacement Controller can complete one governed gate-cycle plan without
+predecessor chat history. The drill is evidence-only: it does not merge,
+approve, enqueue, sign, mutate settings, mutate live daemon state, re-arm real
+watchers, or perform a real takeover. Operators run it weekly until the record
+shows two consecutive clean prior runs, then before each Controller substrate
+promotion:
+
+```bash
+PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli continuity-drill \
+  --from <predecessor-seat-or-session> \
+  --harness <claude|codex> \
+  --repo-root <repo-root> \
+  --prior-run 2026-07-01:clean \
+  --json
+```
+
+For a substrate-promotion proof, add `--promotion-candidate`. The JSON record's
+`cadence` block states whether the drill is in the weekly phase or the
+promotion-gated phase, why the current run is required or optional, the count of
+consecutive clean prior runs, and the next due condition. The
+`benign_gate_cycle` block is the safety proof: every step and inherited takeover
+action must carry `execute: false`, `no_side_effects` must be `true`, and
+`forbidden_mechanics_present` must be `false`. A clean drill also requires the
+predecessor state to be detected and the Ring 0 harness proof to pass.
+
 Operator-relevant `ce launch` flags:
 
 | Flag | Contract |

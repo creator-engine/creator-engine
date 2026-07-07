@@ -3828,4 +3828,109 @@ records:
   verification_method:
     evidence_ref: validators/pyproject.toml
     type: static
+- claim:
+    details: Governed seats relaunch through the canonical launch path; missing launch
+      or claim prerequisites are stop conditions rather than a reason to use a raw
+      harness.
+    evidence_sha256: d32b508831023513d325a5b911e956ddedc3e66fe16e9f1f076abb720efa7a5a
+    item: 33
+    object: canonical-seat-launch-only
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: d5868eb96945ce1b3c3d2bf42db25b9dc307fcab79cae8ef39b83e21f3972a49
+  evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+  id: brain-assertion-d1b-33-canonical-seat-launch-only-v3
+  kind: brain-assertion
+  prev_hash: 2222984b5d084406bc26cd7da2e79c85eb1ca5d605592d24c256059ea4e15104
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 146
+  statement: Governed seats relaunch through the canonical launch path; missing launch
+    or claim prerequisites are stop conditions rather than a reason to use a raw harness.
+  status: superseded
+  superseded_by: brain-assertion-d1b-33-canonical-seat-launch-only-v4
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+    type: static
+- claim:
+    details: Governed seats relaunch through the canonical launch path; missing launch
+      or claim prerequisites are stop conditions rather than a reason to use a raw
+      harness.
+    evidence_sha256: 87d07c9ec70714e6505295a6a177621f46369213a72df6d7593e3e1f8af19cda
+    item: 33
+    object: canonical-seat-launch-only
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 90a860df872e61896075abfb99794aadd18336e1faa559e5a6d9a4f74068854e
+  evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+  id: brain-assertion-d1b-33-canonical-seat-launch-only-v4
+  kind: brain-assertion
+  prev_hash: d5868eb96945ce1b3c3d2bf42db25b9dc307fcab79cae8ef39b83e21f3972a49
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 147
+  statement: doctrine-item asserts canonical-seat-launch-only
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: c6614e7e864622ef8f3f860eb3c0bfdedd52983e47845eb3e5e46590d29bc27e
+    item: 9
+    object: ce-cli-doc-coupling
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: 31420d70e77610e4ddd17a58a63973e54887c2e510563790ee99e481baa4abb5
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-d1b-09-ce-cli-doc-coupling-v4
+  kind: brain-assertion
+  prev_hash: 90a860df872e61896075abfb99794aadd18336e1faa559e5a6d9a4f74068854e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 148
+  statement: doctrine-item asserts ce-cli-doc-coupling
+  status: superseded
+  superseded_by: brain-assertion-d1b-09-ce-cli-doc-coupling-v5
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: 2fc9703285e406f2b23d4f49d39ed488641ab9bf91b3a17fd87e575632af9285
+    item: 9
+    object: ce-cli-doc-coupling
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: 2a70e2503c3227c55842f0e7699c41ca2a0d31c7bd1b67318f3c095a31511d61
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-d1b-09-ce-cli-doc-coupling-v5
+  kind: brain-assertion
+  prev_hash: 31420d70e77610e4ddd17a58a63973e54887c2e510563790ee99e481baa4abb5
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 149
+  statement: doctrine-item asserts ce-cli-doc-coupling
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
 schema_version: '1'

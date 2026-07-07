@@ -103,7 +103,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#480 adds ``codex_controller_evidence`` as the repo-local Codex
     # controller-promotion packet helper over existing launch/takeover facts:
     # 41 -> 42.
-    assert len(ver.V1_RUNTIME) == 42
+    # ce-ops#477 Slice D adds ``continuity_drill_runtime`` as the scheduled
+    # benign drill proof over posture + takeover: 42 -> 43.
+    assert len(ver.V1_RUNTIME) == 43
     # v3 gained the G-7 product surface — the two-mode installer logic
     # (``v3_installer``) atop the Completion Report (``v3_report``), the shaping
     # dialogue (``v3_shaping``), the session render (``v3_session``), the CLI
@@ -205,6 +207,7 @@ def test_classify_lines():
     assert ver.classify("controller_posture") == ver.V1
     assert ver.classify("takeover_runtime") == ver.V1
     assert ver.classify("codex_controller_evidence") == ver.V1
+    assert ver.classify("continuity_drill_runtime") == ver.V1
     assert ver.classify("runtime_backend_bridge") == ver.V1
     assert ver.classify("orchestrator") == ver.V3
     assert ver.classify("onboard_apply") == ver.V3
