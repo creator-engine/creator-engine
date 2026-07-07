@@ -476,6 +476,7 @@ def test_hydrate_contract_is_byte_identical_for_seeded_resume_state(tmp_path: Pa
     resume.write_text('{"resume":true}\n', encoding="utf-8")
 
     first = json.dumps(rt.hydrate_contract(state_root), sort_keys=True, separators=(",", ":"))
+    resume.touch()
     second = json.dumps(rt.hydrate_contract(state_root), sort_keys=True, separators=(",", ":"))
 
     assert first == second
