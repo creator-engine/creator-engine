@@ -15,4 +15,4 @@ audited repair and status verbs.
 The design defines the v1 verb contracts, kill-switch and rate-limit behavior,
 CE-owned namespace boundaries, pinned ephemeral image requirements, OpenBao
 snapshot and restore-drill handling, and host UID/ownership repair expectations
-from the C5 daemon cutover learnings.
+from mixed-ownership host state failures.

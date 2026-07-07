@@ -90,7 +90,7 @@ is treated as out of scope.
 | Ephemeral container verb becomes a generic container runner | Images must be CE-owned and digest-pinned; arbitrary pulls, tags without digests, non-CE registries, privileged mode, host socket mounts, and caller-provided bind mounts are refused. |
 | Host UID or ownership repair damages existing state | State-root repair applies explicit desired UID/GID and mode from broker config, verifies path ancestry and current ownership first, and refuses ambiguous mixed ownership outside CE-owned roots. |
 | Systemd repair restarts unrelated services | `repair-systemd-unit` and `restart-daemon` accept only CE-owned unit or daemon names from config and record the systemd unit identity in audit. |
-| OpenBao backup or drill leaks secrets through audit | Snapshot and drill evidence records paths, hashes, sizes, and result classes only; no tokens, unseal material, snapshot bytes, or secret values are logged. |
+| OpenBao backup or drill leaks secrets through audit | Snapshot and drill evidence records paths, hashes, sizes, and result classes only; no tokens, unseal material, raw snapshot content, or secret values are logged. |
 | Broker compromise broadens authority silently | Small code budget, static verb list, explicit config, systemd supervision, structured audit, and kill switches make unexpected behavior easier to detect and disable. |
 | Evidence is mistaken for approval | Audit records prove what the broker did; they do not approve a PR, release, merge, deployment, or secret-use decision. |
 
@@ -122,6 +122,7 @@ Envelope checks:
 - `caller.identity` and `caller.role` must be authenticated by the transport.
 - `params` must validate against the selected verb schema.
 - `reason` is required for mutating verbs and must be audit-safe text.
+- `created_at` MUST be an RFC 3339 UTC timestamp with a trailing `Z`.
 - Broker-wide kill switch and per-verb disable flags are checked before any
   host mutation.
 
@@ -142,7 +143,7 @@ Envelope checks:
 `result` is one of `ok`, `already-converged`, `refused`, `rate-limited`,
 `disabled`, `failed`, or `degraded`. `details` must be value-free and must not
 include secrets, runtime socket paths, host credentials, OpenBao tokens, or
-snapshot bytes.
+raw snapshot content.
 
 ## Kill Switches and Disable Flags
 
@@ -156,6 +157,16 @@ Both layers must be read before rate-limit accounting and before any mutation.
 Every disabled request emits an audit event with `result=disabled`,
 `disabled_scope`, and `disabled_reason_ref`. Operators may use these records to
 distinguish a deliberate safety stop from a broker outage.
+
+The control path for both layers is out-of-band from the broker request API.
+Flags live in the broker's root-owned host configuration/state directory, which
+is outside every controller, seat, worker, state-root, scratch, and container
+mount. They may be toggled only by the host Operator through a host-local
+maintenance action or a broker admin utility that is not exposed on the normal
+request transport. Runtime reload is allowed only from that root-owned source;
+if the broker cannot read or authenticate the flag state, it fails closed as
+broker-wide disabled. No v1 verb can set, clear, or bypass these flags, and
+transport authorization must reject toggle attempts from contained agents.
 
 ## Rate-Limit Defaults
 
@@ -172,9 +183,13 @@ exists. Defaults are intentionally conservative and may be tightened by config:
 | `run-ephemeral-container` | 3 requests per hour per caller and image |
 | `prune-stopped-owned-containers` | 3 requests per hour per namespace |
 | `snapshot-openbao` | 2 requests per hour per backup profile |
-| `restore-drill-openbao` | 1 request per 6 hours per snapshot |
+| `restore-drill-openbao` | 1 request per 6 hours per profile and canonical `snapshot_ref` |
 
 Rate-limited requests emit audit records and do not mutate host state.
+The `restore-drill-openbao` bucket key is
+`caller_identity + ":restore-drill-openbao:" + profile + ":" +
+canonical_snapshot_ref`, where `canonical_snapshot_ref` is the broker-resolved
+snapshot reference under the configured backup root.
 
 ## Verb Contracts
 
@@ -287,7 +302,7 @@ contents.
 Kill-switch handling: broker-wide or per-verb disable refuses before any path
 creation or ownership mutation.
 
-C5 cutover ownership learning: the broker must treat host UID/GID repair as a
+Host ownership repair rule: the broker must treat host UID/GID repair as a
 host-state action with explicit desired ownership, not as a container-side
 best-effort fix. It must verify the target path on the host, reject ambiguous
 mixed ownership outside CE-owned roots, avoid following untrusted symlinks, and
@@ -363,7 +378,7 @@ Audit event fields: common fields plus `unit`, `action`, `pre_enabled`,
 Kill-switch handling: broker-wide or per-verb disable refuses before systemd
 inspection or mutation.
 
-C5 cutover ownership learning: systemd repair must not assume the unit failure
+State-root ownership preflight: systemd repair must not assume the unit failure
 is purely process state. For CE-owned units that depend on state roots, the
 broker records ownership-related preflight findings and points operators to
 `prepare-owned-state-root` rather than attempting broad recursive ownership
@@ -403,6 +418,20 @@ value-free run result.
 Idempotency: tasks must declare their own idempotency class in broker config.
 The broker refuses tasks not marked repeat-safe or guarded by an idempotency key.
 Repeated dry runs do not mutate state.
+
+Timeout and partial-write handling: when `timeout_seconds` expires, the broker
+sends the configured graceful stop signal to the container init, waits a
+configured grace window no longer than 30 seconds, then sends the configured
+hard kill signal. Tasks that mount `state_root` must declare one write policy in
+broker config: scratch-only rollback, atomic replace from a task-owned staging
+path, or leave-partial-with-marker. The broker never deletes uncertain live
+state. If a timeout happens during a `state_root` write, the selected policy
+determines whether staged data is removed or partial data is left under the
+configured root with an audit-safe partial marker for operator triage. If the
+runtime reports the container still running or stopping after the hard kill, the
+result is `failed` when final state is observable and `degraded` when the
+runtime cannot confirm final state; either result blocks further runs for the
+same task and state root until operator review or rate-limit expiry.
 
 Rate limit: 3 requests per hour per caller and image.
 
@@ -481,9 +510,9 @@ overwrites an existing snapshot.
 Rate limit: 2 requests per hour per backup profile.
 
 Audit event fields: common fields plus `profile`, `destination`,
-`snapshot_ref`, `snapshot_sha256`, `snapshot_bytes`, `verify_after_write`,
-`verification_result`, and `result`. No tokens, unseal keys, snapshot bytes, or
-secret values are logged.
+`snapshot_ref`, `snapshot_sha256`, `snapshot_size_bytes`, `verify_after_write`,
+`verification_result`, and `result`. No tokens, unseal keys, raw snapshot
+content, or secret values are logged.
 
 Kill-switch handling: broker-wide or per-verb disable refuses before requesting
 OpenBao authority or opening the backup destination.
@@ -515,15 +544,31 @@ metadata, and either passes metadata validation or can be restored into an
 ephemeral drill environment without touching live OpenBao state.
 
 Idempotency: drills are read-only with respect to snapshots and live OpenBao
-state. Broker-owned scratch state is cleaned or marked for later cleanup on
-failure.
+state. Broker-owned scratch state is owned by the broker service account, is
+created under a configured drill scratch root with one request-scoped directory,
+and is cleaned on success and on terminal failure before the response is
+returned.
 
-Rate limit: 1 request per 6 hours per snapshot.
+Scratch cleanup guarantee: cleanup is the broker's responsibility, with an
+additional host-local janitor allowed to retry directories that the broker marks
+as cleanup-required. Cleanup is triggered at the end of every
+`ephemeral-restore-verify` attempt, during broker startup reconciliation, and by
+the janitor's bounded retry schedule. If cleanup fails, the broker leaves the
+scratch directory root-owned or broker-owned with mode `0700`, writes only an
+opaque `scratch_ref` and cleanup failure class to audit, returns `degraded`, and
+refuses further ephemeral restore drills for the same profile until cleanup
+succeeds or the Operator quarantines the directory. Any partially restored
+secret data must remain only in the scratch directory, must never be copied into
+live OpenBao state, and must never be summarized or sampled in audit evidence.
+
+Rate limit: 1 request per 6 hours per profile and canonical `snapshot_ref`;
+bucket key `caller_identity + ":restore-drill-openbao:" + profile + ":" +
+canonical_snapshot_ref`.
 
 Audit event fields: common fields plus `profile`, `snapshot_ref`,
-`snapshot_sha256`, `snapshot_bytes`, `mode`, `scratch_ref`,
-`verification_result`, `duration_ms`, and `result`. No snapshot bytes, tokens,
-unseal material, or secret values are logged.
+`snapshot_sha256`, `snapshot_size_bytes`, `mode`, `scratch_ref`,
+`verification_result`, `duration_ms`, and `result`. No raw snapshot content,
+tokens, unseal material, or secret values are logged.
 
 Kill-switch handling: broker-wide or per-verb disable refuses before reading
 the snapshot or creating scratch state.
@@ -559,7 +604,8 @@ requests, emits a structured audit record:
 only. Evidence records may include statuses, counts, hashes, sizes, duration,
 and result classes. They must not include credentials, raw logs containing
 secret material, OpenBao tokens, runtime socket paths exposed to callers, raw
-snapshot bytes, or private host topology.
+snapshot content, or private host topology. `started_at` and `finished_at` MUST
+be RFC 3339 UTC timestamps with trailing `Z`.
 
 ## Operations Flow
 
@@ -573,17 +619,32 @@ sequenceDiagram
   Controller->>Broker: request envelope with fixed verb
   Broker->>Broker: authenticate caller and validate schema
   Broker->>Broker: check broker kill switch and per-verb disable
-  Broker->>Broker: enforce rate limit and CE-owned target boundary
-  Broker->>Host: perform bounded read or mutation
-  Broker->>Audit: write structured audit event
-  Broker-->>Controller: response envelope with result and evidence_ref
+  alt disabled or invalid
+    Broker->>Audit: write terminal audit event
+    Broker-->>Controller: response envelope with refused or disabled result
+  else enabled and valid
+    Broker->>Broker: resolve CE-owned target and enforce rate limit
+    alt refused target
+      Broker->>Audit: write boundary-refusal audit event
+      Broker-->>Controller: response envelope with refused result
+    else rate-limited
+      Broker->>Audit: write rate-limit audit event
+      Broker-->>Controller: response envelope with rate-limited result
+    else accepted request
+      Broker->>Audit: write pre-mutation audit event
+      Broker->>Host: perform bounded read or mutation
+      Broker->>Audit: append final structured audit outcome
+      Broker-->>Controller: response envelope with result and evidence_ref
+    end
+  end
 ```
 
-For mutating verbs, audit write failure is fail-closed unless the verb has not
-yet mutated host state. If mutation happened and the final audit write fails,
-the broker returns `degraded`, writes to the system journal, and rate-limits
-further mutations until the audit sink is healthy or the Operator disables the
-broker.
+For mutating verbs, the pre-mutation audit event is mandatory and fail-closed:
+if it cannot be written, the broker returns `failed` and does not mutate host
+state. The final audit append is post-mutation by necessity because it carries
+the observed result. If mutation happened and the final audit append fails, the
+broker returns `degraded`, writes to the system journal, and rate-limits further
+mutations until the audit sink is healthy or the Operator disables the broker.
 
 ## Failure and Degradation Handling
 
