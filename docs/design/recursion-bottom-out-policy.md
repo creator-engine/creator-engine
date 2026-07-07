@@ -1,6 +1,6 @@
 # Recursion Bottom-Out Policy Design
 
-Status: design-only
+Status: design-only; first implementation slice ready
 
 ## Purpose
 
@@ -39,8 +39,8 @@ error text.
 ## Policy Model
 
 Every autonomous repair run belongs to one incident. An incident has a stable
-`incident_id`, one affected component, and one active repair layer at a time.
-Repair attempts are append-only records bound to that incident.
+`incident_id`, one affected component namespace, and one active repair layer at
+a time. Repair attempts are append-only records bound to that incident.
 
 The hard limits are:
 
@@ -83,28 +83,43 @@ incident until a human reset clears the circuit.
 ## State Schema
 
 Durable circuit-breaker state is stored in an append-friendly record set that
-survives daemon restart and takeover succession.
+survives daemon restart and takeover succession. The first implementation slice
+stores records under
+`${CE_STATE_HOME:-/var/lib/creator-engine}/repair-circuits/v1/`, with one
+append-only event log per incident plus a checkpointed open-circuit index.
+Writers must fsync the attempt event and index update before dispatching the
+next repair actor. Daemon startup and takeover successors replay this directory
+before starting watcher dispatch loops, so `AWAITING-OPERATOR` survives daemon
+restart, process replacement, and controller succession.
 
 ```json
 {
   "schema": "ce.repair_circuit.v1",
   "incident_id": "incident:<stable-id>",
   "state": "ACTIVE_REPAIR",
+  "record_scope": "production",
+  "component_namespace": "production",
   "affected_component": {
     "component_type": "agent|daemon|broker|host_os|provisioning",
-    "component_id": "controller-daemon:dev-1",
-    "scope": "host:ce-pilot-1"
+    "component_id": "daemon:<controller-daemon-id>",
+    "scope": "host:<host-id>"
   },
   "current_layer": "daemon",
   "max_repair_depth": 4,
   "depth_used": 2,
   "same_failure_attempt_limit": 3,
-  "active_signature": {
-    "error_class": "daemon_restart_failed",
-    "affected_component_key": "daemon:controller-daemon:dev-1",
-    "fingerprint_version": "v1"
+  "signature_attempts": {
+    "v1|daemon_restart_failed|daemon:<controller-daemon-id>": {
+      "signature": {
+        "error_class": "daemon_restart_failed",
+        "affected_component_key": "daemon:<controller-daemon-id>",
+        "fingerprint_version": "v1"
+      },
+      "failed_attempts": 2,
+      "last_attempt_id": "repair-attempt:<stable-id>",
+      "last_observed_at": "2026-07-07T15:40:00Z"
+    }
   },
-  "same_signature_attempts": 2,
   "opened_at": null,
   "opened_by_attempt_id": null,
   "human_reset": null,
@@ -120,12 +135,14 @@ Attempt records are append-only and linked to the circuit record:
   "attempt_id": "repair-attempt:<stable-id>",
   "incident_id": "incident:<stable-id>",
   "sequence": 2,
+  "record_scope": "production",
+  "component_namespace": "production",
   "layer": "daemon",
-  "actor": "watcher:controller-daemon",
+  "actor": "watcher:<controller-daemon-id>",
   "repair_verb": "restart_daemon",
   "signature": {
     "error_class": "daemon_restart_failed",
-    "affected_component_key": "daemon:controller-daemon:dev-1",
+    "affected_component_key": "daemon:<controller-daemon-id>",
     "fingerprint_version": "v1"
   },
   "raw_message_sha256": "<64-hex>",
@@ -161,17 +178,25 @@ Rules:
   the observer. A watcher restart does not change the component key.
 - The raw error message, traceback, timestamp, PID, attempt id, host-local temp
   path, and retry counter are excluded from the signature.
-- A matching signature increments `same_signature_attempts` for the incident.
-- A different signature is retryable as a new or changed condition, subject to
-  the incident's remaining depth and any already-open circuit for the affected
-  component.
+- A matching signature increments that signature's `failed_attempts` entry in
+  the incident's `signature_attempts` map.
+- A different signature is retryable as a new or changed condition only if the
+  incident has remaining depth and no already-open circuit for the same
+  affected component namespace. It adds or updates its own `signature_attempts`
+  entry without deleting, replacing, or zeroing any previous signature entry.
 - The third failed attempt for the same signature opens the circuit and emits
   `AWAITING-OPERATOR`.
+- Alternating signatures cannot evade the limit. For A->B->A->B flapping in the
+  same incident and layer, the second A observation resumes A's existing
+  accumulator and the second B observation resumes B's existing accumulator.
+  The active observation pointer may move, but the per-signature counters do
+  not reset until human reset or incident closure.
 
 Watchers must evaluate sameness before dispatch, not after they have already
-started another repair actor. If the durable state says the signature is already
-at the threshold or the circuit is already open, the watcher records an
-observation and notification edge but performs no self-repair dispatch.
+started another repair actor. If the durable state says the observed
+signature's accumulator is already at the threshold or the circuit is already
+open, the watcher records an observation and notification edge but performs no
+self-repair dispatch.
 
 ## Layer Transition Rules
 
@@ -199,10 +224,10 @@ stateDiagram-v2
   ACTIVE_REPAIR --> RECOVERED: repair success
   ACTIVE_REPAIR --> OBSERVED: retryable different signature
   ACTIVE_REPAIR --> ACTIVE_REPAIR: same signature attempts < 3 and depth remains
-  ACTIVE_REPAIR --> AWAITING_OPERATOR: same signature attempts == 3
-  ACTIVE_REPAIR --> AWAITING_OPERATOR: max_repair_depth reached
-  OBSERVED --> AWAITING_OPERATOR: circuit already open
-  AWAITING_OPERATOR --> OBSERVED: human reset
+  ACTIVE_REPAIR --> AWAITING-OPERATOR: same signature attempts == 3
+  ACTIVE_REPAIR --> AWAITING-OPERATOR: max_repair_depth reached
+  OBSERVED --> AWAITING-OPERATOR: circuit already open
+  AWAITING-OPERATOR --> OBSERVED: human reset
   RECOVERED --> [*]
 ```
 
@@ -214,14 +239,19 @@ Detailed rules:
   the new signature, and checks both hard limits.
 - If the signature is new or materially different, the watcher may keep the
   incident active or create a related incident, but it must not erase prior
-  attempt history.
+  attempt history, must not reset `depth_used`, and must not replace the
+  existing `signature_attempts` map. A sibling or forked incident for the same
+  affected component must inherit the parent component event's consumed depth
+  or link to a parent circuit that enforces the shared remaining depth.
 - If the signature matches and fewer than three same-signature attempts have
   failed, the watcher may dispatch the next allowed repair layer.
 - If the signature matches for the third failed attempt, the watcher commits the
   attempt record, sets `state = "AWAITING-OPERATOR"`, sets `opened_at`, emits
   notification evidence, and stops.
 - If `depth_used >= max_repair_depth`, the watcher opens the circuit even when
-  the latest signature is different.
+  the latest signature is different. A different-signature transition never
+  returns `depth_used` to zero; depth is monotonic for the affected component
+  until human reset or incident closure.
 - A human reset creates a reset record naming the incident, the Operator
   identity or approved human channel, reason, timestamp, and new disposition.
   Reset may move the incident back to observation or close it as externally
@@ -242,11 +272,11 @@ Each transition emits durable, value-free evidence:
   "attempt_id": "repair-attempt:<stable-id>",
   "signature": {
     "error_class": "broker_convergence_failed",
-    "affected_component_key": "broker:host-ops:ce-pilot-1",
+    "affected_component_key": "broker:host-ops:<host-id>",
     "fingerprint_version": "v1"
   },
   "depth_used": 3,
-  "same_signature_attempts": 3,
+  "signature_attempt_count": 3,
   "operator_notification_ref": "notify:<id>",
   "posture_ref": "posture:<id>",
   "created_at": "2026-07-07T15:45:00Z"
@@ -289,7 +319,7 @@ Daemon startup flow:
 
 1. Load all open circuit records before starting watcher dispatch loops.
 2. Rebuild in-memory indexes by `incident_id`, `affected_component_key`, and
-   active signature.
+   signature attempt entries.
 3. For every `AWAITING-OPERATOR` incident, disable self-repair dispatch and
    refresh posture/notification state as needed.
 4. For active incidents with no open circuit, resume observation with the
@@ -311,18 +341,39 @@ posture, not as an incidental log line. Minimum fields:
 ```text
 posture: AWAITING-OPERATOR
 incident: incident:<stable-id>
-component: daemon:controller-daemon:dev-1
+component: daemon:<controller-daemon-id>
 signature: daemon_restart_failed
 attempts: same=3 depth=2/4
 dispatch: self-repair halted pending human reset
 notification: notify:<id>
 ```
 
-Operator notification surfaces must include the incident id, affected
-component, error class, last layer attempted, attempt counts, evidence refs,
-and reset instructions. Notifications must distinguish entry into
+Operator notification delivery uses the local CE Operator notify feed:
+`ce notify once|watch|status` reads open circuit events from the durable repair
+circuit store, writes a `notify:<id>` ledger entry, and may mirror a value-free
+summary to the configured forge label `awaiting-operator` when that sync is
+enabled. The required payload includes the incident id, affected component,
+record scope, error class, last layer attempted, attempt counts, evidence refs,
+store path, and reset instructions. Notifications must distinguish entry into
 `AWAITING-OPERATOR` from later reminders or takeover rediscovery of the same
-circuit.
+circuit. The delivery contract is at-least-once with deduplication by
+`incident_id + event_type + opened_by_attempt_id`; if delivery is unavailable,
+the open circuit remains durable and `ce notify once` must replay the pending
+notification before reporting success.
+
+## Drill Isolation
+
+Drill records are non-aliasing by contract. A scheduled drill must set
+`record_scope = "drill"` and a synthetic component namespace of the form
+`drill:<drill-run-id>:<production-component-key>`. Drill attempt records and
+circuits live under the same store root but in the `drill/` partition and are
+excluded from the production open-circuit index, posture banner, and production
+Operator notification path. Production watchers must ignore drill namespace
+records when deciding whether to dispatch repair for real incidents. Drill
+watchers must likewise ignore production records when satisfying drill
+assertions. A drill may copy a production-shaped component key only inside the
+synthetic namespace; it must never write an unscoped production
+`AWAITING-OPERATOR` circuit or clear a production circuit.
 
 ## Degradation Handling
 
@@ -357,17 +408,21 @@ Drill evidence must prove:
 - The same-signature threshold is exactly three failed attempts.
 - `max_repair_depth` is enforced as a hard stop.
 - Repeated same conditions are separated from retryable different signatures.
+- A->B->A->B signature flapping resumes each signature's accumulator instead
+  of resetting attempts.
+- Different-signature transitions preserve monotonic `depth_used` for the
+  affected component.
 - Circuit state and attempt logs survive daemon restart.
 - Takeover preserves open circuits.
 - Posture banner shows `AWAITING-OPERATOR`.
 - Operator notification is emitted with evidence refs and reset requirements.
+- Drill records use `record_scope = "drill"` plus a synthetic namespace and
+  cannot silence, satisfy, or reset production incidents.
 - No source-host approval, merge, signing, gate, or broad host authority is
   introduced by reset handling.
 
 ## Open Operator Questions
 
-- What exact durable store path and retention period should hold circuit state
-  and attempt logs in the first implementation slice?
 - Which `error_class` enum should be ratified first for agent, daemon, broker,
   host OS, and provisioning failures?
 - What human reset command or out-of-band channel should be accepted as the
