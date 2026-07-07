@@ -485,3 +485,21 @@ def test_hydrate_contract_is_byte_identical_for_seeded_resume_state(tmp_path: Pa
         "1b9c7213273033f30c70340a757e6037e02de0e59962ca8356b4c2fedf2a44ad"
     )
     assert "mtime" not in payload["newest_resume_state"]
+
+
+def test_resume_state_pointer_selects_newest_resume_path_before_hash(tmp_path: Path):
+    state_root = tmp_path / ".ce" / "state"
+    sessions = state_root / "sessions"
+    sessions.mkdir(parents=True)
+    older = sessions / "20260707T000000-controller-resume.json"
+    newer = sessions / "20260708T000000-controller-resume.json"
+    older.write_text("older", encoding="utf-8")
+    newer.write_text("newer", encoding="utf-8")
+
+    pointer = rt._resume_state_pointer(state_root)
+
+    assert pointer == {
+        "path": str(newer),
+        "content_sha256": "804f51f71254c4081e37e7c887073560f4a6fa6cdad202e9ac67e032c43ed1e1",
+        "size_bytes": 5,
+    }
