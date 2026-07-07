@@ -27,6 +27,25 @@ and any explicit Operator direction in force for the repository.
    URL if one already exists. Treat the signal as a claim that must be harvested,
    not as gate evidence by itself.
 
+   After every merge, harvest, review verdict, or worker completion signal,
+   check the seat pool and conveyor front end before taking more gate action:
+
+   - Enumerate idle seats, starved seats, active dispatches, ready tickets, and
+     pending PRs from the repository queue, active-work ledger, and current
+     GitHub state.
+   - A seat is starved when it is idle or awaiting dispatch while unblocked ready
+     tickets or reviewable PRs exist for work it is allowed to perform.
+   - Dispatch restock work to starved seats by writing a file-backed brief that
+     names the role, ticket or PR, branch or worktree, authorized path scope,
+     expected start SHA, validation commands, stop line, and explicit
+     non-authorities. Compute `sha256sum` for the brief and send only the brief
+     path plus SHA to the worker.
+   - Re-read the claim or PR comments after posting any lock or dispatch note so
+     a controller can detect collisions before the worker starts.
+   - Raise an empty-conveyor-front-end alarm when there are no dispatched workers,
+     no review workers, and no active conveyor intake while the ready queue or
+     pending-current-head PR list is non-empty.
+
 2. Harvest.
 
    Check out or inspect the signaled head without mutating unrelated work. Verify
@@ -50,6 +69,13 @@ and any explicit Operator direction in force for the repository.
    Route substantive review to an independent venue where author != reviewer.
    A controller must not treat an author's self-check, inline notes, or prior
    approval on an older head as the required independent review.
+
+   Review routing is a fan-out step. When multiple PRs are pending current-head
+   review, dispatch concurrent independent reviewer workers, one reviewer worker
+   per PR, subject to reviewer availability and collision checks. Do not serialize
+   unrelated PRs through a single review lane when independent reviewers are
+   available. Post each verdict as it lands, bound to that PR's current head, and
+   let later verdicts continue independently.
 
    Review verdicts bind to the current head SHA. Evidence must name the head,
    reviewer identity, commands or reproductions run, changed paths considered,
@@ -132,9 +158,14 @@ Proposed resolution, pending Operator decision:
 - A takeover controller may perform gate acts only when launched under governed
   takeover evidence, the drill harness proves the posture, and an explicit
   Operator decision or ratified controller-gate policy grants that authority.
+- `ce-root-v1` signing is categorically non-delegable. It is not unlocked by an
+  Operator grant, controller-gate policy, takeover evidence, or reviewer verdict.
 - Without that explicit grant, the takeover controller stops at
   awaiting-operator with complete evidence, recommended action, and no approval,
-  merge, enqueue, or signing side effect.
+  merge, enqueue, or signing side effect. While held at awaiting-operator, the
+  controller may still post PR comments, post review comments that do not include
+  an approving vote, and surface evidence for the Operator; the hold blocks gate
+  side effects, not communication needed to avoid silent paralysis.
 
 Until the Operator ratifies a resolution, controllers must treat this section as
 proposal text only. Do not edit `AGENTS.md` as part of this runbook.
@@ -160,6 +191,11 @@ Cadence checklist:
   rather than silent reuse, and preserve structured release/takeover history.
 - Dependencies: re-check dependent tickets and PRs after each merge so ready work
   can advance without waiting for predecessor session memory.
+- Seat restock: after each merge or harvested completion, pair idle or starved
+  seats with ready unblocked tickets and pending reviewable PRs. Use the
+  file-backed pointer-plus-SHA brief mechanic for every dispatch and escalate the
+  empty-conveyor-front-end alarm if ready work exists but no worker or review lane
+  is active.
 
 ## Drill Acceptance
 
@@ -169,8 +205,13 @@ execute this sequence in a drill:
 1. Read takeover evidence and this runbook.
 2. Harvest one completed branch and verify full preflight, carrier fidelity, and
    honest work class.
-3. Route independent current-head review and persist evidence.
-4. Stop at the correct gate posture: either perform a permitted gate act with
+3. Enumerate the seat pool and conveyor front end; dispatch restock work for any
+   idle or starved seat using a pointer-plus-SHA brief, or raise the
+   empty-conveyor-front-end alarm when ready work exists with no active intake.
+4. Route independent current-head review. If multiple PRs are pending, fan out
+   concurrent non-author reviewer workers, one per PR, and persist each verdict
+   as it lands.
+5. Stop at the correct gate posture: either perform a permitted gate act with
    fresh evidence or surface an awaiting-operator item when authority is absent.
-5. After an observed merge, transition claims, collate changelog material, and
+6. After an observed merge, transition claims, collate changelog material, and
    re-check the board.
