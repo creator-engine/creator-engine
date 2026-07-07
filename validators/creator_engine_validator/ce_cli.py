@@ -1257,6 +1257,10 @@ def _build_parser() -> argparse.ArgumentParser:
     bv.add_argument("--drift", action="store_true", help="re-verify active assertions against their evidence_ref")
     bv.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
+    bh = brain_sub.add_parser("hydrate", help="emit deterministic active decision/lesson hydration contract")
+    _add_state_root(bh)
+    bh.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
     bp = brain_sub.add_parser("probe", help="freshly interrogate Knowledge-SSOT capability probe(s)")
     bp.add_argument("probe_name", nargs="?", metavar="name", help="probe name")
     bp.add_argument("--all", action="store_true", dest="all_probes", help="run all registered probes")
@@ -3424,6 +3428,26 @@ def _brain_verify(args) -> int:
     return 0 if ok else 1
 
 
+def _brain_hydrate(args) -> int:
+    try:
+        payload = brain_runtime.hydrate_contract(args.state_root)
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("hydrate", exc)
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    summary = payload["summary"]
+    resume = payload.get("newest_resume_state")
+    print(
+        "ce brain hydrate: "
+        f"{summary['active_decision_count']} active decision(s), "
+        f"{summary['active_lesson_count']} active lesson(s)"
+    )
+    print(f"ledger_path: {payload['ledger_path']}")
+    print(f"newest_resume_state: {resume['path'] if resume else 'none'}")
+    return 0
+
+
 def _brain_sync(args) -> int:
     try:
         result = brain_runtime.sync_authoritative_ledger(
@@ -5488,6 +5512,7 @@ _BRAIN_DISPATCH = {
     "check": _brain_check,
     "correct": _brain_correct,
     "eval": _brain_eval,
+    "hydrate": _brain_hydrate,
     "init": _brain_init,
     "ingest": _brain_ingest,
     "recall": _brain_recall,

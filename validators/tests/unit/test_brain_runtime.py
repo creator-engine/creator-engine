@@ -348,3 +348,88 @@ def test_forbidden_identifier_keys_fail_closed():
             records=[],
             write=CaptureWrite(),
         )
+
+
+def test_decision_and_lesson_records_hydrate_in_deterministic_active_order(tmp_path: Path):
+    sink = CaptureWrite()
+    rt.append_decision(
+        date="2026-07-08",
+        scope="forge",
+        statement="second by date",
+        decision_id="brain-decision-runtime-0002",
+        records=[],
+        state_root=tmp_path / ".ce" / "state",
+        write=sink,
+    )
+    rt.append_decision(
+        date="2026-07-07",
+        scope="forge",
+        statement="first by date",
+        decision_id="brain-decision-runtime-0001",
+        records=sink.records,
+        state_root=tmp_path / ".ce" / "state",
+        write=sink,
+    )
+    rt.append_decision(
+        date="2026-07-09",
+        scope="forge",
+        statement="replacement decision",
+        supersedes_ref="brain-decision-runtime-0002",
+        decision_id="brain-decision-runtime-0003",
+        records=sink.records,
+        state_root=tmp_path / ".ce" / "state",
+        write=sink,
+    )
+    rt.append_lesson(
+        date="2026-07-07",
+        scope="takeover",
+        feedback="standby controller lacked operating context",
+        correction="hydrate memory from artifacts",
+        why="session-only memory is not recoverable",
+        how_to_apply="run ce brain hydrate --json during takeover",
+        lesson_id="brain-lesson-runtime-0001",
+        records=sink.records,
+        state_root=tmp_path / ".ce" / "state",
+        write=sink,
+    )
+    ledger = tmp_path / ".ce" / "state" / "brain" / "assertions.yaml"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(sink.text, encoding="utf-8")
+
+    payload = rt.hydrate_contract(tmp_path / ".ce" / "state")
+
+    assert [record["id"] for record in payload["active_decisions"]] == [
+        "brain-decision-runtime-0001",
+        "brain-decision-runtime-0003",
+    ]
+    assert [record["id"] for record in payload["active_lessons"]] == [
+        "brain-lesson-runtime-0001"
+    ]
+    assert payload["summary"] == {
+        "active_decision_count": 2,
+        "active_lesson_count": 1,
+        "newest_resume_state_present": False,
+    }
+
+
+def test_hydrate_empty_or_absent_ledger_returns_well_formed_contract(tmp_path: Path):
+    state_root = tmp_path / ".ce" / "state"
+
+    absent = rt.hydrate_contract(state_root)
+
+    assert absent["kind"] == rt.HYDRATION_KIND
+    assert absent["ledger_present"] is False
+    assert absent["active_decisions"] == []
+    assert absent["active_lessons"] == []
+    assert absent["newest_resume_state"] is None
+
+    path = state_root / "brain" / "assertions.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text("records: []\n", encoding="utf-8")
+
+    empty = rt.hydrate_contract(state_root)
+
+    assert empty["ledger_present"] is True
+    assert empty["record_count"] == 0
+    assert empty["active_decisions"] == []
+    assert empty["active_lessons"] == []

@@ -5,8 +5,10 @@ required: [kind, schema_version, intent_kind]
 properties:
   kind: {const: brain-append-intent}
   schema_version: {const: "1"}
-  intent_kind: {enum: [active_assertion_append, ce411_supersede_pair]}
+  intent_kind: {enum: [active_assertion_append, ce411_supersede_pair, decision_append, lesson_append]}
   active_assertion: {$ref: "#/$defs/assertion_content"}
+  decision: {$ref: "#/$defs/decision_content"}
+  lesson: {$ref: "#/$defs/lesson_content"}
   supersede_pair:
     type: object
     additionalProperties: false
@@ -17,10 +19,32 @@ properties:
 oneOf:
   - properties: {intent_kind: {const: active_assertion_append}}
     required: [active_assertion]
-    not: {required: [supersede_pair]}
+    not:
+      anyOf:
+        - required: [supersede_pair]
+        - required: [decision]
+        - required: [lesson]
   - properties: {intent_kind: {const: ce411_supersede_pair}}
     required: [supersede_pair]
-    not: {required: [active_assertion]}
+    not:
+      anyOf:
+        - required: [active_assertion]
+        - required: [decision]
+        - required: [lesson]
+  - properties: {intent_kind: {const: decision_append}}
+    required: [decision]
+    not:
+      anyOf:
+        - required: [active_assertion]
+        - required: [supersede_pair]
+        - required: [lesson]
+  - properties: {intent_kind: {const: lesson_append}}
+    required: [lesson]
+    not:
+      anyOf:
+        - required: [active_assertion]
+        - required: [supersede_pair]
+        - required: [decision]
 $defs:
   assertion_content:
     type: object
@@ -41,3 +65,38 @@ $defs:
         oneOf:
           - {type: string}
           - {type: object}
+  decision_content:
+    type: object
+    additionalProperties: false
+    required: [date, scope, statement]
+    properties:
+      decision_id: {type: string}
+      date: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+      scope:
+        oneOf:
+          - {type: string, minLength: 1}
+          - {type: object, minProperties: 1}
+      statement: {type: string, minLength: 1}
+      supersedes_ref:
+        oneOf:
+          - {type: string}
+          - {type: "null"}
+  lesson_content:
+    type: object
+    additionalProperties: false
+    required: [date, scope, feedback, correction, why, how_to_apply]
+    properties:
+      lesson_id: {type: string}
+      date: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+      scope:
+        oneOf:
+          - {type: string, minLength: 1}
+          - {type: object, minProperties: 1}
+      feedback: {type: string, minLength: 1}
+      correction: {type: string, minLength: 1}
+      why: {type: string, minLength: 1}
+      how_to_apply: {type: string, minLength: 1}
+      supersedes_ref:
+        oneOf:
+          - {type: string}
+          - {type: "null"}

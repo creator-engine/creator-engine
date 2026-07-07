@@ -200,6 +200,19 @@ def test_ce_brain_check_unknown_on_missing_ledger(tmp_path: Path, capsys):
     assert json.loads(capsys.readouterr().out) == {"record": None, "status": "unknown"}
 
 
+def test_ce_brain_hydrate_json_empty_ledger_contract(tmp_path: Path, capsys):
+    state_root = tmp_path / ".ce" / "state"
+
+    rc = ce_cli.main(["brain", "hydrate", "--state-root", str(state_root), "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "ce-brain-hydration-contract"
+    assert payload["active_decisions"] == []
+    assert payload["active_lessons"] == []
+    assert payload["newest_resume_state"] is None
+
+
 def test_ce_brain_verify_catches_tamper(tmp_path: Path, capsys):
     state_root = tmp_path / ".ce" / "state"
     assert ce_cli.main(

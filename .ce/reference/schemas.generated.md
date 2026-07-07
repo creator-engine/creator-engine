@@ -306,8 +306,15 @@ Definitions:
 | --- | --- | --- | --- | --- |
 | `hash` | string | no | pattern `^[0-9a-f]{64}$` |  |
 | `assertion_id` | string | no | pattern `^brain-assertion-[a-z0-9][a-z0-9-]{3,96}$` |  |
+| `decision_id` | string | no | pattern `^brain-decision-[a-z0-9][a-z0-9-]{3,96}$` |  |
+| `lesson_id` | string | no | pattern `^brain-lesson-[a-z0-9][a-z0-9-]{3,96}$` |  |
+| `record_id` | oneOf | no |  |  |
+| `memory_date` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}$` |  |
+| `memory_status` | string | no | enum `active` |  |
 | `scope` | anyOf | no |  |  |
 | `assertion` | object; allOf | no | additionalProperties `false` |  |
+| `decision` | object | no | additionalProperties `false` |  |
+| `lesson` | object | no | additionalProperties `false` |  |
 
 ### `schemas/brain-recall-record.schema.yaml`
 

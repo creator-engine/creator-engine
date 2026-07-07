@@ -27,7 +27,10 @@ properties:
     type: array
     minItems: 1
     items:
-      $ref: "#/$defs/assertion"
+      oneOf:
+        - $ref: "#/$defs/assertion"
+        - $ref: "#/$defs/decision"
+        - $ref: "#/$defs/lesson"
   note:
     type: string
     maxLength: 1024
@@ -40,6 +43,22 @@ $defs:
   assertion_id:
     type: string
     pattern: "^brain-assertion-[a-z0-9][a-z0-9-]{3,96}$"
+  decision_id:
+    type: string
+    pattern: "^brain-decision-[a-z0-9][a-z0-9-]{3,96}$"
+  lesson_id:
+    type: string
+    pattern: "^brain-lesson-[a-z0-9][a-z0-9-]{3,96}$"
+  record_id:
+    oneOf:
+      - $ref: "#/$defs/decision_id"
+      - $ref: "#/$defs/lesson_id"
+  memory_date:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+  memory_status:
+    type: string
+    enum: [active]
   scope:
     anyOf:
       - type: string
@@ -172,4 +191,117 @@ $defs:
           properties:
             superseded_by:
               $ref: "#/$defs/assertion_id"
+    additionalProperties: false
+  decision:
+    type: object
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - id
+      - date
+      - scope
+      - statement
+      - supersedes_ref
+      - sequence
+      - prev_hash
+      - content_hash
+      - status
+    properties:
+      kind:
+        type: string
+        const: brain-decision
+      record_type:
+        type: string
+        const: brain_decision
+      schema_version:
+        type: string
+        enum: ["1"]
+      id:
+        $ref: "#/$defs/decision_id"
+      date:
+        $ref: "#/$defs/memory_date"
+      scope:
+        $ref: "#/$defs/scope"
+      statement:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      supersedes_ref:
+        anyOf:
+          - $ref: "#/$defs/decision_id"
+          - type: "null"
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        $ref: "#/$defs/hash"
+      content_hash:
+        $ref: "#/$defs/hash"
+      status:
+        $ref: "#/$defs/memory_status"
+    additionalProperties: false
+  lesson:
+    type: object
+    required:
+      - kind
+      - record_type
+      - schema_version
+      - id
+      - date
+      - scope
+      - feedback
+      - correction
+      - why
+      - how_to_apply
+      - supersedes_ref
+      - sequence
+      - prev_hash
+      - content_hash
+      - status
+    properties:
+      kind:
+        type: string
+        const: brain-lesson
+      record_type:
+        type: string
+        const: brain_lesson
+      schema_version:
+        type: string
+        enum: ["1"]
+      id:
+        $ref: "#/$defs/lesson_id"
+      date:
+        $ref: "#/$defs/memory_date"
+      scope:
+        $ref: "#/$defs/scope"
+      feedback:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      correction:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      why:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      how_to_apply:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      supersedes_ref:
+        anyOf:
+          - $ref: "#/$defs/lesson_id"
+          - type: "null"
+      sequence:
+        type: integer
+        minimum: 0
+      prev_hash:
+        $ref: "#/$defs/hash"
+      content_hash:
+        $ref: "#/$defs/hash"
+      status:
+        $ref: "#/$defs/memory_status"
     additionalProperties: false
