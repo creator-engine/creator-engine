@@ -793,12 +793,20 @@ def _cmd_scope(args: argparse.Namespace) -> int:
     ]
     if not ready:
         lines.append(f"{_BRAND} · not yet Ready: {'; '.join(reasons)}")
-    lines.append(journey_guidance.scope_next(args.scope_id))
+    if ready:
+        lines.append(journey_guidance.scope_next(args.scope_id))
+    payload = {
+        "action": "filed",
+        "scope_id": args.scope_id,
+        "path": str(path),
+        "projection": _projection(scope),
+        "ready": ready,
+        "reasons": reasons,
+    }
+    if ready:
+        payload["next"] = journey_guidance.scope_next(args.scope_id)
     return _emit(
-        args, 0, lines,
-        {"action": "filed", "scope_id": args.scope_id, "path": str(path),
-         "projection": _projection(scope), "ready": ready, "reasons": reasons,
-         "next": journey_guidance.scope_next(args.scope_id)},
+        args, 0, lines, payload,
     )
 
 

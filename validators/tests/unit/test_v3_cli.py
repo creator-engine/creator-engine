@@ -134,6 +134,34 @@ def test_scope_success_teaches_next_ratify_command(tmp_path, capsys):
     assert lines[-1] == journey_guidance.scope_next("rate-limit-login")
 
 
+def test_scope_not_ready_does_not_teach_ratify_next_in_text_or_json(tmp_path, capsys):
+    code = v3_cli.main([
+        "scope", "draft-only",
+        "--goal", "explore",
+        "--change-type", "docs",
+        "--root", str(tmp_path / "text"),
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "not yet Ready" in out
+    assert journey_guidance.scope_next("draft-only") not in out
+
+    code = v3_cli.main([
+        "scope", "draft-only",
+        "--goal", "explore",
+        "--change-type", "docs",
+        "--root", str(tmp_path / "json"),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["ready"] is False
+    assert "next" not in payload
+    assert journey_guidance.scope_next("draft-only") not in json.dumps(payload)
+
+
 # ---------------------------------------------------------------------------
 # the front gate — drive REFUSES unless Ready AND ratified
 # ---------------------------------------------------------------------------
