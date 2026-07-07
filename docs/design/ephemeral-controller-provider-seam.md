@@ -36,12 +36,15 @@ forge mutation authority for its mandate. It is never granted:
 - merge-gate singleton custody;
 - approval-wall signing or mint authority;
 - `ce-root-v1` signing authority;
+- seat-relaunch, `ce launch`, or canonical controller launch authority;
 - OpenBao root, unseal, import, wall-secret, or signing-deputy credentials;
 - controller-key material or any long-lived provider credential.
 
 Gate or signing actions requested by an ephemeral controller are routed back to
 the self-hosted singleton path or refused. Provider identity is evidence, not
-authority.
+authority. Ephemeral controllers never relaunch seats or invoke `ce launch`;
+canonical launch authority remains exclusively with the persistent controller
+path.
 
 ## Non-Goals
 
@@ -135,6 +138,31 @@ The response is a forge-results-out record. It names durable forge artifacts and
 the evidence packet; it does not name a provider-local database row, hidden
 queue offset, reusable session, or cached authority.
 
+Schema follow-up: implementation slices must materialize the request/response
+contract as `validators/creator_engine_validator/schemas/ephemeral-controller-run-v1.schema.yaml`
+and register the endpoint as `ephemeral_controller.run_v1` in the CE schema
+reference/catalog before any provider consumes it. The evidence packet shape
+must likewise become
+`validators/creator_engine_validator/schemas/ephemeral-controller-evidence-v1.schema.yaml`
+and register the schema id `ce.ephemeral_controller.evidence.v1` with an owner,
+version, compatibility policy, and validator check.
+
+## Reference Implementation: NanoClaw
+
+Operator decision 2026-07-07 sets the T0 bar for this design: by 2026-07-21,
+NanoClaw is the named reference implementation for the ephemeral controller
+loop. The reference loop is event-spawn -> mandate -> post -> self-retire:
+receive a forge event, resolve the pinned mandate, run exactly one bounded
+controller unit, post forge-visible results and evidence, and retire without
+durable provider state.
+
+NanoClaw binds to provider profile `self_hosted_webhook_v1`. The self-hosted
+webhook listener is the spawn surface; the NanoClaw harness is the proving
+surface for pointer verification, one-mandate runtime launch, bounded forge
+mutation, evidence emission, timeout/reap behavior, and self-retirement. Other
+profiles may be implemented later, but they do not replace NanoClaw as the T0
+reference harness for the event-spawned loop.
+
 ## Provider Profiles
 
 ### Provider 1: Self-Hosted Webhook Receiver
@@ -148,6 +176,10 @@ Shape:
 
 - A thin self-hosted webhook receiver accepts ratified forge events such as PR,
   push, issue label, comment command, merge event, or schedule tick.
+- The receiver is deployed from IaC and fed by ratified SSOT configuration for
+  event bindings, image digest, timeout, heartbeat, and credential policy. A
+  convention-configured or hand-mutated listener is not a conforming spawn
+  surface.
 - The receiver maps the event to a pinned mandate pointer compiled from the
   forge/arc manifest.
 - It spawns the canonical CE runtime image by immutable digest, for example
@@ -219,6 +251,47 @@ Allowed posture:
 - Any attempt by the managed provider to mint approval-wall markers, enqueue,
   merge, sign, or request signing-deputy credentials is refused and recorded.
 
+## Orphan Detection and Reap Policy
+
+Every provider profile must define an orphan detector, a timeout or heartbeat
+contract, a reap mechanism, and a partial-output cleanup policy before it may
+run non-read-only work. A normal `docker run --rm` exit is not sufficient:
+hung ephemerals must be detected and reaped.
+
+Common rules:
+
+- Each run has a provider instance id, mandate digest, work claim, deadline,
+  and heartbeat expectation recorded before work starts.
+- A missing heartbeat after the profile timeout, an exceeded `expires_at`, or a
+  provider-native timeout creates result `failed` with reason
+  `ephemeral_orphan_reaped`.
+- Reap emits evidence before cleanup when possible. If the runtime cannot emit,
+  the listener or provider wrapper emits a failure packet naming the last known
+  forge artifacts and the cleanup decision.
+- Partial forge outputs are never silently deleted. Branches or comments created
+  by the ephemeral may be updated with a superseding failure note, checks are
+  concluded failed or cancelled, draft pull requests are marked abandoned when
+  the mandate permits, and evidence records list every artifact left for human
+  or controller follow-up.
+
+Profile-specific policy:
+
+- `self_hosted_webhook_v1`: the IaC-managed listener owns the watchdog. The
+  spawned runtime must heartbeat to the listener or evidence sink at a fixed
+  cadence below the mandate TTL. On missed heartbeat or timeout, the listener
+  kills the process/container, revokes wrapped grants, waits for container
+  cleanup, and writes the failure evidence packet. NanoClaw must prove this
+  path for T0.
+- `github_actions_low_authority_v1`: GitHub Actions job timeout and workflow
+  cancellation are the detector and reap surface. The job must trap cancellation
+  where the platform allows, upload partial evidence, and leave any comments or
+  labels with a failure/superseded marker rather than deleting them.
+- `managed_agent_cloud_compute_v1`: CE records the provider request id and a CE
+  watchdog deadline before sending the mandate pointer. On provider timeout,
+  lost callback, or expired mandate, CE refuses the result, revokes any bounded
+  publication grant, records failure evidence, and only publishes returned work
+  through a later self-hosted path if a persistent controller revalidates it.
+
 ## Gate and Refusal Requirements
 
 All providers share these fail-closed rules:
@@ -232,6 +305,9 @@ All providers share these fail-closed rules:
 - Gate, queue-enqueue, approval-wall mint, approval-wall secret access,
   signing-deputy, `ce-root-v1`, OpenBao root/unseal/import, or controller-key
   requests from an ephemeral identity refuse regardless of mandate text.
+- Seat relaunch, `ce launch`, or canonical controller launch requests from an
+  ephemeral identity refuse regardless of mandate text. Relaunch remains a
+  persistent-controller responsibility.
 - Provider output that cannot be written to forge-visible targets or the
   evidence sink refuses promotion and is treated as incomplete.
 - Non-read-only promotion requires seam validation evidence. Gate-adjacent work
@@ -323,6 +399,9 @@ sequenceDiagram
   Singleton-->>Runtime: Refuse ephemeral custody or process via singleton path
   Runtime->>Evidence: Emit takeover-compatible evidence packet
   Runtime-->>Listener: Exit after mandate
+  Runtime--xListener: Heartbeat/timeout failure
+  Listener->>Runtime: Reap hung runtime and revoke scoped grants
+  Listener->>Evidence: Emit failed/reaped evidence and partial-output policy
 ```
 
 The lifecycle has no provider-local carryover edge. A later event repeats the
@@ -373,3 +452,5 @@ controller.
   or must CE re-apply their output through the self-hosted path?
 - Where should ephemeral evidence packets live so `ce takeover` can discover
   them without depending on provider-local state?
+- BLOCKING for implementation slices that resolve mandates: what component owns
+  the `ce-mandate://sha256/` resolver, and what storage roots are permitted?
