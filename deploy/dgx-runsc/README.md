@@ -267,8 +267,9 @@ PYTHONPATH=validators python -m pytest validators/tests/unit/test_dgx_runsc.py
 ```
 
 Expected dry-run evidence: `docker run -d --name ce-dgx-codex`, no `--rm`, no
-container `-t` unless `CE_DGX_TTY_FLAGS` is explicitly set, and no host `tmux`
-probe in the launcher.
+container `-t` unless `CE_DGX_TTY_FLAGS` is explicitly set, no host `tmux`
+probe in the launcher, generated config staged under the durable seat log root,
+and a host-backed `/var/tmp` worktree-root bind mount.
 
 Retire the seat when done:
 
@@ -276,14 +277,18 @@ Retire the seat when done:
 docker stop ce-dgx-codex && docker rm ce-dgx-codex
 ```
 
-### Host-config pre-trust prerequisite (REQUIRED for detached)
+### Generated contained config
 
-This launcher bind-mounts the host `~/.codex` directory **read-write**
-(`CE_DGX_CODEX_HOME`), so the host's own `config.toml` is the source of trust and
-sandbox configuration. Unlike the VPS launcher, this script does NOT generate a
-contained config and must NOT clobber the host one. For a detached,
-non-interactive launch to avoid a trust-write loop, the operator must ensure the
-host `~/.codex/config.toml` already pre-trusts the workspace before launching:
+This launcher bind-mounts the host `~/.codex` directory, then overlays a
+generated contained config at `${CODEX_HOME}/config.toml` inside the container.
+The generated config is staged under the durable seat log root by default:
+`${CE_DGX_SEAT_LOG_DIR}/launcher/codex-config.toml`, avoiding host `/tmp` so
+stopped containers remain restartable after tmpfiles cleanup. Operators may
+override the path for tests or diagnostics; production overrides should stay on
+durable host storage.
+
+For a detached, non-interactive launch to avoid a trust-write loop, the generated
+contained config pre-trusts the workspace:
 
 ```toml
 [projects."/workspace/creator-engine"]
@@ -312,6 +317,9 @@ CE_DGX_REPO=$(pwd)
 CE_DGX_CODEX_HOME=/home/cedev4/.codex
 CE_DGX_CODEX_HOME_MODE=rw
 CE_DGX_CODEX_BIN=/home/cedev4/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex
+CE_DGX_CONTAINED_CODEX_CONFIG=$HOME/.ce/logs/seats/<seat-id>/launcher/codex-config.toml
+CE_DGX_HOST_WORKTREE_ROOT=$HOME/.ce/logs/seats/<seat-id>/worktrees/<launch-id>
+CE_DGX_CONTAINER_WORKTREE_ROOT=/var/tmp
 CE_DGX_HARNESS=codex
 CE_DGX_HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock
 CE_DGX_SUBSTRATE_RUN_DIR=/run/creator-engine
@@ -342,6 +350,21 @@ would be more likely to reduce available memory than fix the guard-page failure.
 Set `CE_DGX_CODEX_HOME_MODE=ro` only after confirming Codex does not need to
 write session state. The default is `rw` because the TUI commonly records local
 session data under `~/.codex`.
+
+## Durable Worktree Root
+
+The launcher bind-mounts a host-disk worktree root into the container at
+`/var/tmp` by default:
+
+```text
+CE_DGX_HOST_WORKTREE_ROOT=${CE_DGX_SEAT_LOG_DIR}/worktrees/<launch-id>
+CE_DGX_CONTAINER_WORKTREE_ROOT=/var/tmp
+```
+
+This keeps `/var/tmp` unit worktrees on host disk instead of the runsc writable
+overlay, so files remain inspectable from the host after sentry or container
+death. Operators may override the host or container path. The host path must be
+absolute; production overrides should not live under host `/tmp`.
 
 ## Contained SELF-PUSH Broker Socket
 
@@ -416,6 +439,9 @@ docker run --rm --runtime=runsc-gvproxy-ptrace creator-engine/codex-runsc:0.141.
 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh --dry-run exec --version
 CE_DGX_DRY_RUN=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
 ```
+
+The dry-run argv should show the generated config source under the seat log root
+and a durable host worktree root mounted to `/var/tmp`.
 
 ## Caveats
 

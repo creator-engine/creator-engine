@@ -28,7 +28,7 @@ Environment:
   CE_DGX_CODEX_HOME_MODE    Mount mode for codex home: rw or ro (default: rw)
   CE_DGX_CODEX_BIN          Host standalone codex binary
   CE_DGX_CONTAINED_CODEX_CONFIG Host path for generated contained Codex config
-                            (default: /tmp/creator-engine-dgx-runsc-codex-config-<uid>-<user>.toml)
+                            (default: <seat-log-dir>/launcher/codex-config.toml)
   CE_DGX_HERDR_SOCKET_PATH  Container-only herdr socket path (default: /run/creator-engine/herdr/herdr.sock)
   CE_DGX_SUBSTRATE_RUN_DIR  Container tmpfs root for herdr substrate state (default: /run/creator-engine)
   CE_DGX_CONTAINER_REPO     Container repo path (default: /workspace/creator-engine)
@@ -44,6 +44,9 @@ Environment:
   CE_REVIEWER_AUTHORITY_REF Reviewer-authority envelope ref forwarded to the managed hook
   CE_DGX_SEAT_LOG_DIR       Host log dir mounted at /var/log/ce-seat
                             (default: ~/.ce/logs/seats/<seat-id>)
+  CE_DGX_HOST_WORKTREE_ROOT Durable host root bind-mounted to the container worktree root
+                            (default: <seat-log-dir>/worktrees/<launch-id>)
+  CE_DGX_CONTAINER_WORKTREE_ROOT Container worktree root path (default: /var/tmp)
   CE_DGX_TTY_FLAGS          Docker TTY flags (default: -it; set to -i for non-TTY callers)
                             Detached default is empty; herdr owns the in-container PTY.
   CE_DGX_DETACH             Launch detached (docker run -d, named container) when set to 1
@@ -134,7 +137,10 @@ CE_DGX_SEAT_ID="${CE_DGX_SEAT_ID:-${CE_DGX_CONTAINER_NAME}}"
 CE_DGX_EGRESS_BROKER_SOCKET="${CE_DGX_EGRESS_BROKER_SOCKET:-}"
 CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET="${CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET:-/run/ce-egress-broker.sock}"
 CE_DGX_SEAT_LOG_DIR="${CE_DGX_SEAT_LOG_DIR:-${HOME:-/home/cedev4}/.ce/logs/seats/${CE_DGX_SEAT_ID}}"
-CE_DGX_CONTAINED_CODEX_CONFIG="${CE_DGX_CONTAINED_CODEX_CONFIG:-${XDG_RUNTIME_DIR:-/tmp}/creator-engine-dgx-runsc-codex-config-${CE_DGX_UID}-${CE_DGX_CONTAINER_USER}.toml}"
+CE_DGX_LAUNCH_ID="${CE_DGX_LAUNCH_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+CE_DGX_CONTAINED_CODEX_CONFIG="${CE_DGX_CONTAINED_CODEX_CONFIG:-${CE_DGX_SEAT_LOG_DIR}/launcher/codex-config.toml}"
+CE_DGX_HOST_WORKTREE_ROOT="${CE_DGX_HOST_WORKTREE_ROOT:-${CE_DGX_SEAT_LOG_DIR}/worktrees/${CE_DGX_LAUNCH_ID}}"
+CE_DGX_CONTAINER_WORKTREE_ROOT="${CE_DGX_CONTAINER_WORKTREE_ROOT:-/var/tmp}"
 CE_DGX_CONTAINER_SEAT_LOG_DIR="/var/log/ce-seat"
 CE_DGX_CONTAINER_HERDR_SERVER_LOG="${CE_DGX_CONTAINER_SEAT_LOG_DIR}/herdr-server.log"
 
@@ -186,6 +192,22 @@ case "${CE_DGX_SEAT_LOG_DIR}" in
     ;;
   *)
     printf 'CE_DGX_SEAT_LOG_DIR must be an absolute path, got %s\n' "${CE_DGX_SEAT_LOG_DIR}" >&2
+    exit 2
+    ;;
+esac
+case "${CE_DGX_HOST_WORKTREE_ROOT}" in
+  /*)
+    ;;
+  *)
+    printf 'CE_DGX_HOST_WORKTREE_ROOT must be an absolute path, got %s\n' "${CE_DGX_HOST_WORKTREE_ROOT}" >&2
+    exit 2
+    ;;
+esac
+case "${CE_DGX_CONTAINER_WORKTREE_ROOT}" in
+  /*)
+    ;;
+  *)
+    printf 'CE_DGX_CONTAINER_WORKTREE_ROOT must be an absolute path, got %s\n' "${CE_DGX_CONTAINER_WORKTREE_ROOT}" >&2
     exit 2
     ;;
 esac
@@ -319,6 +341,10 @@ EOF
 
 prepare_contained_codex_config
 
+mkdir -p "${CE_DGX_HOST_WORKTREE_ROOT}"
+chown "${CE_DGX_UID}:${CE_DGX_GID}" "${CE_DGX_HOST_WORKTREE_ROOT}" 2>/dev/null || true
+chmod 0700 "${CE_DGX_HOST_WORKTREE_ROOT}" 2>/dev/null || true
+
 if [ "${CE_DGX_RUNTIME}" = "runsc" ] && [ "${CE_DGX_ALLOW_PLAIN_RUNSC:-0}" != "1" ]; then
   cat >&2 <<'EOF'
 Refusing CE_DGX_RUNTIME=runsc on this DGX.
@@ -405,6 +431,7 @@ fi
 seat_log_mount="type=bind,source=${CE_DGX_SEAT_LOG_DIR},target=${CE_DGX_CONTAINER_SEAT_LOG_DIR}"
 codex_bin_mount="type=bind,source=${CE_DGX_CODEX_BIN},target=/usr/local/bin/codex,readonly"
 contained_codex_config_mount="type=bind,source=${CE_DGX_CONTAINED_CODEX_CONFIG},target=${CE_DGX_CONTAINER_CODEX_HOME}/config.toml,readonly"
+worktree_root_mount="type=bind,source=${CE_DGX_HOST_WORKTREE_ROOT},target=${CE_DGX_CONTAINER_WORKTREE_ROOT}"
 egress_broker_mount=""
 if [ -n "${CE_DGX_EGRESS_BROKER_SOCKET}" ]; then
   egress_broker_mount="type=bind,source=${CE_DGX_EGRESS_BROKER_SOCKET},target=${CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET}"
@@ -448,6 +475,7 @@ docker_cmd=(
   --mount "${codex_home_mount}"
   --mount "${seat_log_mount}"
   --mount "${contained_codex_config_mount}"
+  --mount "${worktree_root_mount}"
   --mount "${codex_bin_mount}"
 )
 

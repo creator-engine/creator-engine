@@ -2,7 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-tmp_dir="$(mktemp -d)"
+scratch_root="${TMPDIR:-${HOME:-/tmp}/tmp}"
+mkdir -p "${scratch_root}"
+tmp_dir="$(mktemp -d "${scratch_root}/ce-seat-logging.XXXXXX")"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
 fail() {
@@ -18,6 +20,18 @@ assert_contains() {
       ;;
     *)
       printf '%s did not contain %s\n' "${label}" "${needle}" >&2
+      printf '%s\n' "${text}" >&2
+      return 1
+      ;;
+  esac
+}
+
+assert_not_contains() {
+  local label="$1" text="$2" needle="$3"
+
+  case "${text}" in
+    *"${needle}"*)
+      printf '%s unexpectedly contained %s\n' "${label}" "${needle}" >&2
       printf '%s\n' "${text}" >&2
       return 1
       ;;
@@ -176,27 +190,39 @@ install -d -m 0700 "${home_dir}"
 dgx_output="$(
   HOME="${home_dir}" \
   CE_DGX_SEAT_ID=seat-dgx-smoke \
-  CE_DGX_CONTAINED_CODEX_CONFIG="${tmp_dir}/dgx-config.toml" \
+  CE_DGX_LAUNCH_ID=smoke-launch \
   CE_DGX_TTY_FLAGS=-i \
   "${repo_root}/deploy/dgx-runsc/run-codex-runsc.sh" --dry-run
 )"
 assert_contains "dgx dry-run" "${dgx_output}" "source=${home_dir}/.ce/logs/seats/seat-dgx-smoke"
 assert_contains "dgx dry-run" "${dgx_output}" "target=/var/log/ce-seat"
+assert_contains "dgx dry-run" "${dgx_output}" "source=${home_dir}/.ce/logs/seats/seat-dgx-smoke/launcher/codex-config.toml"
+assert_contains "dgx dry-run" "${dgx_output}" "source=${home_dir}/.ce/logs/seats/seat-dgx-smoke/worktrees/smoke-launch"
+assert_contains "dgx dry-run" "${dgx_output}" "target=/var/tmp"
 assert_contains "dgx dry-run" "${dgx_output}" "CE_HERDR_SERVER_LOG=/var/log/ce-seat/herdr-server.log"
 assert_contains "dgx dry-run" "${dgx_output}" "CE_CODEX_STDERR_LOG=/var/log/ce-seat/codex-stderr.log"
+assert_not_contains "dgx dry-run" "${dgx_output}" "/tmp/creator-engine-dgx-runsc-codex-config"
+[ -f "${home_dir}/.ce/logs/seats/seat-dgx-smoke/launcher/codex-config.toml" ] || fail "dgx config was not generated under durable seat log root"
+[ -d "${home_dir}/.ce/logs/seats/seat-dgx-smoke/worktrees/smoke-launch" ] || fail "dgx durable host worktree root was not created"
 
 vps_output="$(
   HOME="${home_dir}" \
   CE_VPS_SEAT_ID=seat-vps-smoke \
   CE_VPS_CODEX_BIN=/bin/true \
-  CE_VPS_CONTAINED_CODEX_CONFIG="${tmp_dir}/vps-config.toml" \
+  CE_VPS_LAUNCH_ID=smoke-launch \
   CE_VPS_TTY_FLAGS=-i \
   "${repo_root}/deploy/vps-runsc/run-vps-runsc.sh" --dry-run
 )"
 assert_contains "vps dry-run" "${vps_output}" "source=${home_dir}/.ce/logs/seats/seat-vps-smoke"
 assert_contains "vps dry-run" "${vps_output}" "target=/var/log/ce-seat"
+assert_contains "vps dry-run" "${vps_output}" "source=${home_dir}/.ce/logs/seats/seat-vps-smoke/launcher/codex-config.toml"
+assert_contains "vps dry-run" "${vps_output}" "source=${home_dir}/.ce/logs/seats/seat-vps-smoke/worktrees/smoke-launch"
+assert_contains "vps dry-run" "${vps_output}" "target=/var/tmp"
 assert_contains "vps dry-run" "${vps_output}" "CE_HERDR_SERVER_LOG=/var/log/ce-seat/herdr-server.log"
 assert_contains "vps dry-run" "${vps_output}" "CE_CODEX_STDERR_LOG=/var/log/ce-seat/codex-stderr.log"
+assert_not_contains "vps dry-run" "${vps_output}" "/tmp/creator-engine-vps-runsc-codex-config"
+[ -f "${home_dir}/.ce/logs/seats/seat-vps-smoke/launcher/codex-config.toml" ] || fail "vps config was not generated under durable seat log root"
+[ -d "${home_dir}/.ce/logs/seats/seat-vps-smoke/worktrees/smoke-launch" ] || fail "vps durable host worktree root was not created"
 
 assert_rejects_relative_log_dir \
   "dgx dry-run relative log dir" \

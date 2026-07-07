@@ -2,7 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-tmp_dir="$(mktemp -d)"
+scratch_root="${TMPDIR:-${HOME:-/tmp}/tmp}"
+mkdir -p "${scratch_root}"
+tmp_dir="$(mktemp -d "${scratch_root}/ce-term-coercion.XXXXXX")"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
 assert_term_coercion() {
@@ -28,10 +30,14 @@ assert_term_coercion() {
   esac
 }
 
-dgx_output="$(TERM=dumb "${repo_root}/deploy/dgx-runsc/run-codex-runsc.sh" --dry-run)"
+home_dir="${tmp_dir}/home"
+install -d -m 0700 "${home_dir}"
+
+dgx_output="$(HOME="${home_dir}" TERM=dumb "${repo_root}/deploy/dgx-runsc/run-codex-runsc.sh" --dry-run)"
 assert_term_coercion "dgx" "${dgx_output}"
 
 vps_output="$(
+  HOME="${home_dir}" \
   TERM=dumb \
   CE_VPS_CODEX_BIN=/bin/true \
   CE_VPS_CONTAINED_CODEX_CONFIG="${tmp_dir}/config.toml" \
