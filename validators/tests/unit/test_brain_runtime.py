@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 
 import pytest
@@ -352,37 +353,41 @@ def test_forbidden_identifier_keys_fail_closed():
 
 def test_decision_and_lesson_records_hydrate_in_deterministic_active_order(tmp_path: Path):
     sink = CaptureWrite()
-    rt.append_decision(
+    rt._append_decision(
         date="2026-07-08",
         scope="forge",
         statement="second by date",
+        authority="controller",
         decision_id="brain-decision-runtime-0002",
         records=[],
         state_root=tmp_path / ".ce" / "state",
         write=sink,
     )
-    rt.append_decision(
+    rt._append_decision(
         date="2026-07-07",
         scope="forge",
         statement="first by date",
+        authority="operator",
         decision_id="brain-decision-runtime-0001",
         records=sink.records,
         state_root=tmp_path / ".ce" / "state",
         write=sink,
     )
-    rt.append_decision(
+    rt._append_decision(
         date="2026-07-09",
         scope="forge",
         statement="replacement decision",
+        authority="controller",
         supersedes_ref="brain-decision-runtime-0002",
         decision_id="brain-decision-runtime-0003",
         records=sink.records,
         state_root=tmp_path / ".ce" / "state",
         write=sink,
     )
-    rt.append_lesson(
+    rt._append_lesson(
         date="2026-07-07",
         scope="takeover",
+        source="review:PR-888",
         feedback="standby controller lacked operating context",
         correction="hydrate memory from artifacts",
         why="session-only memory is not recoverable",
@@ -405,6 +410,8 @@ def test_decision_and_lesson_records_hydrate_in_deterministic_active_order(tmp_p
     assert [record["id"] for record in payload["active_lessons"]] == [
         "brain-lesson-runtime-0001"
     ]
+    assert payload["active_decisions"][0]["authority"] == "operator"
+    assert payload["active_lessons"][0]["source"] == "review:PR-888"
     assert payload["summary"] == {
         "active_decision_count": 2,
         "active_lesson_count": 1,
@@ -433,3 +440,48 @@ def test_hydrate_empty_or_absent_ledger_returns_well_formed_contract(tmp_path: P
     assert empty["record_count"] == 0
     assert empty["active_decisions"] == []
     assert empty["active_lessons"] == []
+
+
+def test_hydrate_contract_is_byte_identical_for_seeded_resume_state(tmp_path: Path):
+    state_root = tmp_path / ".ce" / "state"
+    sink = CaptureWrite()
+    rt._append_decision(
+        date="2026-07-07",
+        scope="takeover",
+        statement="Hydration must be deterministic for takeover.",
+        authority="controller",
+        decision_id="brain-decision-runtime-determinism",
+        records=[],
+        state_root=state_root,
+        write=sink,
+    )
+    rt._append_lesson(
+        date="2026-07-07",
+        scope="takeover",
+        source="review:PR-888",
+        feedback="Resume metadata changed after touching files.",
+        correction="Expose resume content hash instead of mtime.",
+        why="Takeover evidence must serialize byte-identically for the same state.",
+        how_to_apply="Compare content_sha256 when inspecting newest_resume_state.",
+        lesson_id="brain-lesson-runtime-determinism",
+        records=sink.records,
+        state_root=state_root,
+        write=sink,
+    )
+    ledger = state_root / "brain" / "assertions.yaml"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(sink.text, encoding="utf-8")
+    resume = state_root / "sessions" / "controller-resume.json"
+    resume.parent.mkdir(parents=True)
+    resume.write_text('{"resume":true}\n', encoding="utf-8")
+
+    first = json.dumps(rt.hydrate_contract(state_root), sort_keys=True, separators=(",", ":"))
+    second = json.dumps(rt.hydrate_contract(state_root), sort_keys=True, separators=(",", ":"))
+
+    assert first == second
+    payload = json.loads(first)
+    assert payload["schema_version"] == rt.SCHEMA_VERSION
+    assert payload["newest_resume_state"]["content_sha256"] == (
+        "1b9c7213273033f30c70340a757e6037e02de0e59962ca8356b4c2fedf2a44ad"
+    )
+    assert "mtime" not in payload["newest_resume_state"]

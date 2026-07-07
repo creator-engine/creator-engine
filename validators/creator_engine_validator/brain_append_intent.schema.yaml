@@ -68,7 +68,7 @@ $defs:
   decision_content:
     type: object
     additionalProperties: false
-    required: [date, scope, statement]
+    required: [date, scope, statement, authority]
     properties:
       decision_id: {type: string}
       date: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
@@ -77,6 +77,7 @@ $defs:
           - {type: string, minLength: 1}
           - {type: object, minProperties: 1}
       statement: {type: string, minLength: 1}
+      authority: {type: string, minLength: 1, maxLength: 256}
       supersedes_ref:
         oneOf:
           - {type: string}
@@ -84,7 +85,7 @@ $defs:
   lesson_content:
     type: object
     additionalProperties: false
-    required: [date, scope, feedback, correction, why, how_to_apply]
+    required: [date, scope, source, feedback, correction, why, how_to_apply]
     properties:
       lesson_id: {type: string}
       date: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
@@ -92,6 +93,7 @@ $defs:
         oneOf:
           - {type: string, minLength: 1}
           - {type: object, minProperties: 1}
+      source: {type: string, minLength: 1, maxLength: 2048}
       feedback: {type: string, minLength: 1}
       correction: {type: string, minLength: 1}
       why: {type: string, minLength: 1}

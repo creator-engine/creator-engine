@@ -239,6 +239,13 @@ def _normalize_memory_text(value: str, field: str) -> str:
     return normalized
 
 
+def _normalize_authority(value: str) -> str:
+    normalized = _normalize_memory_text(value, "authority")
+    if len(normalized) > 256:
+        raise BrainAssertionRefused("authority must be 256 characters or fewer")
+    return normalized
+
+
 def _normalize_date(value: str) -> str:
     if not isinstance(value, str) or not _DATE_RE.match(value):
         raise BrainAssertionRefused("date must use YYYY-MM-DD")
@@ -877,11 +884,12 @@ def correct_claim(
     return CorrectResult(ledger_path=path, superseded_record=superseded, record=active, ledger_text=text)
 
 
-def append_decision(
+def _append_decision(
     *,
     date: str,
     scope: str | dict[str, Any],
     statement: str,
+    authority: str,
     supersedes_ref: str | None = None,
     state_root: Path | str = V3_LOCAL_STATE_ROOT,
     decision_id: str | None = None,
@@ -894,6 +902,7 @@ def append_decision(
     normalized_date = _normalize_date(date)
     normalized_scope = _normalize_scope(scope)
     normalized_statement = _normalize_memory_text(statement, "statement")
+    normalized_authority = _normalize_authority(authority)
     if supersedes_ref is not None:
         _validate_decision_id(supersedes_ref)
     rid = decision_id or _decision_id(
@@ -902,6 +911,7 @@ def append_decision(
             "date": normalized_date,
             "scope": normalized_scope,
             "statement": normalized_statement,
+            "authority": normalized_authority,
             "supersedes_ref": supersedes_ref,
         }
     )
@@ -915,6 +925,7 @@ def append_decision(
         "date": normalized_date,
         "scope": normalized_scope,
         "statement": normalized_statement,
+        "authority": normalized_authority,
         "supersedes_ref": supersedes_ref,
         "status": "active",
     }
@@ -934,10 +945,11 @@ def append_decision(
     )
 
 
-def append_lesson(
+def _append_lesson(
     *,
     date: str,
     scope: str | dict[str, Any],
+    source: str,
     feedback: str,
     correction: str,
     why: str,
@@ -953,6 +965,7 @@ def append_lesson(
     _require_valid_records(current, ledger_path(state_root))
     normalized_date = _normalize_date(date)
     normalized_scope = _normalize_scope(scope)
+    normalized_source = _normalize_memory_text(source, "source")
     normalized_feedback = _normalize_memory_text(feedback, "feedback")
     normalized_correction = _normalize_memory_text(correction, "correction")
     normalized_why = _normalize_memory_text(why, "why")
@@ -964,6 +977,7 @@ def append_lesson(
             "op": "lesson",
             "date": normalized_date,
             "scope": normalized_scope,
+            "source": normalized_source,
             "feedback": normalized_feedback,
             "correction": normalized_correction,
             "why": normalized_why,
@@ -980,6 +994,7 @@ def append_lesson(
         "id": rid,
         "date": normalized_date,
         "scope": normalized_scope,
+        "source": normalized_source,
         "feedback": normalized_feedback,
         "correction": normalized_correction,
         "why": normalized_why,
@@ -1031,6 +1046,7 @@ def _load_records_for_hydration(state_root: Path | str) -> list[dict[str, Any]]:
     except LoaderError as exc:
         raise BrainLedgerInvalid(str(exc)) from exc
     if isinstance(data, dict) and data.get("records") == []:
+        # Hydration is read-only startup context: tolerate a bootstrap-empty ledger here while mutating ledger APIs fail closed.
         return []
     return _records_from_doc(data, path)
 
@@ -1057,20 +1073,20 @@ def _resume_state_pointer(state_root: Path | str) -> dict[str, Any] | None:
     paths: set[Path] = set()
     for pattern in ("**/*resume*", "**/*session*"):
         paths.update(path for path in root.glob(pattern) if path.is_file())
-    candidates: list[tuple[float, str, Path]] = []
+    candidates: list[tuple[str, str, Path]] = []
     for path in paths:
         try:
-            stat = path.stat()
+            content_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
             continue
-        candidates.append((stat.st_mtime, str(path), path))
+        candidates.append((content_sha256, str(path), path))
     if not candidates:
         return None
-    _mtime, _name, newest = sorted(candidates, key=lambda item: (-item[0], item[1]))[0]
+    _digest, _name, newest = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
     stat = newest.stat()
     return {
         "path": str(newest),
-        "mtime": stat.st_mtime,
+        "content_sha256": hashlib.sha256(newest.read_bytes()).hexdigest(),
         "size_bytes": stat.st_size,
     }
 
@@ -1085,7 +1101,7 @@ def hydrate_contract(state_root: Path | str = V3_LOCAL_STATE_ROOT) -> dict[str, 
     resume_state = _resume_state_pointer(state_root)
     return {
         "kind": HYDRATION_KIND,
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "ledger_path": str(path),
         "ledger_present": path.is_file(),
         "record_count": len(records),

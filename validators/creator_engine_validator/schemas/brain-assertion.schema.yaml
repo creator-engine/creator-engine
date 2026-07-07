@@ -59,6 +59,14 @@ $defs:
   memory_status:
     type: string
     enum: [active]
+  authority:
+    type: string
+    minLength: 1
+    maxLength: 256
+  memory_source:
+    type: string
+    minLength: 1
+    maxLength: 2048
   scope:
     anyOf:
       - type: string
@@ -202,6 +210,7 @@ $defs:
       - date
       - scope
       - statement
+      - authority
       - supersedes_ref
       - sequence
       - prev_hash
@@ -227,6 +236,8 @@ $defs:
         type: string
         minLength: 1
         maxLength: 2048
+      authority:
+        $ref: "#/$defs/authority"
       supersedes_ref:
         anyOf:
           - $ref: "#/$defs/decision_id"
@@ -250,6 +261,7 @@ $defs:
       - id
       - date
       - scope
+      - source
       - feedback
       - correction
       - why
@@ -275,6 +287,8 @@ $defs:
         $ref: "#/$defs/memory_date"
       scope:
         $ref: "#/$defs/scope"
+      source:
+        $ref: "#/$defs/memory_source"
       feedback:
         type: string
         minLength: 1

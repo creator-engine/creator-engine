@@ -4411,6 +4411,22 @@ def _takeover(args) -> int:
             duty_manifest=getattr(args, "duty_manifest", None),
         )
     except takeover_runtime.TakeoverError as exc:
+        if getattr(args, "json_output", False):
+            print(
+                json.dumps(
+                    {
+                        "kind": "ce-takeover-error",
+                        "schema_version": "1",
+                        "code": exc.code,
+                        "message": str(exc),
+                        "predecessor": args.takeover_from,
+                        "repo_root": str(Path(args.repo_root).resolve()),
+                        "dry_run": args.dry_run,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
         print(f"ERROR: ce takeover refused [{exc.code}]: {exc}", file=sys.stderr)
         return 2
     if getattr(args, "json_output", False):

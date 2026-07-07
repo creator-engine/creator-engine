@@ -155,10 +155,11 @@ def _apply_intent(data: dict[str, Any], records: Sequence[dict[str, Any]], repo_
             )
         elif data["intent_kind"] == "decision_append":
             item = data["decision"]
-            brain_runtime.append_decision(
+            brain_runtime._append_decision(
                 date=item["date"],
                 scope=item["scope"],
                 statement=item["statement"],
+                authority=item["authority"],
                 supersedes_ref=item.get("supersedes_ref"),
                 decision_id=item.get("decision_id"),
                 records=records,
@@ -167,9 +168,10 @@ def _apply_intent(data: dict[str, Any], records: Sequence[dict[str, Any]], repo_
             )
         elif data["intent_kind"] == "lesson_append":
             item = data["lesson"]
-            brain_runtime.append_lesson(
+            brain_runtime._append_lesson(
                 date=item["date"],
                 scope=item["scope"],
+                source=item["source"],
                 feedback=item["feedback"],
                 correction=item["correction"],
                 why=item["why"],
