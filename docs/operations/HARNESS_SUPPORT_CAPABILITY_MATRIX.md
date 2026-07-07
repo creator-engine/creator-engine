@@ -1,89 +1,145 @@
 # CE harness-support capability matrix
 
-This is the authoritative CE harness-support matrix. It is rendered from `creator_engine_validator.harness_matrix`; `*` marks a cell whose support is deferred or otherwise not verified by committed wiring.
+This is the authoritative CE harness-support and promotion matrix. It is rendered from `creator_engine_validator.harness_matrix`; `yellow *` marks deferred or design-stage support, and `red` marks an absent or refused promotion requirement.
 
-| harness | Ring 0 | Ring 1 | Ring 2 | containment | native fan-out | status |
-| --- | --- | --- | --- | --- | --- | --- |
-| claude_code | full | full | full | deferred * | partial | full |
-| codex | full | deferred * | none | deferred * | none | partial |
-| lane | full | full | full | deferred * | full | full |
-| hermes | partial * | deferred * | deferred * | deferred * | deferred * | deferred * |
-| opencode | deferred * | deferred * | deferred * | deferred * | deferred * | deferred * |
-| copilot_cli | deferred * | deferred * | deferred * | deferred * | deferred * | deferred * |
-| nanoclaw | none | none | none | none | full | none |
-| discord | none | none | none | none | full | none |
-| slack | none | none | none | none | full | none |
+A row is gate-capable only when `code-support`, `launch-wired`, `live-proven`, and `promotion-approved` are all `green`, or when the row records an explicit Operator-ratified exception with date and ratification reference.
+
+| provider | ring | code-support | launch-wired | live-proven | promotion-approved | gate-capable | exception |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| claude_code | Ring 0 | green | green | green | green | yes | none |
+| claude_code | Ring 1 | green | green | green | green | yes | none |
+| claude_code | Ring 2 | green | green | green | green | yes | none |
+| codex | Ring 0 | green | green | green | green | yes | none |
+| codex | Ring 1 | green | yellow * | red | red | no | none |
+| codex | Ring 2 | red | red | red | red | no | none |
+| codex | containment | green | yellow * | red | red | no | none |
+| lane_worker | Ring 0 | green | green | green | green | yes | none |
+| lane_worker | Ring 1 | green | green | green | green | yes | none |
+| lane_worker | Ring 2 | green | green | green | green | yes | none |
+| contained_controller_scaffold | C1 static/dry-run | green | yellow * | red | red | no | none |
+| contained_controller_scaffold | C2 | yellow * | red | red | red | no | none |
+| contained_controller_scaffold | C3 | yellow * | red | red | red | no | none |
+| contained_controller_scaffold | C4 | yellow * | red | red | red | no | none |
+| ephemeral_controller_providers | design-stage | yellow * | red | red | red | no | none |
 
 ## Provenance
 
-### claude_code
-- **ring0** = `full` - validators/creator_engine_validator/claude_launch_spec.py: evaluate_claude_launch + build_governed_claude_command
-- **ring1** = `full` - .claude/settings.json: PreToolUse hook-pack confirmed via validators/creator_engine_validator/hook_pack_confirm.py
-- **ring2** = `full` - .claude/settings.json: Stop hook + validators/creator_engine_validator/hook_check.py: evaluate(HookContext)
-- **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
-- **native_fanout** = `partial` - CE fan-out is provided by worker_spawn / lane launch rather than Claude Code native background agents, which Ring 0 refuses for governed seats
-- **status** = `full` - rollup of verified Ring 0/1/2 support: 3/3
+### claude_code - Ring 0
+- **code-support** = `green` - validators/creator_engine_validator/claude_launch_spec.py: evaluate_claude_launch + build_governed_claude_command
+- **launch-wired** = `green` - validators/creator_engine_validator/claude_launch_spec.py: governed Claude command builder is wired before harness start
+- **live-proven** = `green` - validators/creator_engine_validator/claude_launch_spec.py: launch envelope evaluator is covered by committed probes
+- **promotion-approved** = `green` - Claude Ring 0 is full per existing matrix
+- **gate-capable** = `yes` - all four promotion cells are green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### codex
-- **ring0** = `full` - validators/creator_engine_validator/codex_launch_spec.py: evaluate_codex_launch + build_governed_codex_command scrubs ambient repo credentials
-- **ring1** = `deferred` [unverified/deferred] - validators/creator_engine_validator/hook_pack_confirm.py: confirm_codex_managed_hook_pack exists, but the matrix records Codex Ring 1 support as deferred pending containment acceptance
-- **ring2** = `none` - validators/creator_engine_validator/codex_launch_spec.py: no Codex-owned Stop/closeout hook surface is wired
-- **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
-- **native_fanout** = `none` - no Codex native governed fan-out wiring is present in CE
-- **status** = `partial` - rollup of verified Ring 0/1/2 support: 1/3
+### claude_code - Ring 1
+- **code-support** = `green` - validators/creator_engine_validator/hook_pack_confirm.py: confirm_hook_pack
+- **launch-wired** = `green` - .claude/settings.json: PreToolUse hook registered
+- **live-proven** = `green` - validators/creator_engine_validator/hook_pack_confirm.py: validator-reachable PreToolUse confirmation
+- **promotion-approved** = `green` - Claude Ring 1 is full per existing matrix
+- **gate-capable** = `yes` - all four promotion cells are green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### lane
-- **ring0** = `full` - validators/creator_engine_validator/lane_runtime.py: launch() runs governed lane Ring 0 refusal before side effects
-- **ring1** = `full` - .claude/settings.json: committed PreToolUse hook-pack + validators/creator_engine_validator/lane_runtime.py: launch() exports CE_LEDGER_ROOT into the pane env so the wrapped harness's in-band Ring 1 hook resolves posture from the seat's real claim
-- **ring2** = `full` - validators/creator_engine_validator/lane_runtime.py: verify() + verify_closeout provide lane closeout checks
-- **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
-- **native_fanout** = `full` - validators/creator_engine_validator/lane_runtime.py: launch() materializes governed worker lane fan-out
-- **status** = `full` - rollup of verified Ring 0/1/2 support: 3/3
+### claude_code - Ring 2
+- **code-support** = `green` - validators/creator_engine_validator/hook_check.py: evaluate(HookContext)
+- **launch-wired** = `green` - .claude/settings.json: Stop hook registered
+- **live-proven** = `green` - validators/creator_engine_validator/hook_pack_confirm.py: Stop hook confirmation
+- **promotion-approved** = `green` - Claude Ring 2 is full per existing matrix
+- **gate-capable** = `yes` - all four promotion cells are green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### hermes
-- **ring0** = `partial` [unverified/deferred] - validators/creator_engine_validator/hermes_launch_spec.py: Hermes launch evaluator/builder exists, but the matrix classifies Hermes governance extent as unverified until a harness audit promotes it
-- **ring1** = `deferred` [unverified/deferred] - Hermes per-tool-call hook support is unverified
-- **ring2** = `deferred` [unverified/deferred] - Hermes Stop/final-answer hook support is unverified
-- **containment** = `deferred` [unverified/deferred] - validators/creator_engine_validator/runner/herdr_containment.py: containment plan exists, but live launch still fails closed / is not wired
-- **native_fanout** = `deferred` [unverified/deferred] - Hermes native fan-out support is unverified
-- **status** = `deferred` [unverified/deferred] - Hermes support is explicitly unverified in this matrix
+### codex - Ring 0
+- **code-support** = `green` - validators/creator_engine_validator/codex_launch_spec.py: evaluate_codex_launch + build_governed_codex_command scrubs ambient repo credentials
+- **launch-wired** = `green` - validators/creator_engine_validator/codex_launch_spec.py: governed Codex command builder is wired before harness start
+- **live-proven** = `green` - validators/creator_engine_validator/codex_launch_spec.py: Ring 0 evaluator is committed and probed
+- **promotion-approved** = `green` - Codex Ring 0 is full per known state
+- **gate-capable** = `yes` - all four promotion cells are green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### opencode
-- **ring0** = `deferred` [unverified/deferred] - OpenCode launch envelope / cred-scrub support is unverified
-- **ring1** = `deferred` [unverified/deferred] - OpenCode per-tool-call hook support is unverified
-- **ring2** = `deferred` [unverified/deferred] - OpenCode Stop/closeout support is unverified
-- **containment** = `deferred` [unverified/deferred] - OpenCode sandbox / PTY containment support is unverified
-- **native_fanout** = `deferred` [unverified/deferred] - OpenCode native fan-out support is unverified
-- **status** = `deferred` [unverified/deferred] - OpenCode support is unverified; no CE harness adapter wiring is probed
+### codex - Ring 1
+- **code-support** = `green` - validators/creator_engine_validator/hook_pack_confirm.py: confirm_codex_managed_hook_pack exists
+- **launch-wired** = `yellow` [deferred/design-stage] - deferred pending containment acceptance; promotion evidence packet = ticket 480
+- **live-proven** = `red` - not live-proven until the ticket 480 evidence packet and Ring 1 smoke are accepted
+- **promotion-approved** = `red` - promotion deferred pending containment acceptance and ticket 480
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### copilot_cli
-- **ring0** = `deferred` [unverified/deferred] - Copilot CLI launch envelope / cred-scrub support is unverified
-- **ring1** = `deferred` [unverified/deferred] - Copilot CLI per-tool-call hook support is unverified
-- **ring2** = `deferred` [unverified/deferred] - Copilot CLI Stop/closeout support is unverified
-- **containment** = `deferred` [unverified/deferred] - Copilot CLI sandbox / PTY containment support is unverified
-- **native_fanout** = `deferred` [unverified/deferred] - Copilot CLI native fan-out support is unverified
-- **status** = `deferred` [unverified/deferred] - Copilot CLI support is unverified; no CE harness adapter wiring is probed
+### codex - Ring 2
+- **code-support** = `red` - validators/creator_engine_validator/codex_launch_spec.py: no Codex-owned Stop/closeout hook surface is wired
+- **launch-wired** = `red` - no Codex Ring 2 closeout launch wiring
+- **live-proven** = `red` - no Codex Ring 2 live proof
+- **promotion-approved** = `red` - Codex Ring 2 promotion is not approved
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### nanoclaw
-- **ring0** = `none` - nanoclaw is not an actor harness; no launch envelope applies
-- **ring1** = `none` - nanoclaw is not an actor harness; no per-tool-call hook applies
-- **ring2** = `none` - nanoclaw is not an actor harness; no Stop/closeout applies
-- **containment** = `none` - nanoclaw is not an actor harness; no sandbox / PTY applies
-- **native_fanout** = `full` - validators/creator_engine_validator/runner/notify_feed.py: first-class webhook sink covers nanoclaw emission
-- **status** = `none` - nanoclaw is an emission-only non-actor surface; there is no Ring 1 actor to gate
+### codex - containment
+- **code-support** = `green` - validators/creator_engine_validator/runner/herdr_containment.py: plan_herdr_containment exists
+- **launch-wired** = `yellow` [deferred/design-stage] - containment deferred; live launch still fails closed / is not wired
+- **live-proven** = `red` - Codex containment is not live-proven
+- **promotion-approved** = `red` - Codex containment promotion is deferred
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### discord
-- **ring0** = `none` - discord is not an actor harness; no launch envelope applies
-- **ring1** = `none` - discord is not an actor harness; no per-tool-call hook applies
-- **ring2** = `none` - discord is not an actor harness; no Stop/closeout applies
-- **containment** = `none` - discord is not an actor harness; no sandbox / PTY applies
-- **native_fanout** = `full` - validators/creator_engine_validator/runner/notify_feed.py: first-class webhook sink covers discord emission
-- **status** = `none` - discord is an emission-only non-actor surface; there is no Ring 1 actor to gate
+### lane_worker - Ring 0
+- **code-support** = `green` - validators/creator_engine_validator/lane_runtime.py: launch() runs governed lane Ring 0 refusal before side effects
+- **launch-wired** = `green` - validators/creator_engine_validator/lane_runtime.py: governed worker lane launch is wired
+- **live-proven** = `green` - validators/creator_engine_validator/lane_runtime.py: worker-lane Ring 0 path is committed and probed
+- **promotion-approved** = `green` - lane is approved as worker fan-out, not live controller authority
+- **gate-capable** = `yes` - all four promotion cells are green
+- **exception** = `none` - no Operator-ratified exception recorded
 
-### slack
-- **ring0** = `none` - slack is not an actor harness; no launch envelope applies
-- **ring1** = `none` - slack is not an actor harness; no per-tool-call hook applies
-- **ring2** = `none` - slack is not an actor harness; no Stop/closeout applies
-- **containment** = `none` - slack is not an actor harness; no sandbox / PTY applies
-- **native_fanout** = `full` - validators/creator_engine_validator/runner/notify_feed.py: first-class webhook sink covers slack emission
-- **status** = `none` - slack is an emission-only non-actor surface; there is no Ring 1 actor to gate
+### lane_worker - Ring 1
+- **code-support** = `green` - .claude/settings.json: committed PreToolUse hook-pack
+- **launch-wired** = `green` - validators/creator_engine_validator/lane_runtime.py: launch() exports CE_LEDGER_ROOT into the pane env
+- **live-proven** = `green` - validators/creator_engine_validator/lane_runtime.py: wrapped harness resolves posture from the real seat claim
+- **promotion-approved** = `green` - lane is approved as worker fan-out, not live controller authority
+- **gate-capable** = `yes` - all four promotion cells are green
+- **exception** = `none` - no Operator-ratified exception recorded
+
+### lane_worker - Ring 2
+- **code-support** = `green` - validators/creator_engine_validator/lane_runtime.py: verify() + verify_closeout provide lane closeout checks
+- **launch-wired** = `green` - validators/creator_engine_validator/lane_runtime.py: closeout verification is wired for worker lanes
+- **live-proven** = `green` - validators/creator_engine_validator/lane_runtime.py: worker-lane closeout checks are committed and probed
+- **promotion-approved** = `green` - lane is approved as worker fan-out, not live controller authority
+- **gate-capable** = `yes` - all four promotion cells are green
+- **exception** = `none` - no Operator-ratified exception recorded
+
+### contained_controller_scaffold - C1 static/dry-run
+- **code-support** = `green` - contained-controller scaffold exists only as static/dry-run support
+- **launch-wired** = `yellow` [deferred/design-stage] - dry-run scaffold only; no live controller promotion wiring
+- **live-proven** = `red` - contained controller scaffold is not live-proven
+- **promotion-approved** = `red` - contained controller scaffold is not promotion-approved
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded
+
+### contained_controller_scaffold - C2
+- **code-support** = `yellow` [deferred/design-stage] - C2 scaffold is unproven beyond static/dry-run design
+- **launch-wired** = `red` - C2 launch wiring is unproven
+- **live-proven** = `red` - C2 is not live-proven
+- **promotion-approved** = `red` - C2 promotion is not approved
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded
+
+### contained_controller_scaffold - C3
+- **code-support** = `yellow` [deferred/design-stage] - C3 scaffold is unproven beyond static/dry-run design
+- **launch-wired** = `red` - C3 launch wiring is unproven
+- **live-proven** = `red` - C3 is not live-proven
+- **promotion-approved** = `red` - C3 promotion is not approved
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded
+
+### contained_controller_scaffold - C4
+- **code-support** = `yellow` [deferred/design-stage] - C4 scaffold is unproven beyond static/dry-run design
+- **launch-wired** = `red` - C4 launch wiring is unproven
+- **live-proven** = `red` - C4 is not live-proven
+- **promotion-approved** = `red` - C4 promotion is not approved
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded
+
+### ephemeral_controller_providers - design-stage
+- **code-support** = `yellow` [deferred/design-stage] - ephemeral-controller providers are design-stage only
+- **launch-wired** = `red` - ephemeral-controller provider launch wiring is not present
+- **live-proven** = `red` - ephemeral-controller providers are not live-proven
+- **promotion-approved** = `red` - ephemeral-controller provider promotion is not approved
+- **gate-capable** = `no` - one or more promotion cells are not green
+- **exception** = `none` - no Operator-ratified exception recorded

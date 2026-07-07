@@ -220,7 +220,8 @@ def _expand_loaded_records(loaded: Any) -> list[dict[str, Any]]:
 
 def _derive_matrix_targets(repo_root: str | Path) -> tuple[SeatTarget, ...]:
     matrix = harness_matrix.build_matrix(repo_root=repo_root)
-    return tuple(SeatTarget(seat=row.harness) for row in matrix.rows)
+    seats = dict.fromkeys(row.harness for row in matrix.rows)
+    return tuple(SeatTarget(seat=seat) for seat in seats)
 
 
 def _derive_registry_targets(

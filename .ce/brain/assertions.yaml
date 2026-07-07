@@ -3933,4 +3933,25 @@ records:
   verification_method:
     evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
     type: static
+- claim:
+    object: merge-queue-checks-requested
+    predicate: verified-by-sha256
+    sha256: 6d790034336855609d62ca92196f6c4d271e55266346a246309632da614337c7
+    subject: convention
+  content_hash: 9be4f7a276e00403b7ad1e72449606f2023352f041ead62e30a099d032a5572c
+  evidence_ref: .github/workflows/validate.yml
+  id: brain-assertion-baefc5e6234d292664afc28c
+  kind: brain-assertion
+  prev_hash: 2a70e2503c3227c55842f0e7699c41ca2a0d31c7bd1b67318f3c095a31511d61
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 150
+  statement: convention verified-by-sha256 merge-queue-checks-requested
+  status: superseded
+  superseded_by: brain-assertion-validate-workflow-drift-gate
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/validate.yml
+    type: static
 schema_version: '1'

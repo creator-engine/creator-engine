@@ -285,6 +285,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_version_drift.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_harness_promotion_matrix = sub.add_parser(
+        "verify-harness-promotion-matrix",
+        help="harness promotion matrix gate (requires all-green promotion rows or dated Operator exceptions)",
+    )
+    verify_harness_promotion_matrix.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     pco_allocate = sub.add_parser(
         "pco-allocate",
         help="PCO-027: allocate a worktree lane (acquire lease, run git worktree add, write claim + event)",
@@ -904,6 +910,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .checks.version_drift import run as _run_version_drift
 
         result = _run_version_drift([Path(p) for p in args.paths])
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-harness-promotion-matrix":
+        from .checks.harness_promotion_matrix import run as _run_harness_promotion_matrix
+
+        result = _run_harness_promotion_matrix([Path(p) for p in args.paths])
         return _emit_results([result], args.json_output)
     if subcommand == "hook-check":
         return _hook_check(args)

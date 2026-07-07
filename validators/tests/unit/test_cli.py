@@ -44,6 +44,8 @@ def test_list_checks_excludes_explicit_version_drift_gate(capsys):
     out = capsys.readouterr().out
     assert "version_drift_current_surfaces" not in out
     assert "version_drift_stale_current_claim" not in out
+    assert "harness_promotion_matrix" not in out
+    assert "harness_promotion_gate_without_all_green" not in out
 
 
 def test_list_checks_unprofiled_matches_full_inventory(capsys):

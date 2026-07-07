@@ -187,6 +187,15 @@ def test_validate_workflow_runs_version_drift_gate():
     assert "permissions:" not in run
 
 
+def test_validate_workflow_runs_harness_promotion_matrix_gate():
+    step = _validate_step("Creator Engine validator — harness promotion matrix gate")
+
+    run = step["run"]
+    assert "verify-harness-promotion-matrix" in run
+    assert "PYTHONPATH=validators python -m creator_engine_validator" in run
+    assert "permissions:" not in run
+
+
 def test_validate_workflow_runs_install_spec_signature_guard_as_blocking_gate():
     step = _validate_step("Creator Engine validator — install-spec signature guard")
 
