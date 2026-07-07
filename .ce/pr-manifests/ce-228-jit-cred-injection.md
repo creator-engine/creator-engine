@@ -4,11 +4,11 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** story
+- **Declared work class:** feature
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=44e7ed4ff5c19129d7a782b660777451836d91bb2c94cb2ff7e6787a5a2390c6
+AUTHORIZED_PATHS_SHA256=2db1b96f77ae945afac09e731cb763007f4733e60a5ba352338442028fa2ef1a
 
 ```text
 .ce/changelog/ce-228-jit-cred-injection.md
@@ -19,5 +19,6 @@ tools/egress-broker/egress_broker/__init__.py
 tools/egress-broker/egress_broker/config.py
 tools/egress-broker/egress_broker/host_broker.py
 tools/egress-broker/egress_broker/jit_credential.py
+validators/tests/unit/test_egress_host_broker.py
 validators/tests/unit/test_jit_credential_broker.py
 ```
