@@ -3037,6 +3037,27 @@ def _select_onboard_apply_driver(
     return factory()
 
 
+class _RefreshWorkflowMerged:
+    def __init__(self, repo: str):
+        self._repo = repo
+
+    def value(self, key: str, default: Any = None) -> Any:
+        if key == "github.repo":
+            return self._repo
+        if key == "github.app.kind":
+            return "shared"
+        return default
+
+
+def _select_onboard_refresh_driver(*, repo: str) -> onboard_apply.ApplyDriver:
+    """Select the forge driver for one-file workflow refresh."""
+    return _select_onboard_apply_driver(
+        merged=_RefreshWorkflowMerged(repo),
+        policy_sha=onboard_apply.CE_WORKFLOW_SHA256,
+        adoption=True,
+    )
+
+
 def _onboard_apply_uses_userspace_installer(merged: "v3_installer.MergeResult") -> bool:
     return bool(merged.value("host.userspace_install"))
 
@@ -3050,6 +3071,57 @@ def _close_apply_driver(driver: Any) -> None:
     close = getattr(driver, "close", None)
     if callable(close):
         close()
+
+
+def _cmd_onboard_refresh_workflow(args: argparse.Namespace) -> int:
+    if args.inventory or args.show_plan or args.apply:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · onboard refresh-workflow refused: combine it with no other onboard mode"],
+            {"error": "invalid_onboard_mode"},
+        )
+    try:
+        probe = _detect_brownfield_project(Path.cwd())
+    except v3_installer.InstallRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · onboard refresh-workflow REFUSED: {exc}"],
+            {"error": "refused", "detail": str(exc)},
+        )
+    repo = str((probe.get("github") or {}).get("origin_remote") or "")
+    branch = str((probe.get("history") or {}).get("default_branch") or "")
+    driver = _select_onboard_refresh_driver(repo=repo)
+    try:
+        summary = onboard_apply.refresh_ce_workflow(driver, repo=repo, branch=branch)
+    except onboard_apply.ApplyRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · onboard refresh-workflow REFUSED: {exc.detail}"],
+            {"error": "refused", "code": exc.code, "detail": exc.detail},
+        )
+    except onboard_apply.ApplyFailed as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · onboard refresh-workflow FAILED ({exc.code}): {exc.detail}"],
+            {"error": "failed", "code": exc.code, "detail": exc.detail},
+        )
+    finally:
+        _close_apply_driver(driver)
+    if summary.get("changed"):
+        lines = [
+            f"{_BRAND} · onboard refresh-workflow updated {summary['path']} "
+            "from the current CE template",
+        ]
+    else:
+        lines = [
+            f"{_BRAND} · onboard refresh-workflow current: {summary['path']} "
+            "already matches this CE release",
+        ]
+    return _emit(args, 0, lines, summary)
 
 
 def _apply_onboard_accepts_driver(func: Any) -> bool:
@@ -3227,12 +3299,21 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     and runs the live read-only probes). ``--apply`` crosses into the E2
     live-drive seam in ``onboard_apply``; dry-run planning remains pure.
     """
+    if getattr(args, "refresh_workflow", False):
+        return _cmd_onboard_refresh_workflow(args)
     if getattr(args, "apply", False) and (args.inventory or args.show_plan):
         return _emit(
             args,
             2,
             [f"{_BRAND} · onboard refused: --apply cannot be combined with --inventory or --plan"],
             {"error": "invalid_onboard_mode"},
+        )
+    if not getattr(args, "spec", None):
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · onboard refused: --spec is required unless --refresh-workflow is used"],
+            {"error": "spec_required"},
         )
     spec_path = Path(args.spec)
     if not spec_path.is_file():
@@ -4700,7 +4781,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "(agent loop: --inventory → prepare answers → --plan → --apply). "
              "'onboard' is a one-release-cycle legacy alias (docs/install.sh still invokes it).",
     )
-    p_install.add_argument("--spec", required=True, help="path to the served install spec to verify")
+    p_install.add_argument("--spec", default=None, help="path to the served install spec to verify")
     p_install.add_argument("--key-id", default="ce-root-v1", help="the signing key id (must be pinned)")
     p_install.add_argument("--sig-value", default=None,
                            help="the published signature value (default: the spec's own content digest)")
@@ -4730,6 +4811,8 @@ def _build_parser() -> argparse.ArgumentParser:
                                 "+ the decomposed GitHub leg (no execution)")
     p_install.add_argument("--apply", action="store_true",
                            help="execute the verified E2 install apply drive (side-effecting)")
+    p_install.add_argument("--refresh-workflow", action="store_true",
+                           help="re-render the CE validation workflow in an already-onboarded repo")
     p_install.add_argument("--non-interactive", action="store_true",
                            help="fail-closed: refuse with the exact missing list instead of ever asking")
     p_install.add_argument("--opt-out", action="store_true",
