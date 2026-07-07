@@ -105,6 +105,19 @@ assert_rejects_relative_log_dir() {
   assert_contains "${label}" "${output}" "must be an absolute path"
 }
 
+assert_rejects_relative_worktree_root() {
+  local label="$1"
+  local output status
+  shift
+
+  set +e
+  output="$("$@" 2>&1)"
+  status="$?"
+  set -e
+  [ "${status}" -ne 0 ] || fail "${label} accepted a relative host worktree root"
+  assert_contains "${label}" "${output}" "must be an absolute path"
+}
+
 stub_dir="${tmp_dir}/stubs"
 install -d -m 0700 "${stub_dir}"
 
@@ -232,6 +245,16 @@ assert_rejects_relative_log_dir \
 assert_rejects_relative_log_dir \
   "vps dry-run relative log dir" \
   env CE_VPS_SEAT_LOG_DIR=relative CE_VPS_CODEX_BIN=/bin/true CE_VPS_CONTAINED_CODEX_CONFIG="${tmp_dir}/vps-relative.toml" \
+  "${repo_root}/deploy/vps-runsc/run-vps-runsc.sh" --dry-run
+
+assert_rejects_relative_worktree_root \
+  "dgx dry-run relative host worktree root" \
+  env CE_DGX_HOST_WORKTREE_ROOT=relative CE_DGX_CONTAINED_CODEX_CONFIG="${tmp_dir}/dgx-relative-worktree.toml" \
+  "${repo_root}/deploy/dgx-runsc/run-codex-runsc.sh" --dry-run
+
+assert_rejects_relative_worktree_root \
+  "vps dry-run relative host worktree root" \
+  env CE_VPS_HOST_WORKTREE_ROOT=relative CE_VPS_CODEX_BIN=/bin/true CE_VPS_CONTAINED_CODEX_CONFIG="${tmp_dir}/vps-relative-worktree.toml" \
   "${repo_root}/deploy/vps-runsc/run-vps-runsc.sh" --dry-run
 
 run_entrypoint_success() {

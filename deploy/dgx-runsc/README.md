@@ -71,9 +71,9 @@ diagnostics.
    ```bash
    command -v docker
    command -v runsc
-   test -x /home/cedev4/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex
-   test -f /home/cedev4/.codex/auth.json
-   test -f /home/cedev4/.codex/config.toml
+   test -x "$HOME/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex"
+   test -f "$HOME/.codex/auth.json"
+   test -f "$HOME/.codex/config.toml"
    ```
 
 2. Register the dedicated `runsc-gvproxy-ptrace` Docker runtime:
@@ -314,9 +314,9 @@ CE_DGX_IMAGE=creator-engine/codex-runsc:0.141.0-aarch64
 CE_DGX_RUNTIME=runsc-gvproxy-ptrace
 CE_DGX_DOCKER_NETWORK=
 CE_DGX_REPO=$(pwd)
-CE_DGX_CODEX_HOME=/home/cedev4/.codex
+CE_DGX_CODEX_HOME=$HOME/.codex
 CE_DGX_CODEX_HOME_MODE=rw
-CE_DGX_CODEX_BIN=/home/cedev4/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex
+CE_DGX_CODEX_BIN=$HOME/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex
 CE_DGX_CONTAINED_CODEX_CONFIG=$HOME/.ce/logs/seats/<seat-id>/launcher/codex-config.toml
 CE_DGX_HOST_WORKTREE_ROOT=$HOME/.ce/logs/seats/<seat-id>/worktrees/<launch-id>
 CE_DGX_CONTAINER_WORKTREE_ROOT=/var/tmp
