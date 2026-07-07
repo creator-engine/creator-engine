@@ -28,4 +28,4 @@ validators/tests/unit/test_pr_preflight.py
 
 - Focused unit: `PYTHONPATH=validators PYTEST_ADDOPTS="-n 2" /tmp/ce-885-882-followups-venv/bin/python -m pytest validators/tests/unit/test_onboard_apply.py -q` - 74 passed.
 - Focused unit: `PYTHONPATH=validators PYTEST_ADDOPTS="-n 2" /tmp/ce-885-882-followups-venv/bin/python -m pytest validators/tests/unit/test_pr_preflight.py -q` - 41 passed.
-- Local preflight: pending clean committed-tree run.
+- Local preflight: `CE_VALIDATOR_PYTHON=/tmp/ce-885-882-followups-venv/bin/python PYTHONPATH=validators PYTEST_ADDOPTS="-n 2" PYTEST_XDIST_AUTO_NUM_WORKERS=2 /tmp/ce-885-882-followups-venv/bin/python -m creator_engine_validator.ce_cli validate-pr --repo-root .` - ENV-SKIP: `Install-spec signature guard` blocked by missing `ssh-keygen`; all other preflight checks passed, including baseline-diff pytest with zero new failures (`baseline=13`, `head=13`, 6867 passed, 31 skipped).
