@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** feature
 
-AUTHORIZED_PATHS_COUNT=10
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=2db1b96f77ae945afac09e731cb763007f4733e60a5ba352338442028fa2ef1a
+AUTHORIZED_PATHS_SHA256=6eec7f357be04cf02d07350600bb86dee6336163636900ee2bd76f567f9ad093
 
 ```text
 .ce/changelog/ce-228-jit-cred-injection.md
@@ -19,6 +19,7 @@ tools/egress-broker/egress_broker/__init__.py
 tools/egress-broker/egress_broker/config.py
 tools/egress-broker/egress_broker/host_broker.py
 tools/egress-broker/egress_broker/jit_credential.py
+validators/tests/integration/test_schema_packaging_wheel.py
 validators/tests/unit/test_egress_host_broker.py
 validators/tests/unit/test_jit_credential_broker.py
 ```
