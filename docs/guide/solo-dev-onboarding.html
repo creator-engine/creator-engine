@@ -119,103 +119,197 @@
       <h1>Solo + Dev Mode Onboarding</h1>
     </div>
     <article class="article">
-<h1 id="solo-dev-mode-onboarding">Solo + Dev Mode Onboarding</h1>
-<p><em>This guide is for a solo developer who has chosen <strong>Dev mode</strong>: you work directly in your own coding-agent terminal while Creator Engine wraps that session with governance. If you prefer a less hands-on tour, see <a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a> instead.</em></p>
+<h1 id="solo--dev-mode-onboarding">Solo + Dev Mode Onboarding</h1>
+<p><em>This guide is for a solo developer who has chosen <strong>Dev mode</strong>: you work
+directly in your own coding-agent terminal while Creator Engine wraps that
+session with governance. If you prefer a less hands-on tour, see
+<a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a> instead.</em></p>
 <blockquote>
-<p><strong>You are in: Solo + Dev mode.</strong> You still type prompts to Claude Code or Codex yourself. CE&#x27;s job is to start the governed session, keep the local state healthy, and hold privileged actions until the right human approval is present.</p>
+<p><strong>You are in: Solo + Dev mode.</strong> You still type prompts to Claude Code or
+Codex yourself. CE's job is to start the governed session, keep the local
+state healthy, and hold privileged actions until the right human approval is
+present.</p>
 </blockquote>
-<hr>
+<hr />
 <h2 id="the-day-one-shape">The day-one shape</h2>
 <p>The first run is deliberately small:</p>
 <ol>
 <li>Prepare the host and repository.</li>
 <li>Run <code>ce onboard</code>.</li>
 <li>Use the governed agent pane that opens.</li>
-<li>Return later with <code>ce launch</code>.</li>
+<li>Return later with <code>ce launch --backend host</code>.</li>
 </ol>
-<p>The detailed Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship loop happens inside that governed session. On day one, you do not need to memorize a command table before you can get value.</p>
-<hr>
+<p>The detailed Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship loop happens inside that
+governed session. On day one, you do not need to memorize a command table before
+you can get value.</p>
+<hr />
 <h2 id="prerequisites">Prerequisites</h2>
 <p>Before onboarding, make sure these are true:</p>
 <ul>
-<li>A supported coding-agent CLI is installed and usable from your shell, such as Claude Code or Codex.</li>
-<li>The repository ignores CE&#x27;s local Hermes state:</li>
+<li>
+<p>A supported coding-agent CLI is installed and usable from your shell, such as
+Claude Code or Codex.</p>
+</li>
+<li>
+<p>The repository ignores CE's local Hermes state:</p>
+<pre><code class="language-gitignore">.hermes/
+</code></pre>
+</li>
+<li>
+<p>You have a CE install. If you have not installed yet, follow
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>
+first.</p>
+</li>
 </ul>
-<p>``<code>gitignore .hermes/ </code>``</p>
-<ul>
-<li>You have a CE install. If you have not installed yet, follow <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a> first.</li>
-</ul>
-<p>The <code>.hermes/</code> ignore rule matters because CE refuses to create tracked local runtime state during onboarding. Add it before the first run, commit the ignore change through your normal project process if needed, then continue.</p>
-<hr>
-<h2 id="phase-0-first-run-onboard">Phase 0 - First run: onboard</h2>
+<p>The <code>.hermes/</code> ignore rule matters because CE refuses to create tracked local
+runtime state during onboarding. Add it before the first run, commit the ignore
+change through your normal project process if needed, then continue.</p>
+<hr />
+<h2 id="phase-0---first-run-onboard">Phase 0 - First run: onboard</h2>
 <p>From the repository you want to use with CE, run:</p>
-<pre><code class="language-bash">ce onboard</code></pre>
-<p><code>ce onboard</code> performs the first-run sequence: it verifies the local install, checks host readiness, initializes local CE state, prepares your path, and opens the first governed agent pane unless you explicitly opt out.</p>
+<pre><code class="language-bash">ce onboard
+</code></pre>
+<p><code>ce onboard</code> performs the first-run sequence: it verifies the local install,
+checks host readiness, initializes local CE state, prepares your path, and opens
+the first governed agent pane unless you explicitly opt out.</p>
 <p>If you want to prepare the host and state without opening the pane yet, run:</p>
-<pre><code class="language-bash">ce onboard --no-launch</code></pre>
-<p>If onboarding refuses, read the refusal text and fix that specific prerequisite before trying again. Re-run support is still being tightened; do not assume <code>ce onboard</code> is a general recovery command for partially reused state.</p>
-<hr>
-<h2 id="phase-1-daily-entry-point-launch">Phase 1 - Daily entry point: launch</h2>
+<pre><code class="language-bash">ce onboard --no-launch
+</code></pre>
+<p>If onboarding refuses, read the refusal text and fix that specific prerequisite
+before trying again. Re-run support is still being tightened; do not assume
+<code>ce onboard</code> is a general recovery command for partially reused state.</p>
+<hr />
+<h2 id="phase-1---daily-entry-point-launch">Phase 1 - Daily entry point: launch</h2>
 <p>After onboarding has completed, return to the governed session with:</p>
-<pre><code class="language-bash">ce launch</code></pre>
-<p><code>ce launch</code> opens or attaches the visible governed terminal launcher for your agent. It is the daily entry point after the repository has been onboarded; it is not the first command on a fresh host.</p>
+<pre><code class="language-bash">ce launch --backend host
+</code></pre>
+<p><code>ce launch --backend host</code> opens or attaches the visible governed terminal
+launcher for your agent. It is the daily entry point after the repository has
+been onboarded; it is not the first command on a fresh host.</p>
 <p>For a dry-run of the launcher plan without opening a pane, use:</p>
-<pre><code class="language-bash">ce launch --dry-run</code></pre>
-<hr>
-<h2 id="phase-2-work-in-the-pane">Phase 2 - Work in the pane</h2>
-<p>Inside the governed pane, work the way you normally work with your coding agent:</p>
+<pre><code class="language-bash">ce launch --backend host --dry-run
+</code></pre>
+<hr />
+<h2 id="phase-2---work-in-the-pane">Phase 2 - Work in the pane</h2>
+<p>Inside the governed pane, work the way you normally work with your coding
+agent:</p>
 <ol>
 <li>Describe the change you want.</li>
 <li>Answer clarifying questions.</li>
 <li>Read the proposed work boundary and acceptance criteria.</li>
 <li>Approve only the privileged actions you actually intend.</li>
-<li>Review the resulting diff, tests, and pull request evidence before anything ships.</li>
+<li>Review the resulting diff, tests, and pull request evidence before anything
+ships.</li>
 </ol>
-<p>CE stays quiet until it has a reason to intervene. The important moment is when the agent reaches for something privileged, such as source-host mutation or credential access. CE refuses or holds that action outside the agent and tells you why.</p>
+<p>CE stays quiet until it has a reason to intervene. The important moment is when
+the agent reaches for something privileged, such as source-host mutation or
+credential access. CE refuses or holds that action outside the agent and tells
+you why.</p>
 <p>For the in-product vocabulary tour, run:</p>
-<pre><code class="language-bash">ce guide</code></pre>
+<pre><code class="language-bash">ce guide
+</code></pre>
 <p>For a host/environment preflight, run:</p>
-<pre><code class="language-bash">ce doctor</code></pre>
-<hr>
+<pre><code class="language-bash">ce doctor
+</code></pre>
+<hr />
 <h2 id="repo-connected-install-rail">Repo-connected install rail</h2>
-<p><code>ce onboard</code> is the quick first-run rail for getting a governed local session. Connecting CE to a repository it can ship to is a separate, human-approved install rail. When you have the verified install artifacts and answers file, the shape is:</p>
+<p><code>ce onboard</code> is the quick first-run rail for getting a governed local session.
+Connecting CE to a repository it can ship to is a separate, human-approved
+install rail. When you have the verified install artifacts and answers file, the
+shape is:</p>
 <pre><code class="language-bash">ce install \
   --spec &lt;verified-spec&gt; \
   --answers ce-install.answers.yaml \
-  --plan</code></pre>
+  --plan
+</code></pre>
 <p>Then, only after the plan is acceptable:</p>
 <pre><code class="language-bash">ce install \
   --spec &lt;verified-spec&gt; \
   --answers ce-install.answers.yaml \
-  --apply --non-interactive</code></pre>
-<p>The full version of that flow, including trust roots, anchors, and answer schema paths, lives in <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>.</p>
-<hr>
+  --apply --non-interactive
+</code></pre>
+<p>The full version of that flow, including trust roots, anchors, and answer
+schema paths, lives in
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a>.</p>
+<hr />
 <h2 id="your-irreducible-gestures">Your irreducible gestures</h2>
 <p>CE is designed so that a small set of decisions stays with you:</p>
 <table>
-<thead><tr><th>You always decide</th><th>The agent handles</th></tr></thead>
+<thead>
+<tr>
+<th>You always decide</th>
+<th>The agent handles</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>What change is worth making</td><td>Drafting a concrete implementation path</td></tr>
-<tr><td>What &quot;done&quot; means</td><td>Producing the diff and test evidence</td></tr>
-<tr><td>Whether a privileged action is acceptable</td><td>Surfacing the refusal or approval point</td></tr>
-<tr><td>Whether the pull request satisfies your intent</td><td>Preparing the evidence for review</td></tr>
-<tr><td>Whether to connect CE to a repo through the install rail</td><td>Running only the planned, approved install steps</td></tr>
-</tbody></table>
-<p>In Dev mode you stay close to the shell and the agent pane. The governance layer is outside the agent, so the agent cannot reason around it.</p>
-<hr>
+<tr>
+<td>What change is worth making</td>
+<td>Drafting a concrete implementation path</td>
+</tr>
+<tr>
+<td>What &quot;done&quot; means</td>
+<td>Producing the diff and test evidence</td>
+</tr>
+<tr>
+<td>Whether a privileged action is acceptable</td>
+<td>Surfacing the refusal or approval point</td>
+</tr>
+<tr>
+<td>Whether the pull request satisfies your intent</td>
+<td>Preparing the evidence for review</td>
+</tr>
+<tr>
+<td>Whether to connect CE to a repo through the install rail</td>
+<td>Running only the planned, approved install steps</td>
+</tr>
+</tbody>
+</table>
+<p>In Dev mode you stay close to the shell and the agent pane. The governance layer
+is outside the agent, so the agent cannot reason around it.</p>
+<hr />
 <h2 id="where-to-go-next">Where to go next</h2>
 <table>
-<thead><tr><th>You want to...</th><th>Read</th></tr></thead>
+<thead>
+<tr>
+<th>You want to...</th>
+<th>Read</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>The front door and big picture</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>welcome.md</code></a></td></tr>
-<tr><td>The canonical command path</td><td><a href="quickstart.html"><code>quickstart.md</code></a></td></tr>
-<tr><td>How CE builds software</td><td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td></tr>
-<tr><td>The plain-language vocabulary tour</td><td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td></tr>
-<tr><td>The Solo + CEO path</td><td><a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a></td></tr>
-<tr><td>A worked SCRUM-to-CE mapping</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td></tr>
-<tr><td>The full install-to-ship pilot runbook</td><td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td></tr>
-<tr><td>Contribute to CE itself</td><td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td></tr>
-</tbody></table>
+<tr>
+<td>The front door and big picture</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>welcome.md</code></a></td>
+</tr>
+<tr>
+<td>The canonical command path</td>
+<td><a href="quickstart.html"><code>quickstart.md</code></a></td>
+</tr>
+<tr>
+<td>How CE builds software</td>
+<td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td>
+</tr>
+<tr>
+<td>The plain-language vocabulary tour</td>
+<td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td>
+</tr>
+<tr>
+<td>The Solo + CEO path</td>
+<td><a href="solo-ceo-onboarding.html"><code>solo-ceo-onboarding.md</code></a></td>
+</tr>
+<tr>
+<td>A worked SCRUM-to-CE mapping</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td>
+</tr>
+<tr>
+<td>The full install-to-ship pilot runbook</td>
+<td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td>
+</tr>
+<tr>
+<td>Contribute to CE itself</td>
+<td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td>
+</tr>
+</tbody>
+</table>
     </article>
   </div>
   <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>

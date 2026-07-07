@@ -120,99 +120,210 @@
     </div>
     <article class="article">
 <h1 id="complete-walkthrough">Complete Walkthrough</h1>
-<p><em>This guide shows the whole Creator Engine loop in one continuous path. For the canonical copy-paste command path, start with <a href="quickstart.html"><code>quickstart.md</code></a>. For the concepts, read <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a>. If you want the full pilot operator checklist, read <a href="pilot-runbook.html"><code>pilot-runbook.md</code></a>.</em></p>
+<p><em>This guide shows the whole Creator Engine loop in one continuous path. For the
+canonical copy-paste command path, start with <a href="quickstart.html"><code>quickstart.md</code></a>.
+For the concepts, read <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a>.
+If you want the full pilot operator checklist, read
+<a href="pilot-runbook.html"><code>pilot-runbook.md</code></a>.</em></p>
 <h2 id="1-the-promise">1. The Promise</h2>
-<p>Creator Engine runs your own coding agent under governance. You keep using Claude Code, Codex, or the agent you already know. CE adds a visible workflow around it so work is bounded before it starts, checked after it runs, and gated before it lands.</p>
+<p>Creator Engine runs your own coding agent under governance. You keep using
+Claude Code, Codex, or the agent you already know. CE adds a visible workflow
+around it so work is bounded before it starts, checked after it runs, and gated
+before it lands.</p>
 <p>The useful mental model is simple:</p>
 <blockquote>
-<p>You describe the change. CE turns it into a Scope. Your agent builds inside that Scope. The result is graded against the Scope, not against the agent&#x27;s confidence.</p>
+<p>You describe the change. CE turns it into a Scope. Your agent builds inside
+that Scope. The result is graded against the Scope, not against the agent's
+confidence.</p>
 </blockquote>
-<p>If you get stuck at any point, start with <code>ce --help</code> or <code>ce &lt;command&gt; --help</code>, then follow the linked docs for the stage you are in. If a gate is still unclear, ask your operator which decision is missing before you continue.</p>
-<hr>
+<p>If you get stuck at any point, start with <code>ce --help</code> or
+<code>ce &lt;command&gt; --help</code>, then follow the linked docs for the stage you are in. If
+a gate is still unclear, ask your operator which decision is missing before you
+continue.</p>
+<hr />
 <h2 id="2-get-running">2. Get Running</h2>
-<p>There are two supported rails. They end in the same place: a governed agent session on your machine.</p>
+<p>There are two supported rails. They end in the same place: a governed agent
+session on your machine.</p>
 <table>
-<thead><tr><th>Rail</th><th>Use it when</th><th>Start here</th></tr></thead>
+<thead>
+<tr>
+<th>Rail</th>
+<th>Use it when</th>
+<th>Start here</th>
+</tr>
+</thead>
 <tbody>
-<tr><td><strong>Fast local install</strong></td><td>You want the shortest path from terminal to CE</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a></td></tr>
-<tr><td><strong>Agent-native install</strong></td><td>You want your coding agent to fetch and follow the signed install spec</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/llms-install.md"><code>../llms-install.md</code></a></td></tr>
-</tbody></table>
+<tr>
+<td><strong>Fast local install</strong></td>
+<td>You want the shortest path from terminal to CE</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a></td>
+</tr>
+<tr>
+<td><strong>Agent-native install</strong></td>
+<td>You want your coding agent to fetch and follow the signed install spec</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/llms-install.md"><code>../llms-install.md</code></a></td>
+</tr>
+</tbody>
+</table>
 <p>The fast path is:</p>
-<pre><code class="language-bash">curl --proto &#x27;=https&#x27; --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
+<pre><code class="language-bash">curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
 ce onboard
-ce brain init</code></pre>
-<p><code>ce onboard</code> checks the host, verifies the installed CE surface, initializes local state, and drops you into a governed agent pane. For daily work after that, use:</p>
-<pre><code class="language-bash">ce launch --backend host</code></pre>
-<p>That pane is still your normal coding agent. CE is not a separate dashboard or editor. It is the wrapper around the session: it tracks the work, records the evidence, and holds privileged actions until the right human decision is made.</p>
-<hr>
+</code></pre>
+<p><code>ce onboard</code> checks the host, verifies the installed CE surface, initializes
+local state, and drops you into a governed agent pane. For daily work after
+that, use:</p>
+<pre><code class="language-bash">ce launch --backend host
+</code></pre>
+<p>That pane is still your normal coding agent. CE is not a separate dashboard or
+editor. It is the wrapper around the session: it tracks the work, records the
+evidence, and holds privileged actions until the right human decision is made.</p>
+<hr />
 <h2 id="3-meet-the-loop">3. Meet The Loop</h2>
-<p>CE names the work loop with five words. They are the user-facing skin over a more precise machine, and they match the canon in <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>stage-vocabulary.md</code></a>.</p>
+<p>CE names the work loop with five words. They are the user-facing skin over a
+more precise machine, and they match the canon in
+<a href="https://github.com/creator-engine/creator-engine/blob/main/docs/architecture/stage-vocabulary.md"><code>stage-vocabulary.md</code></a>.</p>
 <table>
-<thead><tr><th>Stage</th><th>Plain meaning</th><th>What CE is protecting</th></tr></thead>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Plain meaning</th>
+<th>What CE is protecting</th>
+</tr>
+</thead>
 <tbody>
-<tr><td><strong>Frame</strong></td><td>Understand the problem and why it matters</td><td>The work is not tracked until the problem is clear</td></tr>
-<tr><td><strong>Shape</strong></td><td>Turn the problem into a ratifiable Scope</td><td>The Scope has Goal, Done-when, Change-type, and Ready</td></tr>
-<tr><td><strong>Build</strong></td><td>Let the agent execute the ratified Scope</td><td>The run stays inside the approved Scope</td></tr>
-<tr><td><strong>Review</strong></td><td>Grade the result against Done-when</td><td>Evidence matters more than transcript confidence</td></tr>
-<tr><td><strong>Ship</strong></td><td>Land the governed outcome</td><td>Merge, no-change, or delivered research happens through the gate</td></tr>
-</tbody></table>
+<tr>
+<td><strong>Frame</strong></td>
+<td>Understand the problem and why it matters</td>
+<td>The work is not tracked until the problem is clear</td>
+</tr>
+<tr>
+<td><strong>Shape</strong></td>
+<td>Turn the problem into a ratifiable Scope</td>
+<td>The Scope has Goal, Done-when, Change-type, and Ready</td>
+</tr>
+<tr>
+<td><strong>Build</strong></td>
+<td>Let the agent execute the ratified Scope</td>
+<td>The run stays inside the approved Scope</td>
+</tr>
+<tr>
+<td><strong>Review</strong></td>
+<td>Grade the result against Done-when</td>
+<td>Evidence matters more than transcript confidence</td>
+</tr>
+<tr>
+<td><strong>Ship</strong></td>
+<td>Land the governed outcome</td>
+<td>Merge, no-change, or delivered research happens through the gate</td>
+</tr>
+</tbody>
+</table>
 <p>If you know BMAD, the rough bridge is:</p>
 <table>
-<thead><tr><th>BMAD shape</th><th>CE stage</th></tr></thead>
+<thead>
+<tr>
+<th>BMAD shape</th>
+<th>CE stage</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Analysis</td><td>Frame</td></tr>
-<tr><td>Planning + solutioning</td><td>Shape</td></tr>
-<tr><td>Implementation</td><td>Build</td></tr>
-<tr><td>Review and release tail</td><td>Review + Ship</td></tr>
-</tbody></table>
-<p>The extra CE tail is deliberate. Review and Ship are first-class because the grader lives outside the agent, and shipping is a governed outcome, not the agent declaring itself done.</p>
-<hr>
+<tr>
+<td>Analysis</td>
+<td>Frame</td>
+</tr>
+<tr>
+<td>Planning + solutioning</td>
+<td>Shape</td>
+</tr>
+<tr>
+<td>Implementation</td>
+<td>Build</td>
+</tr>
+<tr>
+<td>Review and release tail</td>
+<td>Review + Ship</td>
+</tr>
+</tbody>
+</table>
+<p>The extra CE tail is deliberate. Review and Ship are first-class because the
+grader lives outside the agent, and shipping is a governed outcome, not the
+agent declaring itself done.</p>
+<hr />
 <h2 id="4-the-worked-example">4. The Worked Example</h2>
-<p>We will use Dev mode: you drive the pipeline explicitly with <code>ce</code> commands from inside the governed pane. In CEO mode, you can ask the agent to drive more of the mechanics for you, but the same human boundaries remain: you ratify the Scope, judge the artifacts, and authorize privileged gates.</p>
+<p>We will use Dev mode: you drive the pipeline explicitly with <code>ce</code> commands from
+inside the governed pane. In CEO mode, you can ask the agent to drive more of
+the mechanics for you, but the same human boundaries remain: you ratify the
+Scope, judge the artifacts, and authorize privileged gates.</p>
 <p>The synthesized ticket:</p>
 <blockquote>
-<p>Add a lightweight empty-state message to the project activity page so a new repository does not show a blank panel before its first run.</p>
+<p>Add a lightweight empty-state message to the project activity page so a new
+repository does not show a blank panel before its first run.</p>
 </blockquote>
 <h3 id="frame">Frame</h3>
-<p><strong>What you do.</strong> You tell the agent what feels wrong and what outcome would make it better:</p>
+<p><strong>What you do.</strong> You tell the agent what feels wrong and what outcome would make
+it better:</p>
 <pre><code class="language-text">The activity page is blank before the first governed run. Frame a small docs/UI
-ticket for adding an empty state. Keep it narrow: copy only, no backend changes.</code></pre>
-<p>If the problem still feels fuzzy, keep the work in Frame and ask your operator which outcome, boundary, or acceptance criterion must be decided before you Shape it.</p>
-<p><strong>What CE does.</strong> CE keeps this as conversation until there is a real unit of work. It does not create a Scope just because you chatted. When the agent has enough context, it summarizes the candidate work and asks whether to Shape it.</p>
+ticket for adding an empty state. Keep it narrow: copy only, no backend changes.
+</code></pre>
+<p>If the problem still feels fuzzy, keep the work in Frame and ask your operator
+which outcome, boundary, or acceptance criterion must be decided before you
+Shape it.</p>
+<p><strong>What CE does.</strong> CE keeps this as conversation until there is a real unit of
+work. It does not create a Scope just because you chatted. When the agent has
+enough context, it summarizes the candidate work and asks whether to Shape it.</p>
 <p><strong>What you see.</strong></p>
 <pre><code class="language-text">◆ CE · Frame
 Problem: activity page is blank before first run.
 Likely change: add empty-state copy in the existing activity view.
 Boundary: no backend data model or API changes.
-Next: Shape a Scope? › yes</code></pre>
+Next: Shape a Scope? › yes
+</code></pre>
 <p>Frame ends when the problem is bounded enough to become a Scope.</p>
 <h3 id="shape">Shape</h3>
-<p><strong>What you do.</strong> You create the Scope: the Goal, the Done-when checks, and the Change-type.</p>
+<p><strong>What you do.</strong> You create the Scope: the Goal, the Done-when checks, and the
+Change-type.</p>
 <pre><code class="language-bash">ce scope activity-empty-state \
   --goal &quot;Show a helpful empty state on the activity page before the first run&quot; \
   --done-when &quot;A new project activity page shows empty-state copy instead of a blank panel&quot; \
   --done-when &quot;The copy points users back to launching their first governed run&quot; \
   --done-when &quot;Existing populated activity pages are unchanged&quot; \
-  --change-type code</code></pre>
-<p>If your operator asks you to add a lane-aware cap, use <code>--budget &lt;amount&gt; --budget-unit %</code> for a subscription lane or <code>--budget &lt;amount&gt; --budget-unit &#x27;$&#x27;</code> for an API lane. Do not add a cap by default.</p>
-<p><strong>What CE does.</strong> CE checks whether the Scope is Ready. If the Scope is vague, missing a testable Done-when, or under-declares risk, it tells you before the Scope is ratified. You can run a sharpening pass:</p>
-<pre><code class="language-bash">ce shape activity-empty-state</code></pre>
+  --budget 1 \
+  --budget-unit % \
+  --budget-window per_run \
+  --change-type code
+</code></pre>
+<p>The example Budget is a paste-testable 1% per-run cap. Substitute the amount,
+unit, and window your operator gives you for your lane.</p>
+<p><strong>What CE does.</strong> CE checks whether the Scope is Ready. If the Scope is vague,
+missing a testable Done-when, or under-declares risk, it tells you before the
+Scope is ratified. You can run a sharpening pass:</p>
+<pre><code class="language-bash">ce shape activity-empty-state
+</code></pre>
 <p><strong>What you see.</strong></p>
 <pre><code class="language-text">◆ CE · Shape → &quot;activity-empty-state&quot;
 Goal        Show a helpful empty state on the activity page before the first run
 Done-when   3 checks
+Budget      1% per_run
 Change-type code
 Ready       ✓
 
-Front gate: ratify this Scope before Build.</code></pre>
+Front gate: ratify this Scope before Build.
+</code></pre>
 <p>Then you ratify the Scope:</p>
-<pre><code class="language-bash">ce ratify activity-empty-state --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</code></pre>
-<p>Ratification is the human &quot;yes&quot;: this is the work, these are the Done-when checks, and this is the risk tier.</p>
+<pre><code class="language-bash">ce ratify activity-empty-state --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+</code></pre>
+<p>Ratification is the human &quot;yes&quot;: this is the work, these are the Done-when
+checks, and this is the risk tier.</p>
 <h3 id="build">Build</h3>
 <p><strong>What you do.</strong> You dispatch the governed run:</p>
-<pre><code class="language-bash">ce drive activity-empty-state --spawn</code></pre>
-<p>Then you watch for important prompts. Most mechanics belong to the agent and CE, not to you.</p>
-<p><strong>What CE does.</strong> CE starts a boxed run against the ratified Scope. The agent reads the codebase, edits inside the intended path set, runs the relevant checks, and opens a pull request or reports why there is no change to make. If the agent tries to step outside the envelope, CE refuses and explains the gate.</p>
+<pre><code class="language-bash">ce drive activity-empty-state --spawn
+</code></pre>
+<p>Then you watch for important prompts. Most mechanics belong to the agent and CE,
+not to you.</p>
+<p><strong>What CE does.</strong> CE starts a boxed run against the ratified Scope. The agent
+reads the codebase, edits inside the intended path set, runs the relevant
+checks, and opens a pull request or reports why there is no change to make. If
+the agent tries to step outside the envelope, CE refuses and explains the gate.</p>
 <p><strong>What you see.</strong></p>
 <pre><code class="language-text">◆ CE · Build
 Scope       activity-empty-state
@@ -223,14 +334,22 @@ Agent plan:
 1. Locate activity page rendering.
 2. Add empty-state copy when the activity list is empty.
 3. Preserve populated-state behavior.
-4. Run focused tests and lint.</code></pre>
-<p>If the agent needs a privileged action, you see a refusal or an approval prompt through the agent&#x27;s normal terminal UI. When in doubt, run <code>ce drive --help</code> to check the Build command surface, then ask your operator which approval is missing.</p>
+4. Run focused tests and lint.
+</code></pre>
+<p>If the agent needs a privileged action, you see a refusal or an approval prompt
+through the agent's normal terminal UI. When in doubt, run <code>ce drive --help</code> to
+check the Build command surface, then ask your operator which approval is
+missing.</p>
 <h3 id="review">Review</h3>
-<p><strong>What you do.</strong> You inspect the artifacts, not the transcript. Start with the Completion Report and the PR:</p>
+<p><strong>What you do.</strong> You inspect the artifacts, not the transcript. Start with the
+Completion Report and the PR:</p>
 <pre><code class="language-bash">ce report activity-empty-state --run-id activity-empty-state-1
-ce artifacts activity-empty-state --run-id activity-empty-state-1</code></pre>
+ce artifacts activity-empty-state --run-id activity-empty-state-1
+</code></pre>
 <p>Then read the diff and evidence against the Done-when checks you wrote.</p>
-<p><strong>What CE does.</strong> CE grades the run against the Scope. It reports whether the Done-when checks are met, whether checks passed, whether the diff stayed in scope, and what remains for Ship.</p>
+<p><strong>What CE does.</strong> CE grades the run against the Scope. It reports whether the
+Done-when checks are met, whether checks passed, whether the diff stayed in
+scope, and what remains for Ship.</p>
 <p><strong>What you see.</strong> A sample <code>ce report</code> render looks like:</p>
 <pre><code class="language-text">┌─ ◆ CE COMPLETION REPORT · run activity-empty-state-1 · Scope activity-empty-state ──────────────────
 │ Outcome   — → #24
@@ -238,87 +357,177 @@ ce artifacts activity-empty-state --run-id activity-empty-state-1</code></pre>
 │ Next      —
 │ Artifacts PR #24 · Scope activity-empty-state · evidence-chain ✓ · spend
 │ Inspect   gh pr view 24   |   ce show activity-empty-state   |   ce artifacts activity-empty-state --run-id activity-empty-state-1
-└────────────────────────────────────────────────────────────</code></pre>
-<p>Review is where CE differs from a plain coding-agent run. The agent does not get to mark itself done because it sounded confident. The external grade is based on the Scope you ratified and the evidence the run produced.</p>
+└────────────────────────────────────────────────────────────
+</code></pre>
+<p>Review is where CE differs from a plain coding-agent run. The agent does not get
+to mark itself done because it sounded confident. The external grade is based on
+the Scope you ratified and the evidence the run produced.</p>
 <h3 id="ship">Ship</h3>
-<p><strong>What you do.</strong> If the PR satisfies the Scope and the required review/checks are green, you authorize the merge gate:</p>
-<pre><code class="language-bash">ce merge activity-empty-state --run activity-empty-state-1 --apply</code></pre>
-<p>If the result is not good enough, you send it back through Review with concrete feedback tied to the Done-when checks.</p>
-<p><strong>What CE does.</strong> CE verifies that the PR still matches the ratified envelope, that the required checks and review gate are satisfied, and that the change type is allowed to ship through this path. Then it records the terminal outcome.</p>
+<p><strong>What you do.</strong> If the PR satisfies the Scope and the required review/checks
+are green, you authorize the merge gate:</p>
+<pre><code class="language-bash">ce merge activity-empty-state --run activity-empty-state-1 --apply
+</code></pre>
+<p>If the result is not good enough, you send it back through Review with concrete
+feedback tied to the Done-when checks.</p>
+<p><strong>What CE does.</strong> CE verifies that the PR still matches the ratified envelope,
+that the required checks and review gate are satisfied, and that the change type
+is allowed to ship through this path. Then it records the terminal outcome.</p>
 <p><strong>What you see.</strong></p>
 <pre><code class="language-text">◆ CE · Ship
 Outcome   Merged
 Verdict   Scope satisfied · checks green · review complete · gate opened
-Next      → Done</code></pre>
-<p>Ship can also mean &quot;research delivered&quot; or &quot;no change needed&quot; when that is the ratified outcome. It is not only a merged PR.</p>
-<hr>
+Next      → Done
+</code></pre>
+<p>Ship can also mean &quot;research delivered&quot; or &quot;no change needed&quot; when that is the
+ratified outcome. It is not only a merged PR.</p>
+<hr />
 <h2 id="5-the-daily-loop">5. The Daily Loop</h2>
 <p>After setup, most days are smaller than the full walkthrough:</p>
 <ol>
-<li>Launch your governed pane with <code>ce launch</code>.</li>
+<li>Launch your governed pane with <code>ce launch --backend host</code>.</li>
 <li>Talk to the agent about the next problem.</li>
 <li>Let CE help Frame and Shape a small Scope.</li>
-<li>Ratify the Scope when the Goal, Done-when, and Change-type are right.</li>
+<li>Ratify the Scope when the Goal, Done-when, Budget, and Change-type are right.</li>
 <li>Let the agent Build inside the envelope.</li>
 <li>Review the Completion Report and PR evidence.</li>
 <li>Ship through the gate, or send the work back with specific feedback.</li>
 </ol>
-<p>Use one branch per Scope unless your team&#x27;s policy says otherwise. If a request starts to sprawl, split it before ratification. CE works best when the Scope is small enough that Review can be honest.</p>
+<p>Use one branch per Scope unless your team's policy says otherwise. If a request
+starts to sprawl, split it before ratification. CE works best when the Scope is
+small enough that Review can be honest.</p>
 <p>The local help surface is useful throughout the loop:</p>
 <pre><code class="language-bash">ce --help
 ce scope --help
-ce merge --help</code></pre>
-<p>If help output does not explain the gate you are seeing, ask your operator and include the Scope id, run id, and exact refusal text.</p>
-<hr>
+ce merge --help
+</code></pre>
+<p>If help output does not explain the gate you are seeing, ask your operator and
+include the Scope id, run id, and exact refusal text.</p>
+<hr />
 <h2 id="6-your-irreducible-gestures">6. Your Irreducible Gestures</h2>
 <p>CE automates a lot, but it intentionally leaves a few decisions with you.</p>
 <table>
-<thead><tr><th>You decide</th><th>CE and the agent handle</th></tr></thead>
+<thead>
+<tr>
+<th>You decide</th>
+<th>CE and the agent handle</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>What problem is worth doing</td><td>Reading context and proposing a bounded Scope</td></tr>
-<tr><td>Whether the Scope is ratified</td><td>Running only after the front gate is open</td></tr>
-<tr><td>Whether risk increases are acceptable</td><td>Making changes safer inside the envelope</td></tr>
-<tr><td>Whether evidence satisfies Done-when</td><td>Producing the report, artifacts, and PR</td></tr>
-<tr><td>Whether the merge gate opens</td><td>Verifying checks, review, scope, and policy</td></tr>
-</tbody></table>
-<p>Those gestures are the point. CE gives the agent room to work without giving it authority to decide what should be true.</p>
-<hr>
+<tr>
+<td>What problem is worth doing</td>
+<td>Reading context and proposing a bounded Scope</td>
+</tr>
+<tr>
+<td>Whether the Scope is ratified</td>
+<td>Running only after the front gate is open</td>
+</tr>
+<tr>
+<td>Whether risk increases are acceptable</td>
+<td>Making changes safer inside the envelope</td>
+</tr>
+<tr>
+<td>Whether evidence satisfies Done-when</td>
+<td>Producing the report, artifacts, and PR</td>
+</tr>
+<tr>
+<td>Whether the merge gate opens</td>
+<td>Verifying checks, review, scope, and policy</td>
+</tr>
+</tbody>
+</table>
+<p>Those gestures are the point. CE gives the agent room to work without giving it
+authority to decide what should be true.</p>
+<hr />
 <h2 id="7-common-questions">7. Common Questions</h2>
 <h3 id="why-no-time-estimates">Why no time estimates?</h3>
-<p>Because CE is governed by Done-when and evidence, not clock predictions. If your lane requires an explicit cap, that cap is a stop or split signal for the run; it is still not a prediction about elapsed time.</p>
+<p>Because CE is governed by Done-when and evidence, not clock predictions. If your
+lane requires an explicit cap, that cap is a stop or split signal for the run; it
+is still not a prediction about elapsed time.</p>
 <h3 id="what-if-the-agent-wants-to-do-more-than-i-ratified">What if the agent wants to do more than I ratified?</h3>
-<p>That is a new Shape decision. The agent can make work safer inside the current Scope, but increasing risk, broadening files, or changing the Goal needs your explicit ratification.</p>
+<p>That is a new Shape decision. The agent can make work safer inside the current
+Scope, but increasing risk, broadening files, or changing the Goal needs your
+explicit ratification.</p>
 <h3 id="what-if-i-do-not-know-the-right-command">What if I do not know the right command?</h3>
 <p>Use <code>ce --help</code> or the command-specific help first:</p>
 <pre><code class="language-bash">ce report --help
 ce artifacts --help
-ce merge --help</code></pre>
-<p>If the next decision is still unclear, ask your operator which artifact or gate they expect you to inspect before Ship.</p>
+ce merge --help
+</code></pre>
+<p>If the next decision is still unclear, ask your operator which artifact or gate
+they expect you to inspect before Ship.</p>
 <h3 id="do-i-need-to-understand-the-machine-underneath">Do I need to understand the machine underneath?</h3>
-<p>Not to start. The five-stage vocabulary is the everyday interface. When you want the deeper user-facing model, read <a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a>.</p>
-<hr>
+<p>Not to start. The five-stage vocabulary is the everyday interface. When you
+want the deeper user-facing model, read
+<a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a>.</p>
+<hr />
 <h2 id="8-under-the-hood">8. Under The Hood</h2>
-<p>The friendly stage words are the surface. Under them is a conserved machine that records Scope state, run evidence, review evidence, and terminal outcomes. You do not need that layer to run your first Scope, but it is available when you want to inspect how the governance works.</p>
+<p>The friendly stage words are the surface. Under them is a conserved machine that
+records Scope state, run evidence, review evidence, and terminal outcomes. You
+do not need that layer to run your first Scope, but it is available when you
+want to inspect how the governance works.</p>
 <table>
-<thead><tr><th>You want to inspect</th><th>Read</th></tr></thead>
+<thead>
+<tr>
+<th>You want to inspect</th>
+<th>Read</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Canonical command path</td><td><a href="quickstart.html"><code>quickstart.md</code></a></td></tr>
-<tr><td>How CE builds software</td><td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td></tr>
-<tr><td>Plain-language vocabulary</td><td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td></tr>
-</tbody></table>
+<tr>
+<td>Canonical command path</td>
+<td><a href="quickstart.html"><code>quickstart.md</code></a></td>
+</tr>
+<tr>
+<td>How CE builds software</td>
+<td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td>
+</tr>
+<tr>
+<td>Plain-language vocabulary</td>
+<td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td>
+</tr>
+</tbody>
+</table>
 <h2 id="9-where-next">9. Where Next</h2>
 <table>
-<thead><tr><th>You want to understand</th><th>Read</th></tr></thead>
+<thead>
+<tr>
+<th>You want to understand</th>
+<th>Read</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>The canonical command path</td><td><a href="quickstart.html"><code>quickstart.md</code></a></td></tr>
-<tr><td>How CE builds software</td><td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td></tr>
-<tr><td>The plain-language CE concepts</td><td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td></tr>
-<tr><td>The full install-to-ship pilot checklist</td><td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td></tr>
-<tr><td>The quick first-host path</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a></td></tr>
-<tr><td>How Agile/SCRUM habits map to CE</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td></tr>
-<tr><td>How to contribute to CE itself</td><td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td></tr>
-</tbody></table>
-<p>Start with one small Scope. Frame it clearly, Shape it honestly, let the agent Build, Review the evidence, and Ship only when the gate is truly green.</p>
+<tr>
+<td>The canonical command path</td>
+<td><a href="quickstart.html"><code>quickstart.md</code></a></td>
+</tr>
+<tr>
+<td>How CE builds software</td>
+<td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td>
+</tr>
+<tr>
+<td>The plain-language CE concepts</td>
+<td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td>
+</tr>
+<tr>
+<td>The full install-to-ship pilot checklist</td>
+<td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td>
+</tr>
+<tr>
+<td>The quick first-host path</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a></td>
+</tr>
+<tr>
+<td>How Agile/SCRUM habits map to CE</td>
+<td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td>
+</tr>
+<tr>
+<td>How to contribute to CE itself</td>
+<td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td>
+</tr>
+</tbody>
+</table>
+<p>Start with one small Scope. Frame it clearly, Shape it honestly, let the agent
+Build, Review the evidence, and Ship only when the gate is truly green.</p>
     </article>
   </div>
   <footer><div class="wrap-full">Creator Engine &#x2014; open-source (Apache-2.0) governance for coding agents &middot; the grader lives outside the agent</div></footer>
