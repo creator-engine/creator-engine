@@ -1083,11 +1083,11 @@ def _resume_state_pointer(state_root: Path | str) -> dict[str, Any] | None:
     if not candidates:
         return None
     # Resume-state filenames encode timestamps, so lexicographic path order is chronological.
-    _name, _digest, newest = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
+    _name, digest, newest = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
     stat = newest.stat()
     return {
         "path": str(newest),
-        "content_sha256": hashlib.sha256(newest.read_bytes()).hexdigest(),
+        "content_sha256": digest,
         "size_bytes": stat.st_size,
     }
 
