@@ -1501,6 +1501,18 @@ def test_refresh_workflow_refused_when_repo_was_not_onboarded():
     assert "normal onboard plan/apply flow first" in exc.value.detail
 
 
+def test_refresh_workflow_refuses_to_overwrite_non_ce_workflow():
+    non_ce_workflow = b"name: CI\non: [pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+    driver = WorkflowRefreshDriver(non_ce_workflow)
+
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply.refresh_ce_workflow(driver, repo="octo/repo", branch="main")
+
+    assert exc.value.code == "refresh_not_onboarded"
+    assert "is not a CE validation workflow" in exc.value.detail
+    assert driver.refresh_calls == []
+
+
 def test_refresh_workflow_write_failure_surfaces_trimmed_stderr():
     stale = onboard_apply.CE_WORKFLOW_CONTENT.replace(
         "CE signed spec content_sha256 mismatch",
