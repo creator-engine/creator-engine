@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 
 from creator_engine_validator import ce_cli
 
@@ -28,6 +29,28 @@ brief pointer
 """,
         encoding="utf-8",
     )
+
+
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _init_git_repo(root: Path) -> str:
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.name", "CE Test")
+    _git(root, "config", "user.email", "ce-test@example.invalid")
+    (root / "README.md").write_text("initial\n", encoding="utf-8")
+    _git(root, "add", "README.md")
+    _git(root, "commit", "-m", "initial")
+    return _git(root, "rev-parse", "HEAD")
 
 
 def test_ce_claim_transition_json(tmp_path: Path, capsys) -> None:
@@ -97,12 +120,13 @@ def test_ce_claim_list_filters(tmp_path: Path, capsys) -> None:
 
 
 def test_ce_claim_closeout_rerun_same_landed_sha_is_noop(tmp_path: Path) -> None:
+    sha = _init_git_repo(tmp_path)
     _write_claim(tmp_path)
     claim = tmp_path / ".ce" / "claims" / "ce-476-claim-lifecycle.md"
     original = claim.read_text(encoding="utf-8")
     landed = original.replace("state: claimed", "state: landed").replace(
         "merge_sha: null",
-        "merge_sha: abc123",
+        f"merge_sha: {sha}",
     )
     claim.write_text(landed, encoding="utf-8")
 
@@ -113,7 +137,7 @@ def test_ce_claim_closeout_rerun_same_landed_sha_is_noop(tmp_path: Path) -> None
             "ce-476-claim-lifecycle",
             "landed",
             "--sha",
-            "abc123",
+            sha,
             "--repo-root",
             str(tmp_path),
         ]

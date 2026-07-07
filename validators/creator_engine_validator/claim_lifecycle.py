@@ -101,7 +101,8 @@ def transition_claim(
     data, body = parse_claim_text(text, slug=slug, now=now)
     old_state = str(data["state"])
     _assert_transition_allowed(old_state, new_state, force=force)
-    _assert_terminal_evidence(repo_root, new_state, sha)
+    if not force:
+        _assert_terminal_evidence(repo_root, new_state, sha)
 
     next_pr = pr if pr is not None else _nullable_str(data.get("pr"))
     next_sha = sha if sha is not None else _nullable_str(data.get("merge_sha"))
@@ -265,11 +266,11 @@ def _assert_terminal_evidence(repo_root: str | Path, new_state: str, sha: str | 
         raise ClaimLifecycleError(f"transition to {new_state!r} requires merge/release SHA evidence")
     root = Path(repo_root)
     if not (root / ".git").exists():
-        return
+        raise ClaimLifecycleError(f"cannot verify SHA evidence {sha!r}: repo root has no .git metadata")
 
     main_refs = _existing_git_refs(root, ("origin/main", "main", "refs/remotes/origin/main", "refs/heads/main"))
     if not main_refs:
-        return
+        raise ClaimLifecycleError(f"cannot verify SHA evidence {sha!r}: no accessible main refs")
     for ref in main_refs:
         if _git_success(root, "merge-base", "--is-ancestor", sha, ref):
             return
