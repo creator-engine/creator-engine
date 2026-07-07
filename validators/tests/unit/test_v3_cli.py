@@ -2426,7 +2426,9 @@ def test_onboard_apply_authorized_brownfield_routes_to_adoption(tmp_path, capsys
         captured["driver_is_adoption"] = kwargs.get("driver") is adoption_driver
         return {
             "action": "onboard_apply", "mode": request.mode, "target_repo": "acme/app",
-            "verified_count": 12, "legs_total": 19, "greenfield_repos_created": 0,
+            "verified_count": len(onboard_apply.GREENFIELD_LEG_IDS),
+            "legs_total": len(onboard_apply.LEG_IDS),
+            "greenfield_repos_created": 0,
             "repos_already_satisfied": 0, "brownfield_deferred": 0, "applied": 5,
             "already_satisfied": 7, "refused": 0, "failed": 0, "skipped": 7,
             "manual_rollback_required": 0, "brownfield_adopted": 1,
@@ -2491,7 +2493,9 @@ def test_onboard_apply_authorized_brownfield_gets_driver_from_onboard_apply_seam
         captured["driver_is_adoption"] = kwargs.get("driver") is adoption_driver
         return {
             "action": "onboard_apply", "mode": request.mode, "target_repo": "acme/app",
-            "verified_count": 12, "legs_total": 19, "greenfield_repos_created": 0,
+            "verified_count": len(onboard_apply.GREENFIELD_LEG_IDS),
+            "legs_total": len(onboard_apply.LEG_IDS),
+            "greenfield_repos_created": 0,
             "repos_already_satisfied": 0, "brownfield_deferred": 0, "applied": 5,
             "already_satisfied": 7, "refused": 0, "failed": 0, "skipped": 7,
             "manual_rollback_required": 0, "brownfield_adopted": 1,
@@ -2572,8 +2576,13 @@ def test_onboard_apply_existing_already_ce_repo_routes_to_plain_join(tmp_path, c
             "action": "onboard_apply", "root": str(request.state_root), "mode": request.mode,
             "verified": {"ok": True, "key_id": "ce-root-v1", "algo": v3_installer.SSH_ED25519_ALGO},
             "target_repo": request.answers["github"]["repo"],
-            "greenfield_repos_created": 0, "repos_already_satisfied": 12, "brownfield_deferred": 0,
-            "legs_total": 12, "applied": 0, "already_satisfied": 12, "verified_count": 12,
+            "greenfield_repos_created": 0,
+            "repos_already_satisfied": len(onboard_apply.GREENFIELD_LEG_IDS),
+            "brownfield_deferred": 0,
+            "legs_total": len(onboard_apply.GREENFIELD_LEG_IDS),
+            "applied": 0,
+            "already_satisfied": len(onboard_apply.GREENFIELD_LEG_IDS),
+            "verified_count": len(onboard_apply.GREENFIELD_LEG_IDS),
             "skipped": 0, "refused": 0, "failed": 0, "rolled_back": 0, "manual_rollback_required": 0,
             "legs": [],
         }
@@ -2745,10 +2754,10 @@ def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monk
             "greenfield_repos_created": 0,
             "repos_already_satisfied": 1,
             "brownfield_deferred": 0,
-            "legs_total": 12,
+            "legs_total": len(onboard_apply.GREENFIELD_LEG_IDS),
             "applied": 1,
-            "already_satisfied": 11,
-            "verified_count": 12,
+            "already_satisfied": len(onboard_apply.GREENFIELD_LEG_IDS) - 1,
+            "verified_count": len(onboard_apply.GREENFIELD_LEG_IDS),
             "skipped": 0,
             "refused": 0,
             "failed": 0,
@@ -2769,7 +2778,10 @@ def test_onboard_apply_hands_verified_request_to_executor(tmp_path, capsys, monk
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "onboard_apply"
     assert payload["first_project"]["e2_apply_required"] is False
-    assert payload["first_project"]["e2_convergence"]["counts"]["verified_count"] == 12
+    assert (
+        payload["first_project"]["e2_convergence"]["counts"]["verified_count"]
+        == len(onboard_apply.GREENFIELD_LEG_IDS)
+    )
     request = captured["request"]
     assert isinstance(request, onboard_apply.ApplyRequest)
     assert request.state_root == root
@@ -2788,10 +2800,10 @@ def _fake_apply_success_summary(request):
         "greenfield_repos_created": 1,
         "repos_already_satisfied": 0,
         "brownfield_deferred": 0,
-        "legs_total": 12,
-        "applied": 12,
+        "legs_total": len(onboard_apply.GREENFIELD_LEG_IDS),
+        "applied": len(onboard_apply.GREENFIELD_LEG_IDS),
         "already_satisfied": 0,
-        "verified_count": 12,
+        "verified_count": len(onboard_apply.GREENFIELD_LEG_IDS),
         "skipped": 0,
         "refused": 0,
         "failed": 0,

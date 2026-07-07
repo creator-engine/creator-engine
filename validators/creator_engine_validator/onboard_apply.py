@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from . import v3_installer, version as ce_version
+from . import brain_runtime, v3_installer, version as ce_version
 from .checks import ce_runtime_policy
 from .forge.github_repo_config import DEFAULT_MAIN_PROTECTION, BranchProtectionPolicy
 from .forge.protection_diagnostics import (
@@ -52,6 +52,7 @@ GREENFIELD_LEG_IDS: tuple[str, ...] = (
     "host_dependencies",
     "runtime_posture",
     "cli_exposure",
+    "brain_genesis",
     "github_bootstrap_token_probe",
     "github_repo_create",
     "github_app_install",
@@ -413,6 +414,14 @@ _AGENT_CONFIG_DIRS: tuple[tuple[str, ...], ...] = (
     (".codex",),
     (".config", "codex"),
 )
+_BRAIN_GENESIS_ASSERTION_ID = "brain-assertion-genesis-0001"
+_BRAIN_GENESIS_SCOPE = "global"
+_BRAIN_GENESIS_CLAIM = {
+    "subject": "brain-ledger",
+    "predicate": "is",
+    "object": "genesis-initialized",
+}
+_BRAIN_GENESIS_EVIDENCE_REF = "ce-ops#206:ce-brain-init"
 
 
 def _runtime_policy_sha(record: Mapping[str, Any]) -> str:
@@ -1661,6 +1670,62 @@ def _run_leg(
             verification={"ok": True, **verify},
             rollback={"automatic": "remove E2-owned shim only"},
             mutated=bool(action.get("created")),
+        )
+    if leg_id == "brain_genesis":
+        path = brain_runtime.ledger_path(request.state_root)
+        if path.is_file():
+            try:
+                verify = brain_runtime.verify_ledger(request.state_root)
+            except brain_runtime.BrainRuntimeError as exc:
+                raise ApplyRefused(
+                    "brain_genesis_invalid",
+                    f"existing brain ledger could not be verified; run `ce brain init` after repairing it: {exc}",
+                ) from exc
+            if not verify.ok:
+                raise ApplyRefused(
+                    "brain_genesis_invalid",
+                    "existing brain ledger is invalid; run `ce brain init` after repairing it: "
+                    + "; ".join(verify.errors),
+                )
+            return LegOutcome(
+                leg_id,
+                "already_satisfied",
+                "genesis_ledger_already_initialized",
+                verification={
+                    "ok": True,
+                    "ledger_path": str(verify.ledger_path),
+                    "head_content_hash": verify.summary.get("head_content_hash"),
+                    "record_count": verify.summary.get("record_count"),
+                },
+            )
+        try:
+            result = brain_runtime.assert_claim(
+                claim=dict(_BRAIN_GENESIS_CLAIM),
+                scope=_BRAIN_GENESIS_SCOPE,
+                evidence_ref=_BRAIN_GENESIS_EVIDENCE_REF,
+                state_root=request.state_root,
+                assertion_id=_BRAIN_GENESIS_ASSERTION_ID,
+            )
+            verify = brain_runtime.verify_ledger(request.state_root)
+        except brain_runtime.BrainRuntimeError as exc:
+            raise ApplyFailed("brain_genesis_failed", str(exc)) from exc
+        if not verify.ok:
+            raise ApplyFailed(
+                "brain_genesis_verify_failed",
+                "wrote brain genesis ledger but verification failed: " + "; ".join(verify.errors),
+            )
+        return LegOutcome(
+            leg_id,
+            "applied",
+            "initialize_brain_genesis_ledger",
+            verification={
+                "ok": True,
+                "ledger_path": str(result.ledger_path),
+                "content_hash": result.content_hash,
+                "record_count": verify.summary.get("record_count"),
+            },
+            rollback={"automatic": "remove E2-created brain genesis ledger only"},
+            mutated=True,
         )
     if leg_id == "github_bootstrap_token_probe":
         ref_value = prepared.merged.value("github.bootstrap_token")
