@@ -305,6 +305,7 @@ def serve_self_push_unix_socket(
     expected_peer_uids: frozenset[int] | None = None,
     expected_peer_gids: frozenset[int] | None = None,
     reject_unexpected_peer: bool = True,
+    allow_credential_requests: bool = True,
     activated_socket: socket.socket | None = None,
     courier_fn: CourierFn = contained_seat_self_push,
     **host_courier_options: Any,
@@ -318,8 +319,16 @@ def serve_self_push_unix_socket(
     broker uses that already-listening socket without touching the path, preserving the socket
     inode across daemon restarts. ``once=True`` is a CI/test seam; the live daemon leaves it
     false under a supervisor. Configured peer UID/GID expectations are fail-closed by default;
-    unexpected peers are rejected before request parsing.
+    unexpected peers are rejected before request parsing. Credential-capable sockets must not
+    start unless at least one peer expectation set is configured.
     """
+    peercred_expectations_configured = (
+        expected_peer_uids is not None or expected_peer_gids is not None
+    )
+    if allow_credential_requests and not peercred_expectations_configured:
+        raise RuntimeError(
+            "credential-capable self-push/JIT socket requires expected peer UID/GID configuration"
+        )
     path = Path(socket_path)
     if activated_socket is None:
         if path.exists():

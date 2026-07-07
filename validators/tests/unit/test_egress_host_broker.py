@@ -74,6 +74,7 @@ def _start_once_socket_server(socket_path, tmp_path, *, courier_fn, **kwargs):
                 apply_default=True,
                 once=True,
                 courier_fn=courier_fn,
+                allow_credential_requests=False,
                 **kwargs,
             )
         except Exception as exc:  # pragma: no cover - asserted through server_exceptions
@@ -557,6 +558,21 @@ def test_serve_unix_socket_rejects_unexpected_peercred_by_default_when_expected_
     assert peercred["decision"] == "reject"
 
 
+def test_serve_unix_socket_requires_peercred_expectations_for_credential_requests(tmp_path):
+    socket_path = tmp_path / "credential.sock"
+
+    with pytest.raises(RuntimeError, match="requires expected peer UID/GID configuration"):
+        serve_self_push_unix_socket(
+            socket_path,
+            config=_config(tmp_path),
+            broker_seat_id="dev-4",
+            host_repo_path="/host/workspaces/creator-engine",
+            once=True,
+        )
+
+    assert not socket_path.exists()
+
+
 def test_systemd_activation_helper_uses_fromfd_and_unsets_environment(tmp_path, monkeypatch):
     socket_path = tmp_path / "activated-helper.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -620,6 +636,7 @@ def test_serve_unix_socket_activation_keeps_existing_inode(tmp_path):
                 host_repo_path="/host/workspaces/creator-engine",
                 apply_default=True,
                 once=True,
+                allow_credential_requests=False,
                 activated_socket=listener,
                 courier_fn=fake_courier,
             )
@@ -676,6 +693,7 @@ def test_serve_unix_socket_half_closed_client(tmp_path):
                 host_repo_path="/host/workspaces/creator-engine",
                 apply_default=True,
                 once=False,
+                allow_credential_requests=False,
                 courier_fn=fake_courier,
             )
         except Exception as exc:  # pragma: no cover - asserted through server_exceptions
