@@ -5,9 +5,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import Barrier, Lock
 
+import ce_egress_forge_read_broker as cli
 from creator_engine_validator.forge.scoped_token import ScopedToken, TokenRequest
 from egress_broker.audit import append_audit
-from egress_broker.config import load_broker_config
+from egress_broker.config import BrokerConfigError, load_broker_config
 from egress_broker.forge_read import (
     KIND_OWN_PARITY_STATUS,
     READ_PERMISSIONS,
@@ -257,3 +258,53 @@ def test_parse_request_accepts_only_forge_read_verbs():
 def test_kind_own_parity_seam_is_documented_for_later_slice():
     assert "deferred" in KIND_OWN_PARITY_STATUS
     assert "kind:own" in KIND_OWN_PARITY_STATUS
+
+
+def test_cli_main_returns_config_error_when_config_load_fails(tmp_path, monkeypatch, capsys):
+    def load_broker_config(_path):
+        raise BrokerConfigError("broker config not found")
+
+    monkeypatch.setattr(cli, "load_broker_config", load_broker_config)
+
+    rc = cli.main(
+        [
+            "--config",
+            str(tmp_path / "broker.json"),
+            "--seat",
+            "dev-4",
+            "get-issue",
+            _REPO,
+            "475",
+        ]
+    )
+
+    assert rc == cli.EXIT_CONFIG_ERROR
+    err = capsys.readouterr().err
+    assert "config error" in err
+    assert "broker config not found" in err
+
+
+def test_cli_main_returns_refused_code_for_fail_closed_read(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "load_broker_config", lambda path: object())
+    monkeypatch.setattr(
+        cli,
+        "handle_forge_read_request",
+        lambda payload, config: {"ok": False, "error": "refused by policy"},
+    )
+
+    rc = cli.main(
+        [
+            "--config",
+            str(tmp_path / "broker.json"),
+            "--seat",
+            "dev-4",
+            "get-issue",
+            _REPO,
+            "475",
+        ]
+    )
+
+    assert rc == cli.EXIT_REFUSED
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is False
+    assert out["error"] == "refused by policy"

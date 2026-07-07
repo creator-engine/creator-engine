@@ -13,11 +13,12 @@ for _path in (_REPO_ROOT / "validators", _HERE):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from egress_broker.config import load_broker_config  # noqa: E402
+from egress_broker.config import BrokerConfigError, load_broker_config  # noqa: E402
 from egress_broker.forge_read import cli_payload, handle_forge_read_request  # noqa: E402
 
 EXIT_OK = 0
-EXIT_REFUSED = 3
+EXIT_REFUSED = 2
+EXIT_CONFIG_ERROR = 3
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -38,7 +39,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    config = load_broker_config(args.config)
+    try:
+        config = load_broker_config(args.config)
+    except BrokerConfigError as exc:
+        print(f"[ce-egress-forge-read] config error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG_ERROR
     response = handle_forge_read_request(
         cli_payload(args.verb, args.repo, args.number, seat_id=args.seat),
         config=config,
