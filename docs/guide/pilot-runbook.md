@@ -163,9 +163,10 @@ checkpoint/`/clear` nudge. Vocabulary canon:
 1. **Frame** — just chat with your agent about what you want. Nothing is tracked.
 2. **Shape** — when a concrete change emerges, CE offers to crystallize it into a
    **Scope** (the chat→Scope detect-and-offer; cheap, inline, cancel-safe). The
-   Scope card fills in the canon labels — **Goal · Done-when · Change-type ·
-   Ready**. The agent drafts the Scope and may make a change *safer* on its own
-   but only *you* can make it riskier. Shaping design:
+   Scope card fills in the required labels — **Goal · Done-when ·
+   Change-type**. Readiness is shown separately as the card state. The agent
+   drafts the Scope and may make a change *safer* on its own but only *you* can
+   make it riskier. Shaping design:
    [`../architecture/shaping-ux.md`](../architecture/shaping-ux.md).
    When the card reads **Ready ✓**, ratify the Scope: `ce ratify <scope>`.
 3. **Build** — `ce drive <scope>` dispatches one governed, boxed run (the front

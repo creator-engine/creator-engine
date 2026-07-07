@@ -144,8 +144,8 @@
 <tr><td><strong>Goal</strong></td><td>What you are trying to accomplish</td></tr>
 <tr><td><strong>Done-when</strong></td><td>The checks that say the work is finished</td></tr>
 <tr><td><strong>Change-type</strong></td><td>What kind of change this is and how risky it is</td></tr>
-<tr><td><strong>Ready</strong></td><td>CE has enough valid information to run after ratification</td></tr>
 </tbody></table>
+<p>Readiness is the ratifiable state, not a Scope field: CE marks the Scope Ready when these fields are valid.</p>
 <p>Optional lane-aware cap: your operator may ask you to add a cap for a specific lane. Use <code>%</code> for a subscription lane with rolling windows, or <code>$</code> for an API lane. This is opt-in and should not be front-loaded in the default path.</p>
 <p>Nothing builds until you ratify a Ready Scope:</p>
 <pre><code class="language-bash">ce ratify &lt;scope-id&gt;</code></pre>

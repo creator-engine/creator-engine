@@ -66,7 +66,7 @@ more precise machine, and they match the canon in
 | Stage | Plain meaning | What CE is protecting |
 | --- | --- | --- |
 | **Frame** | Understand the problem and why it matters | The work is not tracked until the problem is clear |
-| **Shape** | Turn the problem into a ratifiable Scope | The Scope has Goal, Done-when, Change-type, and Ready |
+| **Shape** | Turn the problem into a ratifiable Scope | The Scope has Goal, Done-when, and Change-type; Ready is the ratifiable state |
 | **Build** | Let the agent execute the ratified Scope | The run stays inside the approved Scope |
 | **Review** | Grade the result against Done-when | Evidence matters more than transcript confidence |
 | **Ship** | Land the governed outcome | Merge, no-change, or delivered research happens through the gate |
@@ -164,7 +164,7 @@ Goal        Show a helpful empty state on the activity page before the first run
 Done-when   3 checks
 Budget      1% per_run
 Change-type code
-Ready       ✓
+State       Ready ✓
 
 Front gate: ratify this Scope before Build.
 ```

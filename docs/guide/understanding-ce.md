@@ -50,7 +50,9 @@ contract for the run.
 | **Goal** | What you are trying to accomplish |
 | **Done-when** | The checks that say the work is finished |
 | **Change-type** | What kind of change this is and how risky it is |
-| **Ready** | CE has enough valid information to run after ratification |
+
+Readiness is the ratifiable state, not a Scope field: CE marks the Scope Ready
+when these fields are valid.
 
 Optional lane-aware cap: your operator may ask you to add a cap for a specific
 lane. Use `%` for a subscription lane with rolling windows, or `$` for an API

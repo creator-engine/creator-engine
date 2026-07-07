@@ -157,17 +157,17 @@
 <p><strong>What you do here:</strong> Talk to the agent as you would to a capable colleague. The agent handles the rest of the planning pipeline — specification, clarification, planning, and task generation — internally. You do not need to run any step by hand.</p>
 <hr>
 <h2 id="phase-3-review-and-ratify-the-scope-your-second-gesture">Phase 3 — Review and ratify the Scope (your second gesture)</h2>
-<p>Once the agent has run the pipeline, it will present you with a <strong>Scope</strong> — the governed unit of work. A Scope has five fields:</p>
+<p>Once the agent has run the pipeline, it will present you with a <strong>Scope</strong> — the governed unit of work. A Scope has three required fields:</p>
 <table>
 <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td><strong>Goal</strong></td><td>what you are building, in one line</td></tr>
 <tr><td><strong>Done-when</strong></td><td>the acceptance criteria that get graded at Review time</td></tr>
 <tr><td><strong>Change-type</strong></td><td>what kind of change this is (code, docs, deploy, etc.)</td></tr>
-<tr><td><strong>Ready</strong></td><td>CE flags this when all four fields are valid and the Scope is ratifiable</td></tr>
 </tbody></table>
+<p>CE may mark the Scope Ready after those fields are valid. Ready is the ratifiable state, not another Scope field.</p>
 <p><strong>Read the Scope carefully.</strong> The Done-when criteria are the most important part: they are what the external grader will check against at Review time, not a transcript of what the agent says. Make sure they reflect what you would actually accept as done. If anything is wrong, tell the agent and it will revise the Scope.</p>
-<p>When the Scope looks right and reads <strong>Ready</strong>, ratify it:</p>
+<p>When the Scope looks right and is marked <strong>Ready</strong>, ratify it:</p>
 <pre><code class="language-bash">ce ratify &lt;scope-id&gt; --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</code></pre>
 <p>The literal above is valid 64-hex syntax for the example. In a real run, generate a fresh approver ref with <code>openssl rand -hex 32</code> and pass that value. The <code>--approver-ref</code> is a value-free fingerprint: it records that a human ratified this Scope without encoding who or any credential.</p>
 <p><strong>Ratification is your explicit &quot;yes — build this.&quot;</strong> Nothing builds until a Ready Scope is ratified. The agent cannot ratify on its own behalf.</p>

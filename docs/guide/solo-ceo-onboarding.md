@@ -92,21 +92,23 @@ hand.
 ## Phase 3 — Review and ratify the Scope (your second gesture)
 
 Once the agent has run the pipeline, it will present you with a **Scope** — the
-governed unit of work. A Scope has five fields:
+governed unit of work. A Scope has three required fields:
 
 | Field | Meaning |
 | --- | --- |
 | **Goal** | what you are building, in one line |
 | **Done-when** | the acceptance criteria that get graded at Review time |
 | **Change-type** | what kind of change this is (code, docs, deploy, etc.) |
-| **Ready** | CE flags this when all four fields are valid and the Scope is ratifiable |
+
+CE may mark the Scope Ready after those fields are valid. Ready is the
+ratifiable state, not another Scope field.
 
 **Read the Scope carefully.** The Done-when criteria are the most important part:
 they are what the external grader will check against at Review time, not a
 transcript of what the agent says. Make sure they reflect what you would actually
 accept as done. If anything is wrong, tell the agent and it will revise the Scope.
 
-When the Scope looks right and reads **Ready**, ratify it:
+When the Scope looks right and is marked **Ready**, ratify it:
 
 ```bash
 ce ratify <scope-id> --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

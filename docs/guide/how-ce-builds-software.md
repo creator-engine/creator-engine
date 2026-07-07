@@ -47,7 +47,9 @@ The required user-facing fields are:
 | Goal | What the work is trying to accomplish |
 | Done-when | The checks the result must satisfy |
 | Change-type | The risk class of the change, such as docs, code, schema, or deploy |
-| Ready | CE has enough valid information to run after ratification |
+
+Readiness is a state check, not a Scope field: CE marks the Scope Ready when
+the required fields are valid and the Scope can be ratified.
 
 Optional lane-aware cap: a Scope can also carry a cap when your lane requires
 one. Use `%` for a subscription lane with rolling windows, or `$` for an API
