@@ -6,12 +6,13 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=14
+AUTHORIZED_PATHS_COUNT=15
 
-AUTHORIZED_PATHS_SHA256=20a873c46fef826071087fbb0736dabab1401b10782cb9a54e1a16dc00ff4994
+AUTHORIZED_PATHS_SHA256=d8f42505cf0c9ed910d9373ba286eadb8ed00e024e08c861dc2d28ef4995d6ce
 
 ```text
 .ce/changelog/ce-488-memory-layer-slice1.md
+.ce/evidence/ce-488-memory-layer-slice1-remediation.md
 .ce/pr-manifests/ce-488-memory-layer-slice1.md
 .ce/reference/cli.generated.md
 .ce/reference/schemas.generated.md

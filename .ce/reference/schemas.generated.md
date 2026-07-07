@@ -311,6 +311,8 @@ Definitions:
 | `record_id` | oneOf | no |  |  |
 | `memory_date` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}$` |  |
 | `memory_status` | string | no | enum `active` |  |
+| `authority` | string | no | minLength `1`<br>maxLength `256` |  |
+| `memory_source` | string | no | minLength `1`<br>maxLength `2048` |  |
 | `scope` | anyOf | no |  |  |
 | `assertion` | object; allOf | no | additionalProperties `false` |  |
 | `decision` | object | no | additionalProperties `false` |  |
