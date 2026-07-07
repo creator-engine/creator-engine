@@ -1411,9 +1411,16 @@ def test_ce_workflow_template_canonicalization_matches_release_publish():
 
 
 class WorkflowRefreshDriver(onboard_apply.ApplyDriver):
-    def __init__(self, content: bytes | None, *, repo_exists: bool = True):
+    def __init__(
+        self,
+        content: bytes | None,
+        *,
+        repo_exists: bool = True,
+        refresh_result: dict[str, Any] | None = None,
+    ):
         self.content = content
         self.repo_exists_flag = repo_exists
+        self.refresh_result = refresh_result
         self.refresh_calls: list[dict[str, Any]] = []
 
     def repo_exists(self, repo: str) -> bool:
@@ -1444,6 +1451,8 @@ class WorkflowRefreshDriver(onboard_apply.ApplyDriver):
             "path": path,
             "current_sha": current_sha,
         })
+        if self.refresh_result is not None:
+            return dict(self.refresh_result)
         self.content = content.encode("utf-8")
         return {"ok": True, "commit_sha": "f" * 40}
 
@@ -1492,6 +1501,39 @@ def test_refresh_workflow_refused_when_repo_was_not_onboarded():
     assert "normal onboard plan/apply flow first" in exc.value.detail
 
 
+def test_refresh_workflow_refuses_to_overwrite_non_ce_workflow():
+    non_ce_workflow = b"name: CI\non: [pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+    driver = WorkflowRefreshDriver(non_ce_workflow)
+
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply.refresh_ce_workflow(driver, repo="octo/repo", branch="main")
+
+    assert exc.value.code == "refresh_not_onboarded"
+    assert "is not a CE validation workflow" in exc.value.detail
+    assert driver.refresh_calls == []
+
+
+def test_refresh_workflow_write_failure_surfaces_trimmed_stderr():
+    stale = onboard_apply.CE_WORKFLOW_CONTENT.replace(
+        "CE signed spec content_sha256 mismatch",
+        "CE signed spec content_sha256 mismatch.",
+    ).encode("utf-8")
+    driver = WorkflowRefreshDriver(
+        stale,
+        refresh_result={
+            "ok": False,
+            "reason": "workflow_refresh_write_failed",
+            "detail": "  gh: workflow scope required\n\n",
+        },
+    )
+
+    with pytest.raises(onboard_apply.ApplyFailed) as exc:
+        onboard_apply.refresh_ce_workflow(driver, repo="octo/repo", branch="main")
+
+    assert exc.value.code == "workflow_refresh_failed"
+    assert exc.value.detail == "workflow_refresh_write_failed: gh: workflow scope required"
+
+
 def test_cli_refresh_workflow_without_spec_uses_refresh_driver(tmp_path, monkeypatch, capsys):
     from creator_engine_validator import v3_cli
 
@@ -1518,6 +1560,23 @@ def test_cli_refresh_workflow_without_spec_uses_refresh_driver(tmp_path, monkeyp
     assert code == 0
     assert payload["status"] == "updated"
     assert driver.refresh_calls
+
+
+def test_cli_refresh_workflow_refuses_spec_combination(tmp_path, monkeypatch, capsys):
+    from creator_engine_validator import v3_cli
+
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: pytest.fail("refresh/spec conflict should refuse before probing"),
+    )
+
+    code = v3_cli.main(["install", "--refresh-workflow", "--spec", str(tmp_path / "llms-install.md")])
+
+    output = capsys.readouterr().out
+    assert code == 2
+    assert "onboard refresh-workflow refused" in output
+    assert "combine it with no other onboard mode" in output
 
 
 def test_ce_workflow_tolerates_exact_ce_resident_checks_inline():

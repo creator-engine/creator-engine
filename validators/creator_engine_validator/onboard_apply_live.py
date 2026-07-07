@@ -1838,7 +1838,7 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
         finally:
             self._revoke_write()
         if proc.returncode != 0:
-            return {"ok": False, "reason": "workflow_refresh_write_failed", "detail": proc.stderr or ""}
+            return {"ok": False, "reason": "workflow_refresh_write_failed", "detail": (proc.stderr or "").strip()}
         parsed: object = None
         if (proc.stdout or "").strip():
             with contextlib.suppress(json.JSONDecodeError, ValueError):

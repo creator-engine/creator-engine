@@ -358,6 +358,48 @@ def test_preflight_refuses_brain_ledger_delta_when_live_base_tail_moved(tmp_path
     )
 
 
+def test_preflight_fails_closed_when_comparison_base_missing(tmp_path: Path):
+    class MissingComparisonBaseRunner(FakeRunner):
+        def __call__(self, argv, cwd, env=None, *, timeout=None):
+            if list(argv) == ["git", "merge-base", "origin/main", "HEAD"]:
+                self.calls.append((list(argv), cwd, dict(env) if env is not None else None, timeout))
+                return pr_preflight.CommandResult(1, "", "fatal: Not a valid object name origin/main\n")
+            return super().__call__(argv, cwd, env, timeout=timeout)
+
+    runner = MissingComparisonBaseRunner(tmp_path)
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=err)
+
+    assert rc == 1
+    output = out.getvalue()
+    assert "[FAIL] comparison base" in output
+    assert "Not a valid object name origin/main" in output
+    assert "FAIL: PR preflight" in output
+    assert not any("verify-work-sizing-floor" in call for call in runner.argv_calls())
+
+
+def test_preflight_brain_ledger_fast_path_skips_tail_hashing_when_ledger_unchanged(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths="validators/creator_engine_validator/pr_preflight.py\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    assert "authoritative brain ledger unchanged" in out.getvalue()
+    assert not any(
+        call[:2] == ["git", "show"] and call[2].endswith(f":{pr_preflight.BRAIN_LEDGER_PATH}")
+        for call in runner.argv_calls()
+    )
+
+
 def test_preflight_allows_brain_ledger_delta_when_live_base_tail_matches(
     tmp_path: Path, monkeypatch
 ):
