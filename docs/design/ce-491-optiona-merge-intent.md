@@ -23,6 +23,9 @@ append target deferred by that slice.
   therefore a post-merge action by a separate actor.
 - The merge gate is the policy singleton. This design must not create a second
   gate-authority holder.
+- The gate-daemon singleton is also the materializer execution assumption for
+  this design. A multi-instance materializer is BLOCKING-FOR-IMPLEMENTATION and
+  is left to Open Operator Question 4.
 - Intent-carrying PRs must not edit `.ce/brain/assertions.yaml` directly.
 - Failed, malformed, or unprovable materialization must be visible and
   fail-closed. The actor must never silently drop an intent.
@@ -84,59 +87,93 @@ Intent files live at:
 .ce/brain/append-intents/<branch-slug>.yaml
 ```
 
-If one branch needs multiple appends, the preferred form is a single file with
-multiple ordered entries rather than multiple files. That keeps PR-to-intent
-mapping deterministic for validators. A future extension may allow
-`.ce/brain/append-intents/<branch-slug>/<intent-id>.yaml`, but that is outside
-this design.
+The current tracked schema describes one intent document per file. If one branch
+needs multiple appends, it must use follow-up PRs or wait for a future schema and
+path extension. A future extension may allow
+`.ce/brain/append-intents/<branch-slug>/<intent-id>.yaml` or an ordered batch
+envelope, but both are outside this design.
 
-### Inline Schema Sketch
+### Tracked Schema Reconciliation
 
-This is a documentation sketch, not a tracked schema file:
+Option A EXTENDS the existing tracked mediated-intent envelope from the latest
+ce-488 remediation head, rather than superseding it. The authoritative files
+are:
+
+- `validators/creator_engine_validator/brain_append_intent.schema.yaml`
+- `validators/creator_engine_validator/brain_append_worker.py`
+
+The ce-488 schema is a tracked schema for the intent payload. It pins
+`kind: brain-append-intent`, `schema_version: "1"`, and `intent_kind` routing
+for `active_assertion_append`, `ce411_supersede_pair`, `decision_append`, and
+`lesson_append`. Its payload blocks are mutually exclusive:
+`active_assertion`, `supersede_pair`, `decision`, or `lesson`. The worker loads
+that schema, rejects host/position-bearing fields such as `sequence`,
+`prev_hash`, `content_hash`, `ledger_text`, `repo_root`, and `state_root`, then
+uses `brain_runtime` to assign live ledger position fields from the current
+tail.
+
+Option A keeps those field meanings:
+
+| Concern | ce-488 tracked contract | Option A reconciliation |
+| --- | --- | --- |
+| Kind discriminator | `kind` must equal `brain-append-intent`. | Same value. PR-carried intent files must validate against this discriminator before merge and again at materialization. |
+| Schema version | `schema_version` is the string `"1"`, not an integer. | Same string form. Option A does not use the earlier integer `version` sketch. |
+| Intent routing | `intent_kind` selects one of the supported operations. | Same routing. The materializer dispatches through the same operation vocabulary and refuses unknown values with `brain_append_intent_kind`. |
+| Payload shape | Exactly one operation payload block is present. | Same mutually exclusive payload shape. `active_assertion_append` and `ce411_supersede_pair` materialize assertion records; `decision_append` and `lesson_append` materialize memory records. |
+| PR binding | No `branch_slug`, `pr_number`, `head_sha`, `authored_at`, or `intent_id` fields are allowed because the schema has `additionalProperties: false`. | PR binding is derived outside the YAML payload: intent path stem supplies `branch_slug`, merge metadata supplies PR number/head/merge commit, and `materialization_key` binds the merge commit, intent path, and canonical intent SHA-256. Embedding PR-binding fields in the YAML would require a future schema revision and is outside this design. |
+
+The PR-carried file content therefore remains a ce-488-style intent payload:
 
 ```yaml
-version: 1
-branch_slug: ce-123-example
-pr_number: 123
-intent_id: ce-123-example:brain-append:001
-authoring:
-  head_sha: "<40-hex-pr-head-sha>"
-  authored_at: "2026-07-07T00:00:00Z"
-append:
-  subject: "governance.example"
-  predicate: "records"
-  object: "A concise assertion payload."
-  rationale: "Why this assertion belongs in the brain ledger."
-  evidence:
-    kind: "pr"
-    uri: "https://example.invalid/repo/pull/123"
-    sha256: "<64-hex-content-or-evidence-digest>"
-  tags:
-    - "brain"
+kind: brain-append-intent
+schema_version: "1"
+intent_kind: active_assertion_append
+active_assertion:
+  assertion_id: brain-assertion-example-intent
+  claim:
+    subject: governance.example
+    predicate: records
+    object: concise assertion payload
+  scope: creator-engine
+  evidence_ref: docs/design/ce-491-optiona-merge-intent.md
+  assertion_type: decision
+  verification_method:
+    type: static
+    evidence_ref: docs/design/ce-491-optiona-merge-intent.md
 ```
 
 Validation rules:
 
-- `version` must be a known integer.
-- `branch_slug` must equal the PR branch slug and the filename stem.
-- `intent_id` must be stable and unique within the intent file.
+- `kind` must equal `brain-append-intent`.
+- `schema_version` must equal the string `"1"`.
+- `intent_kind` must route to exactly one payload block supported by the
+  tracked schema.
+- The filename stem must equal the PR branch slug; this is a path/PR binding
+  rule, not an in-file schema field.
 - Intent content is data-only. It must not carry a precomputed `content_hash` or
   `prev_hash`; those are assigned at materialization against the live tail.
-- Evidence digests must be syntactically valid and deterministic.
+- Evidence references must be local or opaque references accepted by the tracked
+  schema and runtime; live URLs and host-specific identifiers remain outside the
+  intent.
 - The PR must not change `.ce/brain/assertions.yaml` when it carries an append
-  intent, unless it is explicitly using the legacy direct-ledger path and passes
-  the slice-1 stale-tail gate.
+  intent. A hybrid PR with any `.ce/brain/append-intents/` file and any direct
+  `.ce/brain/assertions.yaml` edit is refused by the
+  `brain_append_intent_xor_direct_ledger` hard gate.
 
 ### State Machine
 
 1. Authored: the PR adds `.ce/brain/append-intents/<branch-slug>.yaml`.
 2. PR validated: CI validates path, syntax, data-only shape, branch slug, and
-   evidence digest shape. CI does not assign ledger hashes.
+   evidence reference shape. CI does not assign ledger hashes.
 3. Landed pending materialization: the merge queue lands the PR. The intent file
-   is now present on `main`; closeout is not complete.
-4. Materializing: the owning actor takes a lease, refetches `main`, reads the
-   live ledger tail, validates the intent again, appends one or more ledger
-   records, and removes the consumed intent file.
+   is now present on `main`; closeout is not complete. Merge order is discovered
+   from the merge-gate daemon's own accepted-merge stream and rechecked from git
+   by walking `main` first-parent history in reverse chronological batches, then
+   processing pending intent-bearing merge commits in first-parent order.
+4. Materializing: the owning actor takes a lease for the brain-append ledger
+   component, refetches `main`, reads the live ledger tail, validates the intent
+   again, appends one or more ledger records, and removes the consumed intent
+   file.
 5. Materialized: the actor pushes a direct materialization commit to `main` that
    contains the ledger append and consumed-intent removal.
 6. Closed out: evidence is emitted to the PR comment stream and durable daemon
@@ -149,9 +186,44 @@ main contains zero unconsumed .ce/brain/append-intents/<branch-slug>.yaml files
 for PRs that have completed merge closeout.
 ```
 
-A validator can enforce this by listing intent files on `main`, resolving their
-`branch_slug`/`pr_number`, and checking whether the corresponding PR is merged
-and past closeout. If yes, the file is a hard failure.
+A validator must enforce this by listing intent files on `main`, resolving the
+branch slug from the path stem and the PR number from merge metadata, and
+checking whether the corresponding PR is merged and past closeout. If yes, the
+file is a hard failure.
+
+### HELD State Cascade
+
+`HELD` is scoped to the materialization component, not the whole merge gate. A
+held brain append intent blocks later materialization for
+`.ce/brain/assertions.yaml` only when later intents require the same live ledger
+tail. Other gate work and other independent components may proceed.
+
+A merged PR whose intent is `HELD` is not an immediate repository-wide hard
+failure while it is inside the closeout window. The closeout window is 30
+minutes from the time the merge commit first appears on `main` first-parent
+history. During that window validators report advisory status:
+
+```text
+brain_append_intent_closeout: HELD advisory
+reason: <held-reason>
+materialization_key: <64-hex>
+deadline_utc: <ISO-8601>
+```
+
+After the closeout window expires, the same condition becomes a hard gate failure
+until the intent is materialized, repaired, or explicitly cleared by an
+Operator-authorized recovery.
+
+The daemon persists held state in its runtime state directory:
+
+```text
+.ce/state/brain-intent-materializer/held/<materialization-key>.json
+```
+
+On restart, the daemon reloads held records before scanning new work. If the
+held reason is still true, it re-enters `HELD` without writing to `main`. If a
+follow-up PR has repaired the condition, the daemon records the repair evidence,
+revalidates the live tail, and resumes from the repaired `main`.
 
 ### Consume-And-Remove Semantics
 
@@ -172,7 +244,7 @@ already materialized, or accidentally skipped.
 
 For each merged PR that carries an intent:
 
-1. Acquire the materialization lease for `brain-append:<merge-commit-sha>`.
+1. Acquire the materialization lease for the `brain-append` ledger component.
 2. Fetch `main` and resolve the live tip.
 3. Verify the merge commit contains the expected intent file and that the file's
    canonical SHA-256 matches the value observed at discovery.
@@ -187,9 +259,33 @@ For each merged PR that carries an intent:
     consumed-intent removal.
 11. Emit deterministic evidence.
 
-If multiple landed PRs are pending, the actor processes them in observed merge
-order. If it discovers a direct ledger edit on `main` between pending intents,
-it must re-read the tail and continue only if the tail is provable.
+If multiple landed PRs are pending, the actor processes them in the first-parent
+merge order described in the lifecycle. If it discovers a direct ledger edit on
+`main` between pending intents, it must re-read the tail and continue only if the
+tail is provable.
+
+### Lease Contract
+
+The materialization lease is stored out-of-band in the daemon runtime state:
+
+```text
+.ce/state/brain-intent-materializer/leases/brain-append.json
+```
+
+Lease fields are `component`, `holder`, `acquired_at_utc`, `expires_at_utc`,
+`last_heartbeat_utc`, `main_tip_sha`, and `materialization_key`. The holder
+heartbeats at least once every 60 seconds. The lease expires 15 minutes after
+the last heartbeat.
+
+The exclusion scope is the brain append ledger component
+(`.ce/brain/assertions.yaml` plus consumed `.ce/brain/append-intents/` files),
+not a single PR. This scope is required because all brain append intents share
+one hash-chain tail.
+
+This lease is sufficient only under the strict singleton gate-daemon topology
+assumed by this design. If Operators choose a multi-instance materializer, this
+local lease becomes diagnostic state only; correctness then requires an external
+linearizable lock with the same `brain-append` exclusion scope.
 
 ## Failure And Crash Model
 
@@ -208,10 +304,12 @@ Resume rules:
 - Push rejected because `main` moved: refetch, revalidate the intent, prove the
   new tail, and retry if the movement is explainable.
 - Crash after push before evidence: detect the materialization commit on `main`
-  by `materialization_key`, `intent_sha256`, and consumed-intent absence; then
-  emit the missing evidence without appending again.
+  by the deterministic commit trailer `CE-Materialization-Key:
+  <materialization-key>`, the ledger record's `materialization_key`, the
+  `intent_sha256`, and consumed-intent absence; then emit the missing evidence
+  without appending again.
 - Duplicate resume after success: no-op if the ledger contains exactly one
-  record for the intent and the intent file is absent.
+  materialization set for the intent and the intent file is absent.
 
 Unprovable live tail:
 
@@ -221,6 +319,12 @@ Unprovable live tail:
 - Surfaced state: `HELD` with reason `brain_ledger_tail_unprovable`.
 - Operator-facing text should align with the #882 stale-tail gate vocabulary:
   "current ledger tail could not be proven" and "refused before materialization."
+- Recovery path: a follow-up PR must repair the ledger chain or remove the
+  blocking malformed state through normal governed review. Before the
+  materializer authority is armed, manual recovery is allowed only by explicit
+  Operator authorization recorded outside the repository and referenced by the
+  daemon evidence; the daemon must not infer authorization from a chat transcript
+  or local operator shell access.
 
 Malformed intent after PR CI:
 
@@ -235,6 +339,11 @@ Malformed intent after PR CI:
   artifact digest.
 - Repair requires a follow-up PR or an Operator-approved manual recovery. The
   original intent is never silently dropped.
+- Follow-up PR semantics: the repairing PR either replaces the malformed intent
+  with a valid intent at the same path or removes the intent with a documented
+  superseding record. After that PR merges, the materializer revalidates the live
+  tree and records the original `materialization_key`, the repair PR number, and
+  the new merge commit in held-state evidence.
 
 Partially materialized state:
 
@@ -243,23 +352,144 @@ Partially materialized state:
   hold with reason `brain_intent_partial_materialization`.
 - A state with intent file removed but no matching ledger record is invalid and
   must hold with the same reason. The actor must not guess at repair.
+- Recovery path: no automatic rewrite is allowed. A follow-up PR or explicit
+  Operator recovery must restore one valid state: either the intent is present
+  and pending, or the matching ledger record exists and the intent is absent.
 
 ## Evidence Contract
 
-Every successful materialization creates evidence in three places.
+Every successful materialization creates evidence in four places.
 
-Ledger record fields:
+### Materialized Ledger Record Schema
+
+The materializer writes ordinary brain ledger records plus a deterministic
+`mediation` block. The implementation must update the ledger schema before
+arming this mode because the current `brain-assertion`, `brain-decision`, and
+`brain-lesson` record schemas have `additionalProperties: false`.
+
+For a materialized `active_assertion_append`, the record body fields and YAML
+serialization order are:
 
 ```yaml
+kind: "brain-assertion"
+record_type: "brain_assertion"
+schema_version: "1"
+id: "<brain-assertion-id>"
+statement: "<deterministic statement>"
+type: "capability|convention|decision|gotcha"
+verification_method: "<method-or-method-object>"
+claim: {}
+scope: "<scope-string-or-object>"
+evidence_ref: "<local-or-opaque-reference>"
+status: "active"
+superseded_by: null
 mediation:
   mode: "merge_time_intent"
   intent_path: ".ce/brain/append-intents/<branch-slug>.yaml"
   intent_sha256: "<64-hex>"
+  intent_kind: "active_assertion_append"
   merge_commit_sha: "<40-hex>"
-  materialization_commit_sha: "<40-hex>"
+  pr_number: <integer>
+  branch_slug: "<branch-slug>"
   materialization_key: "<64-hex>"
-  actor: "merge-gate-queue-daemon"
+  materialization_record_index: 0
+  materialization_record_count: 1
+sequence: <integer>
+prev_hash: "<64-hex>"
+content_hash: "<64-hex>"
 ```
+
+For a materialized `ce411_supersede_pair`, the materializer emits two
+`brain-assertion` records in one commit. The first record has `status:
+"superseded"` and `superseded_by` pointing to the replacement id. The second
+record has `status: "active"` and `superseded_by: null`. Both carry the same
+`materialization_key`; their mediation blocks set
+`materialization_record_index` to `0` and `1`, and
+`materialization_record_count` to `2`.
+
+For a materialized `decision_append`, the record body fields and YAML
+serialization order are:
+
+```yaml
+kind: "brain-decision"
+record_type: "brain_decision"
+schema_version: "1"
+id: "<brain-decision-id>"
+date: "YYYY-MM-DD"
+scope: "<scope-string-or-object>"
+statement: "<decision text>"
+authority: "<authority>"
+supersedes_ref: "<brain-decision-id-or-null>"
+status: "active"
+mediation:
+  mode: "merge_time_intent"
+  intent_path: ".ce/brain/append-intents/<branch-slug>.yaml"
+  intent_sha256: "<64-hex>"
+  intent_kind: "decision_append"
+  merge_commit_sha: "<40-hex>"
+  pr_number: <integer>
+  branch_slug: "<branch-slug>"
+  materialization_key: "<64-hex>"
+  materialization_record_index: 0
+  materialization_record_count: 1
+sequence: <integer>
+prev_hash: "<64-hex>"
+content_hash: "<64-hex>"
+```
+
+For a materialized `lesson_append`, the record body fields and YAML
+serialization order are:
+
+```yaml
+kind: "brain-lesson"
+record_type: "brain_lesson"
+schema_version: "1"
+id: "<brain-lesson-id>"
+date: "YYYY-MM-DD"
+scope: "<scope-string-or-object>"
+source: "<source>"
+feedback: "<feedback>"
+correction: "<correction>"
+why: "<why>"
+how_to_apply: "<how-to-apply>"
+supersedes_ref: "<brain-lesson-id-or-null>"
+status: "active"
+mediation:
+  mode: "merge_time_intent"
+  intent_path: ".ce/brain/append-intents/<branch-slug>.yaml"
+  intent_sha256: "<64-hex>"
+  intent_kind: "lesson_append"
+  merge_commit_sha: "<40-hex>"
+  pr_number: <integer>
+  branch_slug: "<branch-slug>"
+  materialization_key: "<64-hex>"
+  materialization_record_index: 0
+  materialization_record_count: 1
+sequence: <integer>
+prev_hash: "<64-hex>"
+content_hash: "<64-hex>"
+```
+
+The record body must not contain execution-time-variable fields such as
+`materialization_commit_sha`, wall-clock timestamps, daemon PID, hostname,
+credential/account identifiers, retry counters, local paths, or lease holder
+identity. Those values may appear only in the commit trailer, PR closeout
+comment, and daemon log. This makes byte-identical idempotency verifiable:
+given the same live tail, merge commit, intent path, canonical intent SHA-256,
+and PR metadata, every instance builds identical record bytes and therefore the
+same `content_hash`.
+
+The `materialization_key` persists in two repository-visible places:
+
+- in every appended ledger record's `mediation.materialization_key`;
+- in a deterministic trailer line in the materialization commit message:
+
+```text
+CE-Materialization-Key: <64-hex>
+```
+
+That trailer is mandatory so crash-after-push detection does not need to parse
+tree contents before it can identify a candidate materialization commit.
 
 PR closeout comment:
 
@@ -269,6 +499,7 @@ intent: .ce/brain/append-intents/<branch-slug>.yaml
 intent_sha256: <64-hex>
 merge_commit: <40-hex>
 materialization_commit: <40-hex>
+materialization_key: <64-hex>
 ledger_tail: <64-hex>
 ```
 
@@ -281,9 +512,30 @@ Daemon log:
   `merge_commit_sha`, `main_parent_sha`, result status, and a canonical event
   SHA-256.
 
-The ledger record is the durable repository-local evidence. The PR comment is
-operator-facing evidence. The daemon log is execution evidence for audits and
-crash recovery.
+The ledger record and commit trailer are durable repository-local evidence. The
+PR comment is operator-facing evidence. The daemon log is execution evidence for
+audits and crash recovery.
+
+Dry-run/advisory mode, used before direct-write authority is armed, writes no
+tracked repository files. It emits JSON to:
+
+```text
+.ce/state/brain-intent-materializer/dry-run/<materialization-key>.json
+```
+
+The dry-run JSON object has `mode: "dry_run"`, `status`, `intent_path`,
+`intent_sha256`, `merge_commit_sha`, `would_append_records`,
+`would_remove_intent_path`, `materialization_key`, `ledger_tail_before`,
+`ledger_tail_after`, `refusal_reason`, and `generated_patch_sha256`. If the
+daemon can comment on the PR, the advisory comment uses this exact form:
+
+```text
+Brain append intent dry-run advisory.
+status: <would_materialize|held|refused>
+intent: .ce/brain/append-intents/<branch-slug>.yaml
+materialization_key: <64-hex>
+evidence: .ce/state/brain-intent-materializer/dry-run/<materialization-key>.json
+```
 
 ## Interaction With The #882 Stale-Tail Gate
 
@@ -304,6 +556,17 @@ Additional validation for intent PRs should be shape-focused:
 - evidence digest fields are deterministic;
 - direct `.ce/brain/assertions.yaml` edits are absent.
 
+The hard gate name for the intent-XOR-direct-edit rule is
+`brain_append_intent_xor_direct_ledger`. It refuses any hybrid PR whose diff
+contains both:
+
+- one or more `.ce/brain/append-intents/` files; and
+- any edit to `.ce/brain/assertions.yaml`.
+
+The refusal is hard even if the direct ledger edit would otherwise pass the #882
+stale-tail gate, because a hybrid PR would create two competing sources of
+ledger truth in the same merge.
+
 The materializer, not PR CI, assigns the live `prev_hash` and `content_hash`.
 
 ## Scheduled Drill And Test Plan
@@ -311,7 +574,7 @@ The materializer, not PR CI, assigns the live `prev_hash` and `content_hash`.
 Unit tests:
 
 - Validate intent schema success and failure cases.
-- Verify branch slug must match file stem and `branch_slug`.
+- Verify branch slug must match the file stem and PR branch metadata.
 - Verify intent canonicalization produces stable `intent_sha256`.
 - Verify direct `.ce/brain/assertions.yaml` edits remain routed to the #882
   stale-tail gate.
@@ -362,3 +625,9 @@ Scheduled drill:
    quarantine would require broader direct-write bounds and should be a separate
    Operator-approved design.
 
+4. BLOCKING-FOR-IMPLEMENTATION: What materializer topology is authorized:
+   strict singleton under the merge-gate queue daemon, or
+   multi-instance-under-external-lock?
+   Recommendation: strict singleton for the first armed implementation. A second
+   materializer instance is an additional writer to `main`, bears directly on
+   Question 1, and requires an external linearizable lock before it can be safe.
