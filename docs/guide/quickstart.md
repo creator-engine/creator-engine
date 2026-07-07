@@ -39,7 +39,7 @@ sugar, but the canonical journey is the `ce` CLI.
 ## 3. Shape The Work
 
 ```bash
-ce shape
+ce shape login-empty-state
 ```
 
 Artifact: a sharpened candidate Scope boundary: goal, constraints, and
@@ -56,24 +56,25 @@ ce scope login-empty-state \
   --done-when "A new repo shows empty-state copy instead of a blank panel" \
   --done-when "The copy points the user to launching the first governed run" \
   --done-when "Existing populated activity views are unchanged" \
+  --budget 1 \
+  --budget-unit % \
+  --budget-window per_run \
   --change-type code
 ```
 
 Artifact: a Scope record. The Scope is the governing contract for the run.
 
 State after this step: the work is in Shape. CE can check whether the Scope is
-Ready. The required fields are Goal, Done-when, and Change-type. Use the
+Ready. The required fields are Goal, Done-when, Budget, and Change-type. Use the
 smallest honest Change-type that describes the risk.
 
-Optional lane-aware cap: if your operator asks you to cap spend explicitly, add
-`--budget <amount> --budget-unit %` for a subscription lane with rolling
-windows, or `--budget <amount> --budget-unit '$'` for an API lane. Do not add a
-cap by default.
+The example Budget is a paste-testable 1% per-run cap. Substitute the amount,
+unit, and window your operator gives you for your lane.
 
 ## 5. Ratify The Scope
 
 ```bash
-ce ratify login-empty-state
+ce ratify login-empty-state --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 Artifact: a ratification record bound to the Scope.
@@ -81,6 +82,9 @@ Artifact: a ratification record bound to the Scope.
 State after this step: the front gate is open. CE may Build exactly this Scope.
 If the goal, Done-when, or Change-type changes later, shape a revised Scope
 instead of treating the chat transcript as authorization.
+
+The literal above is valid 64-hex syntax for the example. In a real run,
+generate a fresh approver ref with `openssl rand -hex 32` and pass that value.
 
 ## 6. Drive The Governed Run
 

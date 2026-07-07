@@ -41,7 +41,6 @@ The fast path is:
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash
 ce onboard
-ce brain init
 ```
 
 `ce onboard` checks the host, verifies the installed CE surface, initializes
@@ -140,12 +139,14 @@ ce scope activity-empty-state \
   --done-when "A new project activity page shows empty-state copy instead of a blank panel" \
   --done-when "The copy points users back to launching their first governed run" \
   --done-when "Existing populated activity pages are unchanged" \
+  --budget 1 \
+  --budget-unit % \
+  --budget-window per_run \
   --change-type code
 ```
 
-If your operator asks you to add a lane-aware cap, use `--budget <amount>
---budget-unit %` for a subscription lane or `--budget <amount> --budget-unit
-'$'` for an API lane. Do not add a cap by default.
+The example Budget is a paste-testable 1% per-run cap. Substitute the amount,
+unit, and window your operator gives you for your lane.
 
 **What CE does.** CE checks whether the Scope is Ready. If the Scope is vague,
 missing a testable Done-when, or under-declares risk, it tells you before the
@@ -161,6 +162,7 @@ ce shape activity-empty-state
 ◆ CE · Shape → "activity-empty-state"
 Goal        Show a helpful empty state on the activity page before the first run
 Done-when   3 checks
+Budget      1% per_run
 Change-type code
 Ready       ✓
 
@@ -278,10 +280,10 @@ ratified outcome. It is not only a merged PR.
 
 After setup, most days are smaller than the full walkthrough:
 
-1. Launch your governed pane with `ce launch`.
+1. Launch your governed pane with `ce launch --backend host`.
 2. Talk to the agent about the next problem.
 3. Let CE help Frame and Shape a small Scope.
-4. Ratify the Scope when the Goal, Done-when, and Change-type are right.
+4. Ratify the Scope when the Goal, Done-when, Budget, and Change-type are right.
 5. Let the agent Build inside the envelope.
 6. Review the Completion Report and PR evidence.
 7. Ship through the gate, or send the work back with specific feedback.

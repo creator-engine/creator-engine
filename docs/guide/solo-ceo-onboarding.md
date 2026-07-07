@@ -41,7 +41,7 @@ your review before anything is ratified.
 
 You need a CE install and a governed session. If you have not done either, follow
 the install steps in [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md)
-first. Once installed, `ce launch` is your daily entry point.
+first. Once installed, `ce launch --backend host` is your daily entry point.
 
 ### The one concept to anchor on
 
@@ -56,7 +56,7 @@ approve gates, you own the outcome. The agent handles the mechanics.
 ## Phase 1 — Launch your governed session
 
 ```bash
-ce launch
+ce launch --backend host
 ```
 
 This opens your coding agent in a governed terminal pane — exactly the session

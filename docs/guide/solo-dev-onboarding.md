@@ -19,7 +19,7 @@ The first run is deliberately small:
 1. Prepare the host and repository.
 2. Run `ce onboard`.
 3. Use the governed agent pane that opens.
-4. Return later with `ce launch`.
+4. Return later with `ce launch --backend host`.
 
 The detailed Frame -> Shape -> Build -> Review -> Ship loop happens inside that
 governed session. On day one, you do not need to memorize a command table before
@@ -78,17 +78,17 @@ before trying again. Re-run support is still being tightened; do not assume
 After onboarding has completed, return to the governed session with:
 
 ```bash
-ce launch
+ce launch --backend host
 ```
 
-`ce launch` opens or attaches the visible governed terminal launcher for your
-agent. It is the daily entry point after the repository has been onboarded; it
-is not the first command on a fresh host.
+`ce launch --backend host` opens or attaches the visible governed terminal
+launcher for your agent. It is the daily entry point after the repository has
+been onboarded; it is not the first command on a fresh host.
 
 For a dry-run of the launcher plan without opening a pane, use:
 
 ```bash
-ce launch --dry-run
+ce launch --backend host --dry-run
 ```
 
 ---
