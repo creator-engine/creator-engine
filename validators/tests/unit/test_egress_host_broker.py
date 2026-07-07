@@ -531,7 +531,7 @@ def test_serve_unix_socket_rejects_unexpected_peercred_when_enabled(tmp_path):
 def test_serve_unix_socket_rejects_unexpected_peercred_by_default_when_expected_configured(
     tmp_path,
 ):
-    socket_path = tmp_path / "peercred-default-reject.sock"
+    socket_path = tmp_path / "pd-rej.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
