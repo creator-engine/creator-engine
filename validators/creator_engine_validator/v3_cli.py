@@ -3074,7 +3074,7 @@ def _close_apply_driver(driver: Any) -> None:
 
 
 def _cmd_onboard_refresh_workflow(args: argparse.Namespace) -> int:
-    if args.inventory or args.show_plan or args.apply:
+    if args.inventory or args.show_plan or args.apply or getattr(args, "spec", None):
         return _emit(
             args,
             2,

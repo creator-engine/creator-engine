@@ -1520,6 +1520,23 @@ def test_cli_refresh_workflow_without_spec_uses_refresh_driver(tmp_path, monkeyp
     assert driver.refresh_calls
 
 
+def test_cli_refresh_workflow_refuses_spec_combination(tmp_path, monkeypatch, capsys):
+    from creator_engine_validator import v3_cli
+
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: pytest.fail("refresh/spec conflict should refuse before probing"),
+    )
+
+    code = v3_cli.main(["install", "--refresh-workflow", "--spec", str(tmp_path / "llms-install.md")])
+
+    output = capsys.readouterr().out
+    assert code == 2
+    assert "onboard refresh-workflow refused" in output
+    assert "combine it with no other onboard mode" in output
+
+
 def test_ce_workflow_tolerates_exact_ce_resident_checks_inline():
     workflow = onboard_apply.CE_WORKFLOW_CONTENT
     tolerated = set(
