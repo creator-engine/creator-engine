@@ -28,6 +28,7 @@ class FakeRunner:
         baseline_test_result: pr_preflight.CommandResult | None = None,
         changed_paths: str = "",
         brain_drift_result: pr_preflight.CommandResult | None = None,
+        ledger_show: dict[tuple[str, str], pr_preflight.CommandResult] | None = None,
     ):
         self.repo_root = repo_root
         self.dirty = dirty
@@ -41,6 +42,7 @@ class FakeRunner:
         self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "1 passed in 0.01s\n", "")
         self.changed_paths = changed_paths
         self.brain_drift_result = brain_drift_result or pr_preflight.CommandResult(0, "ok\n", "")
+        self.ledger_show = ledger_show or {}
         self.calls: list[tuple[list[str], Path, dict[str, str] | None, float | None]] = []
 
     def __call__(self, argv, cwd, env=None, *, timeout=None):
@@ -58,6 +60,12 @@ class FakeRunner:
             return pr_preflight.CommandResult(0, "abc1234\n", "")
         if argv == ["git", "diff", "--name-only", "abc1234..HEAD"]:
             return pr_preflight.CommandResult(0, self.changed_paths, "")
+        if argv[:2] == ["git", "show"] and len(argv) == 3 and ":" in argv[2]:
+            ref, path = argv[2].split(":", 1)
+            return self.ledger_show.get(
+                (ref, path),
+                pr_preflight.CommandResult(1, "", f"missing fixture for {argv[2]}"),
+            )
         if argv[:4] == ["git", "worktree", "add", "--detach"]:
             return pr_preflight.CommandResult(0, "", "")
         if argv[:4] == ["git", "worktree", "remove", "--force"]:
@@ -126,6 +134,19 @@ def _ledger_text(value: str) -> str:
         scope="unit",
         evidence_ref="manual-preflight-test",
         records=[],
+        write=lambda _path, text: captured.append(text),
+    )
+    return captured[-1]
+
+
+def _append_ledger_text(existing: str, value: str) -> str:
+    captured: list[str] = []
+    rt.assert_claim(
+        assertion_id=f"brain-assertion-preflight-{value}",
+        claim={"subject": "brain", "predicate": "state", "object": value},
+        scope="unit",
+        evidence_ref="manual-preflight-test",
+        records=rt.load_ledger_text(existing),
         write=lambda _path, text: captured.append(text),
     )
     return captured[-1]
@@ -307,6 +328,57 @@ def test_preflight_runs_fleet_manifest_guard(tmp_path: Path, monkeypatch):
     assert guarded == [tmp_path]
 
 
+def test_preflight_refuses_brain_ledger_delta_when_live_base_tail_moved(tmp_path: Path):
+    pr_base_ledger = _ledger_text("base")
+    live_base_ledger = _append_ledger_text(pr_base_ledger, "main-moved")
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths=f"{pr_preflight.BRAIN_LEDGER_PATH}\n",
+        ledger_show={
+            ("abc1234", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, pr_base_ledger, ""),
+            ("origin/main", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, live_base_ledger, ""),
+        },
+    )
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=err)
+
+    assert rc == 1
+    output = out.getvalue()
+    assert "[FAIL] Creator Engine validator - brain ledger current-tail PR-diff gate" in output
+    assert "live base ledger tail moved after the PR base" in output
+    assert "semantic fork/re-chain from a non-current tail" in output
+    assert "`ce brain assert`" in output
+    assert "`ce brain correct`" in output
+    assert not any(
+        call[:3] == [sys.executable, "-m", "creator_engine_validator"]
+        and "verify-work-sizing-floor" in call
+        for call in runner.argv_calls()
+    )
+
+
+def test_preflight_allows_brain_ledger_delta_when_live_base_tail_matches(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    base_ledger = _ledger_text("base")
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths=f"{pr_preflight.BRAIN_LEDGER_PATH}\n",
+        ledger_show={
+            ("abc1234", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, base_ledger, ""),
+            ("origin/main", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, base_ledger, ""),
+        },
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    assert "authoritative brain ledger tail is current" in out.getvalue()
+
+
 def test_preflight_auto_reconciles_instance_local_brain_state_when_canonical_unchanged(
     tmp_path: Path, monkeypatch
 ):
@@ -342,10 +414,15 @@ def test_preflight_does_not_reconcile_when_canonical_brain_source_changed_and_ga
 ):
     _stub_expensive_preflight_checks(monkeypatch)
     _write_brain_ledgers(tmp_path, canonical="canonical", local="stale-local")
+    canonical = (tmp_path / ".ce" / "brain" / "assertions.yaml").read_text(encoding="utf-8")
     stale_local = (tmp_path / ".ce" / "state" / "brain" / "assertions.yaml").read_text(encoding="utf-8")
     runner = FakeRunner(
         tmp_path,
         changed_paths=".ce/brain/assertions.yaml\n",
+        ledger_show={
+            ("abc1234", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, canonical, ""),
+            ("origin/main", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, canonical, ""),
+        },
         brain_drift_result=pr_preflight.CommandResult(
             1,
             "ce brain verify --drift: FAIL (1 record(s))\n",

@@ -59,6 +59,11 @@ CONTAINED_SEAT_CARRIER_NOTICE = (
     "NOTICE: omitted check path_manifest_carrier_required for profile contained-seat "
     "because the per-PR carrier is generated harvest-side."
 )
+BRAIN_LEDGER_PATH = ".ce/brain/assertions.yaml"
+BRAIN_LEDGER_RECHAIN_TOOL_HINT = (
+    "rebase onto the current base and re-run the brain re-chain tool "
+    "(`ce brain assert` for appends, or `ce brain correct` for supersede/re-pin cascades)"
+)
 
 
 @dataclass(frozen=True)
@@ -301,6 +306,51 @@ def _changed_paths(repo_root: Path, base: str, runner: Runner) -> list[str]:
 
 def _is_canonical_brain_source(path: str) -> bool:
     return path == ".ce/brain" or path.startswith(".ce/brain/")
+
+
+def _is_authoritative_brain_ledger(path: str) -> bool:
+    return path == BRAIN_LEDGER_PATH
+
+
+def _brain_ledger_tail_at_ref(repo_root: Path, ref: str, runner: Runner) -> str | None:
+    raw = _git_capture(["show", f"{ref}:{BRAIN_LEDGER_PATH}"], repo_root, runner)
+    try:
+        records = brain_runtime.load_ledger_text(raw)
+    except brain_runtime.BrainRuntimeError as exc:
+        raise RuntimeError(f"could not validate {BRAIN_LEDGER_PATH} at {ref}: {exc}") from exc
+    if not records:
+        return None
+    tail = records[-1].get("content_hash")
+    if not isinstance(tail, str) or not tail:
+        raise RuntimeError(f"could not resolve {BRAIN_LEDGER_PATH} tail content_hash at {ref}")
+    return tail
+
+
+def _assert_brain_ledger_delta_uses_current_tail(
+    config: PreflightConfig,
+    comparison_base: str,
+    runner: Runner,
+) -> str:
+    changed = _changed_paths(config.repo_root, comparison_base, runner)
+    if not any(_is_authoritative_brain_ledger(path) for path in changed):
+        return "not applicable; authoritative brain ledger unchanged"
+
+    try:
+        pr_base_tail = _brain_ledger_tail_at_ref(config.repo_root, comparison_base, runner)
+        live_base_tail = _brain_ledger_tail_at_ref(config.repo_root, config.base, runner)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"refused {BRAIN_LEDGER_PATH} delta because the current ledger tail could not be proven: {exc}. "
+            f"{BRAIN_LEDGER_RECHAIN_TOOL_HINT}."
+        ) from exc
+
+    if pr_base_tail != live_base_tail:
+        raise RuntimeError(
+            f"{BRAIN_LEDGER_PATH} changed in this PR, but the live base ledger tail moved after the PR base "
+            f"(PR base tail={pr_base_tail or '<empty>'}; current base tail={live_base_tail or '<empty>'}). "
+            f"This prevents a semantic fork/re-chain from a non-current tail; {BRAIN_LEDGER_RECHAIN_TOOL_HINT}."
+        )
+    return f"passed; authoritative brain ledger tail is current ({live_base_tail or '<empty>'})"
 
 
 def _brain_drift_remediation_note() -> str:
@@ -880,6 +930,17 @@ def run_preflight(
         _run_check(
             "comparison base",
             lambda: comparison_base.setdefault("value", _resolve_comparison_base(config, runner, out, err)),
+            out,
+            err,
+        )
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out)
+        return 1
+    checks.append(
+        _run_check(
+            "Creator Engine validator - brain ledger current-tail PR-diff gate",
+            lambda: _assert_brain_ledger_delta_uses_current_tail(config, comparison_base["value"], runner),
             out,
             err,
         )
