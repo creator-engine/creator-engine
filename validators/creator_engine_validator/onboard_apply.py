@@ -192,12 +192,12 @@ jobs:
               raise SystemExit("CE spec content_sha256 is not 64-hex")
           canonical = re.sub(
               rb"(?m)^(  value: ).*$",
-              rb"\1<published-with-this-spec>",
+              rb"\\1<published-with-this-spec>",
               spec,
           )
           canonical = re.sub(
               rb"(?m)^(  content_sha256: ).*$",
-              rb"\1<published-with-this-spec>",
+              rb"\\1<published-with-this-spec>",
               canonical,
           )
           if hashlib.sha256(canonical).hexdigest() != content_sha:

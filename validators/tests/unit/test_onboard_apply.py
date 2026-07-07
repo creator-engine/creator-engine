@@ -1288,6 +1288,18 @@ def test_ce_workflow_template_triggers_on_merge_group_checks_requested():
     assert triggers["merge_group"] == {"types": ["checks_requested"]}
 
 
+def test_ce_workflow_template_contains_no_control_characters():
+    content = onboard_apply.CE_WORKFLOW_CONTENT
+
+    assert not any(ord(ch) < 9 for ch in content)
+
+
+def test_ce_workflow_template_preserves_regex_backreference_replacement():
+    content = onboard_apply.CE_WORKFLOW_CONTENT
+
+    assert r'rb"\1<published-with-this-spec>"' in content
+
+
 def test_ce_workflow_tolerates_exact_ce_resident_checks_inline():
     workflow = onboard_apply.CE_WORKFLOW_CONTENT
     tolerated = set(
