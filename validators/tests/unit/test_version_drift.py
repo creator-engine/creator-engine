@@ -6,11 +6,30 @@ from creator_engine_validator.checks import version_drift as chk
 from creator_engine_validator.cli import main
 
 
-def _write_repo(root: Path, *, line: str) -> None:
+def _write_repo(root: Path, line: str) -> None:
     package = root / "validators" / "creator_engine_validator"
     package.mkdir(parents=True)
     (package / "version.py").write_text('__version__ = "0.3.2"\n', encoding="utf-8")
     (root / "README.md").write_text(line + "\n", encoding="utf-8")
+    (root / "docs").mkdir()
+    (root / "docs" / "llms.txt").write_text("https://creator-engine.dev/downloads/0.3.2/SHA256SUMS\n", encoding="utf-8")
+    (root / "deploy" / "oci").mkdir(parents=True)
+    (root / "deploy" / "oci" / "README.md").write_text("creator-engine/ce-validator:0.3.2\n", encoding="utf-8")
+    (root / "deploy" / "oci" / "build-image.sh").write_text("creator-engine/ce-validator:0.3.2\n", encoding="utf-8")
+    (root / "deploy" / "daemons").mkdir(parents=True)
+    (root / "deploy" / "daemons" / "Dockerfile").write_text("creator-engine/ce-validator:0.3.2\n", encoding="utf-8")
+    (root / "deploy" / "daemons" / "README.md").write_text(
+        "ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2\n",
+        encoding="utf-8",
+    )
+    (root / "deploy" / "daemons" / "run-daemon-container.sh").write_text(
+        "ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.2\n",
+        encoding="utf-8",
+    )
+    (root / "deploy" / "runtime-image").mkdir(parents=True)
+    (root / "deploy" / "runtime-image" / "Dockerfile").write_text("CE_IMAGE_VERSION=0.3.2\n", encoding="utf-8")
+    (root / "deploy" / "seat-image").mkdir(parents=True)
+    (root / "deploy" / "seat-image" / "Dockerfile").write_text("CE_IMAGE_VERSION=0.3.2\n", encoding="utf-8")
 
 
 def _surface(path: str = "README.md") -> chk.CurrentVersionSurface:
@@ -103,6 +122,16 @@ def test_verify_version_drift_cli_returns_nonzero_for_stale_claim(tmp_path: Path
     out = capsys.readouterr().out
     assert "FAIL version_drift_current_surfaces" in out
     assert "README.md:1" in out
+
+
+def test_verify_version_drift_allows_annotated_historical_claim(tmp_path: Path):
+    _write_repo(
+        tmp_path,
+        "Historical note: creator-engine-validator==0.3.1 was the prior release. "
+        "<!-- ce-version-drift: allow-historical 0.3.1 -->",
+    )
+
+    assert main(["verify-version-drift", str(tmp_path)]) == 0
 
 
 def test_check_invocation_does_not_run_repo_wide_version_drift(monkeypatch, capsys):

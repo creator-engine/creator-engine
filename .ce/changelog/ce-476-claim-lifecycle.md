@@ -12,3 +12,4 @@ issue: ce-ops#476
 - Wired `ce claim transition` and `ce claim list` into the existing claim CLI group without changing forge claim-lock commands.
 - Added claim lifecycle documentation and a merge-closeout workflow that marks merged claims as `landed`.
 - Hardened `--force` so it only bypasses transition-order restrictions; `landed` and `released` still require verifiable SHA evidence.
+- Backfilled the base-branch `verify-version-drift` validator surface and current-version deploy strings so this branch remains compatible with the live governance CI workflow.
