@@ -143,6 +143,10 @@ _BRAND = "◆ CE"  # ◆ CE
 #: internal console_script is ``cev3`` (monorepo coexistence only) — never shown.
 CE_CMD = "ce"
 
+#: Bound PRD context reads for ``ce shape --from`` so huge source documents fail
+#: with a teaching refusal before the CLI attempts to decode the whole file.
+_PRD_SOURCE_MAX_BYTES = 512 * 1024
+
 #: In-product help — the SEED of the in-product guide (content reused from
 #: ``docs/guide/understanding-ce.md``, not re-authored). ``ce guide`` prints it.
 _GUIDE = f"""\
@@ -2724,6 +2728,23 @@ def _cmd_shape(args: argparse.Namespace) -> int:
     if args.from_path:
         source_path = Path(args.from_path)
         try:
+            prd_size = source_path.stat().st_size
+            if prd_size > _PRD_SOURCE_MAX_BYTES:
+                return _emit(
+                    args,
+                    2,
+                    [
+                        f"{_BRAND} · shape refused: PRD {args.from_path!r} is too large "
+                        f"({prd_size} bytes; limit {_PRD_SOURCE_MAX_BYTES}). Trim it to one slice "
+                        "or split it into smaller PRDs, then run shape again."
+                    ],
+                    {
+                        "error": "prd_too_large",
+                        "path": args.from_path,
+                        "size_bytes": prd_size,
+                        "limit_bytes": _PRD_SOURCE_MAX_BYTES,
+                    },
+                )
             prd_text = source_path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             return _emit(

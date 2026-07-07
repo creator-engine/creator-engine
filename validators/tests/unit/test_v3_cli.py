@@ -1183,6 +1183,47 @@ def test_shape_from_prd_missing_file_refused(tmp_path, capsys):
     assert payload["error"] == "prd_read_failed"
 
 
+def test_shape_from_prd_too_large_refused_before_read(tmp_path, capsys):
+    prd = tmp_path / "large.md"
+    prd.write_bytes(b"\xff" * (v3_cli._PRD_SOURCE_MAX_BYTES + 1))
+    code = v3_cli.main(["shape", "--from", str(prd)])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "too large" in out
+    assert "Trim" in out
+    assert "split" in out
+
+    code = v3_cli.main(["shape", "--from", str(prd), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_too_large"
+    assert payload["size_bytes"] == v3_cli._PRD_SOURCE_MAX_BYTES + 1
+    assert payload["limit_bytes"] == v3_cli._PRD_SOURCE_MAX_BYTES
+
+
+def test_shape_from_prd_binary_file_refused(tmp_path, capsys):
+    prd = tmp_path / "binary.md"
+    prd.write_bytes(b"\xff\xfe\x00\x80")
+    code = v3_cli.main(["shape", "--from", str(prd), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_read_failed"
+    assert payload["path"] == str(prd)
+
+
+def test_shape_from_prd_confirm_refuses_invalid_scope_id(tmp_path, capsys):
+    prd = tmp_path / "onboarding.md"
+    prd.write_text("## User registration flow\nBuild registration.\n", encoding="utf-8")
+    code = v3_cli.main([
+        "shape", "BAD ID", "--from", str(prd), "--confirm", "--root", str(tmp_path), "--json",
+    ])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "invalid_scope_id"
+    assert payload["scope_id"] == "BAD ID"
+    assert not (tmp_path / v3_cli.SCOPES_SUBDIR).exists()
+
+
 # ---------------------------------------------------------------------------
 # classification — v3-classified, additive, distinct entry (no v1 import)
 # ---------------------------------------------------------------------------
