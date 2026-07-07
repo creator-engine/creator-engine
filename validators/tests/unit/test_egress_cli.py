@@ -177,6 +177,8 @@ def test_self_push_broker_cli_wires_host_seams(tmp_path):
             "--seat", "dev-4",
             "--host-repo-path", "/host/repo",
             "--config", str(_config_file(tmp_path)),
+            "--expected-peer-uid", "1000,1001",
+            "--expected-peer-gid", "2000",
             "--once",
         ],
         serve_fn=fake_serve,
@@ -188,7 +190,36 @@ def test_self_push_broker_cli_wires_host_seams(tmp_path):
     assert seen["broker_seat_id"] == "dev-4"
     assert seen["host_repo_path"] == "/host/repo"
     assert seen["once"] is True
+    assert seen["expected_peer_uids"] == frozenset({1000, 1001})
+    assert seen["expected_peer_gids"] == frozenset({2000})
     assert callable(seen["signer"])
+
+
+def test_self_push_broker_cli_requires_peercred_expectations(tmp_path, capsys):
+    called = {"serve": False, "signer": False}
+
+    def fake_serve(*args, **kwargs):
+        called["serve"] = True
+
+    def fake_signer_factory(pem_path):
+        called["signer"] = True
+        return lambda payload: b"sig"
+
+    rc = self_push_cli.main(
+        [
+            "--socket", str(tmp_path / "dev-4.sock"),
+            "--seat", "dev-4",
+            "--host-repo-path", "/host/repo",
+            "--config", str(_config_file(tmp_path)),
+            "--once",
+        ],
+        serve_fn=fake_serve,
+        signer_factory=fake_signer_factory,
+    )
+
+    assert rc == self_push_cli.EXIT_CONFIG_ERROR
+    assert called == {"serve": False, "signer": False}
+    assert "--expected-peer-uid" in capsys.readouterr().err
 
 
 def test_self_push_broker_cli_config_error_and_runtime_error_codes(tmp_path, capsys):
@@ -198,6 +229,8 @@ def test_self_push_broker_cli_config_error_and_runtime_error_codes(tmp_path, cap
             "--seat", "dev-4",
             "--host-repo-path", "/host/repo",
             "--config", str(tmp_path / "missing.json"),
+            "--expected-peer-uid", "1000",
+            "--expected-peer-gid", "1000",
         ],
         serve_fn=lambda *a, **k: None,
         signer_factory=lambda pem: (lambda payload: b"sig"),
@@ -215,6 +248,8 @@ def test_self_push_broker_cli_config_error_and_runtime_error_codes(tmp_path, cap
             "--seat", "dev-4",
             "--host-repo-path", "/host/repo",
             "--config", str(_config_file(tmp_path)),
+            "--expected-peer-uid", "1000",
+            "--expected-peer-gid", "1000",
         ],
         serve_fn=leaking_serve,
         signer_factory=lambda pem: (lambda payload: b"sig"),

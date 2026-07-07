@@ -180,6 +180,8 @@ def test_egress_broker_unit_runs_host_broker_script(repo_root: Path):
     assert "ce_egress_self_push_broker.py" in exec_start
     assert "--socket" in exec_start
     assert "--seat" in exec_start
+    assert "--expected-peer-uid" in exec_start
+    assert "--expected-peer-gid" in exec_start
     assert "--host-repo-path" in exec_start
     assert "--config" in exec_start
 
@@ -194,9 +196,11 @@ def test_egress_broker_unit_env_vars_are_parametric(repo_root: Path):
     unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
     exec_start = unit["Service"]["ExecStart"]
 
-    # All four required broker args must reference env vars (not hardcoded values)
+    # Required broker args must reference env vars (not hardcoded values).
     assert "$CE_EGRESS_BROKER_SOCKET" in exec_start
     assert "$CE_EGRESS_BROKER_SEAT" in exec_start
+    assert "$CE_EGRESS_BROKER_EXPECTED_PEER_UID" in exec_start
+    assert "$CE_EGRESS_BROKER_EXPECTED_PEER_GID" in exec_start
     assert "$CE_EGRESS_BROKER_REPO" in exec_start
     assert "$CE_EGRESS_BROKER_CONFIG" in exec_start
 

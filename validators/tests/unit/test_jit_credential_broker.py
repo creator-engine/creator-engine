@@ -7,10 +7,12 @@ mint requests serialize through the broker flock.
 
 import json
 import os
+import socket
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+import ce_egress_self_push_broker as self_push_cli
 from creator_engine_validator.forge.scoped_token import ScopedToken
 from egress_broker.config import load_broker_config
 from egress_broker.host_broker import handle_self_push_json_line, handle_self_push_request
@@ -20,39 +22,47 @@ _MODEL_SECRET = "sk-ce-model-api-sentinel-1234567890"
 _FORGE_SECRET = "ghs_jit_forge_sentinel_1234567890"
 
 
+def _config_doc(tmp_path):
+    return {
+        "repo": "creator-engine/creator-engine",
+        "installation_owner": "creator-engine",
+        "audit_log": str(tmp_path / "audit.jsonl"),
+        "policy": {
+            "base_branch": "main",
+            "allowed_branch_namespaces": ["ce-"],
+            "forbidden_branches": [],
+            "authorized_emails": [],
+            "authorized_logins": ["seat-dev-test"],
+            "max_pushes_per_window": 10,
+            "window_seconds": 3600,
+        },
+        "seats": {
+            "dev-3": {
+                "app_id": "12345",
+                "app_owner": "seat-dev-test",
+                "pem_path": "/dev/shm/ce-dev3/ce-forge-dev3.pem",
+                "installation_id": 242,
+                "allowed_credential_classes": ["model-api", "forge-scoped"],
+            },
+            "dev-other": {
+                "app_id": "98765",
+                "app_owner": "fixture-seat-owner",
+                "pem_path": "/dev/shm/ce-fixture/ce-forge-fixture.pem",
+                "installation_id": 242,
+                "allowed_credential_classes": [],
+            },
+        },
+    }
+
+
 def _config(tmp_path):
-    return load_broker_config(
-        {
-            "repo": "creator-engine/creator-engine",
-            "installation_owner": "creator-engine",
-            "audit_log": str(tmp_path / "audit.jsonl"),
-            "policy": {
-                "base_branch": "main",
-                "allowed_branch_namespaces": ["ce-"],
-                "forbidden_branches": [],
-                "authorized_emails": [],
-                "authorized_logins": ["seat-dev-test"],
-                "max_pushes_per_window": 10,
-                "window_seconds": 3600,
-            },
-            "seats": {
-                "dev-3": {
-                    "app_id": "12345",
-                    "app_owner": "seat-dev-test",
-                    "pem_path": "/dev/shm/ce-dev3/ce-forge-dev3.pem",
-                    "installation_id": 242,
-                    "allowed_credential_classes": ["model-api", "forge-scoped"],
-                },
-                "dev-other": {
-                    "app_id": "98765",
-                    "app_owner": "fixture-seat-owner",
-                    "pem_path": "/dev/shm/ce-fixture/ce-forge-fixture.pem",
-                    "installation_id": 242,
-                    "allowed_credential_classes": [],
-                },
-            },
-        }
-    )
+    return load_broker_config(_config_doc(tmp_path))
+
+
+def _config_file(tmp_path):
+    path = tmp_path / "broker.json"
+    path.write_text(json.dumps(_config_doc(tmp_path)), encoding="utf-8")
+    return path
 
 
 def _records(tmp_path):
@@ -60,6 +70,20 @@ def _records(tmp_path):
         json.loads(line)
         for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     ]
+
+
+def _connect_when_ready(socket_path, *, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while True:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.connect(str(socket_path))
+            return client
+        except (ConnectionRefusedError, FileNotFoundError):
+            client.close()
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
 
 
 def _model_supplier(now, calls):
@@ -129,6 +153,61 @@ def test_mint_model_api_delivers_only_on_socket_not_env_argv_subprocess_or_files
     for path in tmp_path.rglob("*"):
         if path.is_file():
             assert _MODEL_SECRET not in path.read_text(encoding="utf-8", errors="ignore")
+
+
+def test_live_cli_mismatched_peercred_rejects_jit_mint_without_credential(tmp_path):
+    socket_path = tmp_path / "jit-peercred.sock"
+    server_result = {}
+
+    def run_server():
+        server_result["rc"] = self_push_cli.main(
+            [
+                "--socket", str(socket_path),
+                "--seat", "dev-3",
+                "--host-repo-path", "/host/workspace",
+                "--config", str(_config_file(tmp_path)),
+                "--expected-peer-uid", str(os.getuid() + 1),
+                "--expected-peer-gid", str(os.getgid()),
+                "--once",
+            ],
+            signer_factory=lambda pem_path: (lambda payload: b"sig"),
+        )
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    request = {
+        "verb": "mint-seat-credential",
+        "seat_id": "dev-3",
+        "credential_class": "model-api",
+    }
+    with _connect_when_ready(socket_path) as client:
+        client.settimeout(2)
+        client.sendall((json.dumps(request) + "\n").encode("utf-8"))
+        raw = b""
+        while b"\n" not in raw:
+            chunk = client.recv(65536)
+            assert chunk
+            raw += chunk
+
+    server_thread.join(timeout=2)
+    assert not server_thread.is_alive()
+    assert server_result == {"rc": self_push_cli.EXIT_OK}
+    response = json.loads(raw.decode("utf-8"))
+    assert response == {"status": 403, "reason": "peer_credential_unexpected"}
+    assert _MODEL_SECRET not in raw.decode("utf-8")
+
+    records = _records(tmp_path)
+    assert len(records) == 1
+    peercred = records[0]
+    assert peercred["event"] == "self_push_peercred"
+    assert peercred["broker_seat_id"] == "dev-3"
+    assert peercred["peer_uid"] == os.getuid()
+    assert peercred["peer_gid"] == os.getgid()
+    assert peercred["origin"] == "unexpected"
+    assert peercred["decision"] == "reject"
+    assert isinstance(peercred["peer_pid"], int)
+    assert peercred["peer_pid"] > 0
 
 
 def test_unknown_class_refused_and_audited(tmp_path):

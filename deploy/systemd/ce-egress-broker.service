@@ -13,6 +13,8 @@ Sockets=ce-egress-broker.socket
 ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_push_broker.py \
   --socket "$CE_EGRESS_BROKER_SOCKET" \
   --seat "$CE_EGRESS_BROKER_SEAT" \
+  --expected-peer-uid "$CE_EGRESS_BROKER_EXPECTED_PEER_UID" \
+  --expected-peer-gid "$CE_EGRESS_BROKER_EXPECTED_PEER_GID" \
   --host-repo-path "$CE_EGRESS_BROKER_REPO" \
   --config "$CE_EGRESS_BROKER_CONFIG"
 Restart=on-failure

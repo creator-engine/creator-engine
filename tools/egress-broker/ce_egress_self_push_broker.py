@@ -176,6 +176,26 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--socket", required=True, help="host Unix socket path for this seat")
     parser.add_argument("--seat", required=True, help="broker seat id bound to this socket, e.g. dev-4")
     parser.add_argument(
+        "--expected-peer-uid",
+        action="append",
+        default=[],
+        metavar="UID[,UID...]",
+        help=(
+            "expected contained-seat peer UID(s) for SO_PEERCRED enforcement; "
+            "required for this credential-returning socket"
+        ),
+    )
+    parser.add_argument(
+        "--expected-peer-gid",
+        action="append",
+        default=[],
+        metavar="GID[,GID...]",
+        help=(
+            "expected contained-seat peer GID(s) for SO_PEERCRED enforcement; "
+            "required for this credential-returning socket"
+        ),
+    )
+    parser.add_argument(
         "--host-repo-path",
         required=True,
         help="trusted host repo path; any request repo_path is ignored",
@@ -189,6 +209,29 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _parse_expected_peer_ids(raw_values: list[str], *, label: str) -> frozenset[int]:
+    values: set[int] = set()
+    for raw_value in raw_values:
+        for raw_part in str(raw_value).split(","):
+            part = raw_part.strip()
+            if not part:
+                continue
+            try:
+                value = int(part, 10)
+            except ValueError:
+                raise _BrokerStartupError(
+                    f"{label} must contain only numeric ids (got {part!r})"
+                ) from None
+            if value < 0:
+                raise _BrokerStartupError(f"{label} must not contain negative ids")
+            values.add(value)
+    if not values:
+        raise _BrokerStartupError(
+            f"{label} is required for credential-returning self-push/JIT sockets"
+        )
+    return frozenset(values)
+
+
 def main(argv=None, *, serve_fn=None, signer_factory=None) -> int:
     """Parse args, build host-owned seams, and run the Unix-socket broker."""
     args = _build_parser().parse_args(argv)
@@ -197,8 +240,19 @@ def main(argv=None, *, serve_fn=None, signer_factory=None) -> int:
     try:
         config = load_broker_config(args.config)
         seat = config.seat(args.seat)
+        expected_peer_uids = _parse_expected_peer_ids(
+            args.expected_peer_uid,
+            label="--expected-peer-uid",
+        )
+        expected_peer_gids = _parse_expected_peer_ids(
+            args.expected_peer_gid,
+            label="--expected-peer-gid",
+        )
     except BrokerConfigError as exc:
         print(f"[ce-egress-self-push] config error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG_ERROR
+    except _BrokerStartupError as exc:
+        print(f"[ce-egress-self-push] startup error: {exc}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
 
     try:
@@ -218,6 +272,8 @@ def main(argv=None, *, serve_fn=None, signer_factory=None) -> int:
             signer=signer,
             once=args.once,
             activated_socket=activated_socket,
+            expected_peer_uids=expected_peer_uids,
+            expected_peer_gids=expected_peer_gids,
         )
     except _BrokerStartupError as exc:
         print(f"[ce-egress-self-push] startup error: {exc}", file=sys.stderr)
