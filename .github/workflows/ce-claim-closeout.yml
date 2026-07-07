@@ -1,0 +1,77 @@
+name: CE Claim Closeout
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  claim-closeout:
+    name: Mark merged claim as landed
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+
+      - name: Derive claim slug
+        id: claim
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          message="$(git log -1 --format=%B "$MERGE_SHA")"
+          slug="$(printf '%s\n' "$message" | sed -nE 's/^Closes-Claim:[[:space:]]*([A-Za-z0-9._-]+)[[:space:]]*$/\1/p' | head -n1)"
+          if [ -z "$slug" ]; then
+            slug="$HEAD_REF"
+          fi
+          case "$slug" in
+            *[!A-Za-z0-9._-]*|'')
+              echo "No valid claim slug derived; skipping"
+              echo "slug=" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "slug=$slug" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Transition claim to landed
+        if: steps.claim.outputs.slug != ''
+        env:
+          CLAIM_SLUG: ${{ steps.claim.outputs.slug }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          claim=".ce/claims/${CLAIM_SLUG}.md"
+          if [ ! -f "$claim" ]; then
+            echo "Claim file $claim not found; skipping"
+            exit 0
+          fi
+          PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli claim transition "$CLAIM_SLUG" landed --sha "$MERGE_SHA"
+
+      - name: Commit claim closeout
+        if: steps.claim.outputs.slug != ''
+        env:
+          CLAIM_SLUG: ${{ steps.claim.outputs.slug }}
+        run: |
+          set -euo pipefail
+          claim=".ce/claims/${CLAIM_SLUG}.md"
+          if git diff --quiet -- "$claim"; then
+            echo "No claim closeout diff to commit"
+            exit 0
+          fi
+          git config user.name "creator-engine-app[bot]"
+          git config user.email "creator-engine-app[bot]@users.noreply.github.com"
+          git add "$claim"
+          git commit -m "chore: close claim ${CLAIM_SLUG}"
+          git push

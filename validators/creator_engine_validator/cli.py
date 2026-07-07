@@ -684,6 +684,64 @@ def _check_examples(json_output: bool) -> int:
     return 1 if errors else 0
 
 
+def _verify_version_drift(paths: Sequence[str], json_output: bool) -> int:
+    import re
+
+    from .reporting import ValidationError
+
+    version_src = Path("validators/creator_engine_validator/version.py")
+    surfaces = (
+        ("README.md", (("package pin", r"creator-engine-validator==(\d+\.\d+\.\d+)"), ("package version text", r"creator-engine-validator[`'\"]?\s+version[`'\"]?\s+[`'\"](\d+\.\d+\.\d+)[`'\"]"))),
+        ("docs/llms.txt", (("downloads URL", r"/downloads/(\d+\.\d+\.\d+)/"),)),
+        ("deploy/oci/README.md", (("ce-validator image tag", r"creator-engine/ce-validator:(\d+\.\d+\.\d+)"),)),
+        ("deploy/oci/build-image.sh", (("ce-validator image tag", r"creator-engine/ce-validator:(\d+\.\d+\.\d+)"),)),
+        ("deploy/daemons/Dockerfile", (("ce-validator image tag", r"creator-engine/ce-validator:(\d+\.\d+\.\d+)"),)),
+        ("deploy/daemons/README.md", (("ce-runtime image tag", r"(?:ghcr\.io/creator-engine/creator-engine/)?ce-runtime:(\d+\.\d+\.\d+)"),)),
+        ("deploy/daemons/run-daemon-container.sh", (("ce-runtime image tag", r"(?:ghcr\.io/creator-engine/creator-engine/)?ce-runtime:(\d+\.\d+\.\d+)"),)),
+        ("deploy/runtime-image/Dockerfile", (("CE_IMAGE_VERSION default", r"\bCE_IMAGE_VERSION=(\d+\.\d+\.\d+)\b"),)),
+        ("deploy/seat-image/Dockerfile", (("CE_IMAGE_VERSION default", r"\bCE_IMAGE_VERSION=(\d+\.\d+\.\d+)\b"),)),
+    )
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for raw in [Path(p) for p in paths] or [Path(".")]:
+        start = raw if raw.is_dir() else raw.parent
+        for parent in (start, *start.parents):
+            if (parent / version_src).is_file():
+                resolved = parent.resolve(strict=False)
+                if resolved not in seen:
+                    seen.add(resolved)
+                    roots.append(parent)
+                break
+    errors: list[ValidationError] = []
+    version_re = re.compile(r'__version__\s*=\s*"(\d+\.\d+\.\d+)"')
+    historical_re = re.compile(r"\d+\.\d+\.\d+")
+    for root in roots:
+        try:
+            version_text = (root / version_src).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(ValidationError("version_drift_version_source", str(version_src), f"could not read canonical version source {root / version_src}: {exc}", "version-drift current surface gate"))
+            continue
+        match = version_re.search(version_text)
+        if match is None:
+            errors.append(ValidationError("version_drift_version_source", str(version_src), f"no string __version__ assignment found in {root / version_src}", "version-drift current surface gate"))
+            continue
+        expected = match.group(1)
+        for rel, checks in surfaces:
+            path = root / rel
+            if not path.is_file():
+                errors.append(ValidationError("version_drift_missing_surface", rel, "declared current-version surface is missing", "version-drift current surface gate"))
+                continue
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                allowed = set()
+                if "ce-version-drift: allow-historical" in line:
+                    allowed = set(historical_re.findall(line.split("ce-version-drift: allow-historical", 1)[1]))
+                for label, pattern in checks:
+                    for found in re.findall(pattern, line):
+                        if found != expected and found not in allowed:
+                            errors.append(ValidationError("version_drift_stale_current_claim", f"{rel}:{lineno}", f"{label} is {found!r}; expected current release version {expected!r}", "version-drift current surface gate"))
+    return _emit_results([CheckResult(name="version_drift_current_surfaces", errors=tuple(errors))], json_output)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)

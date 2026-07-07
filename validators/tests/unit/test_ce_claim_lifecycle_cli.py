@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import subprocess
+
+from creator_engine_validator import ce_cli
+
+
+def _write_claim(root: Path) -> None:
+    path = root / ".ce" / "claims" / "ce-476-claim-lifecycle.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        """---
+slug: ce-476-claim-lifecycle
+issue: 476
+repo: creator-engine/creator-engine
+state: claimed
+seat: seat-alpha
+controller: CE-DEV-2
+claimed_at: 2026-07-06T13:00:00Z
+transitioned_at: 2026-07-06T13:00:00Z
+pr: null
+merge_sha: null
+refs:
+  - tracker#476
+---
+brief pointer
+""",
+        encoding="utf-8",
+    )
+
+
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _init_git_repo(root: Path) -> str:
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.name", "CE Test")
+    _git(root, "config", "user.email", "ce-test@example.invalid")
+    (root / "README.md").write_text("initial\n", encoding="utf-8")
+    _git(root, "add", "README.md")
+    _git(root, "commit", "-m", "initial")
+    return _git(root, "rev-parse", "HEAD")
+
+
+def test_ce_claim_transition_json(tmp_path: Path, capsys) -> None:
+    _write_claim(tmp_path)
+
+    rc = ce_cli.main(
+        [
+            "claim",
+            "transition",
+            "ce-476-claim-lifecycle",
+            "in-build",
+            "--sha",
+            "abc123",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["new_state"] == "in-build"
+    assert payload["merge_sha"] == "abc123"
+
+
+def test_ce_claim_transition_plain_output_is_structured_log(tmp_path: Path, capsys) -> None:
+    _write_claim(tmp_path)
+
+    rc = ce_cli.main(
+        [
+            "claim",
+            "transition",
+            "ce-476-claim-lifecycle",
+            "in-build",
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["event"] == "ce_claim_transition"
+    assert payload["old_state"] == "claimed"
+    assert payload["new_state"] == "in-build"
+
+
+def test_ce_claim_list_filters(tmp_path: Path, capsys) -> None:
+    _write_claim(tmp_path)
+
+    rc = ce_cli.main(
+        [
+            "claim",
+            "list",
+            "--repo-root",
+            str(tmp_path),
+            "--state",
+            "claimed",
+            "--seat",
+            "seat-alpha",
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert [row["slug"] for row in rows] == ["ce-476-claim-lifecycle"]
+
+
+def test_ce_claim_closeout_rerun_same_landed_sha_is_noop(tmp_path: Path) -> None:
+    sha = _init_git_repo(tmp_path)
+    _write_claim(tmp_path)
+    claim = tmp_path / ".ce" / "claims" / "ce-476-claim-lifecycle.md"
+    original = claim.read_text(encoding="utf-8")
+    landed = original.replace("state: claimed", "state: landed").replace(
+        "merge_sha: null",
+        f"merge_sha: {sha}",
+    )
+    claim.write_text(landed, encoding="utf-8")
+
+    rc = ce_cli.main(
+        [
+            "claim",
+            "transition",
+            "ce-476-claim-lifecycle",
+            "landed",
+            "--sha",
+            sha,
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert rc == 0
+    assert claim.read_text(encoding="utf-8") == landed
+
+
+def test_ce_claim_transition_force_refuses_unverifiable_terminal_sha(tmp_path: Path, capsys) -> None:
+    _write_claim(tmp_path)
+
+    rc = ce_cli.main(
+        [
+            "claim",
+            "transition",
+            "ce-476-claim-lifecycle",
+            "landed",
+            "--sha",
+            "abc123",
+            "--force",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"].startswith("ce claim transition refused:")
+    assert "no .git metadata" in payload["error"]

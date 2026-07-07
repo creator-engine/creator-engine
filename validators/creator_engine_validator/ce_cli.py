@@ -221,6 +221,8 @@ _NATIVE_ONBOARD_INSTALLER_FLAGS = frozenset(
     {"--spec", "--answers", "--answers-schema", "--plan", "--apply", "--inventory"}
 )
 
+CLAIM_LIFECYCLE_STATES = ("claimed", "in-build", "ready", "harvested", "landed", "released", "abandoned")
+
 
 def _maybe_refuse_native_onboard_installer_flags(argv: Sequence[str]) -> int | None:
     if not argv or argv[0] != "onboard":
@@ -1971,6 +1973,25 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_ticket_args(cst)
     cst.add_argument("--write-cache", default=None, dest="write_cache",
                      metavar="ROOT", help="write the view-only Cockpit cache under <ROOT>/claims/claims.json")
+
+    ctr = claim_sub.add_parser("transition", help=argparse.SUPPRESS)
+    ctr.add_argument("slug", help="claim slug, matching .ce/claims/<slug>.md")
+    ctr.add_argument("new_state", choices=CLAIM_LIFECYCLE_STATES, help="target lifecycle state")
+    ctr.add_argument("--pr", default=None, help="pull request URL to store on the claim")
+    ctr.add_argument("--sha", default=None, help="merge or release SHA to store on the claim")
+    ctr.add_argument(
+        "--force",
+        action="store_true",
+        help="bypass transition order/state restrictions; landed/released SHA evidence is still verified",
+    )
+    ctr.add_argument("--repo-root", default=".", help="repo root containing .ce/claims (default: cwd)")
+    ctr.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    cl = claim_sub.add_parser("list", help=argparse.SUPPRESS)
+    cl.add_argument("--repo-root", default=".", help="repo root containing .ce/claims (default: cwd)")
+    cl.add_argument("--state", choices=CLAIM_LIFECYCLE_STATES, default=None, help="filter by lifecycle state")
+    cl.add_argument("--seat", default=None, help="filter by seat id")
+    cl.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     # ce pickup poll — the ce-ops#55/#182 autonomous forge work-pickup "conveyor belt".
     # A per-seat READ-ONLY poller over the GitHub Search API; observe-only by
@@ -4971,6 +4992,43 @@ def _claim_status(args) -> int:
     return 1 if result.state.invalid_count else 0
 
 
+def _claim_lifecycle_module():
+    return importlib.import_module("creator_engine_validator.claim_lifecycle")
+
+
+def _claim_transition(args) -> int:
+    claim_lifecycle = _claim_lifecycle_module()
+    try:
+        result = claim_lifecycle.transition_claim(
+            args.repo_root,
+            args.slug,
+            args.new_state,
+            pr=args.pr,
+            sha=args.sha,
+            force=args.force,
+        )
+    except claim_lifecycle.ClaimLifecycleError as exc:
+        return _emit_claim(args, 2, f"ce claim transition refused: {exc}", None)
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.log_payload(), indent=2, sort_keys=True))
+    else:
+        print(claim_lifecycle.structured_log_line(result))
+    return 0
+
+
+def _claim_list(args) -> int:
+    claim_lifecycle = _claim_lifecycle_module()
+    try:
+        rows = claim_lifecycle.list_claims(args.repo_root, state=args.state, seat=args.seat)
+    except claim_lifecycle.ClaimLifecycleError as exc:
+        return _emit_claim(args, 2, f"ce claim list refused: {exc}", None)
+    if getattr(args, "json_output", False):
+        print(json.dumps(rows, indent=2, sort_keys=True))
+    else:
+        print(claim_lifecycle.format_table(rows), end="")
+    return 0
+
+
 def _make_pickup_transport():
     """Factory for the pickup Search API HTTPS transport (monkeypatchable in tests)."""
     from . import pickup as _pickup
@@ -5396,8 +5454,10 @@ _REVIEWER_TRIAGE_DISPATCH = {
 
 _CLAIM_DISPATCH = {
     "acquire": _claim_acquire,
+    "list": _claim_list,
     "release": _claim_release,
     "status": _claim_status,
+    "transition": _claim_transition,
 }
 
 _PICKUP_DISPATCH = {
