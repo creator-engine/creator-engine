@@ -3938,11 +3938,11 @@ records:
     predicate: verified-by-sha256
     sha256: 6d790034336855609d62ca92196f6c4d271e55266346a246309632da614337c7
     subject: convention
-  content_hash: 9be4f7a276e00403b7ad1e72449606f2023352f041ead62e30a099d032a5572c
+  content_hash: 31e1221164aaddeb70a785e6015b95632a75f04daada6cdd5a87564fffeb189c
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-baefc5e6234d292664afc28c
   kind: brain-assertion
-  prev_hash: 2a70e2503c3227c55842f0e7699c41ca2a0d31c7bd1b67318f3c095a31511d61
+  prev_hash: bdcc67a46f89fd77db88c98f985c6b1132cc2047f499f60fa482875f95fa59b0
   record_type: brain_assertion
   schema_version: '1'
   scope: global
