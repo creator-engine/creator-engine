@@ -145,8 +145,8 @@ ce scope activity-empty-state \
   --change-type code
 ```
 
-The example Budget is a paste-testable 1% per-run cap. Substitute the amount,
-unit, and window your operator gives you for your lane.
+Budget is optional. The example opts into a paste-testable 1% per-run cap;
+substitute the amount, unit, and window your operator gives you for your lane.
 
 **What CE does.** CE checks whether the Scope is Ready. If the Scope is vague,
 missing a testable Done-when, or under-declares risk, it tells you before the
@@ -283,7 +283,7 @@ After setup, most days are smaller than the full walkthrough:
 1. Launch your governed pane with `ce launch --backend host`.
 2. Talk to the agent about the next problem.
 3. Let CE help Frame and Shape a small Scope.
-4. Ratify the Scope when the Goal, Done-when, Budget, and Change-type are right.
+4. Ratify the Scope when the Goal, Done-when, and Change-type are right.
 5. Let the agent Build inside the envelope.
 6. Review the Completion Report and PR evidence.
 7. Ship through the gate, or send the work back with specific feedback.

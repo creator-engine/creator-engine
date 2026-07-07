@@ -65,11 +65,11 @@ ce scope login-empty-state \
 Artifact: a Scope record. The Scope is the governing contract for the run.
 
 State after this step: the work is in Shape. CE can check whether the Scope is
-Ready. The required fields are Goal, Done-when, Budget, and Change-type. Use the
+Ready. The required fields are Goal, Done-when, and Change-type. Use the
 smallest honest Change-type that describes the risk.
 
-The example Budget is a paste-testable 1% per-run cap. Substitute the amount,
-unit, and window your operator gives you for your lane.
+Budget is optional. The example opts into a paste-testable 1% per-run cap;
+substitute the amount, unit, and window your operator gives you for your lane.
 
 ## 5. Ratify The Scope
 

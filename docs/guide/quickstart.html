@@ -43,10 +43,10 @@ the missing details you need to answer.</p>
 </code></pre>
 <p>Artifact: a Scope record. The Scope is the governing contract for the run.</p>
 <p>State after this step: the work is in Shape. CE can check whether the Scope is
-Ready. The required fields are Goal, Done-when, Budget, and Change-type. Use the
+Ready. The required fields are Goal, Done-when, and Change-type. Use the
 smallest honest Change-type that describes the risk.</p>
-<p>The example Budget is a paste-testable 1% per-run cap. Substitute the amount,
-unit, and window your operator gives you for your lane.</p>
+<p>Budget is optional. The example opts into a paste-testable 1% per-run cap;
+substitute the amount, unit, and window your operator gives you for your lane.</p>
 <h2 id="5-ratify-the-scope">5. Ratify The Scope</h2>
 <pre><code class="language-bash">ce ratify login-empty-state --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 </code></pre>

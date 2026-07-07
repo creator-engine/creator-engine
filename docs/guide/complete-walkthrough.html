@@ -292,8 +292,8 @@ Change-type.</p>
   --budget-window per_run \
   --change-type code
 </code></pre>
-<p>The example Budget is a paste-testable 1% per-run cap. Substitute the amount,
-unit, and window your operator gives you for your lane.</p>
+<p>Budget is optional. The example opts into a paste-testable 1% per-run cap;
+substitute the amount, unit, and window your operator gives you for your lane.</p>
 <p><strong>What CE does.</strong> CE checks whether the Scope is Ready. If the Scope is vague,
 missing a testable Done-when, or under-declares risk, it tells you before the
 Scope is ratified. You can run a sharpening pass:</p>
@@ -387,7 +387,7 @@ ratified outcome. It is not only a merged PR.</p>
 <li>Launch your governed pane with <code>ce launch --backend host</code>.</li>
 <li>Talk to the agent about the next problem.</li>
 <li>Let CE help Frame and Shape a small Scope.</li>
-<li>Ratify the Scope when the Goal, Done-when, Budget, and Change-type are right.</li>
+<li>Ratify the Scope when the Goal, Done-when, and Change-type are right.</li>
 <li>Let the agent Build inside the envelope.</li>
 <li>Review the Completion Report and PR evidence.</li>
 <li>Ship through the gate, or send the work back with specific feedback.</li>
