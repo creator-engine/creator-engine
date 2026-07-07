@@ -20,7 +20,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import brain_bootstrap, brain_recall, brain_runtime, launch_runtime
+from creator_engine_validator import (
+    brain_bootstrap,
+    brain_recall,
+    brain_runtime,
+    codex_controller_evidence,
+    launch_runtime,
+)
 from creator_engine_validator.brain_sqlite_vec import SqliteVecStore
 from creator_engine_validator.tmux_adapter import TmuxPane
 
@@ -273,6 +279,27 @@ def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
     codex.chmod(0o755)
     monkeypatch.setenv(launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV, str(codex))
     return codex
+
+
+def _seed_codex_promotion_packet(tmp_path: Path, *, host_id: str = "host-a") -> Path:
+    packet = {
+        "kind": codex_controller_evidence.PACKET_KIND,
+        "schema_version": codex_controller_evidence.SCHEMA_VERSION,
+        "generated_at": "2026-07-06T17:30:00Z",
+        "host_id": host_id,
+        "harness": "codex",
+        "argv_after_rewrite": ["env", "CE_CONTROLLER_ROLE=read-only", "/bin/codex"],
+        "managed_hook_confirmed": {"confirmed": True, "sha": "c" * 64},
+        "cdxd_result": {"ok": True, "bypass_mode": "config", "refusals": []},
+        "bypass_mode_source": "config",
+        "remote_control_status": "disabled",
+        "hook_requirements_sha": "a" * 64,
+        "hook_script_sha": "b" * 64,
+        "lifecycle_sentinel_refs": ["/tmp/events.jsonl", "/tmp/sentinel-wrapper.sh"],
+        "ring1_smoke_result": {"status": "pass"},
+        "known_gaps": [],
+    }
+    return codex_controller_evidence.write_packet(tmp_path, packet)
 
 
 class FakeAdapter:
@@ -1624,6 +1651,111 @@ def test_codex_launch_builds_governed_env_scrubbed_command(tmp_path, monkeypatch
     assert "GH_TOKEN" in inner and "GITHUB_TOKEN" in inner
     assert inner[-3:] == [str(codex), "--model", "gpt-5"]
     assert result.plan.codex_bypass_mode == "config"
+    assert "CE_CONTROLLER_ROLE=read-only" in inner
+    assert result.plan.codex_controller_authority == "read-only"
+    assert result.plan.codex_promotion_packet_status["authority_this_launch"] == "read-only"
+
+
+def test_codex_launch_with_absent_packet_downgrades_controller_authority(tmp_path, monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
+    _fake_codex(tmp_path, monkeypatch)
+
+    result = launch_runtime.launch(
+        harness="codex",
+        backend="host",
+        session="absent-promotion",
+        repo_root=tmp_path,
+        host_id="host-a",
+        tmux_adapter=adapter,
+    )
+    inner = _inner_argv(result)
+
+    assert result.plan.codex_controller_authority == "read-only"
+    assert "CE_CONTROLLER_ROLE=read-only" in inner
+    assert result.plan.codex_promotion_packet_status["authority_this_launch"] == "read-only"
+    assert Path(result.plan.codex_promotion_packet_ref).is_file()
+
+
+def test_codex_launch_with_incomplete_packet_downgrades_controller_authority(
+    tmp_path, monkeypatch
+):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
+    _fake_codex(tmp_path, monkeypatch)
+    packet_path = _seed_codex_promotion_packet(tmp_path)
+    payload = json.loads(packet_path.read_text(encoding="utf-8"))
+    payload.pop("ring1_smoke_result")
+    packet_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = launch_runtime.launch(
+        harness="codex",
+        backend="host",
+        session="incomplete-promotion",
+        repo_root=tmp_path,
+        host_id="host-a",
+        tmux_adapter=adapter,
+    )
+    inner = _inner_argv(result)
+
+    assert result.plan.codex_controller_authority == "read-only"
+    assert "CE_CONTROLLER_ROLE=read-only" in inner
+    assert result.plan.codex_promotion_packet_status["authority_this_launch"] == "read-only"
+
+
+def test_codex_launch_with_complete_packet_keeps_foreman_authority(tmp_path, monkeypatch):
+    adapter = FakeAdapter()
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
+    _fake_codex(tmp_path, monkeypatch)
+    _seed_codex_promotion_packet(tmp_path)
+
+    result = launch_runtime.launch(
+        harness="codex",
+        backend="host",
+        session="complete-promotion",
+        repo_root=tmp_path,
+        host_id="host-a",
+        tmux_adapter=adapter,
+    )
+    inner = _inner_argv(result)
+
+    assert result.plan.codex_controller_authority == "foreman"
+    assert "CE_CONTROLLER_ROLE=foreman" in inner
+    assert result.plan.codex_promotion_packet_status["authority_this_launch"] == "foreman"
+
+
+def test_codex_launch_explicit_remote_control_posture_is_read_only(
+    tmp_path, monkeypatch
+):
+    adapter = FakeAdapter()
+    monkeypatch.setenv("CE_REMOTE_CONTROL_STATUS", "explicit-posture")
+    monkeypatch.setattr(
+        launch_runtime.codex_launch_spec, "detect_config_bypass_mode", lambda: "config"
+    )
+    monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
+    _fake_codex(tmp_path, monkeypatch)
+    _seed_codex_promotion_packet(tmp_path)
+
+    result = launch_runtime.launch(
+        harness="codex",
+        backend="host",
+        session="remote-posture",
+        repo_root=tmp_path,
+        host_id="host-a",
+        tmux_adapter=adapter,
+    )
+
+    assert result.plan.codex_controller_authority == "read-only"
+    assert result.plan.codex_promotion_packet_status["authority_this_launch"] == "read-only"
 
 
 def test_codex_launch_refuses_unsafe_surface_before_side_effects(monkeypatch):

@@ -40,6 +40,10 @@ def _seed_takeover_state(root: Path, predecessor: str = "ce-controller") -> None
             "    rearm_command: [ce, conveyor-daemon, run, --dry-run]\n"
         ),
     )
+    _write(
+        state / "controller-evidence" / "codex-controller-promotion.host-a.json",
+        json.dumps({"host_id": "host-a", "predecessor": predecessor}) + "\n",
+    )
 
 
 def _patch_ring0_pass(monkeypatch) -> None:
@@ -136,6 +140,7 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
     }
     assert {source["name"] for source in payload["evidence_sources"]} >= {
         "lifecycle_records",
+        "controller_evidence",
         "brain_bootstrap",
         "active_work_ledger",
         "merge_queue",

@@ -267,6 +267,12 @@ def _detect_predecessor_state(repo_root: Path, predecessor: str) -> tuple[Eviden
             ("seats/*/*.yaml", "dispatches/*/events.jsonl"),
             predecessor=predecessor,
         ),
+        _glob_source(
+            "controller_evidence",
+            state_root,
+            ("controller-evidence/*.json",),
+            predecessor=predecessor,
+        ),
         _newest_source(
             "resume_state",
             state_root,

@@ -460,12 +460,14 @@ def build_governed_codex_command(
     base_argv: Sequence[str],
     *,
     codex_bin: str | None = None,
+    env_overrides: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Build the governed Codex command with ambient repo-write credentials scrubbed."""
     resolved = codex_bin or resolve_codex_harness_binary()
     return [
         "env",
         *(part for name in CREDENTIAL_ENV_UNSETS for part in ("-u", name)),
+        *(f"{name}={value}" for name, value in sorted((env_overrides or {}).items())),
         resolved,
         *list(base_argv),
     ]
