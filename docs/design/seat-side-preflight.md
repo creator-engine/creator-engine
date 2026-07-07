@@ -125,12 +125,15 @@ generators include:
 | CLI reference | `scripts/gen_cli_reference.py --write` | `.ce/reference/cli.generated.md` |
 | Schema reference | `scripts/gen_schema_reference.py --write` | `.ce/reference/schemas.generated.md` |
 
-The seat-side preflight must detect when a branch changes a source surface that
-belongs to a registered generator. For the current generators, that includes CLI
-command surfaces, validator CLI help text, schema files, and schema-producing
-code that can affect the rendered references. When such a surface changes, the
-seat-side repair path runs the corresponding generator with `--write`, stages
-the generated artifact if it changed, and recommits before the final READY pass.
+The seat-side preflight must reuse the existing registered freshness checks for
+source-surface detection. For the current generators, the profile invokes
+`cli_reference_autogen_sync` and `schema_reference_autogen_sync`; it does not
+reimplement a separate CLI or schema surface matcher. Those checks own the
+source surface rules for CLI command surfaces, validator CLI help text, schema
+files, and schema-producing code that can affect the rendered references. When
+such a surface changes, the seat-side repair path runs the corresponding
+generator with `--write`, stages the generated artifact if it changed, and
+recommits before the final READY pass.
 
 The final pass then verifies byte parity by running the registered freshness
 checks, not by trusting timestamps. If a generator itself changes, its checked
@@ -168,17 +171,24 @@ Two command shapes are plausible:
 | Option | Shape | Strengths | Weaknesses |
 | --- | --- | --- | --- |
 | New named verb | `ce seat-preflight` or `ce preflight seat` | Discoverable as a seat action; can print seat-specific READY language. | Creates another validation entry point; risks drift from CI-parity `validate-pr`; adds CLI surface during a contested CLI period. |
-| Validate-pr profile | `ce validate-pr --profile contained-seat` or successor profile | Reuses the canonical PR preflight, base resolution, work-class parsing, path-manifest gate, autogen checks, and public-docs scanner. Keeps one authoritative validation command. | Profile needs clear documentation so seats know it is required before READY, not merely an optional CI mirror. |
+| Validate-pr profile | `ce validate-pr --profile seat-ready` | Reuses the canonical PR preflight, base resolution, work-class parsing, path-manifest gate, autogen checks, and public-docs scanner. Keeps one authoritative validation command. | Profile needs clear documentation so seats know it is required before READY, not merely an optional CI mirror. |
 
-Recommendation: implement this as a required `ce validate-pr` sub-profile for
-seat READY, not as a new top-level verb. The profile should be visible in seat
-briefs and checklists even if the lower-level CLI option remains narrow. This
-keeps CI parity and seat preflight on the same implementation spine and avoids
-creating a second validation vocabulary.
+Recommendation: implement this as a required `ce validate-pr --profile
+seat-ready` sub-profile for seat READY, not as a new top-level verb. The profile
+should be visible in seat briefs and checklists even if the lower-level CLI
+option remains narrow. This keeps CI parity and seat preflight on the same
+implementation spine and avoids creating a second validation vocabulary.
 
-The recommended profile name should describe the policy, not a deployment
-topology. Acceptable names include `contained-seat` while that is the existing
-term of art, or a future `seat-ready` alias if the vocabulary is generalized.
+`seat-ready` is a new successor profile, not a mutation of the existing
+`contained-seat` profile. The legacy `contained-seat` profile continues to serve
+the harvest-side-carrier flow and may continue to tolerate
+`path_manifest_carrier_required` because those carriers are generated after the
+seat exits. `seat-ready` is for branches whose authoring seat owns the changelog
+and carrier before READY, so it must enforce carrier presence, carrier
+self-inclusion, changelog inclusion, digest fidelity, declared work class,
+registered autogen freshness, and public-docs confidentiality. This separation
+keeps existing harvest-side-carrier users working while giving seat-authored
+carriers a fail-closed profile.
 
 ## Seat Author Loop
 
@@ -205,13 +215,13 @@ The preflight result is blocking:
 - PASS means the seat may push and emit READY, subject to any additional brief
   requirements.
 - FAIL means the seat must not push as READY and must not emit READY.
-- SKIP is allowed only for checks explicitly classified as environment skips by
-  the existing preflight contract. Carrier fidelity, changelog presence,
-  declared work class, registered autogen freshness, and confidentiality checks
-  are not optional skips.
-- TOOLING ERROR is treated as FAIL unless an existing preflight rule classifies
-  the environment as unable to run the full profile. In that case the seat
-  reports BLOCKED rather than READY.
+- ENV-SKIP is introduced by the implementation slice as an explicit
+  classification for checks the host environment cannot run. Carrier fidelity,
+  changelog presence, declared work class, registered autogen freshness, and
+  confidentiality checks are not optional skips.
+- TOOLING ERROR is treated as FAIL unless the implementation slice classifies
+  the environment as unable to run the full profile. In that case the seat emits
+  the worker stop state `BLOCKED` rather than READY.
 
 Self-repair happens before push and before READY. Controller harvest does not
 repair a stale autogen artifact, missing changelog, malformed carrier, missing
@@ -224,8 +234,11 @@ Full-suite local preflight is resource-sensitive and must respect host bounds:
 - Serialize full-suite preflights. A seat should not start a full local preflight
   when another local full-suite or preflight run is active on the same host.
 - Use disk-backed temporary storage: `TMPDIR=$HOME/tmp`.
-- Bound pytest worker parallelism. Use at most `-n 4`; never use `-n auto` for
-  seat-side full preflight.
+- Bound pytest worker parallelism. The `seat-ready` profile supplies a
+  profile-level default test-command override with xdist capped at `-n 4`,
+  replacing the generic preflight default that may use `-n auto`. A wrapper may
+  pass the same cap explicitly, but it must not widen the profile above `-n 4`.
+  Use at most `-n 4`; never use `-n auto` for seat-side full preflight.
 - Clean stale pytest directories after the run has completed and no live pytest
   from that run still needs them.
 
@@ -268,7 +281,14 @@ The design is satisfied when an implementation slice can demonstrate:
   `AUTHORIZED_PATHS_COUNT`/`AUTHORIZED_PATHS_SHA256` block.
 - The PR body includes `- **Declared work class:** <class>` using canonical
   vocabulary.
-- Controller harvest requires zero carrier or autogen repairs.
+- Controller harvest requires zero carrier or autogen repairs. The controller
+  harvest process emits this as a `controller_side_repairs` count in the harvest
+  report and mirrors the value into its PR evidence comment. The measurement
+  window is the controller harvest of the first pushed head after the seat
+  reports READY: from checkout of that head through completion of carrier and
+  autogen freshness evaluation. The count is zero only when harvest performs no
+  carrier rewrite, changelog insertion, digest repair, generated-reference
+  regeneration, or generated-reference staging on behalf of the seat.
 - Public-facing docs contain only generic placeholders and no internal topology
   or secret-bearing operational detail.
 
@@ -280,6 +300,9 @@ surfaces:
 - Add or document the seat-ready `ce validate-pr` profile.
 - Wire registered autogen repair commands only in the authoring profile, while
   CI remains verify-only.
+- Invoke the existing `cli_reference_autogen_sync` and
+  `schema_reference_autogen_sync` checks for source-surface detection and final
+  byte-parity verification instead of duplicating their match logic.
 - Reuse `carrier_gen` for changelog and path-manifest generation.
 - Reuse `verify-path-manifest` for the final fidelity decision.
 - Reuse existing work-class parsing and vocabulary normalization.
