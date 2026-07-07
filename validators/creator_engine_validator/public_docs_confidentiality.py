@@ -145,6 +145,7 @@ KNOWN_OPERATIONS_EXCEPTIONS: frozenset[str] = frozenset(
         "docs/operations/DISTRIBUTED_IDENTITY_PROTOCOL.md",
         "docs/operations/EVIDENCE_FAN_IN_PROTOCOL.md",
         "docs/operations/EXTENSION_HOOK_CONTRACT.md",
+        "docs/operations/FORGE_HOUSEKEEPING_RUNBOOK.md",
         "docs/operations/PRESS_MERGE_BUNDLE.md",
         "docs/operations/GITHUB_NATIVE_COORDINATION_PROTOCOL.md",
         "docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md",

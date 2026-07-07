@@ -89,6 +89,7 @@ def test_takeover_dry_run_text_reports_actions_without_mutation(tmp_path, monkey
     assert "predecessor: ce-controller (detected)" in out
     assert "Ring-0 verify: PASS" in out
     assert "initial state: AWAITING-OPERATOR" in out
+    assert "read-forge-housekeeping-runbook" in out
     assert "enter-awaiting-operator" in out
     assert "would re-arm duties:" in out
     assert "re-arm-watcher queue-watch" in out
@@ -125,6 +126,11 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
     assert payload["ring0_verify"]["ok"] is True
     assert payload["initial_state"] == "AWAITING-OPERATOR"
     assert {action["execute"] for action in payload["hydration_plan"]} == {False}
+    assert {
+        action["document_ref"]
+        for action in payload["hydration_plan"]
+        if action["action"] == "read-forge-housekeeping-runbook"
+    } == {"docs/operations/FORGE_HOUSEKEEPING_RUNBOOK.md"}
     assert payload["raw_controller_launch_refusal"]["code"] == (
         "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED"
     )
