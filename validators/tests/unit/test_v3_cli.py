@@ -283,11 +283,17 @@ def test_drive_merges_envelope_additively_into_operator_policy(tmp_path, capsys)
     assert scopes == ["global", "run"]  # operator global retained + run cap added
 
 
-def test_report_success_teaches_journey_complete(tmp_path, capsys):
-    code = v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path)])
+def test_report_pr_merged_teaches_journey_complete(tmp_path, capsys):
+    chain = tmp_path / "chain.yaml"
+    chain.write_text(yaml.safe_dump({"records": [
+        {"record_type": "runtime_run_outcome", "outcome": "pr_merged", "run_id": "r-1"},
+    ]}))
+    code = v3_cli.main(["report", "rate-limit-login", "--root", str(tmp_path),
+                        "--evidence", str(chain), "--run-id", "r-1"])
 
     lines = capsys.readouterr().out.strip().splitlines()
     assert code == 0
+    assert "│ Next      → Done — merged" in lines
     assert lines[-1] == journey_guidance.report_next()
 
 
@@ -1053,7 +1059,22 @@ def test_report_renders_canon_over_evidence(tmp_path, capsys):
     assert payload["outcome_label"] == "PR opened"
     assert "Done-when 3/3 met" in payload["verdict"] and "14% of Budget S" in payload["verdict"]
     assert payload["next"].startswith("→ Review PR #7")
+    assert "journey_next" not in payload
     assert {"pr", "scope", "evidence", "spend"} <= {a["kind"] for a in payload["artifacts"]}
+
+
+def test_report_pr_opened_does_not_also_teach_journey_complete(tmp_path, capsys):
+    chain = tmp_path / "chain.yaml"
+    chain.write_text(yaml.safe_dump({"records": [
+        {"record_type": "runtime_run_outcome", "outcome": "pr_opened", "run_id": "r-1",
+         "change_set": {"branch": "b", "base": "m", "pr_number": 7}},
+    ]}))
+    code = v3_cli.main(["report", "cs-4f2", "--evidence", str(chain), "--run-id", "r-1"])
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert code == 0
+    assert "│ Next      → Review PR #7" in lines
+    assert journey_guidance.report_next() not in lines
 
 
 def test_artifacts_enriched_with_evidence(tmp_path, capsys):

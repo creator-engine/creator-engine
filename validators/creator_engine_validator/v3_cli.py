@@ -2691,15 +2691,24 @@ def _cmd_report(args: argparse.Namespace) -> int:
     )
     if args.pr is not None:
         summary["pr"] = args.pr
+    report_next = v3_report.render_next(summary)
+    journey_next = (
+        journey_guidance.report_next()
+        if report_next in {"→ Done — merged", "→ Nothing to ship — no change needed"}
+        else None
+    )
     lines = v3_report.render_report(summary)
-    lines.append(journey_guidance.report_next())
-    return _emit(args, 0, lines, {
+    if journey_next:
+        lines.append(journey_next)
+    payload = {
         "action": "report", "run_id": summary.get("run_id"), "scope_id": args.scope_id,
         "outcome": summary.get("outcome"), "outcome_label": v3_report.outcome_label(summary.get("outcome")),
-        "verdict": v3_report.render_verdict(summary), "next": v3_report.render_next(summary),
-        "journey_next": journey_guidance.report_next(),
+        "verdict": v3_report.render_verdict(summary), "next": report_next,
         "artifacts": v3_report.enumerate_artifacts(summary),
-    })
+    }
+    if journey_next:
+        payload["journey_next"] = journey_next
+    return _emit(args, 0, lines, payload)
 
 
 def _cmd_shape(args: argparse.Namespace) -> int:
