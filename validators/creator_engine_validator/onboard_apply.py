@@ -870,6 +870,20 @@ class ApplyDriver:
     ) -> dict[str, Any]:
         return {"ok": False, "reason": "no_workflow_verify_driver"}
 
+    def read_workflow(self, *, repo: str, branch: str, path: str) -> dict[str, Any]:
+        return {"ok": False, "reason": "no_workflow_read_driver"}
+
+    def refresh_workflow(
+        self,
+        *,
+        repo: str,
+        branch: str,
+        path: str,
+        content: str,
+        current_sha: str | None = None,
+    ) -> dict[str, Any]:
+        return {"ok": False, "reason": "no_workflow_refresh_driver"}
+
     def configure_branch_protection(
         self,
         *,
@@ -1533,6 +1547,109 @@ def repo_ce_governance_probe(
         result["reason"] = "probe_error"
         result["detail"] = exc.__class__.__name__
         return _remember_ce_probe(driver, result)
+
+
+def _workflow_content_looks_ce(raw: bytes) -> bool:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    markers = (
+        "creator-engine-validator",
+        "CE signed spec content_sha256 mismatch",
+        "ce check .ce/ --json",
+    )
+    return all(marker in text for marker in markers)
+
+
+def refresh_ce_workflow(
+    driver: ApplyDriver,
+    *,
+    repo: str,
+    branch: str,
+) -> dict[str, Any]:
+    """Re-render only the canonical CE validation workflow in an already-onboarded repo."""
+    if not repo or "/" not in repo:
+        raise ApplyRefused(
+            "refresh_repo_unresolved",
+            "could not determine the GitHub owner/name for this checkout; run from the repo root "
+            "with a GitHub origin remote, then retry.",
+        )
+    if not branch:
+        raise ApplyRefused(
+            "refresh_branch_unresolved",
+            "could not determine the default branch for this checkout; set origin/HEAD or check "
+            "out the branch that carries the CE workflow, then retry.",
+        )
+    if not driver.repo_exists(repo):
+        raise ApplyRefused(
+            "refresh_repo_unreachable",
+            f"could not read GitHub repo {repo}; refresh needs forge read/write authorization "
+            "for this repo before it can update the workflow.",
+        )
+    current = driver.read_workflow(repo=repo, branch=branch, path=CE_WORKFLOW_PATH)
+    if not current.get("ok"):
+        raise ApplyRefused(
+            "refresh_not_onboarded",
+            "this repo does not look onboarded yet: the canonical CE validation workflow is "
+            f"missing at {CE_WORKFLOW_PATH}. Run the normal onboard plan/apply flow first; "
+            "refresh is only for repos that already carry a CE workflow.",
+        )
+    content_value = current.get("content")
+    raw = (
+        content_value
+        if isinstance(content_value, bytes)
+        else str(content_value or "").encode("utf-8")
+    )
+    current_digest = hashlib.sha256(raw).hexdigest()
+    if current_digest == CE_WORKFLOW_SHA256:
+        return {
+            "action": "onboard_refresh_workflow",
+            "status": "current",
+            "repo": repo,
+            "branch": branch,
+            "path": CE_WORKFLOW_PATH,
+            "sha256": CE_WORKFLOW_SHA256,
+            "changed": False,
+        }
+    if not _workflow_content_looks_ce(raw):
+        raise ApplyRefused(
+            "refresh_not_onboarded",
+            "this repo does not look onboarded yet: the workflow at "
+            f"{CE_WORKFLOW_PATH} is not a CE validation workflow. Run the normal onboard "
+            "plan/apply flow first; refresh only updates an existing CE workflow.",
+        )
+    updated = driver.refresh_workflow(
+        repo=repo,
+        branch=branch,
+        path=CE_WORKFLOW_PATH,
+        content=CE_WORKFLOW_CONTENT,
+        current_sha=str(current.get("blob_sha") or current.get("sha") or "") or None,
+    )
+    if not updated.get("ok"):
+        raise ApplyFailed(
+            "workflow_refresh_failed",
+            str(updated.get("reason") or "workflow refresh failed"),
+        )
+    verify = driver.verify_workflow(
+        repo=repo,
+        branch=branch,
+        path=CE_WORKFLOW_PATH,
+        digest=CE_WORKFLOW_SHA256,
+    )
+    if not verify.get("ok"):
+        raise ApplyFailed("workflow_refresh_verify_failed", str(verify))
+    return {
+        "action": "onboard_refresh_workflow",
+        "status": "updated",
+        "repo": repo,
+        "branch": branch,
+        "path": CE_WORKFLOW_PATH,
+        "previous_sha256": current_digest,
+        "sha256": CE_WORKFLOW_SHA256,
+        "changed": True,
+        "write": dict(updated),
+    }
 
 
 def _run_leg(

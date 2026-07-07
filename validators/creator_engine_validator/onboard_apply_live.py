@@ -968,12 +968,8 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             "requested_visibility": visibility,
         }
 
-    def verify_workflow(self, *, repo: str, branch: str, path: str, digest: str) -> dict[str, Any]:
-        """GET the workflow contents and pin the EXACT byte digest (OQ-C, fail-closed).
-
-        A present-but-byte-drifted workflow returns a DISTINCT ``workflow_digest_mismatch`` reason
-        (so a joining dev learns *why* detection failed) — never a blanket brownfield refuse.
-        """
+    def read_workflow(self, *, repo: str, branch: str, path: str) -> dict[str, Any]:
+        """GET workflow contents from GitHub and return decoded bytes plus blob metadata."""
         try:
             code, parsed, stderr = _gh_get(self._reader(), f"repos/{repo}/contents/{path}?ref={branch}")
         except Exception:  # noqa: BLE001
@@ -986,7 +982,24 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             raw = base64.b64decode(parsed["content"])  # GitHub returns base64 (newline-wrapped)
         except (ValueError, TypeError):
             return {"ok": False, "reason": "workflow_decode_failed"}
-        actual = hashlib.sha256(raw).hexdigest()
+        return {
+            "ok": True,
+            "content": raw,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "blob_sha": str(parsed.get("sha") or ""),
+            "path": str(parsed.get("path") or path),
+        }
+
+    def verify_workflow(self, *, repo: str, branch: str, path: str, digest: str) -> dict[str, Any]:
+        """GET the workflow contents and pin the EXACT byte digest (OQ-C, fail-closed).
+
+        A present-but-byte-drifted workflow returns a DISTINCT ``workflow_digest_mismatch`` reason
+        (so a joining dev learns *why* detection failed) — never a blanket brownfield refuse.
+        """
+        current = self.read_workflow(repo=repo, branch=branch, path=path)
+        if not current.get("ok"):
+            return {k: v for k, v in current.items() if k != "content"}
+        actual = str(current.get("sha256") or "")
         if actual == digest:
             return {"ok": True, "sha256": actual}
         return {
@@ -1792,6 +1805,50 @@ class LiveForgeAdoptionDriver(LiveForgeApplyDriver):
         """Revoke BOTH the WRITE token (backstop) and the inherited READ token."""
         self._revoke_write()
         super().close()
+
+    def refresh_workflow(
+        self,
+        *,
+        repo: str,
+        branch: str,
+        path: str,
+        content: str,
+        current_sha: str | None = None,
+    ) -> dict[str, Any]:
+        """Replace exactly one workflow file through GitHub's contents API."""
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        argv = [
+            "gh",
+            "api",
+            "-X",
+            "PUT",
+            f"repos/{repo}/contents/{path}",
+            "-f",
+            "message=ce: refresh CE validation workflow",
+            "-f",
+            f"content={encoded}",
+            "-f",
+            f"branch={branch}",
+        ]
+        if current_sha:
+            argv.extend(["-f", f"sha={current_sha}"])
+        runner = self._writer()
+        try:
+            proc = runner(argv, None)
+        finally:
+            self._revoke_write()
+        if proc.returncode != 0:
+            return {"ok": False, "reason": "workflow_refresh_write_failed", "detail": proc.stderr or ""}
+        parsed: object = None
+        if (proc.stdout or "").strip():
+            with contextlib.suppress(json.JSONDecodeError, ValueError):
+                parsed = json.loads(proc.stdout or "")
+        commit_sha = ""
+        if isinstance(parsed, Mapping):
+            commit = parsed.get("commit")
+            if isinstance(commit, Mapping):
+                commit_sha = str(commit.get("sha") or "")
+        return {"ok": True, "path": path, "commit_sha": commit_sha}
 
     # -- leg 2: the sha-pinned two-scanner secrets scrub --------------------------------------
     def secret_preflight_scan(

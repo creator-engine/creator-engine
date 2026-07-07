@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import ast
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from creator_engine_validator import (
     brain_runtime,
     launch_runtime,
     onboard_apply,
+    release_publish,
     v3_installer,
     version as ce_version,
 )
@@ -1381,6 +1383,141 @@ def test_ce_workflow_template_preserves_regex_backreference_replacement():
     content = onboard_apply.CE_WORKFLOW_CONTENT
 
     assert r'rb"\1<published-with-this-spec>"' in content
+
+
+def _workflow_template_canonical_spec_bytes(spec: bytes) -> bytes:
+    replacements = re.findall(
+        r"canonical = re\.sub\(\n\s+(rb\".+?\"),\n\s+(rb\".+?\"),\n\s+(?:spec|canonical),"
+        r"\n\s+\)",
+        onboard_apply.CE_WORKFLOW_CONTENT,
+    )
+    assert len(replacements) == 2
+    canonical = spec
+    for pattern_literal, replacement_literal in replacements:
+        canonical = re.sub(
+            ast.literal_eval(pattern_literal),
+            ast.literal_eval(replacement_literal),
+            canonical,
+        )
+    return canonical
+
+
+def test_ce_workflow_template_canonicalization_matches_release_publish():
+    spec = _signed_spec(value="c2ln")
+
+    assert _workflow_template_canonical_spec_bytes(spec) == (
+        release_publish.install_spec_signature_guard.canonical_spec_bytes(spec)
+    )
+
+
+class WorkflowRefreshDriver(onboard_apply.ApplyDriver):
+    def __init__(self, content: bytes | None, *, repo_exists: bool = True):
+        self.content = content
+        self.repo_exists_flag = repo_exists
+        self.refresh_calls: list[dict[str, Any]] = []
+
+    def repo_exists(self, repo: str) -> bool:
+        return self.repo_exists_flag
+
+    def read_workflow(self, *, repo: str, branch: str, path: str) -> dict[str, Any]:
+        if self.content is None:
+            return {"ok": False, "reason": "workflow_absent"}
+        return {
+            "ok": True,
+            "content": self.content,
+            "blob_sha": "blob-before",
+            "sha256": v3_installer.content_digest(self.content),
+        }
+
+    def refresh_workflow(
+        self,
+        *,
+        repo: str,
+        branch: str,
+        path: str,
+        content: str,
+        current_sha: str | None = None,
+    ) -> dict[str, Any]:
+        self.refresh_calls.append({
+            "repo": repo,
+            "branch": branch,
+            "path": path,
+            "current_sha": current_sha,
+        })
+        self.content = content.encode("utf-8")
+        return {"ok": True, "commit_sha": "f" * 40}
+
+    def verify_workflow(self, *, repo: str, branch: str, path: str, digest: str) -> dict[str, Any]:
+        actual = v3_installer.content_digest(self.content or b"")
+        return {"ok": actual == digest, "sha256": actual}
+
+
+def test_refresh_workflow_applied_to_stale_onboarded_repo():
+    stale = onboard_apply.CE_WORKFLOW_CONTENT.replace(
+        "CE signed spec content_sha256 mismatch",
+        "CE signed spec content_sha256 mismatch.",
+    ).encode("utf-8")
+    driver = WorkflowRefreshDriver(stale)
+
+    summary = onboard_apply.refresh_ce_workflow(driver, repo="octo/repo", branch="main")
+
+    assert summary["status"] == "updated"
+    assert summary["changed"] is True
+    assert driver.content == onboard_apply.CE_WORKFLOW_CONTENT.encode("utf-8")
+    assert driver.refresh_calls == [{
+        "repo": "octo/repo",
+        "branch": "main",
+        "path": onboard_apply.CE_WORKFLOW_PATH,
+        "current_sha": "blob-before",
+    }]
+
+
+def test_refresh_workflow_noop_when_current():
+    driver = WorkflowRefreshDriver(onboard_apply.CE_WORKFLOW_CONTENT.encode("utf-8"))
+
+    summary = onboard_apply.refresh_ce_workflow(driver, repo="octo/repo", branch="main")
+
+    assert summary["status"] == "current"
+    assert summary["changed"] is False
+    assert driver.refresh_calls == []
+
+
+def test_refresh_workflow_refused_when_repo_was_not_onboarded():
+    driver = WorkflowRefreshDriver(None)
+
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply.refresh_ce_workflow(driver, repo="octo/repo", branch="main")
+
+    assert exc.value.code == "refresh_not_onboarded"
+    assert "normal onboard plan/apply flow first" in exc.value.detail
+
+
+def test_cli_refresh_workflow_without_spec_uses_refresh_driver(tmp_path, monkeypatch, capsys):
+    from creator_engine_validator import v3_cli
+
+    stale = onboard_apply.CE_WORKFLOW_CONTENT.replace(
+        "CE signed spec content_sha256 mismatch",
+        "CE signed spec content_sha256 mismatch.",
+    ).encode("utf-8")
+    driver = WorkflowRefreshDriver(stale)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: {
+            "github": {"origin_remote": "octo/repo"},
+            "history": {"default_branch": "main"},
+        },
+    )
+    monkeypatch.setattr(v3_cli, "_select_onboard_refresh_driver", lambda *, repo: driver)
+
+    code = v3_cli.main(["install", "--refresh-workflow", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["status"] == "updated"
+    assert driver.refresh_calls
 
 
 def test_ce_workflow_tolerates_exact_ce_resident_checks_inline():
