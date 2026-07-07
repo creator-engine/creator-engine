@@ -17,6 +17,7 @@ INITIAL_STATE = "AWAITING-OPERATOR"
 TAKEOVER_KIND = "ce-takeover-evidence-packet"
 SUPPORTED_HARNESSES = frozenset({"claude", "codex"})
 _MAX_MATCH_BYTES = 128_000
+FORGE_HOUSEKEEPING_RUNBOOK = "docs/operations/FORGE_HOUSEKEEPING_RUNBOOK.md"
 
 
 class TakeoverError(Exception):
@@ -594,6 +595,12 @@ def _hydration_actions(evidence: Sequence[EvidenceSource]) -> tuple[dict[str, An
             "action": "hydrate-continuity-packet",
             "execute": False,
             "detail": "assemble predecessor, launch, brain, ledger, queue, approval-wall, and watcher evidence",
+        },
+        {
+            "action": "read-forge-housekeeping-runbook",
+            "execute": False,
+            "detail": "read the forge housekeeping runbook before harvest, review, gate, or closeout work",
+            "document_ref": FORGE_HOUSEKEEPING_RUNBOOK,
         },
         {
             "action": "enter-awaiting-operator",

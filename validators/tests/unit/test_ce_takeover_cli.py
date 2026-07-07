@@ -125,6 +125,11 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
     assert payload["ring0_verify"]["ok"] is True
     assert payload["initial_state"] == "AWAITING-OPERATOR"
     assert {action["execute"] for action in payload["hydration_plan"]} == {False}
+    assert {
+        action["document_ref"]
+        for action in payload["hydration_plan"]
+        if action["action"] == "read-forge-housekeeping-runbook"
+    } == {"docs/operations/FORGE_HOUSEKEEPING_RUNBOOK.md"}
     assert payload["raw_controller_launch_refusal"]["code"] == (
         "READ_ONLY_UNTIL_GOVERNED_LAUNCH_CONFIRMED"
     )
