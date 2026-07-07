@@ -2,7 +2,7 @@
 
 *Curated design reference (provenance: 2026-06-08 design session). **DESIGNED / pilot-target** — re-ground at the implementing gate (G-7). Execution status lives in the project README's **Current Status** section. Vocabulary canon: [`stage-vocabulary.md`](./stage-vocabulary.md). User-facing walk-through: [`../guide/understanding-ce.md`](../guide/understanding-ce.md).*
 
-This is how a developer's free-form chat becomes a **Scope** — a tracked, ratifiable, ticket-sized bet — and how CE shapes it. It is the UX of the **Frame** and **Shape** stages.
+This is how a developer's free-form chat becomes a **Scope** — a tracked, ratifiable, ticket-sized unit of work — and how CE shapes it. It is the UX of the **Frame** and **Shape** stages.
 
 ## The principle: agent drafts, an external rubric grades, the human ratifies
 
@@ -13,21 +13,21 @@ Build **one reusable engine**, not five bespoke dialogues. Only the **rubric** a
 
 ## Frame is the free, pre-Scope zone — which resolves the trigger
 
-A **Scope artifact does not exist during Frame.** Free chat — questions, exploring, thinking out loud — is Frame, untracked. A Scope crystallizes only at the **Frame→Shape transition**. So *"when does chat become a Scope?"* is exactly *"when does Frame become Shape?"* — and that one move both answers the trigger question and **bounds Scope proliferation** (nothing is tracked until intent is concrete enough to draft a bet).
+A **Scope artifact does not exist during Frame.** Free chat — questions, exploring, thinking out loud — is Frame, untracked. A Scope crystallizes only at the **Frame→Shape transition**. So *"when does chat become a Scope?"* is exactly *"when does Frame become Shape?"* — and that one move both answers the trigger question and **bounds Scope proliferation** (nothing is tracked until intent is concrete enough to draft a Scope).
 
 ## The "Ready" gate (Shape→Build)
 
-The Definition-of-Ready gate is a **visible, compact checklist** that fills as the dialogue closes gaps, then the human ratifies the bet:
+The Definition-of-Ready gate is a **visible, compact checklist** that fills as the dialogue closes gaps, then the human ratifies the Scope:
 
 ```
 ◆ CE · Shape → "rate-limit /api/login"   (Goal ✓ · Done-when 3 · Budget S · Change-type code · Ready ✓)
-◆ CE · ratify & dispatch the bet? › yes
+◆ CE · ratify the Scope? › yes
 ```
 
 The gate is **legible, not hidden state** — the user watches it go green. It is enforced (a Scope cannot dispatch until Ready + ratified) but fast to reach. (`Goal/Done-when/Budget/Change-type/Ready` are the user-facing labels over the conserved schema fields — see the vocabulary canon.)
 
 - **Change type (`mutation_class`) derivation:** the agent **proposes** the risk tier; the human may **tighten it for free**; **loosening requires ratification** (safe-by-default — the agent can never unilaterally enlarge blast radius).
-- **Budget (`appetite`) is human-only:** the agent drafts every field *except* the budget; the fixed bet is the human's to place.
+- **Budget is not front-loaded:** the agent teaches Goal, Done-when, and Change-type first; Budget stays optional lane-aware detail.
 - **BMAD phase-1 (heavy Analysis) is light in the pilot** (Frame = understand-the-ticket discovery only); the full PRD-hierarchy Analysis defers to CEO-mode, crosswalk-bridged, per the fractal-collapse property (`Frame` folds into `Shape` at small grain).
 
 ## The chat→Scope trigger dial — detect-and-offer, risk-aware

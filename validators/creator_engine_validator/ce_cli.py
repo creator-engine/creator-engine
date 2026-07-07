@@ -125,6 +125,7 @@ from . import (
     hook_check,
     init_runtime,
     integration_queue_dry_run,
+    journey_guidance,
     lane_runtime,
     launch_runtime,
     main_head_install,
@@ -246,9 +247,9 @@ def _maybe_refuse_native_onboard_installer_flags(argv: Sequence[str]) -> int | N
 V3_FORWARDING_SHIMS: dict[str, tuple[str, str]] = {
     "seats": ("list governed seat liveness from CE state", "seats"),
     "fleet": ("aggregated fleet status", "fleet"),
-    "scope": ("file a Scope (Goal/Done-when/Budget/Change-type)", "scope"),
+    "scope": ("file a Scope (Goal/Done-when/Change-type)", "scope"),
     "shape": ("run the Frame->Shape grill-me on a partial draft (gaps + questions)", "shape"),
-    "ratify": ("place the bet on a Ready Scope (human-only front gate)", "ratify"),
+    "ratify": ("approve a Ready Scope (human-only front gate)", "ratify"),
     "drive": ("assemble the governed dispatch (front gate); --spawn launches the seat", "drive"),
     "dispatch": ("dispatch governed work to an execution venue", "dispatch"),
     "collect": ("fold a finished seat run's transcript + outcome into evidence", "collect"),
@@ -284,7 +285,10 @@ V3_FORWARDING_SHIMS: dict[str, tuple[str, str]] = {
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ce", description="Creator Engine kernel (v1.0 Gate 3 lane-launch surface)"
+        prog="ce",
+        description="Creator Engine kernel (v1.0 Gate 3 lane-launch surface)",
+        epilog=journey_guidance.stage_map_text(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     # ce-ops#25: top-level ``ce --version`` prints the derived CE token
     # (``<semver>+<short-sha>``) to stdout and exits (lazy — git resolves only
@@ -2953,6 +2957,11 @@ def _forward_v3_command(args) -> int:
     return _forward_v3_argv(args.group, getattr(args, "v3_args", ()))
 
 
+def _print_usage_with_stage_map(parser: argparse.ArgumentParser) -> None:
+    parser.print_usage(sys.stderr)
+    print(journey_guidance.stage_map_text(), file=sys.stderr)
+
+
 def _event_append(args) -> int:
     try:
         event = json.loads(args.event_json)
@@ -4161,6 +4170,7 @@ def _init(args) -> int:
                 f"ce init: {len(result.created)} dir(s) created, "
                 f"{len(result.existing)} present -> {result.marker_path}"
             )
+            print(journey_guidance.stage_map_text())
         return 0
 
     target = args.target or "."
@@ -4182,6 +4192,7 @@ def _init(args) -> int:
         )
         for action in result.actions:
             print(f"  {action.status}: {action.path} ({action.reason})")
+        print(journey_guidance.stage_map_text())
     return 0
 
 
@@ -5666,6 +5677,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if skew_result is not None:
         return skew_result
     _maybe_print_startup_update_notice(args)
+    if args.group is None:
+        _print_usage_with_stage_map(parser)
+        return 2
 
     if args.group == "dequeue":
         return _dequeue(args)
@@ -5845,7 +5859,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.group == "posture":
         return _posture(args)
 
-    parser.print_usage(sys.stderr)
+    _print_usage_with_stage_map(parser)
     return 2
 
 

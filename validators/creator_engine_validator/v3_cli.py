@@ -1,7 +1,7 @@
 """CE v3 work-driving CLI (G-7.0) — the distinct v3 entry point (``cev3``).
 
 Drives the OUTER-loop Scope lifecycle from the developer's terminal: file a
-Scope (the Frame→Shape output), place the bet (``ratify``), assemble the governed
+Scope (the Frame→Shape output), ratify it, assemble the governed
 dispatch (the front gate), and inspect projected state — surfacing the CANON
 vocabulary (the Scope-card labels Goal / Done-when / Budget / Change-type / Ready
 and the stage phases Frame → Shape → Build → Review → Ship) OVER the conserved
@@ -74,6 +74,7 @@ from . import (
     dispatch_worktree,
     evidence_sink,
     install_prereqs,
+    journey_guidance,
     onboard_apply,
     onboard_apply_live,
     playbook_runtime,
@@ -123,7 +124,7 @@ _SCHEMA_VERSION = "1"
 #: Scope-id slug (mirrors ``schemas/scope.schema.yaml``'s ``scope_id`` pattern).
 _SCOPE_ID_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 _ESCALATION_ID_RE = re.compile(r"(^[a-z][a-z0-9-]{2,63}$)|(^[0-9a-f]{64}$)")
-#: Value-free 64-hex opaque digest (the bet's ``approver_ref``).
+#: Value-free 64-hex opaque digest (the ratification ``approver_ref``).
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 #: The user-facing Scope-card labels (the canon skin) over the conserved fields.
@@ -144,7 +145,7 @@ CE_CMD = "ce"
 
 #: In-product help — the SEED of the in-product guide (content reused from
 #: ``docs/guide/understanding-ce.md``, not re-authored). ``ce guide`` prints it.
-_GUIDE = """\
+_GUIDE = f"""\
 ◆ Creator Engine — your own coding agent, under governance.
 
 CE wraps a structured, stateful, artifact-aware workflow around the agent you
@@ -152,9 +153,9 @@ already use, so real work is planned, tracked, checked, and merged on purpose.
 The thing that decides whether work is good lives OUTSIDE the agent — you judge
 artifacts (a plan, a diff, the evidence, the PR), not a transcript.
 
-The five stages — Frame → Shape → Build → Review → Ship:
+The five stages — {journey_guidance.STAGE_SEQUENCE_DISPLAY}:
   Frame    understand the problem (just thinking; nothing tracked yet)
-  Shape    turn it into a bet — a Scope (Goal · Done-when · Budget · Change-type)
+  Shape    turn it into a Scope (Goal · Done-when · Change-type)
   Build    the agent does the work in one governed, sandboxed run
   Review   the result is graded against your Done-when — with evidence, not vibes
   Ship     the governed finish: a merged PR, delivered research, or a reasoned no-change
@@ -162,17 +163,18 @@ The five stages — Frame → Shape → Build → Review → Ship:
 The Scope card (your unit of work):
   Goal         what you're trying to do
   Done-when    the checks that say it's finished (these get graded)
-  Budget       a fixed cap you commit — not a time estimate (YOUR call to set)
   Change-type  what kind of change, and how risky
-  Ready        a ✓ once the other four are valid — then you place the bet
+  Ready        a ✓ once the fields are valid — then you ratify the Scope
 
 A few things worth knowing:
-  • You set the Budget. The agent never decides how much you'll spend.
+  • Budget is optional lane-aware detail, not the first step.
   • The agent can make a change safer on its own, but only you can make it riskier.
   • Nothing is tracked until you say yes. Plain chat stays plain chat.
 
 Commands:  ce session · ce scope · ce shape · ce ratify · ce drive · ce report
            ce status · ce show · ce artifacts · ce install · ce guide
+
+{journey_guidance.stage_map_text()}
 
 These friendly words are a clear skin over a precise state machine — you can
 always look underneath. Full guide: docs/guide/understanding-ce.md ; pilot path:
@@ -226,10 +228,10 @@ def _iter_scopes(root: Path) -> list[dict[str, Any]]:
 
 
 def _content_sha(scope: dict[str, Any]) -> str:
-    """SHA256 of the ratified Scope content (excluding the bet itself).
+    """SHA256 of the ratified Scope content (excluding ratification itself).
 
-    The bet (``ratification.ratified_scope_sha``) pins to the Scope body it was
-    placed on — an opaque content digest, never the Scope text. Recomputed
+    ``ratification.ratified_scope_sha`` pins to the Scope body it approved — an
+    opaque content digest, never the Scope text. Recomputed
     canonically (sorted keys) so it is deterministic.
     """
     body = {k: v for k, v in scope.items() if k != "ratification"}
@@ -791,15 +793,25 @@ def _cmd_scope(args: argparse.Namespace) -> int:
     ]
     if not ready:
         lines.append(f"{_BRAND} · not yet Ready: {'; '.join(reasons)}")
+    if ready:
+        lines.append(journey_guidance.scope_next(args.scope_id))
+    payload = {
+        "action": "filed",
+        "scope_id": args.scope_id,
+        "path": str(path),
+        "projection": _projection(scope),
+        "ready": ready,
+        "reasons": reasons,
+    }
+    if ready:
+        payload["next"] = journey_guidance.scope_next(args.scope_id)
     return _emit(
-        args, 0, lines,
-        {"action": "filed", "scope_id": args.scope_id, "path": str(path),
-         "projection": _projection(scope), "ready": ready, "reasons": reasons},
+        args, 0, lines, payload,
     )
 
 
 def _cmd_ratify(args: argparse.Namespace) -> int:
-    """Place the bet (the human-only front-gate ratification) on a Ready Scope."""
+    """Approve the Scope at the human-only front gate."""
     root = Path(args.root)
     try:
         scope = _load_scope(root, args.scope_id)
@@ -814,7 +826,7 @@ def _cmd_ratify(args: argparse.Namespace) -> int:
         )
     ready, reasons = coordination.scope_is_ready(scope)
     if not ready:
-        # The bet is placed at Shape→Build, only once the Scope is Ready.
+        # The Scope is approved at Shape→Build only once it is Ready.
         return _emit(
             args, 1,
             [f"{_BRAND} · ratify refused: Scope is not Ready — {'; '.join(reasons)}"],
@@ -827,13 +839,14 @@ def _cmd_ratify(args: argparse.Namespace) -> int:
     }
     path = _dump_scope(root, scope)
     lines = [
-        f"{_BRAND} · bet placed on Scope {args.scope_id!r} → {path}",
+        f"{_BRAND} · approved Scope {args.scope_id!r} → {path}",
         _card_line(scope),
+        journey_guidance.ratify_next(args.scope_id),
     ]
     return _emit(
         args, 0, lines,
         {"action": "ratified", "scope_id": args.scope_id, "path": str(path),
-         "projection": _projection(scope)},
+         "projection": _projection(scope), "next": journey_guidance.ratify_next(args.scope_id)},
     )
 
 
@@ -1010,6 +1023,7 @@ def _drive_spawn(
         f"    dispatch: {record.dispatch_path}",
         f"    pane: {pane}"
         + ("  [unattended]" if unattended else "  [interactive]"),
+        journey_guidance.drive_spawn_next(plan.scope_id),
     ]
     return _emit(
         args, 0, lines,
@@ -1017,7 +1031,8 @@ def _drive_spawn(
          "mutation_class": plan.mutation_class, "harness": args.harness,
          "unattended": unattended,
          "dispatch_path": str(record.dispatch_path), "pane_id": pane,
-         "terminal": spawn.terminal, "resource_bound": spawn.resource_bound},
+         "terminal": spawn.terminal, "resource_bound": spawn.resource_bound,
+         "next": journey_guidance.drive_spawn_next(plan.scope_id)},
     )
 
 
@@ -2586,11 +2601,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
         _card_line(scope, root),
         f"    Goal (intent):        {scope.get('intent')}",
         f"    Done-when (criteria): {scope.get('acceptance_criteria') or '—'}",
-        f"    Budget (appetite):    {scope.get('appetite') or '—'}",
+        f"    Budget:               {scope.get('appetite') or '—'}",
         f"    Change-type (class):  {scope.get('mutation_class')}",
         f"    Stage / state / board: {proj['phase']} / {proj['state']} / {proj['board']}",
         f"    Ready: {'yes' if ready else 'no — ' + '; '.join(reasons)}"
-        f" · bet placed: {'yes' if coordination.is_ratified(scope) else 'no'}",
+        f" · ratified: {'yes' if coordination.is_ratified(scope) else 'no'}",
     ]
     # v3.1-G2c: surface the forge state — the opened PR + a live reviewer venue, if any.
     change_block, review = _forge_surface_for_scope(root, str(scope.get("scope_id")))
@@ -2676,19 +2691,30 @@ def _cmd_report(args: argparse.Namespace) -> int:
     )
     if args.pr is not None:
         summary["pr"] = args.pr
+    report_next = v3_report.render_next(summary)
+    journey_next = (
+        journey_guidance.report_next()
+        if report_next in {"→ Done — merged", "→ Nothing to ship — no change needed"}
+        else None
+    )
     lines = v3_report.render_report(summary)
-    return _emit(args, 0, lines, {
+    if journey_next:
+        lines.append(journey_next)
+    payload = {
         "action": "report", "run_id": summary.get("run_id"), "scope_id": args.scope_id,
         "outcome": summary.get("outcome"), "outcome_label": v3_report.outcome_label(summary.get("outcome")),
-        "verdict": v3_report.render_verdict(summary), "next": v3_report.render_next(summary),
+        "verdict": v3_report.render_verdict(summary), "next": report_next,
         "artifacts": v3_report.enumerate_artifacts(summary),
-    })
+    }
+    if journey_next:
+        payload["journey_next"] = journey_next
+    return _emit(args, 0, lines, payload)
 
 
 def _cmd_shape(args: argparse.Namespace) -> int:
     """Run the Frame→Shape grill-me over a partial draft (gaps + minimum questions).
 
-    The agent drafts every field EXCEPT the Budget (human-only). Surfaces the
+    The agent drafts the command-line Scope fields. Surfaces the
     gap-aware Scope card, the minimum questions to close, and (with --persona +
     --signal) the detect-and-offer decision. A pure dialogue helper — it does not
     write a Scope artifact (that is `ce scope` once the gaps are closed).
@@ -2700,7 +2726,7 @@ def _cmd_shape(args: argparse.Namespace) -> int:
         draft["acceptance_criteria"] = list(args.done_when)
     if args.change_type:
         draft["mutation_class"] = args.change_type
-    # NB: Budget (appetite) is intentionally NOT drafted — it is human-only.
+    # Budget is intentionally not part of the default terminal-teaching path.
     result = v3_shaping.shape(draft)
     lines = [result.card]
     if result.gaps:
@@ -2709,7 +2735,7 @@ def _cmd_shape(args: argparse.Namespace) -> int:
             who = "  (your call — Budget is yours to set)" if g.human_only else ""
             lines.append(f"    - {g.label}: {g.question}{who}")
     else:
-        lines.append(f"{_BRAND} · Ready — place the bet with `{CE_CMD} ratify {args.scope_id}`")
+        lines.append(f"{_BRAND} · Ready — ratify with `{CE_CMD} ratify {args.scope_id}`")
     offer = None
     if args.persona and args.signal:
         # pass the actual change-type (None when not yet proposed) so the dial
@@ -2721,10 +2747,17 @@ def _cmd_shape(args: argparse.Namespace) -> int:
         lines.append(
             f"{_BRAND} · detect-and-offer [{args.persona}/{band}-risk · signal {args.signal} · needs {thr}]: {verb}"
         )
+    next_hint = (
+        journey_guidance.shape_next(args.scope_id)
+        if args.goal and args.done_when and args.change_type
+        else None
+    )
+    if next_hint:
+        lines.append(next_hint)
     return _emit(args, 0, lines, {
         "action": "shape", "scope_id": args.scope_id, "ready": result.ready,
         "gaps": [{"field": g.field, "label": g.label, "human_only": g.human_only} for g in result.gaps],
-        "questions": list(result.questions), "offer": offer,
+        "questions": list(result.questions), "offer": offer, "next": next_hint,
     })
 
 
@@ -3928,7 +3961,7 @@ def _build_parser() -> argparse.ArgumentParser:
     seats_status.add_parser(sub, default_root=V3_LOCAL_STATE_ROOT)
     fleet_status.add_parser(sub, default_root=V3_LOCAL_STATE_ROOT)
 
-    p_scope = sub.add_parser("scope", help="file a Scope (Goal/Done-when/Budget/Change-type)")
+    p_scope = sub.add_parser("scope", help="file a Scope (Goal/Done-when/Change-type)")
     p_scope.add_argument("scope_id", metavar="ID", help="stable Scope slug")
     p_scope.add_argument("--goal", required=True, help="Goal (the intent / framed problem)")
     p_scope.add_argument("--done-when", action="append", default=[], metavar="CRITERION",
@@ -3943,7 +3976,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_scope.add_argument("--note", default=None, help="optional advisory note (no secrets)")
     _add_root(p_scope)
 
-    p_ratify = sub.add_parser("ratify", help="place the bet on a Ready Scope (human-only front gate)")
+    p_ratify = sub.add_parser("ratify", help="approve a Ready Scope (human-only front gate)")
     p_ratify.add_argument("scope_id", metavar="ID", help="the Scope to ratify")
     p_ratify.add_argument("--approver-ref", required=True, metavar="HEX64",
                           help="value-free 64-hex opaque ratifier digest (never a raw account)")
@@ -4057,8 +4090,8 @@ def _build_parser() -> argparse.ArgumentParser:
                                "(required with --spawn; execution-zones directive)")
     p_review.add_argument("--ledger-root", default=None, dest="ledger_root",
                           help="Active-Work ledger root for the venue claim (required with --spawn)")
-    p_review.add_argument("--controller-id", default="cev3-review", dest="controller_id",
-                          help="controller id for the venue lane (default: cev3-review)")
+    p_review.add_argument("--controller-id", default="ce-review", dest="controller_id",
+                          help="controller id for the venue lane (default: ce-review)")
     p_review.add_argument("--no-unattended", action="store_true", dest="no_unattended",
                           help="opt the reviewer venue back into interactive approval modals "
                                "(default: unattended, mirroring the author seat — D1/F3)")
@@ -4455,7 +4488,7 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="the diff left the closed manifest")
     p_report.add_argument("--cap", type=float, default=None, help="run spend cap (Budget) to meter spend against")
     p_report.add_argument("--unit", choices=["$", "%"], default="$", help="spend unit")
-    p_report.add_argument("--budget-size", default=None, help="appetite size label (e.g. S) for 'of Budget S'")
+    p_report.add_argument("--budget-size", default=None, help="Budget size label (e.g. S) for 'of Budget S'")
     p_report.add_argument(
         "--root", default=V3_LOCAL_STATE_ROOT,
         help=f"v3 local-state root (to default --evidence from a collected run; default: {V3_LOCAL_STATE_ROOT})",

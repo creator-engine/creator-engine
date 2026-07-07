@@ -11,8 +11,8 @@ CE presents users a clear, intuitive, **fractal** cognitive-phase vocabulary for
 > **Frame → Shape → Build → Review → Ship**
 
 - **Frame** — understand and bound the problem/ticket: what is being asked, why, and what "done" means.
-- **Shape** — turn the framed problem into a ratifiable bet: acceptance criteria, appetite (a fixed effort budget, not an estimate), mutation class, and the plan. Ends when the bet is placed (ratified) and the work is Ready.
-- **Build** — execute the ratified bet in one governed, boxed run.
+- **Shape** — turn the framed problem into a ratifiable Scope: Goal, Done-when, Change-type, and the plan. Ends when the Scope is ratified and Ready for Build.
+- **Build** — execute the ratified Scope in one governed, boxed run.
 - **Review** — grade the result against the acceptance criteria (external grading; evidence, not transcripts).
 - **Ship** — the governed terminal delivery: a merged PR, delivered research, or a ratified no-change.
 
@@ -27,7 +27,7 @@ User-facing cognitive phase ↔ board/pipeline label ↔ mechanical spec-lifecyc
 | Cognitive phase | Board label | Spec-lifecycle state | Gate | BMAD phase |
 | --- | --- | --- | --- | --- |
 | **Frame** | `BACKLOG` | `draft` | — | Analysis |
-| **Shape** | `SHAPE → READY` | `draft → ready` | **front gate:** Definition-of-Ready (scope + `acceptance_criteria` + verification) **+** bet-ratification ("place the bet") | Planning + Solutioning |
+| **Shape** | `SHAPE → READY` | `draft → ready` | **front gate:** Definition-of-Ready (scope + `acceptance_criteria` + verification) **+** Scope ratification | Planning + Solutioning |
 | **Build** | `RUN` | `in_progress` | *(container lifecycle: `provision → run → collect → teardown`)* | Implementation |
 | **Review** | `REVIEW` | `verified` | external grading (review-evidence; **non-ratifying**) | — *(CE first-class tail)* |
 | **Ship** | `MERGE` | `ratified → done` | **back gate:** final ratification (mutation_class-tiered) **+** governed merge | — *(CE first-class tail)* |
@@ -35,7 +35,7 @@ User-facing cognitive phase ↔ board/pipeline label ↔ mechanical spec-lifecyc
 Notes:
 
 - **`Shape` is deliberately overloaded.** It is both a cognitive phase and (as `SHAPE`) one of the board states it subsumes. The user-facing `Shape` spans board `SHAPE → READY` plus the DoR gate: the dominant phase keeps its name.
-- **The two-end gate chain is where governance binds.** The **front gate** (Shape→Build) is the Definition-of-Ready plus the bet; the **back gate** (at Ship) is the `mutation_class`-tiered ratification plus the branch-protection-enforced merge. `Build` and `Review` are the middle.
+- **The two-end gate chain is where governance binds.** The **front gate** (Shape→Build) is the Definition-of-Ready plus Scope ratification; the **back gate** (at Ship) is the `mutation_class`-tiered ratification plus the branch-protection-enforced merge. `Build` and `Review` are the middle.
 
 ## The conserved machine (dig-in layer)
 
@@ -73,7 +73,7 @@ The same skin-over-conserved-machine principle applies to the **fields of a Scop
 | --- | --- | --- |
 | **Goal** | `intent` | plain — "what I'm trying to do" |
 | **Done when** | `acceptance_criteria` | names it as the *testable done-oracle* (the external grader's target), not an Agile artifact |
-| **Budget** | `appetite` | a *fixed cap you commit*, **not an estimate** (a Shape-Up appetite); it also becomes the run's spend cap via the G-5 join |
+| **Budget** | `appetite` | optional lane-aware cap detail; it also becomes the run's spend cap via the G-5 join |
 | **Change type** | `mutation_class` | "what kind of change, and how risky" — the risk tier (`docs < code < schema < deploy < …`) that drives the back gate |
 | **Ready** | `definition_of_ready` | maps straight onto the board `READY` state — the word already exists in the machine |
 
