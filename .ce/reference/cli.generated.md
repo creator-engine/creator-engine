@@ -141,6 +141,15 @@ Options:
 | `--evidence-ref` | yes |  | required correction evidence reference |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `brain hydrate`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--state-root` | no |  | CE local state root (default: .ce/state) |
+| `--json` | no |  | emit machine-readable JSON |
+
 ### `brain ingest`
 
 Options:

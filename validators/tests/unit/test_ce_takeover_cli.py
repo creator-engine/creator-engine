@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
+from creator_engine_validator import brain_runtime as rt
 from creator_engine_validator import ce_cli
 
 
@@ -153,6 +156,105 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
         "approval_wall",
         "watcher_manifest",
     }
+
+
+def test_takeover_hydrate_consumes_brain_contract(tmp_path, monkeypatch, capsys):
+    _seed_takeover_state(tmp_path)
+    state_root = tmp_path / ".ce" / "state"
+    rt._append_decision(
+        date="2026-07-07",
+        scope="takeover",
+        statement="Takeover hydrates memory from the brain contract.",
+        authority="controller",
+        decision_id="brain-decision-takeover-0001",
+        records=[],
+        state_root=state_root,
+    )
+    rt._append_lesson(
+        date="2026-07-07",
+        scope="takeover",
+        source="review:PR-888",
+        feedback="Hydrate phase lacked artifact memory.",
+        correction="Consume ce brain hydrate --json.",
+        why="A successor controller cannot read predecessor session memory.",
+        how_to_apply="Inspect brain_hydration before entering awaiting-operator.",
+        lesson_id="brain-lesson-takeover-0001",
+        state_root=state_root,
+    )
+    _patch_ring0_pass(monkeypatch)
+
+    rc = ce_cli.main(
+        [
+            "takeover",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["brain_hydration"]["summary"]["active_decision_count"] == 1
+    assert payload["brain_hydration"]["summary"]["active_lesson_count"] == 1
+    assert payload["brain_hydration"]["newest_resume_state"]["path"].endswith(
+        "ce-controller-resume.json"
+    )
+    hydrate = next(
+        action for action in payload["hydration_plan"] if action["action"] == "hydrate-brain-memory"
+    )
+    assert hydrate["active_decision_count"] == 1
+    assert hydrate["active_lesson_count"] == 1
+    assert hydrate["newest_resume_state"]["path"].endswith("ce-controller-resume.json")
+
+
+def test_takeover_corrupt_brain_ledger_refuses_with_machine_readable_error(
+    tmp_path, monkeypatch, capsys
+):
+    _seed_takeover_state(tmp_path)
+    state_root = tmp_path / ".ce" / "state"
+    ledger = state_root / "brain" / "assertions.yaml"
+
+    def write_ledger(_path: Path, text: str) -> None:
+        ledger.write_text(text, encoding="utf-8")
+
+    rt.assert_claim(
+        claim={"subject": "takeover", "predicate": "ledger", "object": "validates"},
+        scope="takeover",
+        evidence_ref="review:PR-888",
+        assertion_id="brain-assertion-takeover-corrupt",
+        records=[],
+        state_root=state_root,
+        write=write_ledger,
+    )
+    data = yaml.safe_load(ledger.read_text(encoding="utf-8"))
+    data["records"][0]["prev_hash"] = "f" * 64
+    ledger.write_text(yaml.safe_dump(data, sort_keys=True), encoding="utf-8")
+    _patch_ring0_pass(monkeypatch)
+
+    rc = ce_cli.main(
+        [
+            "takeover",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "ce-takeover-error"
+    assert payload["code"] == "CE-TAKEOVER-BRAIN-HYDRATION"
+    assert "brain hydration contract refused" in payload["message"]
 
 
 def test_takeover_reports_missing_inputs_as_evidence_gaps(tmp_path, monkeypatch, capsys):

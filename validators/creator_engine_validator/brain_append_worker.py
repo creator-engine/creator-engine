@@ -153,6 +153,35 @@ def _apply_intent(data: dict[str, Any], records: Sequence[dict[str, Any]], repo_
                 state_root=repo_root / ".ce" / "state",
                 write=sink,
             )
+        elif data["intent_kind"] == "decision_append":
+            item = data["decision"]
+            brain_runtime._append_decision(
+                date=item["date"],
+                scope=item["scope"],
+                statement=item["statement"],
+                authority=item["authority"],
+                supersedes_ref=item.get("supersedes_ref"),
+                decision_id=item.get("decision_id"),
+                records=records,
+                state_root=repo_root / ".ce" / "state",
+                write=sink,
+            )
+        elif data["intent_kind"] == "lesson_append":
+            item = data["lesson"]
+            brain_runtime._append_lesson(
+                date=item["date"],
+                scope=item["scope"],
+                source=item["source"],
+                feedback=item["feedback"],
+                correction=item["correction"],
+                why=item["why"],
+                how_to_apply=item["how_to_apply"],
+                supersedes_ref=item.get("supersedes_ref"),
+                lesson_id=item.get("lesson_id"),
+                records=records,
+                state_root=repo_root / ".ce" / "state",
+                write=sink,
+            )
         else:
             raise BrainAppendRefusal("brain_append_intent_kind", f"unsupported intent_kind {data['intent_kind']!r}")
     except BrainAppendRefusal:
@@ -226,6 +255,8 @@ def run_once(
                 "record_count_before": len(before_records),
                 "record_count_after": len(after_records),
                 "appended_sequences": [r["sequence"] for r in appended],
+                "appended_kinds": [r["kind"] for r in appended],
+                "appended_ids": [r["id"] for r in appended],
                 "appended_prev_hashes": [r["prev_hash"] for r in appended],
                 "head_before": before_records[-1].get(brain_runtime.CONTENT_HASH_FIELD) if before_records else None,
                 "head_after": after_records[-1].get(brain_runtime.CONTENT_HASH_FIELD) if after_records else None,

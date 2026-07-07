@@ -54,6 +54,37 @@ def _supersede() -> dict:
             },
         },
     }
+def _decision() -> dict:
+    return {
+        "kind": "brain-append-intent",
+        "schema_version": "1",
+        "intent_kind": "decision_append",
+        "decision": {
+            "decision_id": "brain-decision-append-0001",
+            "date": "2026-07-07",
+            "scope": "controller-memory",
+            "statement": "Takeover must hydrate controller memory from artifacts.",
+            "authority": "controller",
+            "supersedes_ref": None,
+        },
+    }
+def _lesson() -> dict:
+    return {
+        "kind": "brain-append-intent",
+        "schema_version": "1",
+        "intent_kind": "lesson_append",
+        "lesson": {
+            "lesson_id": "brain-lesson-append-0001",
+            "date": "2026-07-07",
+            "scope": "controller-memory",
+            "source": "review:PR-888",
+            "feedback": "A standby controller could not reconstruct forge housekeeping.",
+            "correction": "Persist operating context in a deterministic hydration contract.",
+            "why": "Session memory is not available after takeover.",
+            "how_to_apply": "Read ce brain hydrate --json during takeover Hydrate.",
+            "supersedes_ref": None,
+        },
+    }
 def _queued(tmp_path: Path, data: dict) -> Path:
     queue = tmp_path / "queue"
     queue.mkdir()
@@ -88,6 +119,40 @@ def test_success_assigns_sequence_prev_hash_and_evidence(tmp_path: Path, intent:
     assert evidence["appended_sequences"] == sequences
     assert evidence["appended_prev_hashes"][0] == evidence["head_before"]
     assert evidence["record_count_after"] == 1 + len(sequences)
+@pytest.mark.parametrize(
+    "intent, kind, record_id",
+    [
+        (_decision(), "brain-decision", "brain-decision-append-0001"),
+        (_lesson(), "brain-lesson", "brain-lesson-append-0001"),
+    ],
+)
+def test_memory_record_kinds_round_trip_through_mediated_append(
+    tmp_path: Path, intent: dict, kind: str, record_id: str
+):
+    outcome = _run(tmp_path, intent)
+
+    evidence = json.loads(outcome.evidence_path.read_text(encoding="utf-8"))
+
+    assert outcome.outcome == "committed"
+    assert evidence["appended_kinds"] == [kind]
+    assert evidence["appended_ids"] == [record_id]
+    assert evidence["appended_sequences"] == [1]
+    assert evidence["record_count_after"] == 2
+
+
+def test_memory_append_intent_requires_provenance_fields():
+    decision = _decision()
+    del decision["decision"]["authority"]
+    lesson = _lesson()
+    del lesson["lesson"]["source"]
+
+    decision_errors = validate_intent_doc(decision)
+    lesson_errors = validate_intent_doc(lesson)
+
+    assert any(error.code == "brain_append_intent_schema" for error in decision_errors)
+    assert any(error.code == "brain_append_intent_schema" for error in lesson_errors)
+
+
 def test_refusal_names_duplicate_active_invariant(tmp_path: Path):
     outcome = _run(tmp_path, _active("brain-assertion-append-other", CLAIM))
     evidence = json.loads(outcome.evidence_path.read_text(encoding="utf-8"))

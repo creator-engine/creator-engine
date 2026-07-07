@@ -36,6 +36,11 @@ LEDGER_KIND = "brain-assertion-ledger"
 LEDGER_RECORD_TYPE = "brain_assertion_ledger"
 ASSERTION_KIND = "brain-assertion"
 ASSERTION_RECORD_TYPE = "brain_assertion"
+DECISION_KIND = "brain-decision"
+DECISION_RECORD_TYPE = "brain_decision"
+LESSON_KIND = "brain-lesson"
+LESSON_RECORD_TYPE = "brain_lesson"
+HYDRATION_KIND = "ce-brain-hydration-contract"
 SCHEMA_VERSION = "1"
 LEDGER_RELATIVE_PATH = Path("brain") / "assertions.yaml"
 AUTHORITATIVE_LEDGER_RELATIVE_PATH = Path(".ce") / "brain" / "assertions.yaml"
@@ -53,6 +58,9 @@ CODE_DUPLICATE_ACTIVE = "brain_assertion_duplicate_active"
 CODE_UNKNOWN = "brain_assertion_unknown"
 
 _ID_RE = re.compile(r"^brain-assertion-[a-z0-9][a-z0-9-]{3,96}$")
+_DECISION_ID_RE = re.compile(r"^brain-decision-[a-z0-9][a-z0-9-]{3,96}$")
+_LESSON_ID_RE = re.compile(r"^brain-lesson-[a-z0-9][a-z0-9-]{3,96}$")
+_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _FORBIDDEN_KEYS = {
     "account",
     "account_id",
@@ -107,6 +115,16 @@ class CorrectResult:
     ledger_path: Path
     superseded_record: dict[str, Any]
     record: dict[str, Any]
+    ledger_text: str
+
+
+@dataclass(frozen=True)
+class MemoryAppendResult:
+    ledger_path: Path
+    record: dict[str, Any]
+    sequence: int
+    content_hash: str
+    prev_hash: str
     ledger_text: str
 
 
@@ -212,6 +230,28 @@ def _normalize_statement(statement: str | None, claim: dict[str, Any]) -> str:
     return normalized
 
 
+def _normalize_memory_text(value: str, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BrainAssertionRefused(f"{field} must be a non-empty string")
+    normalized = value.strip()
+    if len(normalized) > 2048:
+        raise BrainAssertionRefused(f"{field} must be 2048 characters or fewer")
+    return normalized
+
+
+def _normalize_authority(value: str) -> str:
+    normalized = _normalize_memory_text(value, "authority")
+    if len(normalized) > 256:
+        raise BrainAssertionRefused("authority must be 256 characters or fewer")
+    return normalized
+
+
+def _normalize_date(value: str) -> str:
+    if not isinstance(value, str) or not _DATE_RE.match(value):
+        raise BrainAssertionRefused("date must use YYYY-MM-DD")
+    return value
+
+
 def _normalize_assertion_type(assertion_type: str | None) -> str:
     normalized = DEFAULT_ASSERTION_TYPE if assertion_type is None else assertion_type
     if normalized not in ASSERTION_TYPES:
@@ -259,9 +299,29 @@ def _assertion_id(seed: dict[str, Any]) -> str:
     return f"brain-assertion-{digest[:24]}"
 
 
+def _decision_id(seed: dict[str, Any]) -> str:
+    digest = hashlib.sha256(_stable_json(seed).encode("utf-8")).hexdigest()
+    return f"brain-decision-{digest[:24]}"
+
+
+def _lesson_id(seed: dict[str, Any]) -> str:
+    digest = hashlib.sha256(_stable_json(seed).encode("utf-8")).hexdigest()
+    return f"brain-lesson-{digest[:24]}"
+
+
 def _validate_id(value: str) -> None:
     if not isinstance(value, str) or not _ID_RE.match(value):
         raise BrainAssertionRefused("assertion id does not match the brain-assertion id shape")
+
+
+def _validate_decision_id(value: str) -> None:
+    if not isinstance(value, str) or not _DECISION_ID_RE.match(value):
+        raise BrainAssertionRefused("decision id does not match the brain-decision id shape")
+
+
+def _validate_lesson_id(value: str) -> None:
+    if not isinstance(value, str) or not _LESSON_ID_RE.match(value):
+        raise BrainAssertionRefused("lesson id does not match the brain-lesson id shape")
 
 
 def _claim_key(scope: Any, claim: dict[str, Any]) -> str:
@@ -555,7 +615,7 @@ def _validate_current_view(records: Sequence[dict[str, Any]], path: Path | str) 
 
     active_claims: dict[str, str] = {}
     for rid, record in latest.items():
-        if record.get("status") != "active":
+        if record.get("kind") != ASSERTION_KIND or record.get("status") != "active":
             continue
         key = _claim_key(record.get("scope"), record.get("claim"))
         other = active_claims.get(key)
@@ -569,6 +629,45 @@ def _validate_current_view(records: Sequence[dict[str, Any]], path: Path | str) 
                 )
             )
         active_claims[key] = rid
+    seen_memory: dict[str, dict[str, Any]] = {}
+    for idx, record in enumerate(records):
+        kind = record.get("kind")
+        if kind not in {DECISION_KIND, LESSON_KIND}:
+            continue
+        rid = record.get("id")
+        if not isinstance(rid, str):
+            continue
+        if rid in seen_memory:
+            errors.append(
+                _err(
+                    CODE_DUPLICATE_ACTIVE,
+                    path,
+                    ("records", idx, "id"),
+                    "brain memory record id must be unique",
+                )
+            )
+        supersedes_ref = record.get("supersedes_ref")
+        if supersedes_ref is not None:
+            target = seen_memory.get(str(supersedes_ref))
+            if target is None:
+                errors.append(
+                    _err(
+                        CODE_SUPERSEDE_TARGET,
+                        path,
+                        ("records", idx, "supersedes_ref"),
+                        "brain memory supersedes_ref must point at an earlier record",
+                    )
+                )
+            elif target.get("kind") != kind:
+                errors.append(
+                    _err(
+                        CODE_SUPERSEDE_TARGET,
+                        path,
+                        ("records", idx, "supersedes_ref"),
+                        "brain memory supersedes_ref must point at a record of the same kind",
+                    )
+                )
+        seen_memory[rid] = record
     return errors
 
 
@@ -785,6 +884,140 @@ def correct_claim(
     return CorrectResult(ledger_path=path, superseded_record=superseded, record=active, ledger_text=text)
 
 
+def _append_decision(
+    *,
+    date: str,
+    scope: str | dict[str, Any],
+    statement: str,
+    authority: str,
+    supersedes_ref: str | None = None,
+    state_root: Path | str = V3_LOCAL_STATE_ROOT,
+    decision_id: str | None = None,
+    records: Sequence[dict[str, Any]] | None = None,
+    write: Writer | None = None,
+) -> MemoryAppendResult:
+    path = ledger_path(state_root)
+    current = load_records(state_root) if records is None else _copy_mapping_records(records, path)
+    _require_valid_records(current, ledger_path(state_root))
+    normalized_date = _normalize_date(date)
+    normalized_scope = _normalize_scope(scope)
+    normalized_statement = _normalize_memory_text(statement, "statement")
+    normalized_authority = _normalize_authority(authority)
+    if supersedes_ref is not None:
+        _validate_decision_id(supersedes_ref)
+    rid = decision_id or _decision_id(
+        {
+            "op": "decision",
+            "date": normalized_date,
+            "scope": normalized_scope,
+            "statement": normalized_statement,
+            "authority": normalized_authority,
+            "supersedes_ref": supersedes_ref,
+        }
+    )
+    _validate_decision_id(rid)
+
+    body = {
+        "kind": DECISION_KIND,
+        "record_type": DECISION_RECORD_TYPE,
+        "schema_version": SCHEMA_VERSION,
+        "id": rid,
+        "date": normalized_date,
+        "scope": normalized_scope,
+        "statement": normalized_statement,
+        "authority": normalized_authority,
+        "supersedes_ref": supersedes_ref,
+        "status": "active",
+    }
+    record = _append_record(current, body)
+    updated = [*current, record]
+    errors = validate_records(updated, ledger_path(state_root))
+    if errors:
+        raise BrainAssertionRefused(errors)
+    text = _write_ledger(path, updated, write or _default_write)
+    return MemoryAppendResult(
+        ledger_path=path,
+        record=record,
+        sequence=int(record["sequence"]),
+        content_hash=str(record[CONTENT_HASH_FIELD]),
+        prev_hash=str(record["prev_hash"]),
+        ledger_text=text,
+    )
+
+
+def _append_lesson(
+    *,
+    date: str,
+    scope: str | dict[str, Any],
+    source: str,
+    feedback: str,
+    correction: str,
+    why: str,
+    how_to_apply: str,
+    supersedes_ref: str | None = None,
+    state_root: Path | str = V3_LOCAL_STATE_ROOT,
+    lesson_id: str | None = None,
+    records: Sequence[dict[str, Any]] | None = None,
+    write: Writer | None = None,
+) -> MemoryAppendResult:
+    path = ledger_path(state_root)
+    current = load_records(state_root) if records is None else _copy_mapping_records(records, path)
+    _require_valid_records(current, ledger_path(state_root))
+    normalized_date = _normalize_date(date)
+    normalized_scope = _normalize_scope(scope)
+    normalized_source = _normalize_memory_text(source, "source")
+    normalized_feedback = _normalize_memory_text(feedback, "feedback")
+    normalized_correction = _normalize_memory_text(correction, "correction")
+    normalized_why = _normalize_memory_text(why, "why")
+    normalized_how = _normalize_memory_text(how_to_apply, "how_to_apply")
+    if supersedes_ref is not None:
+        _validate_lesson_id(supersedes_ref)
+    rid = lesson_id or _lesson_id(
+        {
+            "op": "lesson",
+            "date": normalized_date,
+            "scope": normalized_scope,
+            "source": normalized_source,
+            "feedback": normalized_feedback,
+            "correction": normalized_correction,
+            "why": normalized_why,
+            "how_to_apply": normalized_how,
+            "supersedes_ref": supersedes_ref,
+        }
+    )
+    _validate_lesson_id(rid)
+
+    body = {
+        "kind": LESSON_KIND,
+        "record_type": LESSON_RECORD_TYPE,
+        "schema_version": SCHEMA_VERSION,
+        "id": rid,
+        "date": normalized_date,
+        "scope": normalized_scope,
+        "source": normalized_source,
+        "feedback": normalized_feedback,
+        "correction": normalized_correction,
+        "why": normalized_why,
+        "how_to_apply": normalized_how,
+        "supersedes_ref": supersedes_ref,
+        "status": "active",
+    }
+    record = _append_record(current, body)
+    updated = [*current, record]
+    errors = validate_records(updated, ledger_path(state_root))
+    if errors:
+        raise BrainAssertionRefused(errors)
+    text = _write_ledger(path, updated, write or _default_write)
+    return MemoryAppendResult(
+        ledger_path=path,
+        record=record,
+        sequence=int(record["sequence"]),
+        content_hash=str(record[CONTENT_HASH_FIELD]),
+        prev_hash=str(record["prev_hash"]),
+        ledger_text=text,
+    )
+
+
 def check_claim(
     *,
     claim: dict[str, Any],
@@ -802,6 +1035,86 @@ def check_claim(
     if match is None:
         return CheckResult(status="unknown", record=None)
     return CheckResult(status="active", record=copy.deepcopy(match))
+
+
+def _load_records_for_hydration(state_root: Path | str) -> list[dict[str, Any]]:
+    path = ledger_path(state_root)
+    if not path.is_file():
+        return []
+    try:
+        data = load_yaml(path)
+    except LoaderError as exc:
+        raise BrainLedgerInvalid(str(exc)) from exc
+    if isinstance(data, dict) and data.get("records") == []:
+        # Hydration is read-only startup context: tolerate a bootstrap-empty ledger here while mutating ledger APIs fail closed.
+        return []
+    return _records_from_doc(data, path)
+
+
+def _active_memory_records(records: Sequence[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    superseded = {
+        str(record["supersedes_ref"])
+        for record in records
+        if record.get("kind") == kind and record.get("supersedes_ref") is not None
+    }
+    active = [
+        copy.deepcopy(record)
+        for record in records
+        if record.get("kind") == kind and isinstance(record.get("id"), str) and record["id"] not in superseded
+    ]
+    active.sort(key=lambda record: (str(record.get("date", "")), int(record.get("sequence", 0)), str(record.get("id", ""))))
+    return active
+
+
+def _resume_state_pointer(state_root: Path | str) -> dict[str, Any] | None:
+    root = Path(state_root)
+    if not root.exists():
+        return None
+    paths: set[Path] = set()
+    for pattern in ("**/*resume*", "**/*session*"):
+        paths.update(path for path in root.glob(pattern) if path.is_file())
+    candidates: list[tuple[str, str, Path]] = []
+    for path in paths:
+        try:
+            content_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            continue
+        candidates.append((content_sha256, str(path), path))
+    if not candidates:
+        return None
+    _digest, _name, newest = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
+    stat = newest.stat()
+    return {
+        "path": str(newest),
+        "content_sha256": hashlib.sha256(newest.read_bytes()).hexdigest(),
+        "size_bytes": stat.st_size,
+    }
+
+
+def hydrate_contract(state_root: Path | str = V3_LOCAL_STATE_ROOT) -> dict[str, Any]:
+    path = ledger_path(state_root)
+    records = _load_records_for_hydration(state_root)
+    if records:
+        _require_valid_records(records, path)
+    decisions = _active_memory_records(records, DECISION_KIND)
+    lessons = _active_memory_records(records, LESSON_KIND)
+    resume_state = _resume_state_pointer(state_root)
+    return {
+        "kind": HYDRATION_KIND,
+        "schema_version": SCHEMA_VERSION,
+        "ledger_path": str(path),
+        "ledger_present": path.is_file(),
+        "record_count": len(records),
+        "head_content_hash": str(records[-1][CONTENT_HASH_FIELD]) if records else None,
+        "active_decisions": decisions,
+        "active_lessons": lessons,
+        "newest_resume_state": resume_state,
+        "summary": {
+            "active_decision_count": len(decisions),
+            "active_lesson_count": len(lessons),
+            "newest_resume_state_present": resume_state is not None,
+        },
+    }
 
 
 def verify_ledger(state_root: Path | str = V3_LOCAL_STATE_ROOT) -> VerifyResult:

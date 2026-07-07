@@ -36,6 +36,10 @@ class DutyManifestError(TakeoverError):
     code = "CE-TAKEOVER-DUTY-MANIFEST"
 
 
+class BrainHydrationError(TakeoverError):
+    code = "CE-TAKEOVER-BRAIN-HYDRATION"
+
+
 @dataclass(frozen=True)
 class EvidenceSource:
     name: str
@@ -113,6 +117,7 @@ class TakeoverPlan:
     initial_state: str
     evidence_sources: tuple[EvidenceSource, ...]
     ring0_report: launch_runtime.LaunchPreflightReport
+    brain_hydration: dict[str, Any]
     hydration_actions: tuple[dict[str, Any], ...]
     rearm_plan: ReArmPlan
 
@@ -161,6 +166,7 @@ class TakeoverPlan:
             },
             "evidence_sources": [source.to_dict() for source in self.evidence_sources],
             "evidence_gaps": list(self.evidence_gaps),
+            "brain_hydration": self.brain_hydration,
             "hydration_plan": list(self.hydration_actions),
             "re_arm_plan": self.rearm_plan.to_dict(),
             "raw_controller_launch_refusal": (
@@ -243,7 +249,8 @@ def build_plan(
         tmux_adapter=_ReadOnlyTmuxProbe(),
         which=which,
     )
-    actions = _hydration_actions(evidence)
+    brain_hydration = _brain_hydration_contract(root)
+    actions = _hydration_actions(evidence, brain_hydration)
     rearm_plan = _plan_rearm_actions(root, duty_manifest=duty_manifest)
     return TakeoverPlan(
         predecessor=predecessor,
@@ -253,6 +260,7 @@ def build_plan(
         initial_state=INITIAL_STATE,
         evidence_sources=evidence,
         ring0_report=ring0,
+        brain_hydration=brain_hydration,
         hydration_actions=actions,
         rearm_plan=rearm_plan,
     )
@@ -575,9 +583,23 @@ def _file_contains(path: Path, needle: str) -> bool:
     return needle.encode("utf-8", errors="ignore") in data
 
 
-def _hydration_actions(evidence: Sequence[EvidenceSource]) -> tuple[dict[str, Any], ...]:
+def _brain_hydration_contract(repo_root: Path) -> dict[str, Any]:
+    try:
+        return brain_runtime.hydrate_contract(repo_root / ".ce" / "state")
+    except brain_runtime.BrainRuntimeError as exc:
+        raise BrainHydrationError(f"brain hydration contract refused: {exc}") from exc
+
+
+def _hydration_actions(
+    evidence: Sequence[EvidenceSource],
+    brain_hydration: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
     source_names = [source.name for source in evidence if source.status == "found"]
     gap_names = [source.name for source in evidence if source.status != "found"]
+    summary = brain_hydration.get("summary", {})
+    decision_count = int(summary.get("active_decision_count", 0))
+    lesson_count = int(summary.get("active_lesson_count", 0))
+    resume = brain_hydration.get("newest_resume_state")
     return (
         {
             "action": "detect-predecessor-state",
@@ -585,6 +607,19 @@ def _hydration_actions(evidence: Sequence[EvidenceSource]) -> tuple[dict[str, An
             "detail": f"read evidence from {len(source_names)} source(s); retain {len(gap_names)} gap(s)",
             "sources": source_names,
             "gaps": gap_names,
+        },
+        {
+            "action": "hydrate-brain-memory",
+            "execute": False,
+            "detail": (
+                f"hydrated {decision_count} active decision(s), "
+                f"{lesson_count} active lesson(s), "
+                f"resume pointer {'present' if resume else 'absent'}"
+            ),
+            "active_decision_count": decision_count,
+            "active_lesson_count": lesson_count,
+            "newest_resume_state": resume,
+            "source": brain_hydration.get("ledger_path"),
         },
         {
             "action": "verify-ring0-harness",
