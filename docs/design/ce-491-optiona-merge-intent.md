@@ -102,15 +102,27 @@ are:
 - `validators/creator_engine_validator/brain_append_intent.schema.yaml`
 - `validators/creator_engine_validator/brain_append_worker.py`
 
-The ce-488 schema is a tracked schema for the intent payload. It pins
-`kind: brain-append-intent`, `schema_version: "1"`, and `intent_kind` routing
-for `active_assertion_append`, `ce411_supersede_pair`, `decision_append`, and
-`lesson_append`. Its payload blocks are mutually exclusive:
-`active_assertion`, `supersede_pair`, `decision`, or `lesson`. The worker loads
-that schema, rejects host/position-bearing fields such as `sequence`,
-`prev_hash`, `content_hash`, `ledger_text`, `repo_root`, and `state_root`, then
-uses `brain_runtime` to assign live ledger position fields from the current
-tail.
+The tracked schema on `main` before PR #888 pinned only
+`active_assertion_append` and `ce411_supersede_pair`. PR #888
+(`ce-488-memory-layer-slice1`) extends
+`validators/creator_engine_validator/brain_append_intent.schema.yaml` so the
+tracked payload schema pins `kind: brain-append-intent`,
+`schema_version: "1"`, and `intent_kind` routing for
+`active_assertion_append`, `ce411_supersede_pair`, `decision_append`, and
+`lesson_append`.
+
+Prerequisite: Option A decision/lesson intent materialization depends on PR
+#888's schema expansion in
+`validators/creator_engine_validator/brain_append_intent.schema.yaml`. Current
+`origin/main` includes PR #888, so the prerequisite is satisfied after rebasing
+this design onto current `main`; branches based before #888 can only rely on
+the two assertion intent kinds.
+
+The expanded payload blocks are mutually exclusive: `active_assertion`,
+`supersede_pair`, `decision`, or `lesson`. The worker loads that schema,
+rejects host/position-bearing fields such as `sequence`, `prev_hash`,
+`content_hash`, `ledger_text`, `repo_root`, and `state_root`, then uses
+`brain_runtime` to assign live ledger position fields from the current tail.
 
 Option A keeps those field meanings:
 
@@ -121,6 +133,16 @@ Option A keeps those field meanings:
 | Intent routing | `intent_kind` selects one of the supported operations. | Same routing. The materializer dispatches through the same operation vocabulary and refuses unknown values with `brain_append_intent_kind`. |
 | Payload shape | Exactly one operation payload block is present. | Same mutually exclusive payload shape. `active_assertion_append` and `ce411_supersede_pair` materialize assertion records; `decision_append` and `lesson_append` materialize memory records. |
 | PR binding | No `branch_slug`, `pr_number`, `head_sha`, `authored_at`, or `intent_id` fields are allowed because the schema has `additionalProperties: false`. | PR binding is derived outside the YAML payload: intent path stem supplies `branch_slug`, merge metadata supplies PR number/head/merge commit, and `materialization_key` binds the merge commit, intent path, and canonical intent SHA-256. Embedding PR-binding fields in the YAML would require a future schema revision and is outside this design. |
+
+Decision and lesson payload fields materialize as follows:
+
+| Intent kind | Intent payload field | Materialized record field |
+| --- | --- | --- |
+| `decision_append` | `decision.decision_id`, `decision.date`, `decision.scope`, `decision.statement`, `decision.authority`, `decision.supersedes_ref` | `id` from `decision_id` when present, otherwise generated from normalized `date`, `scope`, `statement`, `authority`, and `supersedes_ref`; `date`, `scope`, `statement`, `authority`, and `supersedes_ref` copy to the same record fields. Decision `authority` comes directly from `decision.authority` in the intent YAML. |
+| `decision_append` | implied by `intent_kind` | `kind: brain-decision`, `record_type: brain_decision`, `schema_version: "1"`, and `status: active`. |
+| `lesson_append` | `lesson.lesson_id`, `lesson.date`, `lesson.scope`, `lesson.source`, `lesson.feedback`, `lesson.correction`, `lesson.why`, `lesson.how_to_apply`, `lesson.supersedes_ref` | `id` from `lesson_id` when present, otherwise generated from normalized `date`, `scope`, `source`, `feedback`, `correction`, `why`, `how_to_apply`, and `supersedes_ref`; `date`, `scope`, `source`, `feedback`, `correction`, `why`, `how_to_apply`, and `supersedes_ref` copy to the same record fields. Lesson `source` comes directly from `lesson.source` in the intent YAML. |
+| `lesson_append` | implied by `intent_kind` | `kind: brain-lesson`, `record_type: brain_lesson`, `schema_version: "1"`, and `status: active`. |
+| both | not allowed in intent YAML | `sequence`, `prev_hash`, and `content_hash` are assigned only at materialization against the live tail. |
 
 The PR-carried file content therefore remains a ce-488-style intent payload:
 

@@ -19,3 +19,5 @@ issue: ce-ops#491
   materialized ledger record schema, materialization-key persistence, HELD
   cascade, hard XOR gate, lease contract, topology question, dry-run/advisory
   evidence, merge-order discovery, and recovery semantics.
+- Revision: clarified the PR #888 decision/lesson schema prerequisite and
+  mapped decision/lesson intent payload fields to materialized memory records.
