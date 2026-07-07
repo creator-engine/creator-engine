@@ -1156,7 +1156,7 @@ def test_shape_from_prd_text_auto_cites_and_keeps_budget_later(tmp_path, capsys)
     assert f"Source PRD: {prd}" in out
     assert "Budget: [later]" in out
     assert "PRD is context; it does not authorize Build" in out
-    assert "approve the Scope" in out
+    assert "ratify the Scope" in out
 
 
 def test_shape_from_prd_confirm_records_scope_with_source_note(tmp_path, capsys):
@@ -1201,7 +1201,7 @@ def test_shape_from_prd_too_large_refused_before_read(tmp_path, capsys):
     assert payload["limit_bytes"] == v3_cli._PRD_SOURCE_MAX_BYTES
 
 
-def test_shape_from_prd_binary_file_refused(tmp_path, capsys):
+def test_shape_from_prd_invalid_utf8_file_still_reports_read_failed(tmp_path, capsys):
     prd = tmp_path / "binary.md"
     prd.write_bytes(b"\xff\xfe\x00\x80")
     code = v3_cli.main(["shape", "--from", str(prd), "--json"])
@@ -1209,6 +1209,37 @@ def test_shape_from_prd_binary_file_refused(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["error"] == "prd_read_failed"
     assert payload["path"] == str(prd)
+
+
+def test_shape_from_prd_valid_utf8_control_bytes_refused_before_seed(tmp_path, capsys, monkeypatch):
+    def fail_seed(*args, **kwargs):
+        pytest.fail("seed_scope_from_prd must not run for control-byte PRD content")
+
+    monkeypatch.setattr(v3_cli.v3_shaping, "seed_scope_from_prd", fail_seed)
+    prd = tmp_path / "binary.md"
+    prd.write_bytes(b"## User registration flow\nBuild registration.\x00Still valid UTF-8.\n")
+    code = v3_cli.main(["shape", "--from", str(prd), "--confirm", "--root", str(tmp_path), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_binary_content"
+    assert payload["path"] == str(prd)
+    assert payload["codepoint"] == "U+0000"
+    assert not (tmp_path / v3_cli.SCOPES_SUBDIR).exists()
+
+
+def test_shape_from_prd_non_regular_path_refused_before_seed(tmp_path, capsys, monkeypatch):
+    def fail_seed(*args, **kwargs):
+        pytest.fail("seed_scope_from_prd must not run for non-regular PRD paths")
+
+    monkeypatch.setattr(v3_cli.v3_shaping, "seed_scope_from_prd", fail_seed)
+    prd_dir = tmp_path / "prd-dir"
+    prd_dir.mkdir()
+    code = v3_cli.main(["shape", "--from", str(prd_dir), "--confirm", "--root", str(tmp_path), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_not_regular"
+    assert payload["path"] == str(prd_dir)
+    assert not (tmp_path / v3_cli.SCOPES_SUBDIR).exists()
 
 
 def test_shape_from_prd_confirm_refuses_invalid_scope_id(tmp_path, capsys):

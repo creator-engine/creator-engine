@@ -58,6 +58,7 @@ import re
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -146,6 +147,7 @@ CE_CMD = "ce"
 #: Bound PRD context reads for ``ce shape --from`` so huge source documents fail
 #: with a teaching refusal before the CLI attempts to decode the whole file.
 _PRD_SOURCE_MAX_BYTES = 512 * 1024
+_PRD_ALLOWED_CONTROL_CHARS = {"\t", "\n", "\r"}
 
 #: In-product help — the SEED of the in-product guide (content reused from
 #: ``docs/guide/understanding-ce.md``, not re-authored). ``ce guide`` prints it.
@@ -2715,22 +2717,33 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return _emit(args, 0, lines, payload)
 
 
-def _cmd_shape(args: argparse.Namespace) -> int:
-    """Run the Frame→Shape grill-me over a partial draft (gaps + minimum questions).
+def _first_prd_control_char(text: str) -> tuple[int, str] | None:
+    for idx, char in enumerate(text):
+        codepoint = ord(char)
+        if char in _PRD_ALLOWED_CONTROL_CHARS:
+            continue
+        if codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
+            return idx, f"U+{codepoint:04X}"
+    return None
 
-    The agent drafts the command-line Scope fields. Surfaces the
-    gap-aware Scope card, the minimum questions to close, and (with --persona +
-    --signal) the detect-and-offer decision. By default this is a dialogue
-    helper and writes nothing; `--from <path> --confirm` is the explicit
-    confirmation path that records the shaped draft Scope with its source note.
-    """
-    prd_seed: v3_shaping.PrdScopeSeed | None = None
-    if args.from_path:
-        source_path = Path(args.from_path)
-        try:
-            prd_size = source_path.stat().st_size
-            if prd_size > _PRD_SOURCE_MAX_BYTES:
-                return _emit(
+
+def _read_prd_source(args: argparse.Namespace, source_path: Path) -> tuple[int, str | None]:
+    try:
+        prd_stat = source_path.stat()
+        if not stat.S_ISREG(prd_stat.st_mode):
+            return (
+                _emit(
+                    args,
+                    2,
+                    [f"{_BRAND} · shape refused: PRD {args.from_path!r} is not a regular file."],
+                    {"error": "prd_not_regular", "path": args.from_path},
+                ),
+                None,
+            )
+        prd_size = prd_stat.st_size
+        if prd_size > _PRD_SOURCE_MAX_BYTES:
+            return (
+                _emit(
                     args,
                     2,
                     [
@@ -2744,15 +2757,60 @@ def _cmd_shape(args: argparse.Namespace) -> int:
                         "size_bytes": prd_size,
                         "limit_bytes": _PRD_SOURCE_MAX_BYTES,
                     },
-                )
-            prd_text = source_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            return _emit(
+                ),
+                None,
+            )
+        prd_text = source_path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        return (
+            _emit(
                 args,
                 2,
                 [f"{_BRAND} · shape refused: could not read PRD {args.from_path!r}: {exc}"],
                 {"error": "prd_read_failed", "path": args.from_path, "detail": str(exc)},
-            )
+            ),
+            None,
+        )
+
+    control = _first_prd_control_char(prd_text)
+    if control is not None:
+        offset, codepoint = control
+        return (
+            _emit(
+                args,
+                2,
+                [
+                    f"{_BRAND} · shape refused: PRD {args.from_path!r} contains binary/control-byte "
+                    f"content at text offset {offset} ({codepoint}). Provide a plain UTF-8 text PRD."
+                ],
+                {
+                    "error": "prd_binary_content",
+                    "path": args.from_path,
+                    "offset": offset,
+                    "codepoint": codepoint,
+                },
+            ),
+            None,
+        )
+    return 0, prd_text
+
+
+def _cmd_shape(args: argparse.Namespace) -> int:
+    """Run the Frame→Shape grill-me over a partial draft (gaps + minimum questions).
+
+    The agent drafts the command-line Scope fields. Surfaces the
+    gap-aware Scope card, the minimum questions to close, and (with --persona +
+    --signal) the detect-and-offer decision. By default this is a dialogue
+    helper and writes nothing; `--from <path> --confirm` is the explicit
+    confirmation path that records the shaped draft Scope with its source note.
+    """
+    prd_seed: v3_shaping.PrdScopeSeed | None = None
+    if args.from_path:
+        source_path = Path(args.from_path)
+        read_code, prd_text = _read_prd_source(args, source_path)
+        if read_code != 0:
+            return read_code
+        assert prd_text is not None
         prd_seed = v3_shaping.seed_scope_from_prd(prd_text, args.from_path)
         draft = dict(prd_seed.draft)
         if args.scope_id:
