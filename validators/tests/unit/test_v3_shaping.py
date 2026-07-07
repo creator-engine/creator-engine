@@ -71,6 +71,31 @@ def test_budget_gap_is_flagged_human_only():
     assert r.human_only_gaps == r.gaps
 
 
+def test_prd_seed_is_one_bounded_scope_and_reuses_grill():
+    prd = """# Signup PRD
+
+## User registration flow
+
+Build registration for new users.
+
+## Acceptance Criteria
+
+- User can create an account with email and password.
+- Duplicate email is rejected.
+
+## Team management flow
+
+- Invite teammates.
+"""
+    seed = sh.seed_scope_from_prd(prd, "docs/prd/signup.md")
+    assert seed.candidate_slice == "User registration flow"
+    assert seed.source_note == "Source PRD: docs/prd/signup.md"
+    assert seed.draft["scope_id"] == "user-registration-flow"
+    assert "Team management flow" not in seed.draft["intent"]
+    result = sh.shape(seed.draft)
+    assert {g.field for g in result.gaps} == {"appetite"}
+
+
 # ---------------------------------------------------------------------------
 # Change-type is safe-by-default — tighten free, loosen needs ratification
 # ---------------------------------------------------------------------------

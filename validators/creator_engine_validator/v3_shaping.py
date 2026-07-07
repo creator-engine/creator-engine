@@ -40,6 +40,7 @@ own work intake; never an offensive capability.
 from __future__ import annotations
 
 from dataclasses import dataclass, field as _field
+import re
 from typing import Any
 
 from . import coordination
@@ -104,6 +105,16 @@ class ShapingResult:
     @property
     def human_only_gaps(self) -> tuple[Gap, ...]:
         return tuple(g for g in self.gaps if g.human_only)
+
+
+@dataclass(frozen=True)
+class PrdScopeSeed:
+    """A bounded-first Scope draft seeded from an existing requirements doc."""
+
+    source_path: str
+    source_note: str
+    candidate_slice: str
+    draft: dict[str, Any] = _field(default_factory=dict)
 
 
 def _gap_for(field: str) -> Gap:
@@ -194,6 +205,121 @@ def retier(proposed: str, requested: str, *, ratified: bool = False) -> RetierRe
 def agent_may_draft(field: str) -> bool:
     """True iff the agent may draft this field (everything except the budget)."""
     return field not in HUMAN_ONLY_FIELDS
+
+
+# ---------------------------------------------------------------------------
+# PRD context injection — seed one draft, then reuse the grill-me engine (PURE)
+# ---------------------------------------------------------------------------
+_GENERIC_PRD_HEADINGS = frozenset({
+    "prd",
+    "product requirements document",
+    "requirements",
+    "overview",
+    "background",
+    "context",
+    "goals",
+    "goal",
+    "non-goals",
+    "non goals",
+    "scope",
+})
+
+
+def _clean_candidate(text: str) -> str:
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text)
+    text = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s*", "", text)
+    text = re.sub(r"^\s*(?:feature|slice|story|requirement)\s*[:：-]\s*", "", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip(" \t\"'`.:")
+    return text
+
+
+def _slugify_scope_id(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    if not slug or not slug[0].isalpha():
+        slug = f"scope-{slug}" if slug else "scope-from-prd"
+    if len(slug) < 3:
+        slug = f"{slug}-scope"
+    return slug[:64].rstrip("-")
+
+
+def _first_candidate_slice(text: str) -> str:
+    lines = text.splitlines()
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped.startswith("#"):
+            continue
+        candidate = _clean_candidate(stripped)
+        lowered = candidate.lower()
+        if candidate and lowered not in _GENERIC_PRD_HEADINGS and "prd" not in lowered:
+            return candidate
+
+    for raw in lines:
+        candidate = _clean_candidate(raw)
+        if not candidate:
+            continue
+        lowered = candidate.lower()
+        if any(word in lowered for word in (" flow", " feature", " slice", " story", " requirement")):
+            return candidate
+
+    for raw in lines:
+        candidate = _clean_candidate(raw)
+        if candidate and candidate.lower() not in _GENERIC_PRD_HEADINGS:
+            return candidate
+    return "first PRD slice"
+
+
+def _acceptance_criteria_from_prd(text: str, *, limit: int = 5) -> tuple[str, ...]:
+    lines = text.splitlines()
+    in_acceptance = False
+    out: list[str] = []
+    for raw in lines:
+        stripped = raw.strip()
+        heading_text = _clean_candidate(stripped).lower()
+        if stripped.startswith("#"):
+            if in_acceptance:
+                break
+            in_acceptance = heading_text in {"acceptance criteria", "done when", "done-when"}
+            continue
+        if not in_acceptance:
+            continue
+        candidate = _clean_candidate(stripped)
+        if candidate:
+            out.append(candidate)
+        if len(out) >= limit:
+            break
+    return tuple(out)
+
+
+def _change_type_from_prd(text: str) -> str:
+    lowered = text.lower()
+    if any(word in lowered for word in ("documentation", "docs", "copy-only", "copy only")):
+        return "docs"
+    return "code"
+
+
+def seed_scope_from_prd(text: str, source_path: str) -> PrdScopeSeed:
+    """Return one bounded Scope draft seeded by PRD context (PURE).
+
+    The PRD informs the draft; it does not authorize work. This helper performs
+    only the context-injection step. Callers still run :func:`shape` over the
+    returned draft so the same grill-me rubric owns readiness and gap questions.
+    """
+    candidate = _first_candidate_slice(text)
+    draft: dict[str, Any] = {
+        "scope_id": _slugify_scope_id(candidate),
+        "intent": f"Implement {candidate} as described in {source_path}",
+        "mutation_class": _change_type_from_prd(text),
+    }
+    acceptance_criteria = _acceptance_criteria_from_prd(text)
+    if acceptance_criteria:
+        draft["acceptance_criteria"] = list(acceptance_criteria)
+    return PrdScopeSeed(
+        source_path=source_path,
+        source_note=f"Source PRD: {source_path}",
+        candidate_slice=candidate,
+        draft=draft,
+    )
 
 
 # ---------------------------------------------------------------------------

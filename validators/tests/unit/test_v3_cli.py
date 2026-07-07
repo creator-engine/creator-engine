@@ -1117,6 +1117,144 @@ def test_shape_dial_offers_per_persona_risk(capsys):
     assert json.loads(capsys.readouterr().out)["offer"] is True
 
 
+def test_shape_from_prd_previews_one_scope_and_does_not_write(tmp_path, capsys):
+    prd = tmp_path / "onboarding.md"
+    prd.write_text(
+        """# Onboarding PRD
+
+## User registration flow
+
+Build the first registration slice.
+
+## Acceptance Criteria
+
+- User creates an account with email and password.
+
+## Billing flow
+
+- User adds a payment method.
+""",
+        encoding="utf-8",
+    )
+    code = v3_cli.main(["shape", "--from", str(prd), "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["scope_id"] == "user-registration-flow"
+    assert payload["candidate_slice"] == "User registration flow"
+    assert payload["bounded_scope_count"] == 1
+    assert payload["source_note"] == f"Source PRD: {prd}"
+    assert payload["recorded"] is False
+    assert not (tmp_path / v3_cli.SCOPES_SUBDIR).exists()
+
+
+def test_shape_from_prd_text_auto_cites_and_keeps_budget_later(tmp_path, capsys):
+    prd = tmp_path / "onboarding.md"
+    prd.write_text("## User registration flow\nBuild registration.\n", encoding="utf-8")
+    code = v3_cli.main(["shape", "--from", str(prd)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"Source PRD: {prd}" in out
+    assert "Budget: [later]" in out
+    assert "PRD is context; it does not authorize Build" in out
+    assert "ratify the Scope" in out
+
+
+def test_shape_from_prd_confirm_records_scope_with_source_note(tmp_path, capsys):
+    prd = tmp_path / "onboarding.md"
+    prd.write_text(
+        "## User registration flow\nBuild registration.\n\n## Acceptance Criteria\n- Account can be created.\n",
+        encoding="utf-8",
+    )
+    code = v3_cli.main(["shape", "--from", str(prd), "--confirm", "--root", str(tmp_path), "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["recorded"] is True
+    rec = _scope_on_disk(tmp_path, "user-registration-flow")
+    assert rec["note"] == f"Source PRD: {prd}"
+    assert rec["intent"] == f"Implement User registration flow as described in {prd}"
+    assert "ratification" not in rec
+
+
+def test_shape_from_prd_missing_file_refused(tmp_path, capsys):
+    missing = tmp_path / "missing.md"
+    code = v3_cli.main(["shape", "--from", str(missing), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_read_failed"
+
+
+def test_shape_from_prd_too_large_refused_before_read(tmp_path, capsys):
+    prd = tmp_path / "large.md"
+    prd.write_bytes(b"\xff" * (v3_cli._PRD_SOURCE_MAX_BYTES + 1))
+    code = v3_cli.main(["shape", "--from", str(prd)])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "too large" in out
+    assert "Trim" in out
+    assert "split" in out
+
+    code = v3_cli.main(["shape", "--from", str(prd), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_too_large"
+    assert payload["size_bytes"] == v3_cli._PRD_SOURCE_MAX_BYTES + 1
+    assert payload["limit_bytes"] == v3_cli._PRD_SOURCE_MAX_BYTES
+
+
+def test_shape_from_prd_invalid_utf8_file_still_reports_read_failed(tmp_path, capsys):
+    prd = tmp_path / "binary.md"
+    prd.write_bytes(b"\xff\xfe\x00\x80")
+    code = v3_cli.main(["shape", "--from", str(prd), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_read_failed"
+    assert payload["path"] == str(prd)
+
+
+def test_shape_from_prd_valid_utf8_control_bytes_refused_before_seed(tmp_path, capsys, monkeypatch):
+    def fail_seed(*args, **kwargs):
+        pytest.fail("seed_scope_from_prd must not run for control-byte PRD content")
+
+    monkeypatch.setattr(v3_cli.v3_shaping, "seed_scope_from_prd", fail_seed)
+    prd = tmp_path / "binary.md"
+    prd.write_bytes(b"## User registration flow\nBuild registration.\x00Still valid UTF-8.\n")
+    code = v3_cli.main(["shape", "--from", str(prd), "--confirm", "--root", str(tmp_path), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_binary_content"
+    assert payload["path"] == str(prd)
+    assert payload["codepoint"] == "U+0000"
+    assert not (tmp_path / v3_cli.SCOPES_SUBDIR).exists()
+
+
+def test_shape_from_prd_non_regular_path_refused_before_seed(tmp_path, capsys, monkeypatch):
+    def fail_seed(*args, **kwargs):
+        pytest.fail("seed_scope_from_prd must not run for non-regular PRD paths")
+
+    monkeypatch.setattr(v3_cli.v3_shaping, "seed_scope_from_prd", fail_seed)
+    prd_dir = tmp_path / "prd-dir"
+    prd_dir.mkdir()
+    code = v3_cli.main(["shape", "--from", str(prd_dir), "--confirm", "--root", str(tmp_path), "--json"])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "prd_not_regular"
+    assert payload["path"] == str(prd_dir)
+    assert not (tmp_path / v3_cli.SCOPES_SUBDIR).exists()
+
+
+def test_shape_from_prd_confirm_refuses_invalid_scope_id(tmp_path, capsys):
+    prd = tmp_path / "onboarding.md"
+    prd.write_text("## User registration flow\nBuild registration.\n", encoding="utf-8")
+    code = v3_cli.main([
+        "shape", "BAD ID", "--from", str(prd), "--confirm", "--root", str(tmp_path), "--json",
+    ])
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "invalid_scope_id"
+    assert payload["scope_id"] == "BAD ID"
+    assert not (tmp_path / v3_cli.SCOPES_SUBDIR).exists()
+
+
 # ---------------------------------------------------------------------------
 # classification — v3-classified, additive, distinct entry (no v1 import)
 # ---------------------------------------------------------------------------

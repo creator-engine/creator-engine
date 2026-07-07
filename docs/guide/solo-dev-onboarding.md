@@ -110,6 +110,16 @@ the agent reaches for something privileged, such as source-host mutation or
 credential access. CE refuses or holds that action outside the agent and tells
 you why.
 
+If you arrive with an existing PRD or requirements document, start Shape from
+that context instead of retyping it:
+
+```bash
+ce shape --from docs/prd/onboarding.md
+```
+
+CE previews one first Scope, cites `Source PRD: docs/prd/onboarding.md`, and
+waits for explicit confirmation before it records anything.
+
 For the in-product vocabulary tour, run:
 
 ```bash

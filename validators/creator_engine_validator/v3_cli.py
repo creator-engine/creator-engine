@@ -58,6 +58,7 @@ import re
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -142,6 +143,11 @@ _BRAND = "◆ CE"  # ◆ CE
 #: (the pilot installs v3-only; the 7E installer exposes this CLI as ``ce``). The
 #: internal console_script is ``cev3`` (monorepo coexistence only) — never shown.
 CE_CMD = "ce"
+
+#: Bound PRD context reads for ``ce shape --from`` so huge source documents fail
+#: with a teaching refusal before the CLI attempts to decode the whole file.
+_PRD_SOURCE_MAX_BYTES = 512 * 1024
+_PRD_ALLOWED_CONTROL_CHARS = {"\t", "\n", "\r"}
 
 #: In-product help — the SEED of the in-product guide (content reused from
 #: ``docs/guide/understanding-ce.md``, not re-authored). ``ce guide`` prints it.
@@ -2711,15 +2717,114 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return _emit(args, 0, lines, payload)
 
 
+def _first_prd_control_char(text: str) -> tuple[int, str] | None:
+    for idx, char in enumerate(text):
+        codepoint = ord(char)
+        if char in _PRD_ALLOWED_CONTROL_CHARS:
+            continue
+        if codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
+            return idx, f"U+{codepoint:04X}"
+    return None
+
+
+def _read_prd_source(args: argparse.Namespace, source_path: Path) -> tuple[int, str | None]:
+    try:
+        prd_stat = source_path.stat()
+        if not stat.S_ISREG(prd_stat.st_mode):
+            return (
+                _emit(
+                    args,
+                    2,
+                    [f"{_BRAND} · shape refused: PRD {args.from_path!r} is not a regular file."],
+                    {"error": "prd_not_regular", "path": args.from_path},
+                ),
+                None,
+            )
+        prd_size = prd_stat.st_size
+        if prd_size > _PRD_SOURCE_MAX_BYTES:
+            return (
+                _emit(
+                    args,
+                    2,
+                    [
+                        f"{_BRAND} · shape refused: PRD {args.from_path!r} is too large "
+                        f"({prd_size} bytes; limit {_PRD_SOURCE_MAX_BYTES}). Trim it to one slice "
+                        "or split it into smaller PRDs, then run shape again."
+                    ],
+                    {
+                        "error": "prd_too_large",
+                        "path": args.from_path,
+                        "size_bytes": prd_size,
+                        "limit_bytes": _PRD_SOURCE_MAX_BYTES,
+                    },
+                ),
+                None,
+            )
+        prd_text = source_path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        return (
+            _emit(
+                args,
+                2,
+                [f"{_BRAND} · shape refused: could not read PRD {args.from_path!r}: {exc}"],
+                {"error": "prd_read_failed", "path": args.from_path, "detail": str(exc)},
+            ),
+            None,
+        )
+
+    control = _first_prd_control_char(prd_text)
+    if control is not None:
+        offset, codepoint = control
+        return (
+            _emit(
+                args,
+                2,
+                [
+                    f"{_BRAND} · shape refused: PRD {args.from_path!r} contains binary/control-byte "
+                    f"content at text offset {offset} ({codepoint}). Provide a plain UTF-8 text PRD."
+                ],
+                {
+                    "error": "prd_binary_content",
+                    "path": args.from_path,
+                    "offset": offset,
+                    "codepoint": codepoint,
+                },
+            ),
+            None,
+        )
+    return 0, prd_text
+
+
 def _cmd_shape(args: argparse.Namespace) -> int:
     """Run the Frame→Shape grill-me over a partial draft (gaps + minimum questions).
 
     The agent drafts the command-line Scope fields. Surfaces the
     gap-aware Scope card, the minimum questions to close, and (with --persona +
-    --signal) the detect-and-offer decision. A pure dialogue helper — it does not
-    write a Scope artifact (that is `ce scope` once the gaps are closed).
+    --signal) the detect-and-offer decision. By default this is a dialogue
+    helper and writes nothing; `--from <path> --confirm` is the explicit
+    confirmation path that records the shaped draft Scope with its source note.
     """
-    draft: dict[str, Any] = {"scope_id": args.scope_id}
+    prd_seed: v3_shaping.PrdScopeSeed | None = None
+    if args.from_path:
+        source_path = Path(args.from_path)
+        read_code, prd_text = _read_prd_source(args, source_path)
+        if read_code != 0:
+            return read_code
+        assert prd_text is not None
+        prd_seed = v3_shaping.seed_scope_from_prd(prd_text, args.from_path)
+        draft = dict(prd_seed.draft)
+        if args.scope_id:
+            draft["scope_id"] = args.scope_id
+    else:
+        if not args.scope_id:
+            return _emit(
+                args,
+                2,
+                [f"{_BRAND} · shape refused: provide a Scope ID or --from <path>"],
+                {"error": "missing_scope_id"},
+            )
+        draft = {"scope_id": args.scope_id}
+
     if args.goal:
         draft["intent"] = args.goal
     if args.done_when:
@@ -2728,14 +2833,81 @@ def _cmd_shape(args: argparse.Namespace) -> int:
         draft["mutation_class"] = args.change_type
     # Budget is intentionally not part of the default terminal-teaching path.
     result = v3_shaping.shape(draft)
-    lines = [result.card]
+    lines: list[str]
+    if prd_seed is not None:
+        source_note = prd_seed.source_note
+        lines = [
+            f"{_BRAND} · Reading PRD: {args.from_path}",
+            f"{_BRAND} · Identified first candidate slice: {prd_seed.candidate_slice!r}",
+            f"{_BRAND} · Running shape grill for one bounded Scope",
+            f"Goal: [inferred] {draft.get('intent')}",
+        ]
+        ac = draft.get("acceptance_criteria") or []
+        if ac:
+            lines.append(f"Done-when: [inferred] {len(ac)} criterion/criteria")
+            for criterion in ac:
+                lines.append(f"    - {criterion}")
+        else:
+            lines.append("Done-when: [gap] PRD does not specify acceptance criteria for this slice")
+        lines.append(f"Change-type: [inferred] {draft.get('mutation_class')}")
+        lines.append(f"{source_note}  (will be auto-cited in the Scope note)")
+        if any(g.field == "appetite" for g in result.gaps):
+            lines.append("Budget: [later] set the cap when you are ready to ratify the Scope")
+        lines.append(f"{_BRAND} · PRD is context; it does not authorize Build")
+    else:
+        source_note = None
+        lines = [result.card]
+
     if result.gaps:
-        lines.append(f"{_BRAND} · to reach Ready, close {len(result.gaps)} gap(s):")
+        if prd_seed is None:
+            lines.append(f"{_BRAND} · to reach Ready, close {len(result.gaps)} gap(s):")
         for g in result.gaps:
+            if prd_seed is not None and g.field == "appetite":
+                continue
             who = "  (your call — Budget is yours to set)" if g.human_only else ""
             lines.append(f"    - {g.label}: {g.question}{who}")
     else:
-        lines.append(f"{_BRAND} · Ready — ratify with `{CE_CMD} ratify {args.scope_id}`")
+        lines.append(f"{_BRAND} · Ready — ratify with `{CE_CMD} ratify {draft['scope_id']}`")
+
+    recorded_path: str | None = None
+    if args.confirm:
+        if prd_seed is None:
+            return _emit(
+                args,
+                2,
+                [f"{_BRAND} · shape refused: --confirm is only available with --from <path>"],
+                {"error": "confirm_requires_from"},
+            )
+        if not _SCOPE_ID_RE.match(str(draft.get("scope_id", ""))):
+            return _emit(
+                args,
+                2,
+                [f"{_BRAND} · shape refused: inferred Scope ID {draft.get('scope_id')!r} is invalid"],
+                {"error": "invalid_scope_id", "scope_id": draft.get("scope_id")},
+            )
+        scope: dict[str, Any] = {
+            "kind": _KIND,
+            "record_type": _RECORD_TYPE,
+            "schema_version": _SCHEMA_VERSION,
+            "scope_id": draft["scope_id"],
+            "intent": draft["intent"],
+            "mutation_class": draft["mutation_class"],
+            "note": source_note,
+        }
+        if draft.get("acceptance_criteria"):
+            scope["acceptance_criteria"] = list(draft["acceptance_criteria"])
+        path = _dump_scope(Path(args.root), scope)
+        recorded_path = str(path)
+        lines.append(f"{_BRAND} · recorded confirmed Scope {draft['scope_id']!r} → {path}")
+    elif prd_seed is not None:
+        scope_arg = f" {shlex.quote(str(args.scope_id))}" if args.scope_id else ""
+        root_arg = f" --root {shlex.quote(str(args.root))}" if args.root != V3_LOCAL_STATE_ROOT else ""
+        lines.append(f"{_BRAND} · no Scope recorded yet; confirm before tracking")
+        lines.append(
+            f"{_BRAND} · confirm with: {CE_CMD} shape{scope_arg} --from "
+            f"{shlex.quote(str(args.from_path))} --confirm{root_arg}"
+        )
+
     offer = None
     if args.persona and args.signal:
         # pass the actual change-type (None when not yet proposed) so the dial
@@ -2755,9 +2927,16 @@ def _cmd_shape(args: argparse.Namespace) -> int:
     if next_hint:
         lines.append(next_hint)
     return _emit(args, 0, lines, {
-        "action": "shape", "scope_id": args.scope_id, "ready": result.ready,
+        "action": "shape", "scope_id": draft["scope_id"], "ready": result.ready,
         "gaps": [{"field": g.field, "label": g.label, "human_only": g.human_only} for g in result.gaps],
-        "questions": list(result.questions), "offer": offer, "next": next_hint,
+        "questions": list(result.questions), "offer": offer,
+        "next": next_hint,
+        "source_prd": prd_seed.source_path if prd_seed is not None else None,
+        "source_note": source_note,
+        "candidate_slice": prd_seed.candidate_slice if prd_seed is not None else None,
+        "bounded_scope_count": 1 if prd_seed is not None else None,
+        "recorded": recorded_path is not None,
+        "path": recorded_path,
     })
 
 
@@ -4496,7 +4675,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_shape = sub.add_parser("shape", help="run the Frame→Shape grill-me on a partial draft (gaps + questions)")
-    p_shape.add_argument("scope_id", metavar="ID", help="working Scope slug")
+    p_shape.add_argument("scope_id", metavar="ID", nargs="?", help="working Scope slug")
+    p_shape.add_argument("--from", dest="from_path", default=None, metavar="PATH",
+                         help="read an existing PRD/requirements doc as context for one bounded Scope")
     p_shape.add_argument("--goal", default=None, help="Goal (intent) — agent-draftable")
     p_shape.add_argument("--done-when", action="append", default=[], metavar="CRITERION",
                          help="a Done-when criterion (repeatable) — agent-draftable")
@@ -4506,6 +4687,10 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="persona for the detect-and-offer dial")
     p_shape.add_argument("--signal", default=None, choices=list(v3_shaping.SIGNAL_ORDER),
                          help="detected intent-to-act signal strength (for the dial)")
+    p_shape.add_argument("--confirm", action="store_true",
+                         help="with --from, record the shaped draft Scope and Source PRD note")
+    p_shape.add_argument("--root", default=V3_LOCAL_STATE_ROOT,
+                         help=f"v3 local-state root used only when --confirm records a Scope (default: {V3_LOCAL_STATE_ROOT})")
     p_shape.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_install = sub.add_parser(
