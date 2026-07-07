@@ -1,4 +1,4 @@
-# PR path manifest - ticket 479 - harness parity-by-layer matrix
+# PR path manifest — ticket 479 · harness parity-by-layer matrix
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-479-parity-matrix` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=15
+AUTHORIZED_PATHS_COUNT=16
 
-AUTHORIZED_PATHS_SHA256=80de44637556a3013d105b7dfd2554da9905d2ba5d7b381017056e2ba11e5078
+AUTHORIZED_PATHS_SHA256=b44eb5321732d87665d3833400461993836dca45ae9ab0dc05a748595bda870d
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-479-parity-matrix.md
 .ce/pr-manifests/ce-479-parity-matrix.md
 .github/workflows/validate.yml
