@@ -1578,14 +1578,14 @@ records:
 - claim:
     details: The authoring controller must not approve its own PR; review evidence
       comes from a distinct governed reviewer venue.
-    evidence_sha256: 5f9b9b950b40e4cd05c22fe65a8415203b6ee6310330e80c3a33f0db46de0de0
+    evidence_sha256: 445011e894e206de9d4f49e36257d84eaed5b2cdb37f987794c9f544c5ab0363
     item: 13
     object: distinct-reviewer-venue
     predicate: asserts
     refs:
     - .claude/agents/reviewer.md
     subject: doctrine-item
-  content_hash: 391fae6befe77327a1d9458ee8acce263870b8651f9ed4a5f91daa5205535f76
+  content_hash: b4a3a6abcab6679278ee12a0c256c34cec0fa7c55a2a4b69f353d15140886cfb
   evidence_ref: docs/operations/REVIEWER_VENUE_AUTHORITY.md
   id: brain-assertion-d1b-13-distinct-reviewer-venue-v2
   kind: brain-assertion
@@ -1609,11 +1609,11 @@ records:
     object: reviewer-readonly-prepared-worktree
     predicate: asserts
     subject: doctrine-item
-  content_hash: d9492cf75f71f6ee5354ccafb3d2d99c1cd718622cbedd4d8123a2783eca1af7
+  content_hash: 1c5a175db11a1e728a18a06a83119b221db14537104cd1c1c37b0aa4bec5a7f9
   evidence_ref: .claude/agents/reviewer.md
   id: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree
   kind: brain-assertion
-  prev_hash: 391fae6befe77327a1d9458ee8acce263870b8651f9ed4a5f91daa5205535f76
+  prev_hash: b4a3a6abcab6679278ee12a0c256c34cec0fa7c55a2a4b69f353d15140886cfb
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1634,11 +1634,11 @@ records:
     object: reviewer-readonly-prepared-worktree
     predicate: asserts
     subject: doctrine-item
-  content_hash: 903ab8b451433e82b9f90a1dd3db8fb6202b31585ef29119a5ddc02490f3afa0
+  content_hash: ae627ef4d5c85b17bea1af0e044210fb5cea5d3374108576a4f9f1383c902898
   evidence_ref: .claude/agents/reviewer.md
   id: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree-v2
   kind: brain-assertion
-  prev_hash: d9492cf75f71f6ee5354ccafb3d2d99c1cd718622cbedd4d8123a2783eca1af7
+  prev_hash: 1c5a175db11a1e728a18a06a83119b221db14537104cd1c1c37b0aa4bec5a7f9
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1661,11 +1661,11 @@ records:
     - .github/scripts/ceops_autoclose.py
     - tools/ce-ops-autoclose/parse_issue_refs.py
     subject: doctrine-item
-  content_hash: 40cdff52c53347e63011ae4ef881192e9539c69575672d806f6d98e0aed941df
+  content_hash: ac3a940062490e869ff57ce9e23acb951357eb8bfe1d714d5c150c4e541992b4
   evidence_ref: .github/workflows/ce-ops-autoclose.yml
   id: brain-assertion-d1b-16-cross-repo-closes-bot
   kind: brain-assertion
-  prev_hash: 903ab8b451433e82b9f90a1dd3db8fb6202b31585ef29119a5ddc02490f3afa0
+  prev_hash: ae627ef4d5c85b17bea1af0e044210fb5cea5d3374108576a4f9f1383c902898
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1689,11 +1689,11 @@ records:
     - .github/scripts/ceops_autoclose.py
     - tools/ce-ops-autoclose/parse_issue_refs.py
     subject: doctrine-item
-  content_hash: 5a804f3c8151cdda0867e066c565894a7d24c1dabdf5cad6b9be503c29dd9852
+  content_hash: 433926828ff8e6e40e7e0de715a60aa47351b322ab246645d240de9dd8b87862
   evidence_ref: .github/workflows/ce-ops-autoclose.yml
   id: brain-assertion-d1b-16-cross-repo-closes-bot-v2
   kind: brain-assertion
-  prev_hash: 40cdff52c53347e63011ae4ef881192e9539c69575672d806f6d98e0aed941df
+  prev_hash: ac3a940062490e869ff57ce9e23acb951357eb8bfe1d714d5c150c4e541992b4
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1716,11 +1716,11 @@ records:
     - validators/creator_engine_validator/hook_check.py
     - validators/creator_engine_validator/runner/ring1_tool_guard.py
     subject: doctrine-item
-  content_hash: 62ea695f70ae362eef1fae0b67c57376d712443ebbb5e9ae0fe54bea1e5d714d
+  content_hash: 050b9b551cc4f8ec1d28d59856125d3f360205f232ac89f90e1e13e75e6de004
   evidence_ref: .claude/hooks/ce-pretooluse.sh
   id: brain-assertion-d1b-17-ring1-worker-push-block
   kind: brain-assertion
-  prev_hash: 5a804f3c8151cdda0867e066c565894a7d24c1dabdf5cad6b9be503c29dd9852
+  prev_hash: 433926828ff8e6e40e7e0de715a60aa47351b322ab246645d240de9dd8b87862
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1744,11 +1744,11 @@ records:
     - validators/creator_engine_validator/hook_check.py
     - validators/creator_engine_validator/runner/ring1_tool_guard.py
     subject: doctrine-item
-  content_hash: d63a22db74289c0a19c4a08a6694a8e9cb96ed4be5636144df2c4769fa559bb3
+  content_hash: 5d3cc93ff4822f95052689bb27bb0c7e7f9f8cf5ab1ec4becba9ec039d16291d
   evidence_ref: .claude/hooks/ce-pretooluse.sh
   id: brain-assertion-d1b-17-ring1-worker-push-block-v2
   kind: brain-assertion
-  prev_hash: 62ea695f70ae362eef1fae0b67c57376d712443ebbb5e9ae0fe54bea1e5d714d
+  prev_hash: 050b9b551cc4f8ec1d28d59856125d3f360205f232ac89f90e1e13e75e6de004
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1771,11 +1771,11 @@ records:
     refs:
     - validators/creator_engine_validator/release_publish.py
     subject: doctrine-item
-  content_hash: 63dc1a5655b477f0b7022547183d26d3fe5d0714a31e9be6576b6ee5e679aa1a
+  content_hash: 25b4797d64c9007e1917852cd2304ff8c6e69608c51e19d18b66b9ee084fda8a
   evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
   id: brain-assertion-d1b-18-install-spec-resign-controller-root
   kind: brain-assertion
-  prev_hash: d63a22db74289c0a19c4a08a6694a8e9cb96ed4be5636144df2c4769fa559bb3
+  prev_hash: 5d3cc93ff4822f95052689bb27bb0c7e7f9f8cf5ab1ec4becba9ec039d16291d
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1800,11 +1800,11 @@ records:
     refs:
     - validators/creator_engine_validator/release_publish.py
     subject: doctrine-item
-  content_hash: c8e4cc8770b7b8dd71decd864da58ba15a6d273a805b7371906c562b290ef2a2
+  content_hash: ac1f24dd89b0481fc485d5a1e31e57c6cf9bb2e0ad7848085a950f5f38c16d06
   evidence_ref: validators/creator_engine_validator/checks/install_spec_signature_guard.py
   id: brain-assertion-d1b-18-install-spec-resign-controller-root-v2
   kind: brain-assertion
-  prev_hash: 63dc1a5655b477f0b7022547183d26d3fe5d0714a31e9be6576b6ee5e679aa1a
+  prev_hash: 25b4797d64c9007e1917852cd2304ff8c6e69608c51e19d18b66b9ee084fda8a
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1828,11 +1828,11 @@ records:
     refs:
     - validators/creator_engine_validator/pr_preflight.py
     subject: doctrine-item
-  content_hash: e5b9bc51d9e85e4961efae7263fdfeef6765bc7149288ea0fbdea316aa024a98
+  content_hash: 54e862f5a3b676a797f88bb9c4c0ebe5cff1a3668b9533d352cd3d3d51d3f4d0
   evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
   id: brain-assertion-d1b-19-brain-drift-state-reconcile
   kind: brain-assertion
-  prev_hash: c8e4cc8770b7b8dd71decd864da58ba15a6d273a805b7371906c562b290ef2a2
+  prev_hash: ac1f24dd89b0481fc485d5a1e31e57c6cf9bb2e0ad7848085a950f5f38c16d06
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1857,11 +1857,11 @@ records:
     refs:
     - validators/creator_engine_validator/pr_preflight.py
     subject: doctrine-item
-  content_hash: 86aaa3fa4d7b76bd04a35e40726d89f430f2b2b4d96161c35fc9151bbf5436a0
+  content_hash: 2eaf9f66c67adb1889fec1715b6a253cae12048e76a38e9b55a0088d2c06c1dd
   evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
   id: brain-assertion-d1b-19-brain-drift-state-reconcile-v2
   kind: brain-assertion
-  prev_hash: e5b9bc51d9e85e4961efae7263fdfeef6765bc7149288ea0fbdea316aa024a98
+  prev_hash: 54e862f5a3b676a797f88bb9c4c0ebe5cff1a3668b9533d352cd3d3d51d3f4d0
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1887,11 +1887,11 @@ records:
     - .claude/agents/verification.md
     - .claude/agents/reviewer.md
     subject: doctrine-item
-  content_hash: 4a2c82aa110993c67924c3282eaa28048d25f2dd807e20c1b879973db305f2ed
+  content_hash: c02b68677008727f7d1baf62e787c62de99ab74276f3dfc77ffff586ae3d9e89
   evidence_ref: .claude/agents/README.md
   id: brain-assertion-d1b-20-canonical-worker-role-files
   kind: brain-assertion
-  prev_hash: 86aaa3fa4d7b76bd04a35e40726d89f430f2b2b4d96161c35fc9151bbf5436a0
+  prev_hash: 2eaf9f66c67adb1889fec1715b6a253cae12048e76a38e9b55a0088d2c06c1dd
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1917,11 +1917,11 @@ records:
     - .claude/agents/verification.md
     - .claude/agents/reviewer.md
     subject: doctrine-item
-  content_hash: 8094f3dd4009a823952efc3291badab9ac53974c0f51723500a5f7e465d438d3
+  content_hash: 14a7d63cd307801fa3d8b04f596a60ccb390817f99ab7890588892e8ee3e721e
   evidence_ref: .claude/agents/README.md
   id: brain-assertion-d1b-20-canonical-worker-role-files-v2
   kind: brain-assertion
-  prev_hash: 4a2c82aa110993c67924c3282eaa28048d25f2dd807e20c1b879973db305f2ed
+  prev_hash: c02b68677008727f7d1baf62e787c62de99ab74276f3dfc77ffff586ae3d9e89
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1943,11 +1943,11 @@ records:
     refs:
     - playbooks/controller/briefs/dispatch.md
     subject: doctrine-item
-  content_hash: 8f687af1751ff4cd5612df0a9b0d19d287be57d4812f1d02c8c9a2c3b2bb6c0f
+  content_hash: 262696840667809087998acd871780c63f707418760c8f044fea245437bf2b0f
   evidence_ref: .claude/skills/ce-dispatch/SKILL.md
   id: brain-assertion-d1b-22-dispatch-territory-check
   kind: brain-assertion
-  prev_hash: 8094f3dd4009a823952efc3291badab9ac53974c0f51723500a5f7e465d438d3
+  prev_hash: 14a7d63cd307801fa3d8b04f596a60ccb390817f99ab7890588892e8ee3e721e
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1970,11 +1970,11 @@ records:
     refs:
     - playbooks/controller/briefs/dispatch.md
     subject: doctrine-item
-  content_hash: de4a77a62eecb12c6590f622972d1e94c7b2ac955ada969dd4bdc720146d7506
+  content_hash: 76b43beb0b0c2f70b893c8603ca61802a5b86783f113d8034fd3a11d8c2042cc
   evidence_ref: .claude/skills/ce-dispatch/SKILL.md
   id: brain-assertion-d1b-22-dispatch-territory-check-v2
   kind: brain-assertion
-  prev_hash: 8f687af1751ff4cd5612df0a9b0d19d287be57d4812f1d02c8c9a2c3b2bb6c0f
+  prev_hash: 262696840667809087998acd871780c63f707418760c8f044fea245437bf2b0f
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -1994,11 +1994,11 @@ records:
     object: harvest-requires-commit-sha
     predicate: asserts
     subject: doctrine-item
-  content_hash: 7158c27c5e016b8af6df296dd65a1f05cd6288e1cd6561c66c45d158fb71a786
+  content_hash: 45e8bb460eff94019325cccec3b57ffb4546c27703d578af5de7d8a43a185ab9
   evidence_ref: playbooks/controller/briefs/harvest.md
   id: brain-assertion-d1b-25-harvest-requires-commit-sha
   kind: brain-assertion
-  prev_hash: de4a77a62eecb12c6590f622972d1e94c7b2ac955ada969dd4bdc720146d7506
+  prev_hash: 76b43beb0b0c2f70b893c8603ca61802a5b86783f113d8034fd3a11d8c2042cc
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2019,11 +2019,11 @@ records:
     object: harvest-requires-commit-sha
     predicate: asserts
     subject: doctrine-item
-  content_hash: e8a3ab336b4f78ff64c78fdd8e3d1155f353350bdbc1af680f7c6a9a62c68c68
+  content_hash: d473bdc2eecc7ee3656612e76f7b26f507e2f7fa398f195263e82935de67f68d
   evidence_ref: playbooks/controller/briefs/harvest.md
   id: brain-assertion-d1b-25-harvest-requires-commit-sha-v2
   kind: brain-assertion
-  prev_hash: 7158c27c5e016b8af6df296dd65a1f05cd6288e1cd6561c66c45d158fb71a786
+  prev_hash: 45e8bb460eff94019325cccec3b57ffb4546c27703d578af5de7d8a43a185ab9
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2045,11 +2045,11 @@ records:
     refs:
     - .claude/agents/README.md
     subject: doctrine-item
-  content_hash: 4eb25a28cdf200a95a25a41ad5b09017a2237b4f167315730216db36ec534bf7
+  content_hash: 288fd8220b6a9dca6fe64fb1b5864e4cbfaa55c63196215eeab3399993d2e5b6
   evidence_ref: docs/contracts/forge-persona-catalog.md
   id: brain-assertion-d1b-28-role-scoped-dispatch-no-agent
   kind: brain-assertion
-  prev_hash: e8a3ab336b4f78ff64c78fdd8e3d1155f353350bdbc1af680f7c6a9a62c68c68
+  prev_hash: d473bdc2eecc7ee3656612e76f7b26f507e2f7fa398f195263e82935de67f68d
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2072,11 +2072,11 @@ records:
     refs:
     - .claude/agents/README.md
     subject: doctrine-item
-  content_hash: 521c9d22154161e6da8814fbe7cc685ea424bd125448facb5724abfff6e852a3
+  content_hash: 1673c658d24ffea97cbbe8f781b01b7f67f667e8d993e080c68573e2da19fee3
   evidence_ref: docs/contracts/forge-persona-catalog.md
   id: brain-assertion-d1b-28-role-scoped-dispatch-no-agent-v2
   kind: brain-assertion
-  prev_hash: 4eb25a28cdf200a95a25a41ad5b09017a2237b4f167315730216db36ec534bf7
+  prev_hash: 288fd8220b6a9dca6fe64fb1b5864e4cbfaa55c63196215eeab3399993d2e5b6
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2096,11 +2096,11 @@ records:
     object: contained-not-airgapped
     predicate: asserts
     subject: doctrine-item
-  content_hash: aa590ef6dad344560db3df75da1032762f88ff5d479cd0bb46bdb957c9eda5a4
+  content_hash: c6ed83fb3af8fd9bd03a60e21177c9212ef049ad43b2660e4a293a3171d3eb15
   evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
   id: brain-assertion-d1b-30-contained-not-airgapped
   kind: brain-assertion
-  prev_hash: 521c9d22154161e6da8814fbe7cc685ea424bd125448facb5724abfff6e852a3
+  prev_hash: 1673c658d24ffea97cbbe8f781b01b7f67f667e8d993e080c68573e2da19fee3
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2121,11 +2121,11 @@ records:
     object: contained-not-airgapped
     predicate: asserts
     subject: doctrine-item
-  content_hash: 7139de936b00af683d12c2d0117697a016e87c0907d78aa83ec478145db1253f
+  content_hash: f273a733aa62bf96b513f50b4ad21739cc4b39b53534a6f1b0276e31d323cde4
   evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
   id: brain-assertion-d1b-30-contained-not-airgapped-v2
   kind: brain-assertion
-  prev_hash: aa590ef6dad344560db3df75da1032762f88ff5d479cd0bb46bdb957c9eda5a4
+  prev_hash: c6ed83fb3af8fd9bd03a60e21177c9212ef049ad43b2660e4a293a3171d3eb15
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2146,11 +2146,11 @@ records:
     object: canonical-seat-launch-only
     predicate: asserts
     subject: doctrine-item
-  content_hash: 82b61a8a26fd5266fceb45a0be068d8a5becd2cabc07a2209caea2a9016efb4e
+  content_hash: 343c39f36f6ca732512d1fde13999fe32547024780e3d046cd6fcfe1584fc0c6
   evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
   id: brain-assertion-d1b-33-canonical-seat-launch-only
   kind: brain-assertion
-  prev_hash: 7139de936b00af683d12c2d0117697a016e87c0907d78aa83ec478145db1253f
+  prev_hash: f273a733aa62bf96b513f50b4ad21739cc4b39b53534a6f1b0276e31d323cde4
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2172,11 +2172,11 @@ records:
     object: canonical-seat-launch-only
     predicate: asserts
     subject: doctrine-item
-  content_hash: aad542f88cc9a4820200c5fa19c1243eeb7251a03f5ce83b1e83a46b0690e088
+  content_hash: efadc25f2773304b154354b584a5017eea17c96f7fe9baa82c98afa1edec4ad9
   evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
   id: brain-assertion-d1b-33-canonical-seat-launch-only-v3
   kind: brain-assertion
-  prev_hash: 82b61a8a26fd5266fceb45a0be068d8a5becd2cabc07a2209caea2a9016efb4e
+  prev_hash: 343c39f36f6ca732512d1fde13999fe32547024780e3d046cd6fcfe1584fc0c6
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2198,11 +2198,11 @@ records:
     refs:
     - docs/contracts/peer-authority.md
     subject: doctrine-item
-  content_hash: 197411821814b5281d427dd97417f145367e0f9da6d9047117d584f0971a3640
+  content_hash: c29682af71ca36b8047d4ed9f0657b4592b1327fbedb59c91ed314e1fbfd4480
   evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
   id: brain-assertion-d1b-34-containment-not-authority-tier
   kind: brain-assertion
-  prev_hash: aad542f88cc9a4820200c5fa19c1243eeb7251a03f5ce83b1e83a46b0690e088
+  prev_hash: efadc25f2773304b154354b584a5017eea17c96f7fe9baa82c98afa1edec4ad9
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2225,11 +2225,11 @@ records:
     refs:
     - docs/contracts/peer-authority.md
     subject: doctrine-item
-  content_hash: a1fee8809e869139d9a1f13c19e78b33046d6da043be6d98b3821019dda83bdd
+  content_hash: d78fcb715f9f3bb6e0f07b2fea3b4d0718959f00a665263891f56d7693f56f84
   evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
   id: brain-assertion-d1b-34-containment-not-authority-tier-v2
   kind: brain-assertion
-  prev_hash: 197411821814b5281d427dd97417f145367e0f9da6d9047117d584f0971a3640
+  prev_hash: c29682af71ca36b8047d4ed9f0657b4592b1327fbedb59c91ed314e1fbfd4480
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2252,11 +2252,11 @@ records:
     refs:
     - validators/creator_engine_validator/hook_check.py
     subject: doctrine-item
-  content_hash: 24b4ae962efc6049c05ac67822e3b82a10963edfbabfb1787586026ce0760a59
+  content_hash: 95a26ae810e85344c05db6c4e50260f2e2bbe2f53c5d297923ce15c673ba339d
   evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
   id: brain-assertion-d1b-35-peer-authority-substrate-independent
   kind: brain-assertion
-  prev_hash: a1fee8809e869139d9a1f13c19e78b33046d6da043be6d98b3821019dda83bdd
+  prev_hash: d78fcb715f9f3bb6e0f07b2fea3b4d0718959f00a665263891f56d7693f56f84
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2281,11 +2281,11 @@ records:
     refs:
     - validators/creator_engine_validator/hook_check.py
     subject: doctrine-item
-  content_hash: 13bd1490fb56bbbda2c495e71e380920bbec42fc2f934aca5e654e83646cd5ca
+  content_hash: 96e958902cee1f8221744b2f5e7715ae4c16b5b3952fc2684dfb50446c44cd45
   evidence_ref: docs/decisions/ADR-0013-substrate-independent-authority.md
   id: brain-assertion-d1b-35-peer-authority-substrate-independent-v2
   kind: brain-assertion
-  prev_hash: 24b4ae962efc6049c05ac67822e3b82a10963edfbabfb1787586026ce0760a59
+  prev_hash: 95a26ae810e85344c05db6c4e50260f2e2bbe2f53c5d297923ce15c673ba339d
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2309,11 +2309,11 @@ records:
     - validators/creator_engine_validator/seat_class.py
     - validators/creator_engine_validator/brain_bootstrap.py
     subject: doctrine-item
-  content_hash: b766fd74643fb7d730fb2980807cb35d3723fd1be9b43dc8e6654e334b9d4c57
+  content_hash: 6d07a89373b3426b43b93b25dff92a13c0513005873fb64c8ea53d628605b779
   evidence_ref: docs/contracts/seat-class-policy.md
   id: brain-assertion-d1b-36-foreman-delegates-implementation
   kind: brain-assertion
-  prev_hash: 13bd1490fb56bbbda2c495e71e380920bbec42fc2f934aca5e654e83646cd5ca
+  prev_hash: 96e958902cee1f8221744b2f5e7715ae4c16b5b3952fc2684dfb50446c44cd45
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2337,11 +2337,11 @@ records:
     - validators/creator_engine_validator/seat_class.py
     - validators/creator_engine_validator/brain_bootstrap.py
     subject: doctrine-item
-  content_hash: d0820bf146159628d3bd26e70cac23ed50e7a919163b48e014ed694854216438
+  content_hash: d1eca50c17237b905e2843a0ffbaeb0413f8d1215a2da4602d67bd85f2fb67ba
   evidence_ref: docs/contracts/seat-class-policy.md
   id: brain-assertion-d1b-36-foreman-delegates-implementation-v2
   kind: brain-assertion
-  prev_hash: b766fd74643fb7d730fb2980807cb35d3723fd1be9b43dc8e6654e334b9d4c57
+  prev_hash: 6d07a89373b3426b43b93b25dff92a13c0513005873fb64c8ea53d628605b779
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2363,11 +2363,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: 57b0b7457ab2c2f5152fbe604020e09d6bcc69bf37d0675546455dfb7871375d
+  content_hash: 66614d23f835a66e3d8f39deb911c1c1764a29b0f0a40220a155fdbb6c0410f1
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running
   kind: brain-assertion
-  prev_hash: d0820bf146159628d3bd26e70cac23ed50e7a919163b48e014ed694854216438
+  prev_hash: d1eca50c17237b905e2843a0ffbaeb0413f8d1215a2da4602d67bd85f2fb67ba
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2390,11 +2390,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: 154927b03e4ca5a3bd75c9771f822b771f85f40685783b4cef074353e01b14cc
+  content_hash: ebc348a1499e16a06647352062bff6c2eb8d9b7274ca201b05862cc6884253fd
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v2
   kind: brain-assertion
-  prev_hash: 57b0b7457ab2c2f5152fbe604020e09d6bcc69bf37d0675546455dfb7871375d
+  prev_hash: 66614d23f835a66e3d8f39deb911c1c1764a29b0f0a40220a155fdbb6c0410f1
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2414,11 +2414,11 @@ records:
     object: pythonpath-install-bootstrap-footgun
     predicate: asserts
     subject: doctrine-item
-  content_hash: 0cca5fd8e745e8793938556bb0e499cf15b75b45654f36cbeca64ce03c69977b
+  content_hash: 0aa2c259cb6ee496d07e2b0ad6399672791ba3c4ddbcdac0fd434e263738d545
   evidence_ref: validators/tests/integration/test_install_bootstrap.py
   id: brain-assertion-d1b-40-pythonpath-install-bootstrap-footgun
   kind: brain-assertion
-  prev_hash: 154927b03e4ca5a3bd75c9771f822b771f85f40685783b4cef074353e01b14cc
+  prev_hash: ebc348a1499e16a06647352062bff6c2eb8d9b7274ca201b05862cc6884253fd
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2439,11 +2439,11 @@ records:
     object: pythonpath-install-bootstrap-footgun
     predicate: asserts
     subject: doctrine-item
-  content_hash: cfced3c8339b2d41a94e1b48dc358b143fcfb0c596dd6c61ef66c6e111226ae4
+  content_hash: b06cacd5c1a7215699740ed6a16b19fad4d62d11fa8fbb5a5f100358c8a3ce5a
   evidence_ref: validators/tests/integration/test_install_bootstrap.py
   id: brain-assertion-d1b-40-pythonpath-install-bootstrap-footgun-v2
   kind: brain-assertion
-  prev_hash: 0cca5fd8e745e8793938556bb0e499cf15b75b45654f36cbeca64ce03c69977b
+  prev_hash: 0aa2c259cb6ee496d07e2b0ad6399672791ba3c4ddbcdac0fd434e263738d545
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2463,11 +2463,11 @@ records:
     object: hashes-must-be-recomputed
     predicate: asserts
     subject: doctrine-item
-  content_hash: b6c49739457544622cf1d83c46c800f280dc87095442ed9af10d391154de66b8
+  content_hash: 29659d80d8b7ef03e173caa67be3c4d1a14a599dd23cefcd66642bd5db9bea2b
   evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
   id: brain-assertion-d1b-41-hashes-must-be-recomputed
   kind: brain-assertion
-  prev_hash: cfced3c8339b2d41a94e1b48dc358b143fcfb0c596dd6c61ef66c6e111226ae4
+  prev_hash: b06cacd5c1a7215699740ed6a16b19fad4d62d11fa8fbb5a5f100358c8a3ce5a
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2488,11 +2488,11 @@ records:
     object: hashes-must-be-recomputed
     predicate: asserts
     subject: doctrine-item
-  content_hash: 673bf6ea89bd61af9b1c2cd2c6f27d6058140d2a45c310a0a0911d429db87225
+  content_hash: 0253e79b008f4538d0e5ecd9ab4a20274d4f0afa941c6b0a5e7283c9f3ae169c
   evidence_ref: docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md
   id: brain-assertion-d1b-41-hashes-must-be-recomputed-v2
   kind: brain-assertion
-  prev_hash: b6c49739457544622cf1d83c46c800f280dc87095442ed9af10d391154de66b8
+  prev_hash: 29659d80d8b7ef03e173caa67be3c4d1a14a599dd23cefcd66642bd5db9bea2b
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2514,11 +2514,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 456257136e6ebf7bee9cac1d0a4b1e9fc41001139ec05f0ba27b3e530f42f098
+  content_hash: b0b12e6a50defad059c3534e703bfdfac9e15fc52271cc27a316d5e5ae8d1f84
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-42-preflight-committed-clean-tree
   kind: brain-assertion
-  prev_hash: 673bf6ea89bd61af9b1c2cd2c6f27d6058140d2a45c310a0a0911d429db87225
+  prev_hash: 0253e79b008f4538d0e5ecd9ab4a20274d4f0afa941c6b0a5e7283c9f3ae169c
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2541,11 +2541,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 42719063950db35bfb319063165eedd92bf087e387f98954eab3941ce2b869f7
+  content_hash: 373f429a9625526a5a568bfcb0f3d18cec950b6c88c7bee02c38ae966b3c903f
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-42-preflight-committed-clean-tree-v2
   kind: brain-assertion
-  prev_hash: 456257136e6ebf7bee9cac1d0a4b1e9fc41001139ec05f0ba27b3e530f42f098
+  prev_hash: b0b12e6a50defad059c3534e703bfdfac9e15fc52271cc27a316d5e5ae8d1f84
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2567,11 +2567,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 847f677aa47fd53b2724fa9b66844d9540f9932607e90a5603dca9fc45bb779c
+  content_hash: dbcc8b023b6b7e9406d375d28643d003597ae22a5af5aca6ce2043e01786ab09
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-43-preflight-scrubs-credential-env
   kind: brain-assertion
-  prev_hash: 42719063950db35bfb319063165eedd92bf087e387f98954eab3941ce2b869f7
+  prev_hash: 373f429a9625526a5a568bfcb0f3d18cec950b6c88c7bee02c38ae966b3c903f
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2594,11 +2594,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: fc8c1dd869ddf1dc51fb9fb50d091889ab46fe3a61709cc55663edeca7753e49
+  content_hash: e079a91c2b71e80270a27cd3447cd6afee2ca988906f80469889400ec1e362b4
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v2
   kind: brain-assertion
-  prev_hash: 847f677aa47fd53b2724fa9b66844d9540f9932607e90a5603dca9fc45bb779c
+  prev_hash: dbcc8b023b6b7e9406d375d28643d003597ae22a5af5aca6ce2043e01786ab09
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2621,11 +2621,11 @@ records:
     refs:
     - .github/workflows/validate.yml
     subject: doctrine-item
-  content_hash: a5fa30db91149c3a5fb2d1ecb24d31b96a41484aa063a80ffeaf404fca0aad73
+  content_hash: 6459c8c20cafebdb2d4bf6625a37513e0b60ec526f3b1221783e26ed4c3dc704
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-01-local-preflight-ci-parity-v2
   kind: brain-assertion
-  prev_hash: fc8c1dd869ddf1dc51fb9fb50d091889ab46fe3a61709cc55663edeca7753e49
+  prev_hash: e079a91c2b71e80270a27cd3447cd6afee2ca988906f80469889400ec1e362b4
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2648,11 +2648,11 @@ records:
     refs:
     - .github/workflows/validate.yml
     subject: doctrine-item
-  content_hash: 33e5962f586b3e205ca5b7d0113c525e76c00a09a67fd18ce2737f41420dc643
+  content_hash: e6b97346d82d62813f0c16cb6eb66c83695a509638de1230d3b71bf384f5024b
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-01-local-preflight-ci-parity-v3
   kind: brain-assertion
-  prev_hash: a5fa30db91149c3a5fb2d1ecb24d31b96a41484aa063a80ffeaf404fca0aad73
+  prev_hash: 6459c8c20cafebdb2d4bf6625a37513e0b60ec526f3b1221783e26ed4c3dc704
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2675,11 +2675,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 23a9fe26868722ad12aff242d8ed078ca7aab38068b521b043125c7997fd3ccf
+  content_hash: 448445cfca21b0f6b42214d7ae1bb9091f4f49a16bd9a2755e790b62eddb35f9
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-42-preflight-committed-clean-tree-v2
   kind: brain-assertion
-  prev_hash: 33e5962f586b3e205ca5b7d0113c525e76c00a09a67fd18ce2737f41420dc643
+  prev_hash: e6b97346d82d62813f0c16cb6eb66c83695a509638de1230d3b71bf384f5024b
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2702,11 +2702,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 45e243c45075eb40994b57b364796ad5221de21c4bf57441a54fd151a4d63112
+  content_hash: 69e853f617549161f3d4b7cef12c3bc13af8c956272aa39e2f660801519c7b66
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-42-preflight-committed-clean-tree-v3
   kind: brain-assertion
-  prev_hash: 23a9fe26868722ad12aff242d8ed078ca7aab38068b521b043125c7997fd3ccf
+  prev_hash: 448445cfca21b0f6b42214d7ae1bb9091f4f49a16bd9a2755e790b62eddb35f9
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2729,11 +2729,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 0b60b3213c2527d2ff1799b7f261f73f98e1a2c8ffcf09fd45352e7c9a5b2eb5
+  content_hash: 3028107665761406fad3f897c77a7621a9cf7b3de1179a69055ad37f0632ecfe
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v2
   kind: brain-assertion
-  prev_hash: 45e243c45075eb40994b57b364796ad5221de21c4bf57441a54fd151a4d63112
+  prev_hash: 69e853f617549161f3d4b7cef12c3bc13af8c956272aa39e2f660801519c7b66
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2756,11 +2756,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 0ea693f2f2fe28a8d4921d9f479d90d4d60b4667b31559a93de8d54512958502
+  content_hash: 88a766c4f13c964770d79faf0d76b44821b4a688417c343c615731a93cae04d1
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v3
   kind: brain-assertion
-  prev_hash: 0b60b3213c2527d2ff1799b7f261f73f98e1a2c8ffcf09fd45352e7c9a5b2eb5
+  prev_hash: 3028107665761406fad3f897c77a7621a9cf7b3de1179a69055ad37f0632ecfe
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2781,11 +2781,11 @@ records:
     object: merge-queue-conflict-gate
     predicate: asserts
     subject: doctrine-item
-  content_hash: 96d5a6922a871523e0772bfa92e7b6da2627ff809b460916b603c315a20c8ee4
+  content_hash: 7dde0d84b1c6df67168a84735880e086f442840d9efac82905046863e1eff761
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-10-merge-queue-conflict-gate-v2
   kind: brain-assertion
-  prev_hash: 0ea693f2f2fe28a8d4921d9f479d90d4d60b4667b31559a93de8d54512958502
+  prev_hash: 88a766c4f13c964770d79faf0d76b44821b4a688417c343c615731a93cae04d1
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2806,11 +2806,11 @@ records:
     object: merge-queue-conflict-gate
     predicate: asserts
     subject: doctrine-item
-  content_hash: edb07ea175bfcf1ee5c2e393e9d80df2dfa4c9e5938ba063bd4ec18fb03dc2be
+  content_hash: d6add6fb0fd68baed54bc8e3425f948ababef2a79ad43921ad62ea387353c2dc
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-10-merge-queue-conflict-gate-v3
   kind: brain-assertion
-  prev_hash: 96d5a6922a871523e0772bfa92e7b6da2627ff809b460916b603c315a20c8ee4
+  prev_hash: 7dde0d84b1c6df67168a84735880e086f442840d9efac82905046863e1eff761
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2831,11 +2831,11 @@ records:
     object: approval-green-triggers-queue
     predicate: asserts
     subject: doctrine-item
-  content_hash: e87dc042093e83d79c9b44d9c521ee0be2bc946a6e9646d8d4815a182d741de2
+  content_hash: 69df6121dbbc4c837c8e3ef2c7003a42191f6ac08324936f66a13130e2bc15ef
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-11-approval-green-triggers-queue-v2
   kind: brain-assertion
-  prev_hash: edb07ea175bfcf1ee5c2e393e9d80df2dfa4c9e5938ba063bd4ec18fb03dc2be
+  prev_hash: d6add6fb0fd68baed54bc8e3425f948ababef2a79ad43921ad62ea387353c2dc
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2856,11 +2856,11 @@ records:
     object: approval-green-triggers-queue
     predicate: asserts
     subject: doctrine-item
-  content_hash: d124acf26bf767f26c5477367c72a1ceade35bed8a673a468cb97921d1c492d6
+  content_hash: c74b59d3939d98f69fa7a7f11243c51b7265a72714624d9a4ed8bc3cb4b16df2
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-11-approval-green-triggers-queue-v3
   kind: brain-assertion
-  prev_hash: e87dc042093e83d79c9b44d9c521ee0be2bc946a6e9646d8d4815a182d741de2
+  prev_hash: 69df6121dbbc4c837c8e3ef2c7003a42191f6ac08324936f66a13130e2bc15ef
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2881,11 +2881,11 @@ records:
     object: approval-current-head-required
     predicate: asserts
     subject: doctrine-item
-  content_hash: c6a244dfd6e1dd08d98b095e4c4558ed9431557099725aa7e22f2b47814f6d82
+  content_hash: 0a4923d297b443d27f41b561be51c82659b69343479f6e4aa0203889dfa65e2e
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-12-approval-current-head-required-v2
   kind: brain-assertion
-  prev_hash: d124acf26bf767f26c5477367c72a1ceade35bed8a673a468cb97921d1c492d6
+  prev_hash: c74b59d3939d98f69fa7a7f11243c51b7265a72714624d9a4ed8bc3cb4b16df2
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2906,11 +2906,11 @@ records:
     object: approval-current-head-required
     predicate: asserts
     subject: doctrine-item
-  content_hash: 34cfe271dceb204d76bd80ab697a3bf7203bcf9f1f852d1a309ebb021afd7bcc
+  content_hash: 91ede33a8ec4d2228593d543b76a52b031bbbd3986ee279090898374224af837
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-12-approval-current-head-required-v3
   kind: brain-assertion
-  prev_hash: c6a244dfd6e1dd08d98b095e4c4558ed9431557099725aa7e22f2b47814f6d82
+  prev_hash: 0a4923d297b443d27f41b561be51c82659b69343479f6e4aa0203889dfa65e2e
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2931,11 +2931,11 @@ records:
     object: merge-queue-conflict-gate
     predicate: asserts
     subject: doctrine-item
-  content_hash: 42a3c6c930d0e939c3a47587c2c540bbe39d4ae5c9644879642a751904f86b0c
+  content_hash: 7c40f1e17f63007765fc82ffe5f76e7990e9a3d53ff82102d02d7a00dfbd1572
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-10-merge-queue-conflict-gate-v3
   kind: brain-assertion
-  prev_hash: 34cfe271dceb204d76bd80ab697a3bf7203bcf9f1f852d1a309ebb021afd7bcc
+  prev_hash: 91ede33a8ec4d2228593d543b76a52b031bbbd3986ee279090898374224af837
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2956,11 +2956,11 @@ records:
     object: merge-queue-conflict-gate
     predicate: asserts
     subject: doctrine-item
-  content_hash: 412f69a0d2bd8e927956538bc303d54d73d4dba74da92592e9a6c2059176f549
+  content_hash: 1f4788f43233ba7e21bd5f9f155cc68f0d97304b88393859c0d2b9175b1fb69d
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-10-merge-queue-conflict-gate-v4
   kind: brain-assertion
-  prev_hash: 42a3c6c930d0e939c3a47587c2c540bbe39d4ae5c9644879642a751904f86b0c
+  prev_hash: 7c40f1e17f63007765fc82ffe5f76e7990e9a3d53ff82102d02d7a00dfbd1572
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -2981,11 +2981,11 @@ records:
     object: approval-green-triggers-queue
     predicate: asserts
     subject: doctrine-item
-  content_hash: fd3d52f89097e24365c3e32f7e7b1ef1d03e7e634f98d81ddcf95e849a9b6ada
+  content_hash: cf3aa455bbca9b98076ab148d7144d57af91c445a0a050601b9e9c07df35e2a3
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-11-approval-green-triggers-queue-v3
   kind: brain-assertion
-  prev_hash: 412f69a0d2bd8e927956538bc303d54d73d4dba74da92592e9a6c2059176f549
+  prev_hash: 1f4788f43233ba7e21bd5f9f155cc68f0d97304b88393859c0d2b9175b1fb69d
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3006,11 +3006,11 @@ records:
     object: approval-green-triggers-queue
     predicate: asserts
     subject: doctrine-item
-  content_hash: 0c46f204827ff9b37bb7bb73cfb509a2b89ebd0bafd8a9238cda238a4a998fb9
+  content_hash: 0e53e1739a9901113c093ab1d2f637934a80695d5421cc62826aef37cfc86a5d
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-11-approval-green-triggers-queue-v4
   kind: brain-assertion
-  prev_hash: fd3d52f89097e24365c3e32f7e7b1ef1d03e7e634f98d81ddcf95e849a9b6ada
+  prev_hash: cf3aa455bbca9b98076ab148d7144d57af91c445a0a050601b9e9c07df35e2a3
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3031,11 +3031,11 @@ records:
     object: approval-current-head-required
     predicate: asserts
     subject: doctrine-item
-  content_hash: 1eda16c83bb2bdcf5c31d90646795c1ff42f7b69fd396b3e903390a1cc001a09
+  content_hash: 31c475655d917f366442e3812cf35d699b55b4590cd59fd2625ce88cab8432d3
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-12-approval-current-head-required-v3
   kind: brain-assertion
-  prev_hash: 0c46f204827ff9b37bb7bb73cfb509a2b89ebd0bafd8a9238cda238a4a998fb9
+  prev_hash: 0e53e1739a9901113c093ab1d2f637934a80695d5421cc62826aef37cfc86a5d
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3056,11 +3056,11 @@ records:
     object: approval-current-head-required
     predicate: asserts
     subject: doctrine-item
-  content_hash: 917b2abf83f4d2666e7eecc0a8f9250b6d3fdb5ed184a48f988b7b72528bd056
+  content_hash: a100e2c51974b53e7719a501cbc02a572e6b6059412c71b0c571c674fd2e4421
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-12-approval-current-head-required-v4
   kind: brain-assertion
-  prev_hash: 1eda16c83bb2bdcf5c31d90646795c1ff42f7b69fd396b3e903390a1cc001a09
+  prev_hash: 31c475655d917f366442e3812cf35d699b55b4590cd59fd2625ce88cab8432d3
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3083,11 +3083,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: eb48a4c45f0aa925d7a421aa7ebcddcd418ff2225f0699b3ea15aba4cdc568e7
+  content_hash: ce13a93790fef4f45f2d74a031a883447b9b3dc77c39f6d1e24e23b3efceb74c
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v2
   kind: brain-assertion
-  prev_hash: 917b2abf83f4d2666e7eecc0a8f9250b6d3fdb5ed184a48f988b7b72528bd056
+  prev_hash: a100e2c51974b53e7719a501cbc02a572e6b6059412c71b0c571c674fd2e4421
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3110,11 +3110,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: 2093e0d050a134563f8fcfb495124562a51e504a4961745c64fb0c333a3419aa
+  content_hash: 0740a0637d47fa9a512dcf304e578e4514a5c3d7e213075f138d1d68659d31c6
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v4
   kind: brain-assertion
-  prev_hash: eb48a4c45f0aa925d7a421aa7ebcddcd418ff2225f0699b3ea15aba4cdc568e7
+  prev_hash: ce13a93790fef4f45f2d74a031a883447b9b3dc77c39f6d1e24e23b3efceb74c
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3137,11 +3137,11 @@ records:
     refs:
     - .github/workflows/validate.yml
     subject: doctrine-item
-  content_hash: f55b2cad6018196e307eeafd1902fbcfa8463020e0c7bbab8627cc74699da30a
+  content_hash: 009c6abf08eab14dd312da51dba104c2bfb9e46d8f7546d6c371eb0fd51f1188
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-01-local-preflight-ci-parity-v3
   kind: brain-assertion
-  prev_hash: 2093e0d050a134563f8fcfb495124562a51e504a4961745c64fb0c333a3419aa
+  prev_hash: 0740a0637d47fa9a512dcf304e578e4514a5c3d7e213075f138d1d68659d31c6
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3164,11 +3164,11 @@ records:
     - .github/workflows/validate.yml
     subject: doctrine-item
     verdict: present
-  content_hash: b6c7cdf994a5e2605e12f4fb5f50f058fb4e9d40836e8a2d50f580ab0e29a94e
+  content_hash: bfb11ffe80904e578771638d372a54bf5d94bb44eebc49e375e1b95a0ada2bf1
   evidence_ref: probe:pr_preflight_ci_parity
   id: brain-assertion-d1b-01-local-preflight-ci-parity-v4
   kind: brain-assertion
-  prev_hash: f55b2cad6018196e307eeafd1902fbcfa8463020e0c7bbab8627cc74699da30a
+  prev_hash: 009c6abf08eab14dd312da51dba104c2bfb9e46d8f7546d6c371eb0fd51f1188
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3192,11 +3192,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: ad4de247c732a942b6cd4ea0f9fc271317df025799389d9fc0624411f7db4243
+  content_hash: dad3daaf204619c45436ddf0ae8f2017f81f5360420537156e5697eea77e2831
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-42-preflight-committed-clean-tree-v3
   kind: brain-assertion
-  prev_hash: b6c7cdf994a5e2605e12f4fb5f50f058fb4e9d40836e8a2d50f580ab0e29a94e
+  prev_hash: bfb11ffe80904e578771638d372a54bf5d94bb44eebc49e375e1b95a0ada2bf1
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3219,11 +3219,11 @@ records:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
     verdict: present
-  content_hash: 26893c45841832ad53a4ac64f4608f8ebddce686caa9697981f2654a01098a1a
+  content_hash: c152256c5d425f85ce070aa704310f9f6374dbffe83abeecceb46b56ff1c0adb
   evidence_ref: probe:pr_preflight_clean_tree_guard
   id: brain-assertion-d1b-42-preflight-committed-clean-tree-v4
   kind: brain-assertion
-  prev_hash: ad4de247c732a942b6cd4ea0f9fc271317df025799389d9fc0624411f7db4243
+  prev_hash: dad3daaf204619c45436ddf0ae8f2017f81f5360420537156e5697eea77e2831
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3247,11 +3247,11 @@ records:
     refs:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
-  content_hash: 3a056f2bbffa826f89195387b45f320c528af161aceb1f282728ea837561ff14
+  content_hash: a0ffe13950fc3cddf3e920cb58bc62f032a84ac913e01d8396edcc307dbcff26
   evidence_ref: validators/creator_engine_validator/pr_preflight.py
   id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v3
   kind: brain-assertion
-  prev_hash: 26893c45841832ad53a4ac64f4608f8ebddce686caa9697981f2654a01098a1a
+  prev_hash: c152256c5d425f85ce070aa704310f9f6374dbffe83abeecceb46b56ff1c0adb
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3274,11 +3274,11 @@ records:
     - docs/contracts/authoring-a-governed-pr.md
     subject: doctrine-item
     verdict: present
-  content_hash: f93d06902d09f2fa5418b6f1bd7c406418584da2bec541ae525edd14163128a5
+  content_hash: d8c024627656876c5c27a941fa0d5f38b23e1be84f475e31fd1ab1a118745d52
   evidence_ref: probe:pr_preflight_scrubs_credential_env
   id: brain-assertion-d1b-43-preflight-scrubs-credential-env-v4
   kind: brain-assertion
-  prev_hash: 3a056f2bbffa826f89195387b45f320c528af161aceb1f282728ea837561ff14
+  prev_hash: a0ffe13950fc3cddf3e920cb58bc62f032a84ac913e01d8396edcc307dbcff26
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3300,11 +3300,11 @@ records:
     object: merge-queue-conflict-gate
     predicate: asserts
     subject: doctrine-item
-  content_hash: da7a2c4392a3f45b767dd8e0c200b8a2fa6d4a894726815e810f72fce3655a75
+  content_hash: 11e6a6ccd45ac1cbc14c49d821cc87e04520c3979536297ef6a4bfcf461450b2
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-10-merge-queue-conflict-gate-v4
   kind: brain-assertion
-  prev_hash: f93d06902d09f2fa5418b6f1bd7c406418584da2bec541ae525edd14163128a5
+  prev_hash: d8c024627656876c5c27a941fa0d5f38b23e1be84f475e31fd1ab1a118745d52
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3325,11 +3325,11 @@ records:
     predicate: asserts
     subject: doctrine-item
     verdict: present
-  content_hash: 0eb9cd6a4c698ec24e1149fefd4782877c9c65bc27b40c25799bfe2b47ed35df
+  content_hash: b480ee84c0355d8a0de2232497986552ec473db0fca4ad621bb2a853107e0b69
   evidence_ref: probe:integrator_belt_merge_queue_conflict_gate
   id: brain-assertion-d1b-10-merge-queue-conflict-gate-v5
   kind: brain-assertion
-  prev_hash: da7a2c4392a3f45b767dd8e0c200b8a2fa6d4a894726815e810f72fce3655a75
+  prev_hash: 11e6a6ccd45ac1cbc14c49d821cc87e04520c3979536297ef6a4bfcf461450b2
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3351,11 +3351,11 @@ records:
     object: approval-green-triggers-queue
     predicate: asserts
     subject: doctrine-item
-  content_hash: 365fa0b24e31d97185bcfcd3be589bfbab3f9a5fc8b598914c0e724150820239
+  content_hash: 89e5679fcf97c7316db3fd0c5e97ea82ad72167abb64671f021a7e4519a225b2
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-11-approval-green-triggers-queue-v4
   kind: brain-assertion
-  prev_hash: 0eb9cd6a4c698ec24e1149fefd4782877c9c65bc27b40c25799bfe2b47ed35df
+  prev_hash: b480ee84c0355d8a0de2232497986552ec473db0fca4ad621bb2a853107e0b69
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3376,11 +3376,11 @@ records:
     predicate: asserts
     subject: doctrine-item
     verdict: present
-  content_hash: 4ed5d4ace4d755cc965a04d3af0265aa1c1f0b5d90d02aac74bd2bd9dc4b1ed2
+  content_hash: 18096fefcaad4a60e8c9570596af7916a75b3d47cc0ab217dede9eba28d65a05
   evidence_ref: probe:integrator_belt_approval_green_triggers_queue
   id: brain-assertion-d1b-11-approval-green-triggers-queue-v5
   kind: brain-assertion
-  prev_hash: 365fa0b24e31d97185bcfcd3be589bfbab3f9a5fc8b598914c0e724150820239
+  prev_hash: 89e5679fcf97c7316db3fd0c5e97ea82ad72167abb64671f021a7e4519a225b2
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3402,11 +3402,11 @@ records:
     object: approval-current-head-required
     predicate: asserts
     subject: doctrine-item
-  content_hash: b5ce7fd68cd11ecd8cb246157c71af139ac5c8f05e830abb70069fcf3190411e
+  content_hash: 673f44c849f6439632229dd7cd47dec2d899526292940e7b759b7caf50fcaa60
   evidence_ref: validators/creator_engine_validator/forge/integrator_belt.py
   id: brain-assertion-d1b-12-approval-current-head-required-v4
   kind: brain-assertion
-  prev_hash: 4ed5d4ace4d755cc965a04d3af0265aa1c1f0b5d90d02aac74bd2bd9dc4b1ed2
+  prev_hash: 18096fefcaad4a60e8c9570596af7916a75b3d47cc0ab217dede9eba28d65a05
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3427,11 +3427,11 @@ records:
     predicate: asserts
     subject: doctrine-item
     verdict: present
-  content_hash: c9d30b341b70e06b3e35bdd2166a83d81bdd4df103d7b825379c24752d5cbe55
+  content_hash: f821396b06ccd9b92bf783b9f62faa7a9dc9673c8ee9d26d62e64d291fd8f201
   evidence_ref: probe:integrator_belt_approval_current_head_required
   id: brain-assertion-d1b-12-approval-current-head-required-v5
   kind: brain-assertion
-  prev_hash: b5ce7fd68cd11ecd8cb246157c71af139ac5c8f05e830abb70069fcf3190411e
+  prev_hash: 673f44c849f6439632229dd7cd47dec2d899526292940e7b759b7caf50fcaa60
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3456,11 +3456,11 @@ records:
     - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
     - README.md
     subject: doctrine-item
-  content_hash: 0ec505223279bc201a21bcf59c71734cb8bdf3ab667256bfecc20af854ea3a96
+  content_hash: 20e22468b7df9e1a861356c1754d7683f7ba9abd11db672accba4c19aca1ed4f
   evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
   id: brain-assertion-d1b-09-ce-cli-doc-coupling-v2
   kind: brain-assertion
-  prev_hash: c9d30b341b70e06b3e35bdd2166a83d81bdd4df103d7b825379c24752d5cbe55
+  prev_hash: f821396b06ccd9b92bf783b9f62faa7a9dc9673c8ee9d26d62e64d291fd8f201
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3484,11 +3484,11 @@ records:
     - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
     - README.md
     subject: doctrine-item
-  content_hash: f5d49c9ffb32e5cd882ccc02533afd7cbe4cac4de32276dc4b70dbf686401555
+  content_hash: 58c16e50c1c9231fec96b4134949415abfb28a6557978d6610da0efa8ee865c4
   evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
   id: brain-assertion-d1b-09-ce-cli-doc-coupling-v3
   kind: brain-assertion
-  prev_hash: 0ec505223279bc201a21bcf59c71734cb8bdf3ab667256bfecc20af854ea3a96
+  prev_hash: 20e22468b7df9e1a861356c1754d7683f7ba9abd11db672accba4c19aca1ed4f
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3506,11 +3506,11 @@ records:
     predicate: verified-by-sha256
     sha256: f708637942edfd22e2b1ce5af6d0d6bae9485a2fdc7f70e14cf69a8aefdf56ae
     subject: convention
-  content_hash: 32a041abc26b916de37ef83dc11baabddb05e25ddc6379f36e4d890a0e6b8fa4
+  content_hash: aa9a8c8132cd3f71440de40afe9ab20a6596408c811c294328b1c1f5c993ce32
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-fleet-mergequeue-trigger
   kind: brain-assertion
-  prev_hash: f5d49c9ffb32e5cd882ccc02533afd7cbe4cac4de32276dc4b70dbf686401555
+  prev_hash: 58c16e50c1c9231fec96b4134949415abfb28a6557978d6610da0efa8ee865c4
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -3527,11 +3527,11 @@ records:
     predicate: verified-by-sha256
     sha256: 6d790034336855609d62ca92196f6c4d271e55266346a246309632da614337c7
     subject: convention
-  content_hash: d2ec4e410654f2b9e97dc57965ccb8cf14665e21569604b7f5da48efce9a3c1d
+  content_hash: f801bf26f8a54e63ae5a1ba3712b575ff214f8fc921bb4328610cb1810fd92a8
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-baefc5e6234d292664afc28c
   kind: brain-assertion
-  prev_hash: 32a041abc26b916de37ef83dc11baabddb05e25ddc6379f36e4d890a0e6b8fa4
+  prev_hash: aa9a8c8132cd3f71440de40afe9ab20a6596408c811c294328b1c1f5c993ce32
   record_type: brain_assertion
   schema_version: '1'
   scope: global
@@ -3553,11 +3553,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: a89e5709454a97104126f0a5cc2e2319efbd0a9f2d8ce2508173225e48106de0
+  content_hash: 5a05709671e370d5031c2c9754316581471d4329bf56975834d31cef51278439
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v4
   kind: brain-assertion
-  prev_hash: d2ec4e410654f2b9e97dc57965ccb8cf14665e21569604b7f5da48efce9a3c1d
+  prev_hash: f801bf26f8a54e63ae5a1ba3712b575ff214f8fc921bb4328610cb1810fd92a8
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3580,11 +3580,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: c2a38ef50bc581c1aab1f5220067d523e1b544c3db8178f1cd2370069906b66a
+  content_hash: 77d3e6d96fbca9145c02ca1b6c5c8b58ffc3de43359a0ba96d3db45d29f4e69b
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v5
   kind: brain-assertion
-  prev_hash: a89e5709454a97104126f0a5cc2e2319efbd0a9f2d8ce2508173225e48106de0
+  prev_hash: 5a05709671e370d5031c2c9754316581471d4329bf56975834d31cef51278439
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3608,11 +3608,11 @@ records:
     refs:
     - validators/creator_engine_validator/pr_preflight.py
     subject: doctrine-item
-  content_hash: d8c62eb8db523e7ae817a5221b9293cdb68968d5a3eecd13a798e7fc433efabe
+  content_hash: d326d51eed7b6d96fca458ad1ba017395c528fcbce47db51fca5035ce98324af
   evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
   id: brain-assertion-d1b-19-brain-drift-state-reconcile-v2
   kind: brain-assertion
-  prev_hash: c2a38ef50bc581c1aab1f5220067d523e1b544c3db8178f1cd2370069906b66a
+  prev_hash: 77d3e6d96fbca9145c02ca1b6c5c8b58ffc3de43359a0ba96d3db45d29f4e69b
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3637,11 +3637,11 @@ records:
     refs:
     - validators/creator_engine_validator/pr_preflight.py
     subject: doctrine-item
-  content_hash: afcb6073064a031cfbd9d293908f66e8f6787741b72cf25ae5ad0668921e9072
+  content_hash: 1034dd4b4821f115941c87b1bda6c1b58c5fac5a75fbd1831ec8a852150ef915
   evidence_ref: validators/creator_engine_validator/checks/ce_brain_drift.py
   id: brain-assertion-d1b-19-brain-drift-state-reconcile-v3
   kind: brain-assertion
-  prev_hash: d8c62eb8db523e7ae817a5221b9293cdb68968d5a3eecd13a798e7fc433efabe
+  prev_hash: d326d51eed7b6d96fca458ad1ba017395c528fcbce47db51fca5035ce98324af
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3668,11 +3668,11 @@ records:
     - .claude/agents/verification.md
     - .claude/agents/reviewer.md
     subject: doctrine-item
-  content_hash: ccf7fc21608e91ccfdb8311749fed98a15bb8fe5b9dcbdbdc67305acc22f821c
+  content_hash: b00ab2795f1d3b20ba3efdaa905dd852dace6d660d7b622c3835fe70d7936929
   evidence_ref: .claude/agents/README.md
   id: brain-assertion-d1b-20-canonical-worker-role-files-v2
   kind: brain-assertion
-  prev_hash: afcb6073064a031cfbd9d293908f66e8f6787741b72cf25ae5ad0668921e9072
+  prev_hash: 1034dd4b4821f115941c87b1bda6c1b58c5fac5a75fbd1831ec8a852150ef915
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3702,11 +3702,11 @@ records:
     - .claude/agents/reviewer.md
     - .claude/agents/canary_qa.md
     subject: doctrine-item
-  content_hash: 537fe7cd5f39dbcc7ddd7b9ba7fe3ecd20133be1820d5530550112d668399fa1
+  content_hash: a262ff722d73ef1bdae8a7617d166b551642041f7d636c6cc4f0d64f2c0bd171
   evidence_ref: .claude/agents/README.md
   id: brain-assertion-d1b-20-canonical-worker-role-files-v3
   kind: brain-assertion
-  prev_hash: ccf7fc21608e91ccfdb8311749fed98a15bb8fe5b9dcbdbdc67305acc22f821c
+  prev_hash: b00ab2795f1d3b20ba3efdaa905dd852dace6d660d7b622c3835fe70d7936929
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3731,11 +3731,11 @@ records:
     - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
     - README.md
     subject: doctrine-item
-  content_hash: 3c0c8d48f1b20cf3d8175a3ddafa58de4e9f1ecaa6741a00de4be7e052072b79
+  content_hash: 3d722c0aa7837f21d76fb759679f5084b63a91ea33e2e2c3fb53fc2031b4c7e1
   evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
   id: brain-assertion-d1b-09-ce-cli-doc-coupling-v3
   kind: brain-assertion
-  prev_hash: 537fe7cd5f39dbcc7ddd7b9ba7fe3ecd20133be1820d5530550112d668399fa1
+  prev_hash: a262ff722d73ef1bdae8a7617d166b551642041f7d636c6cc4f0d64f2c0bd171
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3759,11 +3759,11 @@ records:
     - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
     - README.md
     subject: doctrine-item
-  content_hash: fa6ee6c03d4ec985bf51ebbfa48fb5dd0663527fccc8864acf62c23382f96003
+  content_hash: daf62092b55663aa3f903b67fb8661a5598cf1a1b00912f54d97f80f3f4cd997
   evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
   id: brain-assertion-d1b-09-ce-cli-doc-coupling-v4
   kind: brain-assertion
-  prev_hash: 3c0c8d48f1b20cf3d8175a3ddafa58de4e9f1ecaa6741a00de4be7e052072b79
+  prev_hash: 3d722c0aa7837f21d76fb759679f5084b63a91ea33e2e2c3fb53fc2031b4c7e1
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3785,11 +3785,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: 1e9f29c29ebc245888aa696febb9ec60262faf53ebb3579249abed985e069a51
+  content_hash: 587d6a58c0cf3fa7cd845a6cea2d8251588c30a41f2f38ff7c9cd65f57a37a9e
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-d1b-39-full-validator-long-running-v5
   kind: brain-assertion
-  prev_hash: fa6ee6c03d4ec985bf51ebbfa48fb5dd0663527fccc8864acf62c23382f96003
+  prev_hash: daf62092b55663aa3f903b67fb8661a5598cf1a1b00912f54d97f80f3f4cd997
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3812,11 +3812,11 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: 2222984b5d084406bc26cd7da2e79c85eb1ca5d605592d24c256059ea4e15104
+  content_hash: f29c3004841bb756fe42665f8e62e009af0b9bfd5d90ff75000a394d5a38c882
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-c33afd0c91dc4b8a693d251a
   kind: brain-assertion
-  prev_hash: 1e9f29c29ebc245888aa696febb9ec60262faf53ebb3579249abed985e069a51
+  prev_hash: 587d6a58c0cf3fa7cd845a6cea2d8251588c30a41f2f38ff7c9cd65f57a37a9e
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3837,11 +3837,11 @@ records:
     object: canonical-seat-launch-only
     predicate: asserts
     subject: doctrine-item
-  content_hash: d5868eb96945ce1b3c3d2bf42db25b9dc307fcab79cae8ef39b83e21f3972a49
+  content_hash: e59d44c969bb88991d5b214a338b87471fe741fadc737eae1e604e814615561f
   evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
   id: brain-assertion-d1b-33-canonical-seat-launch-only-v3
   kind: brain-assertion
-  prev_hash: 2222984b5d084406bc26cd7da2e79c85eb1ca5d605592d24c256059ea4e15104
+  prev_hash: f29c3004841bb756fe42665f8e62e009af0b9bfd5d90ff75000a394d5a38c882
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3863,11 +3863,11 @@ records:
     object: canonical-seat-launch-only
     predicate: asserts
     subject: doctrine-item
-  content_hash: 90a860df872e61896075abfb99794aadd18336e1faa559e5a6d9a4f74068854e
+  content_hash: d6c9fdf6b34749fa9b6c796a5345555d6a5db1320470cda1ff770c60ca961e67
   evidence_ref: docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md
   id: brain-assertion-d1b-33-canonical-seat-launch-only-v4
   kind: brain-assertion
-  prev_hash: d5868eb96945ce1b3c3d2bf42db25b9dc307fcab79cae8ef39b83e21f3972a49
+  prev_hash: e59d44c969bb88991d5b214a338b87471fe741fadc737eae1e604e814615561f
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3890,11 +3890,11 @@ records:
     - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
     - README.md
     subject: doctrine-item
-  content_hash: 31420d70e77610e4ddd17a58a63973e54887c2e510563790ee99e481baa4abb5
+  content_hash: 2c6aa38d4ae5e78844ed8766fe7ab6777cfdd58aad927f652ffd5fca58afce1b
   evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
   id: brain-assertion-d1b-09-ce-cli-doc-coupling-v4
   kind: brain-assertion
-  prev_hash: 90a860df872e61896075abfb99794aadd18336e1faa559e5a6d9a4f74068854e
+  prev_hash: d6c9fdf6b34749fa9b6c796a5345555d6a5db1320470cda1ff770c60ca961e67
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3917,11 +3917,11 @@ records:
     - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
     - README.md
     subject: doctrine-item
-  content_hash: 2a70e2503c3227c55842f0e7699c41ca2a0d31c7bd1b67318f3c095a31511d61
+  content_hash: bdcc67a46f89fd77db88c98f985c6b1132cc2047f499f60fa482875f95fa59b0
   evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
   id: brain-assertion-d1b-09-ce-cli-doc-coupling-v5
   kind: brain-assertion
-  prev_hash: 31420d70e77610e4ddd17a58a63973e54887c2e510563790ee99e481baa4abb5
+  prev_hash: 2c6aa38d4ae5e78844ed8766fe7ab6777cfdd58aad927f652ffd5fca58afce1b
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
@@ -3938,11 +3938,11 @@ records:
     predicate: verified-by-sha256
     sha256: 6d790034336855609d62ca92196f6c4d271e55266346a246309632da614337c7
     subject: convention
-  content_hash: 9be4f7a276e00403b7ad1e72449606f2023352f041ead62e30a099d032a5572c
+  content_hash: 31e1221164aaddeb70a785e6015b95632a75f04daada6cdd5a87564fffeb189c
   evidence_ref: .github/workflows/validate.yml
   id: brain-assertion-baefc5e6234d292664afc28c
   kind: brain-assertion
-  prev_hash: 2a70e2503c3227c55842f0e7699c41ca2a0d31c7bd1b67318f3c095a31511d61
+  prev_hash: bdcc67a46f89fd77db88c98f985c6b1132cc2047f499f60fa482875f95fa59b0
   record_type: brain_assertion
   schema_version: '1'
   scope: global

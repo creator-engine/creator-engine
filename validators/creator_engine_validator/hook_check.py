@@ -56,6 +56,7 @@ from .runtime_evidence_spine import (
 )
 
 CONTRACT = "docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md"
+REVIEWER_AUTHORITY_CAPABILITY = "independent_review_venue"
 
 # Tools whose target file_path is subject to the scope gate.
 SCOPE_TOOLS = frozenset({"Edit", "Write", "MultiEdit"})
@@ -1010,6 +1011,26 @@ def _is_raw_gh_api_review_approve(command: Any) -> bool:
     return False
 
 
+def _is_gh_pr_review_approve(command: Any) -> bool:
+    if not isinstance(command, str):
+        return False
+    try:
+        tokens = _shell_tokens(command)
+    except ValueError:
+        return False
+    for index, token in enumerate(tokens):
+        if not (
+            _is_gh_executable(token)
+            and index + 3 < len(tokens)
+            and tokens[index + 1] == "pr"
+            and tokens[index + 2] == "review"
+        ):
+            continue
+        review_args = tokens[index + 3 :]
+        return any(arg == "-a" or arg.startswith("--approve") for arg in review_args)
+    return False
+
+
 def classify_mechanics(command: Any) -> str | None:
     """Return the restricted classification for ``command``, or ``None``.
 
@@ -1127,10 +1148,13 @@ def _authority_covers(envelope: Any, action: str, command: Any) -> bool:
     rec = envelope.get("reviewer_authority_envelope", envelope)
     if not isinstance(rec, dict):
         return False
+    capability = rec.get("capability")
+    if capability is not None and str(capability).strip() != REVIEWER_AUTHORITY_CAPABILITY:
+        return False
     if str(rec.get("mechanic", "")).strip().lower() != action:
         return False
     if action == "pr_review":
-        if _is_raw_gh_api_review_approve(command):
+        if _is_raw_gh_api_review_approve(command) or _is_gh_pr_review_approve(command):
             return False
         pr = _extract_pr_number(command)
         return pr is not None and pr == rec.get("pr_number")

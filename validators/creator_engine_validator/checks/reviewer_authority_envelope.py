@@ -43,8 +43,11 @@ CODE_ROLE = "VAL-RVA-ROLE"
 CODE_MODE = "VAL-RVA-MODE"
 CODE_SECRET = "VAL-RVA-SECRET"
 CODE_NO_INLINE = "VAL-RVA-NO-INLINE"
+CODE_CAPABILITY = "VAL-RVA-CAPABILITY"
+CODE_SELF_REVIEW = "VAL-RVA-SELF-REVIEW"
 
 MECHANICS = frozenset({"pr_review"})
+CAPABILITIES = frozenset({"independent_review_venue"})
 REQUIRED_BINDINGS = ("pr_number", "head_sha", "actor", "ratified_prompt_sha")
 
 _YAML_SUFFIXES = {".yml", ".yaml"}
@@ -154,10 +157,17 @@ def validate_reviewer_authority_envelope_record(data: Any, path: Path | str) -> 
 
     if _normalize_token(rec.get("mechanic", "")) not in MECHANICS:
         errors.append(make_error(CODE_MECHANIC, path, _pointer(pre + ("mechanic",)), "mechanic must be 'pr_review' (the only reviewer-venue mechanic this envelope authorizes)", CONTRACT))
+    capability = rec.get("capability")
+    if capability is not None and _normalize_token(capability) not in CAPABILITIES:
+        errors.append(make_error(CODE_CAPABILITY, path, _pointer(pre + ("capability",)), "capability must be independent_review_venue when present", CONTRACT))
     for field in REQUIRED_BINDINGS:
         val = rec.get(field)
         if val is None or (isinstance(val, str) and not val.strip()):
             errors.append(make_error(CODE_BINDING, path, _pointer(pre + (field,)), f"{field} is a required authority binding (pr_number/head_sha/actor/ratified_prompt_sha)", CONTRACT))
+    actor = str(rec.get("actor") or "").strip().lower()
+    author = str(rec.get("target_pr_author") or "").strip().lower()
+    if actor and author and actor == author:
+        errors.append(make_error(CODE_SELF_REVIEW, path, _pointer(pre + ("target_pr_author",)), "target_pr_author must differ from actor (author≠reviewer invariant)", CONTRACT))
 
     role = _normalize_token(rec.get("emitting_role", ""))
     if role not in EMITTING_ROLES or role in FORBIDDEN_ACTIVE_ROLES:
@@ -172,7 +182,17 @@ def validate_reviewer_authority_envelope_record(data: Any, path: Path | str) -> 
 
 @register(
     CHECK_NAME,
-    [CODE_SCHEMA, CODE_MECHANIC, CODE_BINDING, CODE_ROLE, CODE_MODE, CODE_SECRET, CODE_NO_INLINE],
+    [
+        CODE_SCHEMA,
+        CODE_MECHANIC,
+        CODE_BINDING,
+        CODE_ROLE,
+        CODE_MODE,
+        CODE_SECRET,
+        CODE_NO_INLINE,
+        CODE_CAPABILITY,
+        CODE_SELF_REVIEW,
+    ],
 )
 def run_reviewer_authority_envelope(paths: Iterable[Path]) -> CheckResult:
     errors: list[ValidationError] = []

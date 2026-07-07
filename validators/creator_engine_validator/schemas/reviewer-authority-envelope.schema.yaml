@@ -28,6 +28,9 @@ $defs:
       envelope_id:
         type: string
         pattern: "^rva-[a-z0-9][a-z0-9-]{3,96}$"
+      capability:
+        type: string
+        enum: [independent_review_venue]
       mechanic:
         type: string
         enum: [pr_review]
@@ -38,6 +41,9 @@ $defs:
         type: string
         pattern: "^[0-9a-f]{7,40}$"
       actor:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+      target_pr_author:
         type: string
         pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
       ratified_prompt_sha:
@@ -51,6 +57,18 @@ $defs:
         enum: [strict, auto, transcendence]
       recorded_at:
         $ref: "#/$defs/timestamp"
+      expires_at:
+        $ref: "#/$defs/timestamp"
+      single_use:
+        type: boolean
+      consumed_at:
+        $ref: "#/$defs/timestamp"
+      consumed_by_controller_id:
+        type: string
+        minLength: 1
+      consumed_by_lane_id:
+        type: string
+        minLength: 1
       metadata:
         type: object
         additionalProperties: true

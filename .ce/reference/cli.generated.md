@@ -758,6 +758,13 @@ Options:
 | `--backend` | no | `docker, gvisor, local-noop, openshell` | runtime backend selector carried by --runtime-policy (gvisor aliases to gvisor-proxy) |
 | `--ratification-evidence` | no |  | inherited ratification-evidence pointer carried for elevated modes / privileged lane kinds |
 | `--reviewer-authority-ref` | no |  | G2.007.3: reviewer-authority envelope ref for a distinct reviewer venue (role=reviewer + --lane-kind review); validated then exported to the pane env as CE_REVIEWER_AUTHORITY_REF for the in-band hook |
+| `--mint-reviewer-authority` | no |  | G11: mint a lane-scoped reviewer-authority envelope in ignored ledger state, validate it, then inject it into a distinct reviewer venue; mutually exclusive with --reviewer-authority-ref |
+| `--reviewer-authority-pr` | no |  | PR number bound into a minted reviewer-authority envelope |
+| `--reviewer-authority-head-sha` | no |  | PR head SHA bound into a minted reviewer-authority envelope |
+| `--reviewer-authority-actor` | no |  | reviewer login bound into a minted reviewer-authority envelope (never a token) |
+| `--reviewer-authority-pr-author` | no |  | target PR author login bound into a minted reviewer-authority envelope; must differ from --reviewer-authority-actor |
+| `--reviewer-authority-ratified-prompt-sha` | no |  | ratified reviewer prompt SHA bound into a minted envelope; defaults to --prompt-sha |
+| `--reviewer-authority-emitting-role` | no | `agent_reviewer, architect, controller, implementer, operator, reviewer, verification` | canonical non-ratifying emitting role for a minted reviewer-authority envelope |
 | `--seat-env-file` | no |  | v3.1-G2f (F4/D2): path to an owner-only (0600-class) env file sourced into the seat process via an exec-wrap before launch — the per-seat credential contract (e.g. a reviewer token). The file PATH transits argv; the secret VALUE never enters argv, the tmux server, or any record. Refused if missing or group/world-accessible |
 | `--claim-ticket` | no |  | ce-ops#38: acquire + verify a work-claim lock on this ticket (owner/name#N / issue URL / N inside the slug) BEFORE any lane side effect; a foreign active claim refuses the launch |
 | `--purpose` | no |  | operator-readable purpose recorded in the governed seat lifecycle record |

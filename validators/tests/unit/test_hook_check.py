@@ -461,7 +461,8 @@ def test_governed_bash_with_reviewer_authority_envelope_allows_matching_pr_revie
         "operating_mode": "strict",
     }
     ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST, side_effect_authority=envelope)
-    assert hook_check.evaluate(_bash_event("gh pr review 106 --approve"), ctx).decision == "allow"
+    assert hook_check.evaluate(_bash_event("gh pr review 106 --comment --body governed-redo"), ctx).decision == "allow"
+    assert hook_check.evaluate(_bash_event("gh pr review 106 --approve"), ctx).decision == "deny"
     # the same pr_review envelope does NOT open an unrelated restricted mechanic
     assert hook_check.evaluate(_bash_event("git push origin main"), ctx).decision == "deny"
 

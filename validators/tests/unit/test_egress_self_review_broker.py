@@ -378,6 +378,20 @@ def test_approve_refuses_invalid_reviewer_authority_ref_from_pane_env(tmp_path, 
     assert "invalid reviewer-authority-envelope ref" in str(exc.value)
 
 
+def test_approve_refuses_review_venue_only_capability_from_pane_env(tmp_path, monkeypatch):
+    ref = tmp_path / "reviewer-authority.ce.yml"
+    ref.write_text(
+        json.dumps(_reviewer_authority_envelope(capability="independent_review_venue")),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(broker.CE_REVIEWER_AUTHORITY_ENV, str(ref))
+
+    with pytest.raises(broker.SelfReviewRefused) as exc:
+        broker.parse_request(_payload(event="APPROVE"), run_mode="strangeLoop")
+
+    assert "review-venue-only" in str(exc.value)
+
+
 def _assert_payload_ref_refused_without_open(monkeypatch, host_ref, payload_ref, payload_key):
     opened_host_refs = []
     original_open = Path.open

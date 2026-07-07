@@ -49,9 +49,20 @@ def test_unknown_mechanic_rejected(tmp_path):
     assert "VAL-RVA-MECHANIC" in _codes(tmp_path, lambda r: r.update(mechanic="merge"))
 
 
+def test_unknown_capability_rejected(tmp_path):
+    assert "VAL-RVA-CAPABILITY" in _codes(tmp_path, lambda r: r.update(capability="approval"))
+
+
 @pytest.mark.parametrize("field", ["pr_number", "head_sha", "actor", "ratified_prompt_sha"])
 def test_missing_binding_rejected(tmp_path, field):
     assert "VAL-RVA-BINDING" in _codes(tmp_path, lambda r: r.pop(field))
+
+
+def test_author_cannot_equal_actor_when_author_bound(tmp_path):
+    assert "VAL-RVA-SELF-REVIEW" in _codes(
+        tmp_path,
+        lambda r: r.update(target_pr_author=r["actor"]),
+    )
 
 
 def test_reserved_role_rejected(tmp_path):

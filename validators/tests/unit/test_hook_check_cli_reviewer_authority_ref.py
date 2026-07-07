@@ -43,11 +43,12 @@ def _write_envelope(tmp_path: Path, name: str = "reviewer-authority.ce.yml", **o
     return path
 
 
-def _pr_review_event(pr: int = 108) -> dict:
+def _pr_review_event(pr: int = 108, *, approve: bool = False) -> dict:
+    flag = "--approve" if approve else "--comment"
     return {
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": f"gh pr review {pr} --approve --body governed-redo"},
+        "tool_input": {"command": f"gh pr review {pr} {flag} --body governed-redo"},
         "ce": {"posture": "governed"},
     }
 
@@ -70,6 +71,20 @@ def test_cli_reviewer_authority_ref_allows_matching_pr_review(tmp_path, capsys, 
     )
     assert code == 0
     assert payload["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+def test_cli_reviewer_authority_ref_denies_matching_pr_review_approve(tmp_path, capsys, monkeypatch):
+    _write_envelope(tmp_path)
+    code, payload = _run(
+        [
+            "hook-check", "--stdin", "--format", "claude", "--posture", "governed",
+            "--posture-root", str(tmp_path),
+            "--reviewer-authority-ref", "reviewer-authority.ce.yml",
+        ],
+        capsys, monkeypatch, json.dumps(_pr_review_event(108, approve=True)),
+    )
+    assert code == 0
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_cli_reviewer_authority_ref_denies_wrong_pr(tmp_path, capsys, monkeypatch):

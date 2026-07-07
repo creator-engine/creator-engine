@@ -26,7 +26,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -73,6 +73,8 @@ LANE_KINDS = frozenset({"read-only", "implementation", "review", "approval", "me
 REVIEWER_VENUE_ROLE = "reviewer"
 REVIEWER_VENUE_LANE_KIND = "review"
 CE_REVIEWER_AUTHORITY_ENV = "CE_REVIEWER_AUTHORITY_REF"
+REVIEWER_AUTHORITY_CAPABILITY = "independent_review_venue"
+REVIEWER_AUTHORITY_TTL_SECONDS = 15 * 60
 
 # Gate B (posture-claim reachability). Every governed lane exports the ABSOLUTE
 # Active-Work Ledger root into its pane environment under this launch-pinned env
@@ -337,6 +339,24 @@ def _utc_now_str(now: datetime | None) -> str:
     return (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _parse_utc_timestamp(value: Any, *, field: str, ref: Path | str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ReviewerAuthorityInvalid(
+            f"reviewer_authority_ref {str(ref)!r} missing {field}; refusing before any side effect"
+        )
+    try:
+        return datetime.strptime(value.strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise ReviewerAuthorityInvalid(
+            f"reviewer_authority_ref {str(ref)!r} has invalid {field} timestamp; "
+            "refusing before any side effect"
+        ) from exc
+
+
+def _normalise_login(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
 def _claim_path(ledger_root: Path, controller_id: str, lane_id: str) -> Path:
     return ledger_root / "claims" / controller_id / f"{lane_id}.yaml"
 
@@ -422,7 +442,61 @@ def is_distinct_reviewer_venue(*, role: str | None, lane_kind: str | None) -> bo
     return norm_role == REVIEWER_VENUE_ROLE and norm_kind == REVIEWER_VENUE_LANE_KIND
 
 
-def _validate_reviewer_authority_ref(reviewer_authority_ref: str, repo_root: Path | str) -> str:
+def _resolve_reviewer_authority_ref(reviewer_authority_ref: str, repo_root: Path | str) -> Path:
+    repo_root = Path(repo_root)
+    candidates = [repo_root / reviewer_authority_ref, Path(reviewer_authority_ref)]
+    resolved = next((c for c in candidates if c.is_file()), None)
+    if resolved is None:
+        raise ReviewerAuthorityInvalid(
+            f"reviewer_authority_ref {reviewer_authority_ref!r} not found under "
+            f"{repo_root} (or as an absolute path); refusing before any side effect"
+        )
+    return resolved
+
+
+def _load_reviewer_authority_envelope(path: Path | str) -> dict[str, Any]:
+    try:
+        data = load_yaml(Path(path))
+    except LoaderError as exc:
+        raise ReviewerAuthorityInvalid(
+            f"reviewer_authority_ref {str(path)!r} is unreadable: {exc}"
+        ) from exc
+    return data if isinstance(data, dict) else {}
+
+
+def _reviewer_authority_record(data: Mapping[str, Any]) -> Mapping[str, Any]:
+    rec = data.get("reviewer_authority_envelope")
+    return rec if isinstance(rec, Mapping) else {}
+
+
+def _validate_reviewer_authority_launch_state(
+    data: Mapping[str, Any],
+    *,
+    ref: Path | str,
+    now: datetime | None,
+) -> None:
+    rec = _reviewer_authority_record(data)
+    if rec.get("consumed_at"):
+        raise ReviewerAuthorityInvalid(
+            f"reviewer_authority_ref {str(ref)!r} is already spent; refusing before any side effect"
+        )
+    expires_at = rec.get("expires_at")
+    if expires_at is not None:
+        expiry = _parse_utc_timestamp(expires_at, field="expires_at", ref=ref)
+        current = now or datetime.now(UTC)
+        if current >= expiry:
+            raise ReviewerAuthorityInvalid(
+                f"reviewer_authority_ref {str(ref)!r} expired at {expires_at}; "
+                "refusing before any side effect"
+            )
+
+
+def _validate_reviewer_authority_ref(
+    reviewer_authority_ref: str,
+    repo_root: Path | str,
+    *,
+    now: datetime | None = None,
+) -> str:
     """Resolve + validate a reviewer-authority envelope ref. Fail-closed.
 
     Returns the (unchanged, repo-relative) ref on success so the caller can both
@@ -433,14 +507,7 @@ def _validate_reviewer_authority_ref(reviewer_authority_ref: str, repo_root: Pat
         validate_reviewer_authority_envelope_file,
     )
 
-    repo_root = Path(repo_root)
-    candidates = [repo_root / reviewer_authority_ref, Path(reviewer_authority_ref)]
-    resolved = next((c for c in candidates if c.is_file()), None)
-    if resolved is None:
-        raise ReviewerAuthorityInvalid(
-            f"reviewer_authority_ref {reviewer_authority_ref!r} not found under "
-            f"{repo_root} (or as an absolute path); refusing before any side effect"
-        )
+    resolved = _resolve_reviewer_authority_ref(reviewer_authority_ref, repo_root)
     errors = validate_reviewer_authority_envelope_file(resolved)
     if errors:
         detail = "; ".join(e.format() for e in errors[:3])
@@ -448,7 +515,112 @@ def _validate_reviewer_authority_ref(reviewer_authority_ref: str, repo_root: Pat
             f"reviewer_authority_ref {reviewer_authority_ref!r} is not a schema-valid "
             f"reviewer-authority envelope: {detail}"
         )
+    _validate_reviewer_authority_launch_state(
+        _load_reviewer_authority_envelope(resolved),
+        ref=resolved,
+        now=now,
+    )
     return reviewer_authority_ref
+
+
+def _reviewer_authority_envelope_path(
+    ledger_root: Path, controller_id: str, lane_id: str
+) -> Path:
+    return ledger_root / "panes" / controller_id / f"{lane_id}.reviewer-authority.yaml"
+
+
+def _compose_reviewer_authority_envelope(
+    *,
+    controller_id: str,
+    lane_id: str,
+    pr_number: int | str | None,
+    head_sha: str | None,
+    actor: str | None,
+    target_pr_author: str | None,
+    ratified_prompt_sha: str | None,
+    emitting_role: str,
+    operating_mode: str,
+    recorded_at: str,
+) -> dict[str, Any]:
+    recorded_dt = _parse_utc_timestamp(recorded_at, field="recorded_at", ref="<minted>")
+    expires_at = (recorded_dt + timedelta(seconds=REVIEWER_AUTHORITY_TTL_SECONDS)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    envelope_uuid = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"ce-reviewer-authority:{controller_id}:{lane_id}:{pr_number}:{head_sha}:{actor}:{target_pr_author}:{recorded_at}",
+    )
+    return {
+        "reviewer_authority_envelope": {
+            "envelope_id": f"rva-launch-{envelope_uuid.hex}",
+            "capability": REVIEWER_AUTHORITY_CAPABILITY,
+            "mechanic": "pr_review",
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "actor": actor,
+            "target_pr_author": target_pr_author,
+            "ratified_prompt_sha": ratified_prompt_sha,
+            "emitting_role": emitting_role,
+            "operating_mode": operating_mode,
+            "recorded_at": recorded_at,
+            "expires_at": expires_at,
+            "single_use": True,
+        }
+    }
+
+
+def _validate_reviewer_authority_envelope(
+    envelope: Mapping[str, Any], path: Path | str
+) -> None:
+    from .checks.reviewer_authority_envelope import (
+        validate_reviewer_authority_envelope_record,
+    )
+
+    errors = validate_reviewer_authority_envelope_record(dict(envelope), path)
+    if errors:
+        detail = "; ".join(e.format() for e in errors[:3])
+        raise ReviewerAuthorityInvalid(
+            f"minted reviewer-authority envelope is invalid: {detail}"
+        )
+
+
+def _write_reviewer_authority_envelope(
+    *,
+    ledger_root: Path,
+    controller_id: str,
+    lane_id: str,
+    envelope: Mapping[str, Any],
+) -> str:
+    path = _reviewer_authority_envelope_path(ledger_root, controller_id, lane_id)
+    _atomic_write(path, yaml.safe_dump(dict(envelope), sort_keys=True))
+    return str(path.resolve())
+
+
+def _consume_reviewer_authority_ref_if_single_use(
+    reviewer_authority_ref: str,
+    *,
+    repo_root: Path | str,
+    controller_id: str,
+    lane_id: str,
+    now: datetime | None,
+) -> None:
+    path = _resolve_reviewer_authority_ref(reviewer_authority_ref, repo_root)
+    data = _load_reviewer_authority_envelope(path)
+    _validate_reviewer_authority_launch_state(data, ref=path, now=now)
+    rec = _reviewer_authority_record(data)
+    if rec.get("single_use") is not True:
+        return
+    mutable = dict(data)
+    mutable_rec = dict(rec)
+    mutable_rec.update(
+        {
+            "consumed_at": _utc_now_str(now),
+            "consumed_by_controller_id": controller_id,
+            "consumed_by_lane_id": lane_id,
+        }
+    )
+    mutable["reviewer_authority_envelope"] = mutable_rec
+    _atomic_write(path, yaml.safe_dump(mutable, sort_keys=True))
 
 
 #: The argv prefix that sources a seat env file into the seat process, then execs the
@@ -660,6 +832,13 @@ def launch(
     tenant_policy: Path | str | None = None,
     ratification_evidence_ref: str | None = None,
     reviewer_authority_ref: str | None = None,
+    mint_reviewer_authority: bool = False,
+    reviewer_authority_pr_number: int | str | None = None,
+    reviewer_authority_head_sha: str | None = None,
+    reviewer_authority_actor: str | None = None,
+    reviewer_authority_pr_author: str | None = None,
+    reviewer_authority_ratified_prompt_sha: str | None = None,
+    reviewer_authority_emitting_role: str = "controller",
     seat_env_file: Path | str | None = None,
     runtime_policy: Path | str | None = None,
     backend: str | None = None,
@@ -705,6 +884,44 @@ def launch(
     #     ride ONLY a distinct reviewer venue (role=reviewer + lane_kind=review), and
     #     it must resolve to a schema-valid reviewer-authority envelope. Both checks
     #     are pure and raise before any side effect (no tmux spawn, no pane write).
+    reviewer_authority_to_mint: dict[str, Any] | None = None
+    if mint_reviewer_authority and reviewer_authority_ref is not None:
+        raise ReviewerAuthorityInvalid(
+            "supply either reviewer_authority_ref or mint_reviewer_authority, not both"
+        )
+    if mint_reviewer_authority:
+        if not is_distinct_reviewer_venue(role=role, lane_kind=mode_resolution.lane_kind):
+            raise ReviewerVenueIdentityInvalid(
+                f"mint_reviewer_authority requires a distinct reviewer venue "
+                f"(role={REVIEWER_VENUE_ROLE!r} + lane_kind={REVIEWER_VENUE_LANE_KIND!r}); "
+                f"got role={role!r} lane_kind={mode_resolution.lane_kind!r}"
+            )
+        if not _normalise_login(reviewer_authority_pr_author):
+            raise ReviewerAuthorityInvalid(
+                "mint_reviewer_authority requires reviewer_authority_pr_author so the "
+                "author≠reviewer invariant can be enforced"
+            )
+        if _normalise_login(reviewer_authority_actor) == _normalise_login(reviewer_authority_pr_author):
+            raise ReviewerAuthorityInvalid(
+                "self-review refused: reviewer_authority_actor authored the target PR "
+                "(author≠reviewer invariant)"
+            )
+        reviewer_authority_to_mint = _compose_reviewer_authority_envelope(
+            controller_id=controller_id,
+            lane_id=lane_id,
+            pr_number=reviewer_authority_pr_number,
+            head_sha=reviewer_authority_head_sha,
+            actor=reviewer_authority_actor,
+            target_pr_author=reviewer_authority_pr_author,
+            ratified_prompt_sha=reviewer_authority_ratified_prompt_sha or str(prompt_sha),
+            emitting_role=reviewer_authority_emitting_role,
+            operating_mode=mode_resolution.operating_mode,
+            recorded_at=_utc_now_str(now),
+        )
+        _validate_reviewer_authority_envelope(
+            reviewer_authority_to_mint,
+            _reviewer_authority_envelope_path(ledger_root, controller_id, lane_id),
+        )
     if reviewer_authority_ref is not None:
         if not is_distinct_reviewer_venue(role=role, lane_kind=mode_resolution.lane_kind):
             raise ReviewerVenueIdentityInvalid(
@@ -713,7 +930,7 @@ def launch(
                 f"got role={role!r} lane_kind={mode_resolution.lane_kind!r}"
             )
         reviewer_authority_ref = _validate_reviewer_authority_ref(
-            reviewer_authority_ref, repo_root
+            reviewer_authority_ref, repo_root, now=now
         )
 
     # 0b.2 v3.1-G2f (F4/D2): validate the seat env file fail-closed BEFORE any side
@@ -998,6 +1215,22 @@ def launch(
 
     # --- Side effects begin here ---
 
+    # G11: in-launcher reviewer-authority minting is intentionally delayed until
+    # every pre-spawn refusal gate above has passed. A refused launch must not
+    # leave a valid, unconsumed reviewer-authority artifact behind.
+    minted_reviewer_authority_ref: str | None = None
+    if reviewer_authority_to_mint is not None:
+        reviewer_authority_ref = _write_reviewer_authority_envelope(
+            ledger_root=ledger_root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+            envelope=reviewer_authority_to_mint,
+        )
+        minted_reviewer_authority_ref = reviewer_authority_ref
+        reviewer_authority_ref = _validate_reviewer_authority_ref(
+            reviewer_authority_ref, repo_root, now=now
+        )
+
     # 7. Spawn/attach the tmux pane running the (possibly governed) command. A
     #    validated reviewer venue carries its authority ref as a launch-pinned env
     #    var so the in-band hook can forward it as ce.reviewer_authority_ref.
@@ -1031,6 +1264,7 @@ def launch(
     )
 
     runner_runtime: dict[str, Any] | None = None
+    surface_created = False
     try:
         if runtime_policy_stamp is not None:
             if runtime_policy_record is None:
@@ -1066,10 +1300,24 @@ def launch(
                 # the tmux backend ignores it (signature stays uniform).
                 seat_dir=str(seat_dir),
             )
+        surface_created = True
     except runtime_backend_bridge.RuntimeBackendBridgeError as exc:
+        if minted_reviewer_authority_ref is not None and not surface_created:
+            Path(minted_reviewer_authority_ref).unlink(missing_ok=True)
         raise RuntimePolicyRefused(str(exc)) from exc
     except TmuxUnavailable as exc:
+        if minted_reviewer_authority_ref is not None and not surface_created:
+            Path(minted_reviewer_authority_ref).unlink(missing_ok=True)
         raise TmuxUnavailableError(str(exc)) from exc
+
+    if reviewer_authority_ref is not None:
+        _consume_reviewer_authority_ref_if_single_use(
+            reviewer_authority_ref,
+            repo_root=repo_root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+            now=now,
+        )
 
     # 7b. v3.5-F launch-confirm: the seat scope must materialize. Write
     #     memory.oom.group=1 (the kernel kills the SEAT as a unit, never a
