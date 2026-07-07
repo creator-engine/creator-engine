@@ -1627,9 +1627,11 @@ def refresh_ce_workflow(
         current_sha=str(current.get("blob_sha") or current.get("sha") or "") or None,
     )
     if not updated.get("ok"):
+        reason = str(updated.get("reason") or "workflow refresh failed")
+        detail = str(updated.get("detail") or "").strip()
         raise ApplyFailed(
             "workflow_refresh_failed",
-            str(updated.get("reason") or "workflow refresh failed"),
+            f"{reason}: {detail}" if detail else reason,
         )
     verify = driver.verify_workflow(
         repo=repo,
