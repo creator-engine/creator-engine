@@ -133,20 +133,48 @@ def test_terminal_transition_without_git_metadata_is_refused(tmp_path: Path) -> 
         lifecycle.transition_claim(tmp_path, "ce-476-claim-lifecycle", "landed", sha="abc123", now=NOW)
 
 
-def test_force_bypasses_terminal_evidence_check(tmp_path: Path) -> None:
+def test_force_does_not_bypass_landed_evidence_check(tmp_path: Path) -> None:
     _write_claim(tmp_path, "ce-476-claim-lifecycle", state="harvested")
 
-    result = lifecycle.transition_claim(
-        tmp_path,
-        "ce-476-claim-lifecycle",
-        "landed",
-        sha="abc123",
-        force=True,
-        now=NOW,
-    )
+    with pytest.raises(lifecycle.ClaimLifecycleError, match="no \\.git metadata"):
+        lifecycle.transition_claim(
+            tmp_path,
+            "ce-476-claim-lifecycle",
+            "landed",
+            sha="abc123",
+            force=True,
+            now=NOW,
+        )
 
-    assert result.new_state == "landed"
-    assert result.merge_sha == "abc123"
+
+def test_force_does_not_bypass_unreachable_landed_sha(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    non_ancestor_sha = _create_non_ancestor_sha(tmp_path)
+    _write_claim(tmp_path, "ce-476-claim-lifecycle", state="harvested")
+
+    with pytest.raises(lifecycle.ClaimLifecycleError, match="not reachable from main ref"):
+        lifecycle.transition_claim(
+            tmp_path,
+            "ce-476-claim-lifecycle",
+            "landed",
+            sha=non_ancestor_sha,
+            force=True,
+            now=NOW,
+        )
+
+
+def test_force_does_not_bypass_released_evidence_check(tmp_path: Path) -> None:
+    _write_claim(tmp_path, "ce-476-claim-lifecycle", state="landed")
+
+    with pytest.raises(lifecycle.ClaimLifecycleError, match="no \\.git metadata"):
+        lifecycle.transition_claim(
+            tmp_path,
+            "ce-476-claim-lifecycle",
+            "released",
+            sha="abc123",
+            force=True,
+            now=NOW,
+        )
 
 
 def test_terminal_transition_with_ancestor_sha_passes(tmp_path: Path) -> None:
@@ -161,6 +189,24 @@ def test_terminal_transition_with_ancestor_sha_passes(tmp_path: Path) -> None:
         now=NOW,
     )
 
+    assert result.new_state == "landed"
+    assert result.merge_sha == sha
+
+
+def test_force_bypasses_order_but_still_requires_verified_terminal_sha(tmp_path: Path) -> None:
+    sha = _init_git_repo(tmp_path)
+    _write_claim(tmp_path, "ce-476-claim-lifecycle", state="claimed")
+
+    result = lifecycle.transition_claim(
+        tmp_path,
+        "ce-476-claim-lifecycle",
+        "landed",
+        sha=sha,
+        force=True,
+        now=NOW,
+    )
+
+    assert result.old_state == "claimed"
     assert result.new_state == "landed"
     assert result.merge_sha == sha
 

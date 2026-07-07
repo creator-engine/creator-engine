@@ -1977,7 +1977,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ctr.add_argument("new_state", choices=CLAIM_LIFECYCLE_STATES, help="target lifecycle state")
     ctr.add_argument("--pr", default=None, help="pull request URL to store on the claim")
     ctr.add_argument("--sha", default=None, help="merge or release SHA to store on the claim")
-    ctr.add_argument("--force", action="store_true", help="allow backward or terminal-state transitions")
+    ctr.add_argument(
+        "--force",
+        action="store_true",
+        help="bypass transition order/state restrictions; landed/released SHA evidence is still verified",
+    )
     ctr.add_argument("--repo-root", default=".", help="repo root containing .ce/claims (default: cwd)")
     ctr.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 

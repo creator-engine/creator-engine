@@ -11,3 +11,4 @@ issue: ce-ops#476
 - Added a local claim lifecycle runtime for YAML-frontmatter claim files, including transition validation, legacy prose upgrades, listing, and structured transition logs.
 - Wired `ce claim transition` and `ce claim list` into the existing claim CLI group without changing forge claim-lock commands.
 - Added claim lifecycle documentation and a merge-closeout workflow that marks merged claims as `landed`.
+- Hardened `--force` so it only bypasses transition-order restrictions; `landed` and `released` still require verifiable SHA evidence.

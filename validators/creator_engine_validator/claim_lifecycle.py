@@ -101,8 +101,7 @@ def transition_claim(
     data, body = parse_claim_text(text, slug=slug, now=now)
     old_state = str(data["state"])
     _assert_transition_allowed(old_state, new_state, force=force)
-    if not force:
-        _assert_terminal_evidence(repo_root, new_state, sha)
+    _assert_terminal_evidence(repo_root, new_state, sha)
 
     next_pr = pr if pr is not None else _nullable_str(data.get("pr"))
     next_sha = sha if sha is not None else _nullable_str(data.get("merge_sha"))

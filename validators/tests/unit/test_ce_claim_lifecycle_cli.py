@@ -145,3 +145,27 @@ def test_ce_claim_closeout_rerun_same_landed_sha_is_noop(tmp_path: Path) -> None
 
     assert rc == 0
     assert claim.read_text(encoding="utf-8") == landed
+
+
+def test_ce_claim_transition_force_refuses_unverifiable_terminal_sha(tmp_path: Path, capsys) -> None:
+    _write_claim(tmp_path)
+
+    rc = ce_cli.main(
+        [
+            "claim",
+            "transition",
+            "ce-476-claim-lifecycle",
+            "landed",
+            "--sha",
+            "abc123",
+            "--force",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"].startswith("ce claim transition refused:")
+    assert "no .git metadata" in payload["error"]

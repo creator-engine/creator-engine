@@ -40,7 +40,10 @@ The ordered lifecycle is:
 | `released` | The landed SHA is included in a versioned release. |
 
 `landed`, `released`, and `abandoned` are terminal for consumers. The CLI refuses
-backward transitions unless `--force` is passed.
+backward transitions and other state-machine skips unless `--force` is passed.
+`--force` does not bypass terminal evidence checks: transitions to `landed` or
+`released` must still provide a SHA that is reachable from an accessible `main`
+ref.
 
 ## CLI
 
@@ -53,6 +56,9 @@ ce claim transition <slug> <new-state> [--pr <url>] [--sha <sha>] [--force]
 The command updates `.ce/claims/<slug>.md`, refreshes `transitioned_at`, stores
 `pr` or `merge_sha` when provided, and prints one JSON log line with the event
 name `ce_claim_transition`.
+
+`--force` is limited to transition-order and state-machine restrictions. It does
+not make unverifiable `landed` or `released` evidence acceptable.
 
 List claims:
 
