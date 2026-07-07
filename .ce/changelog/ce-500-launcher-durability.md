@@ -10,4 +10,4 @@ issue: ce-ops#500
 
 - Stage generated contained Codex configs under each seat's durable log root instead of host /tmp.
 - Bind durable host-backed worktree roots to the container /var/tmp worktree root for both VPS and DGX runsc launchers.
-- Extend launcher smoke coverage for durable config paths, /tmp rejection, and symmetric /var/tmp mounts.
+- Extend launcher smoke coverage for durable default config paths and symmetric /var/tmp mounts.

@@ -282,9 +282,10 @@ docker stop ce-dgx-codex && docker rm ce-dgx-codex
 This launcher bind-mounts the host `~/.codex` directory, then overlays a
 generated contained config at `${CODEX_HOME}/config.toml` inside the container.
 The generated config is staged under the durable seat log root by default:
-`${CE_DGX_SEAT_LOG_DIR}/launcher/codex-config.toml`. The launcher rejects
-generated config or host worktree roots under host `/tmp` so stopped containers
-remain restartable after tmpfiles cleanup.
+`${CE_DGX_SEAT_LOG_DIR}/launcher/codex-config.toml`, avoiding host `/tmp` so
+stopped containers remain restartable after tmpfiles cleanup. Operators may
+override the path for tests or diagnostics; production overrides should stay on
+durable host storage.
 
 For a detached, non-interactive launch to avoid a trust-write loop, the generated
 contained config pre-trusts the workspace:
@@ -362,8 +363,8 @@ CE_DGX_CONTAINER_WORKTREE_ROOT=/var/tmp
 
 This keeps `/var/tmp` unit worktrees on host disk instead of the runsc writable
 overlay, so files remain inspectable from the host after sentry or container
-death. Operators may override the host or container path, but the host path must
-be absolute and must not live under host `/tmp`.
+death. Operators may override the host or container path. The host path must be
+absolute; production overrides should not live under host `/tmp`.
 
 ## Contained SELF-PUSH Broker Socket
 

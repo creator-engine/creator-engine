@@ -187,12 +187,6 @@ case "${CE_DGX_CONTAINED_CODEX_CONFIG}" in
     exit 2
     ;;
 esac
-case "${CE_DGX_CONTAINED_CODEX_CONFIG}" in
-  /tmp | /tmp/*)
-    printf 'CE_DGX_CONTAINED_CODEX_CONFIG must be durable and not under host /tmp, got %s\n' "${CE_DGX_CONTAINED_CODEX_CONFIG}" >&2
-    exit 2
-    ;;
-esac
 case "${CE_DGX_SEAT_LOG_DIR}" in
   /*)
     ;;
@@ -206,12 +200,6 @@ case "${CE_DGX_HOST_WORKTREE_ROOT}" in
     ;;
   *)
     printf 'CE_DGX_HOST_WORKTREE_ROOT must be an absolute path, got %s\n' "${CE_DGX_HOST_WORKTREE_ROOT}" >&2
-    exit 2
-    ;;
-esac
-case "${CE_DGX_HOST_WORKTREE_ROOT}" in
-  /tmp | /tmp/*)
-    printf 'CE_DGX_HOST_WORKTREE_ROOT must be durable and not under host /tmp, got %s\n' "${CE_DGX_HOST_WORKTREE_ROOT}" >&2
     exit 2
     ;;
 esac

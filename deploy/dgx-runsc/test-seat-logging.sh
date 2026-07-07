@@ -105,19 +105,6 @@ assert_rejects_relative_log_dir() {
   assert_contains "${label}" "${output}" "must be an absolute path"
 }
 
-assert_rejects_tmp_path() {
-  local label="$1"
-  local output status
-  shift
-
-  set +e
-  output="$("$@" 2>&1)"
-  status="$?"
-  set -e
-  [ "${status}" -ne 0 ] || fail "${label} accepted a host /tmp path"
-  assert_contains "${label}" "${output}" "must be durable and not under host /tmp"
-}
-
 stub_dir="${tmp_dir}/stubs"
 install -d -m 0700 "${stub_dir}"
 
@@ -245,26 +232,6 @@ assert_rejects_relative_log_dir \
 assert_rejects_relative_log_dir \
   "vps dry-run relative log dir" \
   env CE_VPS_SEAT_LOG_DIR=relative CE_VPS_CODEX_BIN=/bin/true CE_VPS_CONTAINED_CODEX_CONFIG="${tmp_dir}/vps-relative.toml" \
-  "${repo_root}/deploy/vps-runsc/run-vps-runsc.sh" --dry-run
-
-assert_rejects_tmp_path \
-  "dgx dry-run tmp config" \
-  env CE_DGX_CONTAINED_CODEX_CONFIG=/tmp/ce-dgx-config.toml \
-  "${repo_root}/deploy/dgx-runsc/run-codex-runsc.sh" --dry-run
-
-assert_rejects_tmp_path \
-  "vps dry-run tmp config" \
-  env CE_VPS_CODEX_BIN=/bin/true CE_VPS_CONTAINED_CODEX_CONFIG=/tmp/ce-vps-config.toml \
-  "${repo_root}/deploy/vps-runsc/run-vps-runsc.sh" --dry-run
-
-assert_rejects_tmp_path \
-  "dgx dry-run tmp worktree" \
-  env CE_DGX_HOST_WORKTREE_ROOT=/tmp/ce-dgx-worktrees \
-  "${repo_root}/deploy/dgx-runsc/run-codex-runsc.sh" --dry-run
-
-assert_rejects_tmp_path \
-  "vps dry-run tmp worktree" \
-  env CE_VPS_CODEX_BIN=/bin/true CE_VPS_HOST_WORKTREE_ROOT=/tmp/ce-vps-worktrees \
   "${repo_root}/deploy/vps-runsc/run-vps-runsc.sh" --dry-run
 
 run_entrypoint_success() {

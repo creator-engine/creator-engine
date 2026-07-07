@@ -162,9 +162,10 @@ because its inner bubblewrap/Landlock sandbox cannot nest inside runsc/gVisor;
 the gVisor container is the sandbox boundary.
 
 The generated config is staged under the durable seat log root by default:
-`${CE_VPS_SEAT_LOG_DIR}/launcher/codex-config.toml`. The launcher rejects
-generated config or host worktree roots under host `/tmp` so stopped containers
-remain restartable after tmpfiles cleanup.
+`${CE_VPS_SEAT_LOG_DIR}/launcher/codex-config.toml`, avoiding host `/tmp` so
+stopped containers remain restartable after tmpfiles cleanup. Operators may
+override the path for tests or diagnostics; production overrides should stay on
+durable host storage.
 
 > **tmux is DEPRECATED/legacy** for driving these seats. The herdr pane via
 > `docker exec -it <name> herdr` is the supported attach surface.
@@ -221,8 +222,8 @@ nested bubblewrap or Landlock cannot run inside runsc/gVisor. The gVisor
 container is the sandbox boundary for this recipe, so Codex runs in bypass mode
 only inside that containment. Host auth stays in the mounted Codex home; the
 contained config is generated separately and can be redirected with
-`CE_VPS_CONTAINED_CODEX_CONFIG`, provided the override is durable and not under
-host `/tmp`.
+`CE_VPS_CONTAINED_CODEX_CONFIG`. Production overrides should use durable host
+storage rather than host `/tmp`.
 
 ## Durable Worktree Root
 
@@ -236,8 +237,8 @@ CE_VPS_CONTAINER_WORKTREE_ROOT=/var/tmp
 
 This keeps `/var/tmp` unit worktrees on host disk instead of the runsc writable
 overlay, so files remain inspectable from the host after sentry or container
-death. Operators may override the host or container path, but the host path must
-be absolute and must not live under host `/tmp`.
+death. Operators may override the host or container path. The host path must be
+absolute; production overrides should not live under host `/tmp`.
 
 ## Codex Binary Mounts
 
