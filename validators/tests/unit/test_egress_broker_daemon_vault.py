@@ -494,6 +494,8 @@ class TestMainVaultRouting:
                 "--seat", "dev-3",
                 "--host-repo-path", "/host/repo",
                 "--config", config_path,
+                "--expected-peer-uid", "1000",
+                "--expected-peer-gid", "1000",
                 "--once",
             ],
             serve_fn=lambda *a, **k: None,

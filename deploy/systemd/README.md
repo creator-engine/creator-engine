@@ -80,6 +80,29 @@ explicit ambient-auth flag. Set optional `CE_BELT_LABELS` to pass one scoped
 `--label` filter such as `enhancement`; leave it unset to observe the default
 pickup queries.
 
+## Egress Self-Push Broker Peer Credentials
+
+`ce-egress-broker.service` uses its own environment file, not
+`gate-daemons.env`:
+
+- user: `~/.config/creator-engine/ce-egress-broker.env`
+- system: `/etc/creator-engine/ce-egress-broker.env`
+
+Required values:
+
+```sh
+CE_EGRESS_BROKER_SOCKET=/run/ce-egress/dev-3.sock
+CE_EGRESS_BROKER_SEAT=dev-3
+CE_EGRESS_BROKER_EXPECTED_PEER_UID=<contained-seat-uid>
+CE_EGRESS_BROKER_EXPECTED_PEER_GID=<contained-seat-gid>
+CE_EGRESS_BROKER_REPO=/workspace/creator-engine
+CE_EGRESS_BROKER_CONFIG=/etc/ce-egress/broker-dev3.json
+```
+
+The daemon returns JIT credential values on this Unix stream, so it refuses to
+start without explicit expected peer UID/GID values and rejects mismatched
+`SO_PEERCRED` peers before request parsing.
+
 ## Egress Self-Review Broker Run Mode
 
 `ce-egress-self-review.service` uses its own environment file, not

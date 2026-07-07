@@ -33,6 +33,7 @@ from .host_broker import (
     serve_self_push_unix_socket,
     systemd_activated_unix_socket,
 )
+from .jit_credential import ModelCredential, SeatCredentialStore
 from .orchestrator import ContainedSeatSelfPushRequest, contained_seat_self_push
 from .policy import (
     BrokerPolicy,
@@ -50,8 +51,10 @@ __all__ = [
     "CommitFacts",
     "ContainedSeatSelfPushRequest",
     "Decision",
+    "ModelCredential",
     "Precondition",
     "RateState",
+    "SeatCredentialStore",
     "contained_seat_self_push",
     "evaluate",
     "handle_self_push_json_line",

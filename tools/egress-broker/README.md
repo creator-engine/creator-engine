@@ -71,6 +71,8 @@ install -d -m 0700 /run/user/$UID/creator-engine/egress-broker
 python tools/egress-broker/ce_egress_self_push_broker.py \
   --seat dev-4 \
   --socket /run/user/$UID/creator-engine/egress-broker/dev-4.sock \
+  --expected-peer-uid "$CONTAINED_SEAT_UID" \
+  --expected-peer-gid "$CONTAINED_SEAT_GID" \
   --host-repo-path /home/cedev4/ce-workspaces/creator-engine \
   --config ~/.ce-egress/broker.json
 ```
@@ -78,9 +80,18 @@ python tools/egress-broker/ce_egress_self_push_broker.py \
 The socket should be owned by the seat UID/GID and mode `0600` or `0660`
 (depending on whether a seat group is used). The daemon binds one broker seat id to one socket
 and always calls `contained_seat_self_push(..., apply=True)` with the configured host repo path.
-It rejects request fields such as `command`, `remote`, `refspec`, `token`, `pem_path`,
-and `config_path`; a request `apply` field is ignored. The seat cannot select a command,
-target remote, credential, host config, or dry-run/apply mode.
+It requires explicit `--expected-peer-uid` and `--expected-peer-gid` values and rejects
+unexpected Unix-socket peers through `SO_PEERCRED` before request parsing; those peercred
+decisions remain secret-free audit records. It rejects request fields such as `command`,
+`remote`, `refspec`, `token`, `pem_path`, and `config_path`; a request `apply` field is
+ignored. The seat cannot select a command, target remote, credential, host config, or
+dry-run/apply mode.
+
+That one-socket-per-seat binding is load-bearing for JIT credentials too: the active credential
+registry is process-local, so cross-process single-active behavior assumes exactly one live
+broker process owns the seat socket. Deployments must not start a second broker against the
+same seat/socket path; the bind-time existing-socket refusal and systemd single socket unit are
+part of the safety boundary.
 
 Host seam spec:
 
@@ -99,6 +110,8 @@ Live apply smoke template from a contained seat:
 python tools/egress-broker/ce_egress_self_push_broker.py \
   --seat dev-4 \
   --socket /run/user/$UID/creator-engine/egress-broker/dev-4.sock \
+  --expected-peer-uid "$CONTAINED_SEAT_UID" \
+  --expected-peer-gid "$CONTAINED_SEAT_GID" \
   --host-repo-path /home/cedev4/ce-workspaces/creator-engine \
   --config ~/.ce-egress/broker.json
 
@@ -143,6 +156,32 @@ python tools/egress-broker/ce_egress_broker.py \
   --config ~/.ce-egress/broker.json \
   --apply
 ```
+
+## JIT Seat Credential Socket Verb (ce-ops#228)
+
+The host broker accepts value-only JSON socket requests for short-lived seat credentials:
+
+```json
+{"verb":"mint-seat-credential","seat_id":"dev-3","credential_class":"forge-scoped"}
+```
+
+and explicit revocation:
+
+```json
+{"verb":"revoke-seat-credential","seat_id":"dev-3","credential_class":"forge-scoped"}
+```
+
+Credential classes are fail-closed and per-seat allowlisted with
+`allowed_credential_classes`. v1 classes are `model-api` and `forge-scoped`. The response
+delivers the credential value only on the broker Unix stream; the broker does not create a
+container env, argv, Docker `-e`, Docker exec env, or persisted container-config delivery
+path. Every mint/refusal/revoke appends a secret-free audit line, and the broker keeps only
+one active credential per seat/class in the live broker process, with active TTL sweep,
+lazy expiry on subsequent requests, and explicit revoke support. For `forge-scoped`, the
+GitHub installation token lifetime remains about one hour at the API unless upstream revocation
+succeeds; the 300s TTL is the broker's bookkeeping and active-revocation deadline.
+The daemon refuses to start unless expected peer UID/GID values are supplied, and a peercred
+mismatch is rejected before a credential mint/revoke request can return any credential value.
 
 ## Contained-seat self-review broker (ce-ops#243)
 

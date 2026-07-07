@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.slow, pytest.mark.xdist_group("wheel-build")]
 
 STRICT_ENV = "CE_SCHEMA_PACKAGING_STRICT"
 REQUIRED_DEV_WHEEL_PROJECTS = ("build", "setuptools")
