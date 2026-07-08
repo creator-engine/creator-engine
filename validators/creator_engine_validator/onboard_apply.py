@@ -1554,12 +1554,29 @@ def _workflow_content_looks_ce(raw: bytes) -> bool:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         return False
-    markers = (
-        "creator-engine-validator",
-        "CE signed spec content_sha256 mismatch",
-        "ce check .ce/ --json",
+    generation_markers = (
+        (
+            "name: Validate governance artifacts",
+            'CE_APP_WHEEL: "creator_engine_validator-',
+            'python -m pip install --no-index --find-links .ce-validator-dist "creator-engine-validator==${CE_VERSION}"',
+            "ce check .ce/ --json",
+        ),
+        (
+            "name: Validate governance artifacts",
+            "creator-engine-validator",
+            "CE signed spec content_sha256 mismatch",
+            "ce check .ce/ --json",
+        ),
+        (
+            "name: Validate governance artifacts",
+            "creator-engine-validator @ https://creator-engine.dev/downloads/",
+            "--hash=sha256:",
+            "python -m pip install --require-hashes --only-binary :all: "
+            "-r /tmp/ce-requirements.txt",
+            "ce check .ce/ | tee /tmp/ce-check.out || true",
+        ),
     )
-    return all(marker in text for marker in markers)
+    return any(all(marker in text for marker in markers) for markers in generation_markers)
 
 
 def refresh_ce_workflow(
