@@ -216,6 +216,9 @@ INTERNAL_COMMAND_GROUPS = frozenset(
     {"herdr", "ask", "support", "triage", "automerge-kill-switch", "dependency-unlock"}
 )
 
+PRE_ARGPARSE_DISPATCH_GROUPS: frozenset[str] = frozenset({"conveyor", "press-merge-evidence"})
+PRE_ARGPARSE_INTERNAL_GROUPS: frozenset[str] = frozenset({"press-merge-evidence"})
+
 _V3_FORWARDED_ENV = "CE_V3_FORWARDED"
 
 _NATIVE_ONBOARD_INSTALLER_FLAGS = frozenset(

@@ -77,6 +77,7 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce queue` | Preview or inspect Integration Queue state, or run the bounded integrator poll belt. |
 | `ce queue-poll` | Run a bounded, witnessable merge-queue repair poll. |
 | `ce queue-daemon` | Run the autonomous merge-queue daemon. |
+| `ce conveyor` | Repair the merge queue by enqueuing approved, CI-green pull requests that were stranded. Use `ce conveyor sweep`. |
 | `ce dequeue` | Dequeue one pull request from the GitHub merge queue through the forge bridge. |
 | `ce emergency-stop` | Emergency merge-queue stop for one queued pull request. |
 | `ce queue-dequeue` | Alias for `ce emergency-stop`. |
