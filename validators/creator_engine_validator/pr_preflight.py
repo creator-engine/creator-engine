@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Protocol, TextIO
 
 from . import brain_intent_xor_gate, brain_runtime
-from .work_sizing import WORK_CLASS_INPUTS, normalize_work_class
+from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class  # WORK_CLASSES re-exported; egress_broker/orchestrator.py imports it from here
 
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
 NETWORK_SUBPROCESS_TIMEOUT_ENV = "CE_NETWORK_SUBPROCESS_TIMEOUT_SECONDS"

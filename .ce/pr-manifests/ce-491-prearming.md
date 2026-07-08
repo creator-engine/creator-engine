@@ -3,7 +3,7 @@
 Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`).
 This is the closed path set for the CE-491 materializer pre-arming checklist batch.
 
-- **Declared work class:** T
+- **Declared work class:** tiny
 
 The change:
 Close four pre-arming findings from the Option A materializer review: add real
