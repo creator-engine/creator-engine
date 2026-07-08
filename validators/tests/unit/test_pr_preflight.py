@@ -992,6 +992,31 @@ def test_preflight_discovers_canonical_declared_work_class_from_carrier(tmp_path
     assert "[PASS] declared work class: S" in out.getvalue()
 
 
+def test_preflight_discovers_task_declared_work_class_from_carrier(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    carrier = tmp_path / ".ce" / "pr-manifests" / "dev4-night-lane0-pr-preflight.md"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text("- **Declared work class:** T\n", encoding="utf-8")
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths=".ce/pr-manifests/dev4-night-lane0-pr-preflight.md\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, declared_work_class=None),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    assert "[PASS] declared work class: XS" in out.getvalue()
+
+
 def test_preflight_rejects_unknown_declared_work_class_from_carrier(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
