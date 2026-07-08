@@ -64,7 +64,7 @@ def test_codex_ring0_is_full_but_ring1_waits_for_promotion_packet():
 
     ring1 = _row(matrix, "codex", "Ring 1")
     assert ring1.cells["code-support"].value == hm.GREEN
-    assert ring1.cells["launch-wired"].value == hm.YELLOW
+    assert ring1.cells["launch-wired"].value == hm.GREEN
     assert ring1.cells["live-proven"].value == hm.RED
     assert ring1.cells["promotion-approved"].value == hm.RED
     assert ring1.gate_capable.value == hm.GATE_NO
@@ -122,7 +122,7 @@ def test_cli_renders_markdown(capsys):
     out = capsys.readouterr().out
     assert "CE harness-support capability matrix" in out
     assert "| claude_code | Ring 0 | green | green | green | green | yes | none |" in out
-    assert "| codex | Ring 1 | green | yellow * | red | red | no | none |" in out
+    assert "| codex | Ring 1 | green | green | red | red | no | none |" in out
     assert "| ephemeral_controller_providers | design-stage | yellow * | red | red | red | no | none |" in out
 
 
