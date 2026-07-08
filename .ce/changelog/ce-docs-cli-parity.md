@@ -14,3 +14,5 @@ issue: docs-cli-parity
   quickstart.
 - Records a full `docs/guide` CLI reference sweep against the shipped `ce`
   parser surfaces; no missing verbs were found.
+- Replaces retired `cev3` CLI references (`cev3 onboard/session/ratify/drive/report/merge`) in the
+  governed-seat quickstart with the current `ce install --plan/--apply` and `ce launch` surface.

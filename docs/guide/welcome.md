@@ -152,10 +152,10 @@ Start there once these four steps make sense.
 | Run CE from a Mac today | [`onboarding-macos-container.md`](./onboarding-macos-container.md) |
 | Walk the full install-to-ship pilot | [`pilot-runbook.md`](./pilot-runbook.md) |
 | Contribute to CE itself | [`contributing-to-ce.md`](./contributing-to-ce.md) |
+| See the whole project at a glance | [`README`](../../README.md) · [`GOVERNANCE.md`](../../GOVERNANCE.md) |
 
 Welcome packs should link these canonical docs instead of duplicating the CE
 journey. Tenant-specific packs may add local prerequisites and support contacts;
 they should not copy the Quickstart or concepts narrative.
-| See the whole project at a glance | [`README`](../../README.md) · [`GOVERNANCE.md`](../../GOVERNANCE.md) |
 
 Welcome aboard. Type a prompt, and let CE hold the gate.
