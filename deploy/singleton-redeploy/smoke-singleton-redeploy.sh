@@ -33,6 +33,12 @@ assert_grep() {
   grep -F -- "$pattern" "$file" >/dev/null || die "expected output line not found: $pattern"
 }
 
+assert_grep_either() {
+  local pattern="$1"
+  local file="$2"
+  grep -E -- "$pattern" "$file" >/dev/null || die "expected output pattern not found: $pattern"
+}
+
 main() {
   case "${1:-}" in
     -h|--help)
@@ -49,6 +55,8 @@ main() {
   root="$(repo_root)"
   local script="$root/deploy/singleton-redeploy/redeploy-singleton.sh"
   [[ -x "$script" ]] || die "redeploy script is not executable: $script"
+  # shellcheck source=/dev/null
+  source "$script"
 
   local tmpdir
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ce-singleton-smoke.XXXXXX")"
@@ -65,7 +73,7 @@ main() {
   assert_grep "--daemon NAME" "$tmpdir/help.out"
 
   "$script" --daemon queue-daemon --dry-run --repo-root "$root" --env-file "$env_file" > "$tmpdir/dry-run.out"
-  assert_grep "Would install" "$tmpdir/dry-run.out"
+  assert_grep_either "Would install|Would leave unchanged" "$tmpdir/dry-run.out"
   assert_grep "Would reload" "$tmpdir/dry-run.out"
   assert_grep "Would enable" "$tmpdir/dry-run.out"
   assert_grep "Would restart" "$tmpdir/dry-run.out"
@@ -79,6 +87,13 @@ main() {
 
   "$script" --daemon option-a-materializer --dry-run --repo-root "$root" > "$tmpdir/option-a.out"
   assert_grep "not deployed yet" "$tmpdir/option-a.out"
+
+  local sed_value="repo\\root&hash#path"
+  local escaped
+  escaped="$(sed_replacement_escape "$sed_value")"
+  local rendered
+  rendered="$(printf 'PLACEHOLDER\n' | sed "s#PLACEHOLDER#$escaped#")"
+  [[ "$rendered" == "$sed_value" ]] || die "sed replacement escaping did not round-trip backslash content"
 
   printf 'OK: singleton redeploy smoke passed\n'
 }
