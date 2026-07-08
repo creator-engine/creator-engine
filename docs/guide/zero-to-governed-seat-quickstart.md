@@ -7,8 +7,6 @@ apply gates.
 Before you start:
 
 - Install a supported coding-agent CLI such as Claude Code or Codex.
-- Add `.hermes/` to the target repository's `.gitignore` before onboarding, so
-  CE's local Hermes state can never become tracked project content.
 - Have `curl` and `git` available on the host.
 
 ## 1. Host Bootstrap
