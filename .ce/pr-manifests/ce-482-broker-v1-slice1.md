@@ -3,7 +3,7 @@
 Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, path-manifest convention).
 This is the closed path set for host-ops broker v1 Slice 1.
 
-- **Declared work class:** L
+- **Declared work class:** epic
 
 ## Summary
 
