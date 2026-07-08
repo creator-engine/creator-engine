@@ -10,7 +10,7 @@ A row is gate-capable only when `code-support`, `launch-wired`, `live-proven`, a
 | claude_code | Ring 1 | green | green | green | green | yes | none |
 | claude_code | Ring 2 | green | green | green | green | yes | none |
 | codex | Ring 0 | green | green | green | green | yes | none |
-| codex | Ring 1 | green | yellow * | red | red | no | none |
+| codex | Ring 1 | green | green | red | red | no | none |
 | codex | Ring 2 | red | red | red | red | no | none |
 | codex | containment | green | yellow * | red | red | no | none |
 | lane_worker | Ring 0 | green | green | green | green | yes | none |
@@ -58,7 +58,7 @@ A row is gate-capable only when `code-support`, `launch-wired`, `live-proven`, a
 
 ### codex - Ring 1
 - **code-support** = `green` - validators/creator_engine_validator/hook_pack_confirm.py: confirm_codex_managed_hook_pack exists
-- **launch-wired** = `yellow` [deferred/design-stage] - deferred pending containment acceptance; promotion evidence packet = ticket 480
+- **launch-wired** = `green` - Operator-authorized pre-act (decision 4, Operator decisions 2026-07-08); containment accepted per C5 promotion (decision 3, same ledger); promotion evidence packet still pending = ticket 480
 - **live-proven** = `red` - not live-proven until the ticket 480 evidence packet and Ring 1 smoke are accepted
 - **promotion-approved** = `red` - promotion deferred pending containment acceptance and ticket 480
 - **gate-capable** = `no` - one or more promotion cells are not green

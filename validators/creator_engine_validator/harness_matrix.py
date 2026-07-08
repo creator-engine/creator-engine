@@ -303,7 +303,11 @@ def _codex_rows(_repo_root: Path) -> tuple[HarnessRow, ...]:
             code_support=_green(f"{_rel(confirm_path)}: confirm_codex_managed_hook_pack exists")
             if ring1_candidate
             else _red("Codex managed hook-pack predicate is absent"),
-            launch_wired=_yellow("deferred pending containment acceptance; promotion evidence packet = ticket 480"),
+            launch_wired=_green(
+                "Operator-authorized pre-act (decision 4, Operator decisions 2026-07-08); "
+                "containment accepted per C5 promotion (decision 3, same ledger); "
+                "promotion evidence packet still pending = ticket 480"
+            ),
             live_proven=_red("not live-proven until the ticket 480 evidence packet and Ring 1 smoke are accepted"),
             promotion_approved=_red("promotion deferred pending containment acceptance and ticket 480"),
         ),
