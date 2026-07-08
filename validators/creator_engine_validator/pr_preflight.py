@@ -927,7 +927,7 @@ def _commit_staged_autogen(repo_root: Path, spec: SeatReadyAutogenSpec, runner: 
         detail = status.stderr.strip() or status.stdout.strip() or f"git diff --cached --quiet failed for {spec.artifact}"
         raise RuntimeError(detail)
     commit = runner(
-        ["git", "commit", "-m", f"chore: refresh {spec.check_name} artifact"],
+        ["git", "commit", "-m", f"chore: refresh {spec.check_name} artifact", "--", str(spec.artifact)],
         repo_root,
         None,
     )

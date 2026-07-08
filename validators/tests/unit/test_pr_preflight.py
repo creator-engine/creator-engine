@@ -778,6 +778,47 @@ def test_seat_ready_autogen_gate_runs_only_for_profile_and_touched_surface(
     assert [sys.executable, "scripts/gen_cli_reference.py", "--write"] not in unchanged_surface_runner.argv_calls()
 
 
+def test_seat_ready_autogen_gate_commits_only_regenerated_artifact(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths="validators/creator_engine_validator/pr_preflight.py\n",
+        autogen_artifact_changed=True,
+    )
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    calls = runner.argv_calls()
+    artifact = ".ce/reference/cli.generated.md"
+    assert ["git", "add", artifact] in calls
+    assert [
+        "git",
+        "commit",
+        "-m",
+        "chore: refresh cli_reference_autogen_sync artifact",
+        "--",
+        artifact,
+    ] in calls
+    assert calls.index(["git", "add", artifact]) < calls.index(
+        [
+            "git",
+            "commit",
+            "-m",
+            "chore: refresh cli_reference_autogen_sync artifact",
+            "--",
+            artifact,
+        ]
+    )
+
+
 def test_seat_ready_autogen_gate_reports_env_skip_for_missing_generator_environment(
     tmp_path: Path, monkeypatch
 ):

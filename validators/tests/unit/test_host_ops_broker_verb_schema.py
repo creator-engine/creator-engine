@@ -63,6 +63,14 @@ def test_extra_params_are_rejected_for_every_verb(verb):
         validate_params(verb, raw)
 
 
+def test_restart_daemon_name_with_space_is_rejected_by_schema():
+    raw = dict(VALID_PARAMS["restart-daemon"])
+    raw["daemon"] = "ce agent"
+
+    with pytest.raises(VerbSchemaError, match="daemon contains unsupported characters"):
+        validate_params("restart-daemon", raw)
+
+
 @pytest.mark.parametrize("verb", VERBS)
 @pytest.mark.parametrize("field", sorted(COMMAND_LIKE_FIELDS))
 def test_command_like_params_are_rejected_for_every_verb(verb, field):

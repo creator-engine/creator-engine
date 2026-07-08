@@ -26,7 +26,7 @@ def check_kill_switch(path: str | Path, verb: str) -> KillSwitchDecision:
         return KillSwitchDecision(True, "broker", f"kill-switch-read-error:{p}")
     if not isinstance(raw, Mapping):
         return KillSwitchDecision(True, "broker", f"kill-switch-malformed:{p}")
-    if raw.get("disabled") is True:
+    if "disabled" in raw and raw["disabled"] is not False:
         return KillSwitchDecision(True, "broker", _reason(raw, "broker-wide-disabled"))
     disabled_verbs = raw.get("disabled_verbs", {})
     if disabled_verbs is None:

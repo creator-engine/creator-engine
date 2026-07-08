@@ -23,7 +23,7 @@ VERBS = (
 MUTATING_VERBS = frozenset(v for v in VERBS if v != "status")
 
 STATUS_CLASSES = ("daemons", "systemd", "containers", "state_roots", "openbao")
-_SAFE_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/@+=,\- ]{0,255}$")
+_SAFE_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/@+=,\-]{0,255}$")
 _OCTAL_MODE = re.compile(r"^0[0-7]{3}$")
 _DIGEST_IMAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/\-]+@sha256:[A-Fa-f0-9]{64}$")
 
