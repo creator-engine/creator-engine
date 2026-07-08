@@ -1,0 +1,22 @@
+# Creator Engine — root signing trust anchor `ce-root-v1`
+# Served at creator-engine.dev/keys/ce-root-v1 (extension-less). This is an
+# OpenSSH allowed_signers file: the agent pins it to verify the signed install
+# spec (docs/llms-install.md) with stock `ssh-keygen -Y verify` — no CE tooling,
+# which is what breaks the install-time bootstrap circularity.
+#
+# Custody:
+# - ce-root-v1 (Fork A, ratified 2026-06-10): Operator-authorized,
+#   orchestrator-generated 2026-06-10; the PRIVATE key is operator-held offline
+#   and NEVER enters the repo or any governed seat.
+# - ce-dev1-root-v1 (secondary trust root, ratified 2026-06-11):
+#   Operator-authorized secondary trust anchor; the PRIVATE key is held out of
+#   repo, encrypted at rest, and NEVER enters the repo or any governed seat.
+# Signing the spec is a manual host-bound team-mode act per release
+# (ssh-keygen -Y sign, namespace `ce-spec-v1`). Both principals use the same
+# namespace `ce-spec-v1`; identities are host-bound team-mode signing
+# identities per ratified trust-anchor policy.
+#
+# Format: <principal> <keytype> <base64-key>. Verify with:
+#   ssh-keygen -Y verify -f ce-root-v1 -I ce-root-v1 -n ce-spec-v1 -s <sig> < <canonical-bytes>
+ce-root-v1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG/El7UgQWNbfCv0so+P8eERg8oGkQqr6HjumrcnMLpJ
+ce-dev1-root-v1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMjl3sHqj5cutQvwHrFL6qfyQyOgz+2fssoJH29nSvTf

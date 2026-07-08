@@ -9,7 +9,7 @@ Usage:
   deploy/oci/build-image.sh [--image IMAGE] [--platform PLATFORM[,PLATFORM...]] [--load|--push] [--dry-run]
 
 Defaults:
-  IMAGE:    creator-engine/ce-validator:0.3.3
+  IMAGE:    creator-engine/ce-validator:0.3.4
   PLATFORM: linux/arm64
   OUTPUT:   --load for a single platform, --push when explicitly requested
 
@@ -19,9 +19,9 @@ Examples:
   deploy/oci/build-image.sh --dry-run
 
 Run the built image:
-  docker run --rm creator-engine/ce-validator:0.3.3 ce --help
+  docker run --rm creator-engine/ce-validator:0.3.4 ce --help
   docker run --rm -v "$PWD:/workspace/creator-engine" -w /workspace/creator-engine \
-    creator-engine/ce-validator:0.3.3 creator-engine-validator check-examples
+    creator-engine/ce-validator:0.3.4 creator-engine-validator check-examples
 USAGE
 }
 
@@ -31,7 +31,7 @@ quote_cmd() {
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-image="${CE_OCI_IMAGE:-creator-engine/ce-validator:0.3.3}"
+image="${CE_OCI_IMAGE:-creator-engine/ce-validator:0.3.4}"
 platform="${CE_OCI_PLATFORM:-linux/arm64}"
 output_mode="${CE_OCI_OUTPUT_MODE:-load}"
 dry_run=0

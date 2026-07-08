@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG CE_CANONICAL_RUNTIME_IMAGE=creator-engine/ce-validator:0.3.3
+ARG CE_CANONICAL_RUNTIME_IMAGE=creator-engine/ce-validator:0.3.4
 
 FROM ${CE_CANONICAL_RUNTIME_IMAGE}
 
