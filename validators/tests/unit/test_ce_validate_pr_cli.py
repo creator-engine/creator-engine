@@ -55,6 +55,25 @@ def test_ce_validate_pr_dispatches_to_preflight(monkeypatch):
     }
 
 
+def test_ce_validate_pr_accepts_seat_ready_profile(monkeypatch):
+    captured = {}
+
+    def fake_run_cli(args):
+        captured["profile"] = args.profile
+        return 0
+
+    monkeypatch.setattr(ce_cli.pr_preflight, "run_cli", fake_run_cli)
+
+    rc = ce_cli.main(["validate-pr", "--profile", "seat-ready"])
+
+    assert rc == 0
+    assert captured == {"profile": "seat-ready"}
+
+
+def test_ce_validate_pr_profiles_include_seat_ready():
+    assert "seat-ready" in ce_cli.pr_preflight.VALIDATE_PR_PROFILES
+
+
 def test_ce_validate_pr_accepts_canonical_and_legacy_work_class_inputs(monkeypatch):
     captured = []
 

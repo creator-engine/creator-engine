@@ -29,6 +29,9 @@ DEFAULT_TEST_COMMAND = (
     f"{shlex.quote(sys.executable)} -m pytest -p no:cacheprovider "
     'validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup'
 )
+SEAT_READY_PROFILE = "seat-ready"
+SEAT_READY_PYTEST_WORKER_CAP = 4
+SEAT_READY_TEST_COMMAND = DEFAULT_TEST_COMMAND.replace("-n auto", f"-n {SEAT_READY_PYTEST_WORKER_CAP}", 1)
 DECLARED_WORK_CLASS_PATTERN = re.compile(
     r"^\s*(?:[-*]\s*)?(?:\*\*)?Declared work class(?:\*\*)?\s*:\s*(?:\*\*)?\s*"
     r"`?([A-Za-z][A-Za-z0-9_-]*)`?\s*(?:<!--.*-->)?\s*$",
@@ -51,7 +54,7 @@ PYTEST_SKIP_REASON_PATTERN = re.compile(
     r"^SKIPPED\s+\[(?P<count>\d+)\]\s+(?P<location>.+?)(?::\s+(?P<reason>.*))?$",
     re.MULTILINE,
 )
-VALIDATE_PR_PROFILES = ("contained-seat",)
+VALIDATE_PR_PROFILES = ("contained-seat", SEAT_READY_PROFILE)
 CONTAINED_SEAT_PROFILE = "contained-seat"
 PATH_MANIFEST_CARRIER_REQUIRED_CODE = "path_manifest_carrier_required"
 PATH_MANIFEST_ERROR_PATTERN = re.compile(r"\b(path_manifest_[a-z0-9_]+)\b")
@@ -104,6 +107,15 @@ class SkipReportEntry:
 class BaselineDiffTestResult:
     detail: str
     head_skip_count: int = 0
+
+
+@dataclass(frozen=True)
+class SeatReadyAutogenSpec:
+    check_name: str
+    generator_argv: tuple[str, ...]
+    artifact: Path
+    surface_touched: Callable[[Sequence[str]], bool]
+    verify: Callable[[Sequence[Path]], object]
 
 
 class Runner(Protocol):
@@ -281,7 +293,7 @@ def _assert_clean_tree(config: PreflightConfig, runner: Runner, out: TextIO) -> 
     )
 
 
-def _python_env(repo_root: Path, *, pytest: bool = False) -> dict[str, str]:
+def _python_env(repo_root: Path, *, pytest: bool = False, tmpdir: str | None = None) -> dict[str, str]:
     env = dict(os.environ)
     pythonpath_parts = [str(repo_root / "validators")]
     if env.get("PYTHONPATH"):
@@ -289,10 +301,22 @@ def _python_env(repo_root: Path, *, pytest: bool = False) -> dict[str, str]:
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     if pytest:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env["TMPDIR"] = "/var/tmp"
+        env["TMPDIR"] = tmpdir or "/var/tmp"
         for key in TOKEN_ENV_VARS:
             env.pop(key, None)
     return env
+
+
+def _effective_test_command(config: PreflightConfig) -> str:
+    if config.profile == SEAT_READY_PROFILE and config.test_command == DEFAULT_TEST_COMMAND:
+        return SEAT_READY_TEST_COMMAND
+    return config.test_command
+
+
+def _pytest_tmpdir(config: PreflightConfig) -> str | None:
+    if config.profile == SEAT_READY_PROFILE:
+        return str(Path("~/tmp").expanduser())
+    return None
 
 
 def _extract_declared_work_classes(text: str) -> list[str]:
@@ -609,9 +633,9 @@ def _run_baseline_diff_tests(
         if add.returncode != 0:
             raise RuntimeError(f"could not create baseline worktree for {comparison_base}")
         try:
-            baseline = runner(argv, base_worktree, _python_env(base_worktree, pytest=True))
+            baseline = runner(argv, base_worktree, _python_env(base_worktree, pytest=True, tmpdir=_pytest_tmpdir(config)))
             _print_streams(baseline, out, err)
-            head = runner(argv, config.repo_root, _python_env(config.repo_root, pytest=True))
+            head = runner(argv, config.repo_root, _python_env(config.repo_root, pytest=True, tmpdir=_pytest_tmpdir(config)))
             _print_streams(head, out, err)
         finally:
             remove = runner(["git", "worktree", "remove", "--force", str(base_worktree)], config.repo_root, None)
@@ -806,6 +830,157 @@ def _run_path_manifest_gate(
     raise RuntimeError(f"Creator Engine validator - path-manifest PR-diff gate failed with exit code {result.returncode}")
 
 
+def _normalize_changed_path(path: str) -> str:
+    return path.strip().replace(os.sep, "/")
+
+
+def _cli_reference_surface_touched(changed_paths: Sequence[str]) -> bool:
+    from .checks import cli_reference_autogen_sync as cli_autogen
+
+    cli_paths = {
+        str(cli_autogen.GENERATOR_RELATIVE),
+        str(cli_autogen.DOC_RELATIVE),
+        "validators/creator_engine_validator/ce_cli.py",
+        "validators/creator_engine_validator/cli.py",
+        "validators/creator_engine_validator/pr_preflight.py",
+    }
+    return any(_normalize_changed_path(path) in cli_paths for path in changed_paths)
+
+
+def _schema_reference_surface_touched(changed_paths: Sequence[str]) -> bool:
+    from .checks import schema_reference_autogen_sync as schema_autogen
+
+    schema_paths = {
+        str(schema_autogen.GENERATOR_RELATIVE),
+        str(schema_autogen.DOC_RELATIVE),
+    }
+    return any(
+        _normalize_changed_path(path) in schema_paths or _normalize_changed_path(path).startswith("schemas/")
+        for path in changed_paths
+    )
+
+
+def _seat_ready_autogen_specs(py: str) -> tuple[SeatReadyAutogenSpec, ...]:
+    from .checks import cli_reference_autogen_sync as cli_autogen
+    from .checks import schema_reference_autogen_sync as schema_autogen
+
+    return (
+        SeatReadyAutogenSpec(
+            check_name=cli_autogen.CHECK_NAME,
+            generator_argv=(py, str(cli_autogen.GENERATOR_RELATIVE), "--write"),
+            artifact=cli_autogen.DOC_RELATIVE,
+            surface_touched=_cli_reference_surface_touched,
+            verify=cli_autogen.run,
+        ),
+        SeatReadyAutogenSpec(
+            check_name=schema_autogen.CHECK_NAME,
+            generator_argv=(py, str(schema_autogen.GENERATOR_RELATIVE), "--write"),
+            artifact=schema_autogen.DOC_RELATIVE,
+            surface_touched=_schema_reference_surface_touched,
+            verify=schema_autogen.run,
+        ),
+    )
+
+
+def _looks_like_missing_environment(text: str) -> bool:
+    needles = (
+        "ModuleNotFoundError",
+        "No module named ",
+        "ImportError",
+        "cannot import name",
+        "No such file or directory",
+    )
+    return any(needle in text for needle in needles)
+
+
+def _format_check_errors(result: object) -> str:
+    errors = getattr(result, "errors", ())
+    return "\n".join(error.format() for error in errors)
+
+
+def _verify_seat_ready_autogen(spec: SeatReadyAutogenSpec, repo_root: Path) -> str:
+    result = spec.verify([repo_root])
+    if getattr(result, "ok", False):
+        return "byte parity passed"
+
+    rendered = _format_check_errors(result)
+    if _looks_like_missing_environment(rendered):
+        return f"ENV-SKIP {spec.check_name}: {rendered}"
+    raise RuntimeError(f"{spec.check_name} failed read-only byte-parity verification:\n{rendered}")
+
+
+def _artifact_changed(repo_root: Path, artifact: Path, runner: Runner) -> bool:
+    result = runner(["git", "diff", "--quiet", "--", str(artifact)], repo_root, None)
+    if result.returncode == 0:
+        return False
+    if result.returncode == 1:
+        return True
+    detail = result.stderr.strip() or result.stdout.strip() or f"git diff --quiet failed for {artifact}"
+    raise RuntimeError(detail)
+
+
+def _commit_staged_autogen(repo_root: Path, spec: SeatReadyAutogenSpec, runner: Runner, out: TextIO, err: TextIO) -> None:
+    status = runner(["git", "diff", "--cached", "--quiet", "--", str(spec.artifact)], repo_root, None)
+    if status.returncode == 0:
+        return
+    if status.returncode != 1:
+        detail = status.stderr.strip() or status.stdout.strip() or f"git diff --cached --quiet failed for {spec.artifact}"
+        raise RuntimeError(detail)
+    commit = runner(
+        ["git", "commit", "-m", f"chore: refresh {spec.check_name} artifact"],
+        repo_root,
+        None,
+    )
+    _print_streams(commit, out, err)
+    if commit.returncode != 0:
+        raise RuntimeError(f"could not commit regenerated {spec.artifact}")
+
+
+def _run_seat_ready_autogen_gate(
+    config: PreflightConfig,
+    comparison_base: str,
+    py: str,
+    py_env: Mapping[str, str],
+    *,
+    runner: Runner,
+    out: TextIO,
+    err: TextIO,
+) -> str:
+    if config.profile != SEAT_READY_PROFILE:
+        return "not applicable; profile is not seat-ready"
+
+    changed_paths = _changed_paths(config.repo_root, comparison_base, runner)
+    reports: list[str] = []
+    for spec in _seat_ready_autogen_specs(py):
+        if not spec.surface_touched(changed_paths):
+            reports.append(f"{spec.check_name}: source surface unchanged")
+            continue
+
+        print(f"==> Seat-ready autogen repair - {spec.check_name}", file=out)
+        result = runner(spec.generator_argv, config.repo_root, py_env)
+        _print_streams(result, out, err)
+        if result.returncode != 0:
+            rendered = (result.stdout + "\n" + result.stderr).strip()
+            if _looks_like_missing_environment(rendered):
+                reports.append(f"ENV-SKIP {spec.check_name}: {rendered}")
+                continue
+            raise RuntimeError(f"{spec.check_name} generator failed with exit code {result.returncode}")
+
+        if _artifact_changed(config.repo_root, spec.artifact, runner):
+            add = runner(["git", "add", str(spec.artifact)], config.repo_root, None)
+            _print_streams(add, out, err)
+            if add.returncode != 0:
+                raise RuntimeError(f"could not stage regenerated {spec.artifact}")
+            _commit_staged_autogen(config.repo_root, spec, runner, out, err)
+            reports.append(f"{spec.check_name}: regenerated and committed {spec.artifact}")
+        else:
+            reports.append(f"{spec.check_name}: generator produced no artifact changes")
+
+        reports.append(f"{spec.check_name}: {_verify_seat_ready_autogen(spec, config.repo_root)}")
+
+    return "; ".join(reports) if reports else "no registered autogen specs"
+
+
 def run_preflight(
     config: PreflightConfig,
     *,
@@ -825,7 +1000,7 @@ def run_preflight(
             pr_body_file=config.pr_body_file,
             pr_body=config.pr_body,
             allow_dirty=config.allow_dirty,
-            test_command=config.test_command,
+            test_command=_effective_test_command(config),
             profile=config.profile,
         )
         _validate_profile(config.profile)
@@ -1242,6 +1417,22 @@ def run_preflight(
         _run_check(
             "Creator Engine validator - test-coupling PR-diff gate",
             test_coupling_gate,
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "Seat-ready registered autogen repair gate",
+            lambda: _run_seat_ready_autogen_gate(
+                config,
+                comparison_base["value"],
+                py,
+                py_env,
+                runner=runner,
+                out=out,
+                err=err,
+            ),
             out,
             err,
         )

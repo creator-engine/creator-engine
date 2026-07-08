@@ -29,6 +29,8 @@ class FakeRunner:
         changed_paths: str = "",
         brain_drift_result: pr_preflight.CommandResult | None = None,
         ledger_show: dict[tuple[str, str], pr_preflight.CommandResult] | None = None,
+        autogen_generator_result: pr_preflight.CommandResult | None = None,
+        autogen_artifact_changed: bool = False,
     ):
         self.repo_root = repo_root
         self.dirty = dirty
@@ -43,6 +45,8 @@ class FakeRunner:
         self.changed_paths = changed_paths
         self.brain_drift_result = brain_drift_result or pr_preflight.CommandResult(0, "ok\n", "")
         self.ledger_show = ledger_show or {}
+        self.autogen_generator_result = autogen_generator_result or pr_preflight.CommandResult(0, "generated\n", "")
+        self.autogen_artifact_changed = autogen_artifact_changed
         self.calls: list[tuple[list[str], Path, dict[str, str] | None, float | None]] = []
 
     def __call__(self, argv, cwd, env=None, *, timeout=None):
@@ -70,10 +74,26 @@ class FakeRunner:
             return pr_preflight.CommandResult(0, "", "")
         if argv[:4] == ["git", "worktree", "remove", "--force"]:
             return pr_preflight.CommandResult(0, "", "")
-        if argv == pr_preflight._test_command_argv(pr_preflight.DEFAULT_TEST_COMMAND):
+        if argv in (
+            pr_preflight._test_command_argv(pr_preflight.DEFAULT_TEST_COMMAND),
+            pr_preflight._test_command_argv(pr_preflight.SEAT_READY_TEST_COMMAND),
+        ):
             if str(cwd).endswith("/base"):
                 return self.baseline_test_result
             return self.head_test_result
+        if argv in (
+            [sys.executable, "scripts/gen_cli_reference.py", "--write"],
+            [sys.executable, "scripts/gen_schema_reference.py", "--write"],
+        ):
+            return self.autogen_generator_result
+        if argv[:4] == ["git", "diff", "--quiet", "--"]:
+            return pr_preflight.CommandResult(1 if self.autogen_artifact_changed else 0, "", "")
+        if argv[:4] == ["git", "diff", "--cached", "--quiet"]:
+            return pr_preflight.CommandResult(1 if self.autogen_artifact_changed else 0, "", "")
+        if argv[:2] == ["git", "add"]:
+            return pr_preflight.CommandResult(0, "", "")
+        if argv[:2] == ["git", "commit"]:
+            return pr_preflight.CommandResult(0, "[ce-499 test] refresh\n", "")
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "examples/malformed/" in argv:
             return pr_preflight.CommandResult(self.malformed_returncode, "malformed rejected\n", "")
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "scan-install-spec-signature" in argv:
@@ -637,6 +657,155 @@ def test_contained_seat_profile_still_enforces_non_carrier_path_manifest_failure
     assert pr_preflight.CONTAINED_SEAT_CARRIER_NOTICE not in output
 
 
+def test_seat_ready_profile_does_not_omit_missing_carrier(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
+    monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
+    monkeypatch.setattr(pr_preflight, "_workflow_permissions_audit", lambda repo_root: None)
+    runner = FakeRunner(
+        tmp_path,
+        path_manifest_returncode=1,
+        path_manifest_stdout="FAIL path_manifest_fidelity path_manifest_carrier_required\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    output = out.getvalue()
+    assert rc == 1
+    assert "path_manifest_carrier_required" in output
+    assert pr_preflight.CONTAINED_SEAT_CARRIER_NOTICE not in output
+    assert "omitted path_manifest_carrier_required" not in output
+
+
+def test_seat_ready_default_test_command_caps_pytest_workers(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(tmp_path)
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
+    assert "-n" in pytest_call[0]
+    assert pytest_call[0][pytest_call[0].index("-n") + 1] == "4"
+    assert "auto" not in pytest_call[0]
+
+
+def test_seat_ready_pytest_env_uses_home_tmpdir(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    runner = FakeRunner(tmp_path)
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
+    env = pytest_call[2]
+    assert env is not None
+    assert env["TMPDIR"] == str(tmp_path / "home" / "tmp")
+
+
+def test_seat_ready_autogen_gate_runs_only_for_profile_and_touched_surface(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+
+    seat_ready_runner = FakeRunner(
+        tmp_path,
+        changed_paths="validators/creator_engine_validator/pr_preflight.py\n",
+    )
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=seat_ready_runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+    assert rc == 0
+    assert [sys.executable, "scripts/gen_cli_reference.py", "--write"] in seat_ready_runner.argv_calls()
+
+    contained_runner = FakeRunner(
+        tmp_path,
+        changed_paths="validators/creator_engine_validator/pr_preflight.py\n",
+    )
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.CONTAINED_SEAT_PROFILE),
+        runner=contained_runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+    assert rc == 0
+    assert [sys.executable, "scripts/gen_cli_reference.py", "--write"] not in contained_runner.argv_calls()
+
+    unprofiled_runner = FakeRunner(
+        tmp_path,
+        changed_paths="validators/creator_engine_validator/pr_preflight.py\n",
+    )
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=None),
+        runner=unprofiled_runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+    assert rc == 0
+    assert [sys.executable, "scripts/gen_cli_reference.py", "--write"] not in unprofiled_runner.argv_calls()
+
+    unchanged_surface_runner = FakeRunner(
+        tmp_path,
+        changed_paths="docs/design/seat-side-preflight.md\n",
+    )
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=unchanged_surface_runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+    assert rc == 0
+    assert [sys.executable, "scripts/gen_cli_reference.py", "--write"] not in unchanged_surface_runner.argv_calls()
+
+
+def test_seat_ready_autogen_gate_reports_env_skip_for_missing_generator_environment(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths="validators/creator_engine_validator/pr_preflight.py\n",
+        autogen_generator_result=pr_preflight.CommandResult(
+            1,
+            "",
+            "ModuleNotFoundError: No module named 'jinja2'\n",
+        ),
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    output = out.getvalue()
+    assert "ENV-SKIP cli_reference_autogen_sync" in output
+    assert "No module named 'jinja2'" in output
+
+
 def test_preflight_reports_manifest_count_or_sha_desync(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
@@ -771,6 +940,14 @@ def test_preflight_build_parser_rejects_unknown_profile():
         parser.parse_args(["--profile", "bogus"])
 
     assert exc_info.value.code == 2
+
+
+def test_validate_profile_accepts_seat_ready():
+    pr_preflight._validate_profile(pr_preflight.SEAT_READY_PROFILE)
+
+
+def test_validate_pr_profiles_include_seat_ready():
+    assert pr_preflight.SEAT_READY_PROFILE in pr_preflight.VALIDATE_PR_PROFILES
 
 
 def test_preflight_build_parser_hides_profile_from_help(capsys):
