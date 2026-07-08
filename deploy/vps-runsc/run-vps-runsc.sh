@@ -35,7 +35,7 @@ Environment:
                                 npm symlinks ending in @openai/codex/bin/codex.js are autodetected.
   CE_VPS_CLAUDE_BIN            Optional host Claude binary mounted at /usr/local/bin/claude
   CE_LEDGER_ROOT               Host or container Active-Work Ledger root forwarded to the managed
-                                Codex PreToolUse hook (default: container repo .hermes ledger)
+                                Codex PreToolUse hook (default: container repo .ce/state ledger)
   CE_REVIEWER_AUTHORITY_REF    Reviewer-authority envelope ref forwarded to the managed hook
   CE_VPS_CONTAINER_REPO        Container repo path (default: /workspace/creator-engine)
   CE_VPS_CONTAINER_USER        Container seat user name (default: current user)
@@ -391,7 +391,7 @@ prepare_contained_codex_config() {
   local config_dir hook_command ledger_root reviewer_ref
   config_dir="$(dirname "${CE_VPS_CONTAINED_CODEX_CONFIG}")"
   mkdir -p "${config_dir}"
-  ledger_root="${CE_LEDGER_ROOT:-${CE_VPS_REPO}/.hermes/active-work-ledger}"
+  ledger_root="${CE_LEDGER_ROOT:-${CE_VPS_REPO}/.ce/state/active-work-ledger}"
   ledger_root="$(container_repo_path "${ledger_root}")"
   hook_command="CE_LEDGER_ROOT=$(shell_quote_env_value "${ledger_root}")"
   if [ -n "${CE_REVIEWER_AUTHORITY_REF:-}" ]; then

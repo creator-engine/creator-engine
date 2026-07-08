@@ -36,7 +36,7 @@ def _ok_legs(**overrides) -> ce_onboard.OnboardLegs:
         ),
         verify_install=lambda install_root, *, offline: {"ok": True, "status": "verified", "reason": ""},
         fix_path=lambda: {"profile_path": "/home/u/.profile", "changed": True},
-        init=lambda repo_root: {"created": [".hermes"], "existing": []},
+        init=lambda repo_root: {"created": [".ce/state"], "existing": []},
         brain_init=lambda state_root: {"created": True, "already_initialized": False},
         launch=lambda *, harness, repo_root, ledger_root: ce_onboard.LaunchLegResult(
             ok=True, live_controllers=1, seat_record_ref="seats/h/c.yaml", detail="launched",
@@ -310,11 +310,50 @@ def test_red_g4_onboard_refusal_includes_actionable_state_path_guidance():
     doctor = result.phases[0]
     assert doctor.status == "refused"
     assert doctor.verify["refused_clauses"] == ["RED-G-4"]
-    assert ".hermes/" in doctor.data["guidance"]
-    assert ".gitignore" in doctor.data["guidance"]
+    assert ".ce/state/" in doctor.data["guidance"]
+    assert ".hermes/" not in doctor.data["guidance"]
+    assert ".gitignore" not in doctor.data["guidance"]
     assert "ce init --repo-root /tmp/user-repo" in doctor.data["guidance"]
     assert "ce onboard --repo-root /tmp/user-repo" in doctor.data["guidance"]
-    assert "Add `.hermes/` to .gitignore" in doctor.data["next_steps"]
+    assert all("Add `.hermes/` to .gitignore" not in step for step in doctor.data["next_steps"])
+
+
+def test_onboard_succeeds_with_ce_state_and_no_hermes_gitignore_entry(tmp_path: Path):
+    (tmp_path / ".ce" / "state").mkdir(parents=True)
+    legs = _ok_legs(
+        doctor=lambda repo_root, *, require_visible_launch: ce_onboard.DoctorLegResult(
+            ok=False, refused_clauses=["RED-G-4"], detail="legacy state path",
+        ),
+    )
+
+    result = ce_onboard.run_onboard(
+        _config(install_mode="skip", no_launch=True, repo_root=str(tmp_path)),
+        legs=legs,
+    )
+
+    assert result.ok
+    doctor = result.phases[0]
+    assert doctor.status == "ok"
+    assert doctor.verify["refused_clauses"] == []
+    assert doctor.verify["legacy_state_clause_advisory"] is True
+    assert ".hermes/" not in json.dumps(result.to_dict())
+
+
+def test_legacy_hermes_directory_emits_advisory_not_refusal(tmp_path: Path):
+    (tmp_path / ".ce" / "state").mkdir(parents=True)
+    (tmp_path / ".hermes").mkdir()
+    (tmp_path / ".gitignore").write_text(".hermes/\n", encoding="utf-8")
+
+    result = ce_onboard.run_onboard(
+        _config(install_mode="skip", no_launch=True, repo_root=str(tmp_path)),
+        legs=_ok_legs(),
+    )
+
+    assert result.ok
+    doctor = result.phases[0]
+    assert doctor.status == "ok"
+    assert doctor.data["advisories"]
+    assert ".hermes/" in doctor.data["advisories"][0]
 
 
 def test_user_project_onboard_not_blocked_by_packaging_clause(tmp_path: Path, monkeypatch):
@@ -332,6 +371,7 @@ def test_user_project_onboard_not_blocked_by_packaging_clause(tmp_path: Path, mo
     monkeypatch.delenv("CE_INSTALL_AGENT", raising=False)
     git(["init", "--initial-branch=main"])
     (tmp_path / ".gitignore").write_text(".hermes/\n", encoding="utf-8")
+    (tmp_path / ".ce" / "state").mkdir(parents=True)
     legs = _ok_legs(doctor=ce_onboard._default_doctor_leg)
 
     result = ce_onboard.run_onboard(

@@ -25,7 +25,7 @@ machine-role names `source` (→ Operator) and `Hermes`-the-role
 (→ Controller); the v2 terminology canon (`ce_terminology_v2`) accepts
 those legacy names *on import* in `specs/001`/`002` and enforces
 `operator` only on new `specs/v2/` artifacts. Crucially, the **Hermes
-harness** — the CE CLI / `.hermes/` toolchain / seat-launch substrate —
+harness** — the CE CLI / `.ce/state` toolchain / seat-launch substrate —
 is a *tool* the Controller runs on, NOT the Controller role; the §a
 matrix's "Nefarious / Hermes" actor names that operator machine + that
 harness, distinct from the Controller. The §a Actor/Tool Ownership

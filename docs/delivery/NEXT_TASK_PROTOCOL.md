@@ -119,7 +119,7 @@ Describe the cleanup state of the development environment: branch
 state on the canonical remote; worktree state; whether the feature
 branch is to be deleted, retained, or requires Source approval before
 deletion; whether any local snapshot file (e.g.,
-`.hermes/session-state/STATE.md` in deployed instances) needs an
+`.ce/state/session-state/STATE.md` in deployed instances) needs an
 update. Cleanup actions that mutate shared state (deleting remote
 branches, force-pushes) MUST be ratified separately.
 

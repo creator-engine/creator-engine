@@ -6,14 +6,15 @@
 
 ## Purpose
 
-A PCO claim today lives instance-local (`.hermes/active-work-ledger/` on v1
-instances) — invisible to the other peer. By the A.0 invariant (**the forge
-is the only shared state**), a *team-visible* claim is **projected onto the
-forge**: the backlog item's **assignee + Projects `Status=Running`**. The
-projection is **re-read and drift-checked immediately before** the local
-claim (`forge.backlog.claim_item`: read → drift-check → write → randomized
-back-off → re-read → reconcile). The instance-local ledger remains the
-per-instance detail; the forge projection is the shared truth.
+A PCO claim lives instance-local (`.ce/state/active-work-ledger/` for v3;
+`.hermes/active-work-ledger/` is the v1-frozen layout) — invisible to the
+other peer. By the A.0 invariant (**the forge is the only shared state**), a
+*team-visible* claim is **projected onto the forge**: the backlog item's
+**assignee + Projects `Status=Running`**. The projection is **re-read and
+drift-checked immediately before** the local claim (`forge.backlog.claim_item`:
+read → drift-check → write → randomized back-off → re-read → reconcile). The
+instance-local ledger remains the per-instance detail; the forge projection is
+the shared truth.
 
 ## ⚠ The advisory-lock limit — read this first
 

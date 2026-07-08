@@ -92,9 +92,10 @@ Pull requests should:
 - Keep a clean changed-file boundary — touch only what the change
   requires, and avoid sweeping unrelated reformatting or churn.
 - Avoid checking in instance-local runtime or session state (for
-  example, anything under `.hermes/` that is intended to be ignored,
-  filled-in copies of `templates/hermes/session-state/STATE.template.md`,
-  generated logs, local credentials, or per-machine paths). The
+  example, anything under `.ce/state/`, legacy `.hermes/` runtime
+  state kept ignored for backward compatibility, filled-in copies of
+  `templates/hermes/session-state/STATE.template.md`, generated logs,
+  local credentials, or per-machine paths). The
   constitution (Principle II) requires upstream content to remain
   reusable across deployments; instance-local state stays in ignored
   local files.

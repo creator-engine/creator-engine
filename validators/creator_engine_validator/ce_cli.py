@@ -529,7 +529,7 @@ def _build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--prompt", required=True, help="path to the consumed prompt pointer")
     launch.add_argument("--prompt-sha", required=True, help="expected byte-level SHA256 of --prompt")
     launch.add_argument("--repo-root", required=True)
-    launch.add_argument("--ledger-root", required=True, help="path to .hermes/active-work-ledger")
+    launch.add_argument("--ledger-root", required=True, help="path to .ce/state/active-work-ledger")
     launch.add_argument("--handoff", default=None, help="optional consumed handoff pointer path")
     launch.add_argument("--handoff-sha", default=None, help="expected byte-level SHA256 of --handoff")
     launch.add_argument(
@@ -549,7 +549,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mcp-config",
         dest="mcp_config",
         default=None,
-        help="CE-owned MCP config path inside the repo / .hermes (pins --strict-mcp-config)",
+        help="CE-owned MCP config path inside the repo / .ce/state (pins --strict-mcp-config)",
     )
     launch.add_argument(
         "--completion-report-ref",
@@ -749,7 +749,7 @@ def _build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--occurred-at", required=True, help="ISO-8601 UTC timestamp or source-controlled ref")
     rec.add_argument("--repo-root", required=True)
     rec.add_argument("--side-effect-ledger-root", required=True)
-    rec.add_argument("--active-work-ledger-root", required=True, help="path to .hermes/active-work-ledger")
+    rec.add_argument("--active-work-ledger-root", required=True, help="path to .ce/state/active-work-ledger")
     rec.add_argument("--actor-role", default=None, choices=["controller", "architect", "implementer", "reviewer", "verification"])
     rec.add_argument("--pane-ref", default=None)
     rec.add_argument("--subject-ref", default=None)
@@ -821,7 +821,7 @@ def _build_parser() -> argparse.ArgumentParser:
     wa.add_argument("--lane-id", required=True)
     wa.add_argument("--claim-ref", required=True, help="claim path relative to --active-work-ledger-root")
     wa.add_argument("--lease-ref", required=True, help="lease path relative to --active-work-ledger-root")
-    wa.add_argument("--active-work-ledger-root", required=True, help="path to .hermes/active-work-ledger")
+    wa.add_argument("--active-work-ledger-root", required=True, help="path to .ce/state/active-work-ledger")
     wa.add_argument("--container-instance-root", required=True, help="root for container-instance records")
     wa.add_argument("--instance-id", required=True)
     wa.add_argument("--started-at", default=None, help="ISO-8601 UTC start timestamp (defaults to now)")
@@ -900,7 +900,7 @@ def _build_parser() -> argparse.ArgumentParser:
     fb.add_argument(
         "--packet-root",
         required=True,
-        help="ignored output root for the packet (e.g. .hermes/fan-in/)",
+        help="ignored output root for the packet (e.g. .ce/state/fan-in/)",
     )
     fb.add_argument("--repo-root", default=None, help="repo root for the git-ignore guard")
     fb.add_argument("--packet-id", default=None, help="override the request's packet_id")
@@ -943,7 +943,7 @@ def _build_parser() -> argparse.ArgumentParser:
     qd.add_argument(
         "--preview-root",
         required=True,
-        help="ignored output root for the preview (e.g. .hermes/integration-queue/)",
+        help="ignored output root for the preview (e.g. .ce/state/integration-queue/)",
     )
     qd.add_argument("--repo-root", default=None, help="repo root for the git-ignore guard")
     qd.add_argument("--preview-id", default=None, help="override the request's preview_id")
@@ -1037,7 +1037,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pa.add_argument("--recorded-at", required=True, help="UTC timestamp YYYY-MM-DDThh:mm:ssZ")
     pa.add_argument("--body-json", required=True, help="record body mapping as JSON")
-    pa.add_argument("--repo-root", default=None, help="repo root (records must not target .hermes/)")
+    pa.add_argument("--repo-root", default=None, help="repo root (records must target .ce/state for live local state)")
     pa.add_argument("--key-id", default=pcl_runtime.DEFAULT_KEY_ID, help="shape-only signature key_id")
     pa.add_argument(
         "--signature-value",

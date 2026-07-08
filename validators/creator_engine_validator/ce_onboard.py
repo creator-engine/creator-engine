@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -78,8 +79,8 @@ GITHUB_APP_OPERATOR_INPUT = {
 }
 
 STATE_PATH_GUIDANCE = (
-    ".hermes/ must be git-ignored before CE writes local governed state. "
-    "Add a .gitignore line containing `.hermes/`, run `ce init --repo-root {repo_root}`, "
+    "{state_root}/ must exist before CE writes local governed state. "
+    "Run `ce init --repo-root {repo_root}` to bootstrap `{state_root}/`, "
     "then re-run `ce onboard --repo-root {repo_root}`."
 )
 
@@ -533,11 +534,57 @@ def _run_doctor_leg(
     return _run_leg("doctor", func, repo_root, require_visible_launch=require_visible_launch)
 
 
-def _state_path_guidance(repo_root: str) -> dict[str, Any]:
+def _state_root_path(repo_root: str | Path, state_root: str | Path) -> Path:
+    root = Path(state_root)
+    return root if root.is_absolute() else Path(repo_root) / root
+
+
+def _state_layout_exists(repo_root: str | Path, state_root: str | Path) -> bool:
+    return _state_root_path(repo_root, state_root).is_dir()
+
+
+def _path_is_gitignored(repo_root: str | Path, path: str) -> bool:
+    root = Path(repo_root)
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", path],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        gitignore = root / ".gitignore"
+        if not gitignore.is_file():
+            return False
+        normalized = path.strip().rstrip("/")
+        return any(
+            line.strip().rstrip("/") == normalized
+            for line in gitignore.read_text(encoding="utf-8", errors="replace").splitlines()
+        )
+    return proc.returncode == 0
+
+
+def _legacy_hermes_advisories(repo_root: str | Path) -> list[str]:
+    root = Path(repo_root)
+    if not (root / ".hermes").is_dir():
+        return []
+    ignored = _path_is_gitignored(root, ".hermes/")
+    if ignored:
+        return [
+            "Legacy .hermes/ state remains on disk and is gitignored; keep it ignored "
+            "while migrating to .ce/state/."
+        ]
+    return [
+        "Legacy .hermes/ state remains on disk; add/keep .hermes/ in .gitignore "
+        "to avoid committing legacy local state while migrating to .ce/state/."
+    ]
+
+
+def _state_path_guidance(repo_root: str, state_root: str = V3_LOCAL_STATE_ROOT) -> dict[str, Any]:
     return {
-        "guidance": STATE_PATH_GUIDANCE.format(repo_root=repo_root),
+        "guidance": STATE_PATH_GUIDANCE.format(repo_root=repo_root, state_root=state_root),
         "next_steps": [
-            "Add `.hermes/` to .gitignore",
             f"Run `ce init --repo-root {repo_root}`",
             f"Re-run `ce onboard --repo-root {repo_root}`",
         ],
@@ -575,6 +622,9 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
     # Phase 1 — doctor. A hard refusal here (ungoverned host) STOPS before any
     # mutation. We require the visible-launch clause only when we will launch.
     require_visible = not config.no_launch
+    state_layout_ready = _state_layout_exists(config.repo_root, config.state_root)
+    enforce_state_layout = legs.doctor is _default_doctor_leg
+    legacy_advisories = _legacy_hermes_advisories(config.repo_root) if state_layout_ready else []
     try:
         doctor = _run_doctor_leg(
             legs.doctor,
@@ -584,21 +634,36 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
         )
     except OnboardError as exc:
         return _fail_result(result, exc)
+    if enforce_state_layout and not state_layout_ready:
+        result.phases.append(_record(
+            "doctor", status=STATUS_REFUSED,
+            detail="canonical state path missing",
+            verify={"missing_state_root": str(_state_root_path(config.repo_root, config.state_root))},
+            data=_state_path_guidance(config.repo_root, config.state_root),
+        ))
+        result.ok = False
+        result.reason = "state path bootstrap required"
+        return result
+    refused_clauses = list(doctor.refused_clauses)
+    legacy_state_clause = False
+    if state_layout_ready and "RED-G-4" in refused_clauses:
+        refused_clauses = [c for c in refused_clauses if c != "RED-G-4"]
+        legacy_state_clause = True
     if not doctor.ok:
         # A missing visible tmux terminal is a *soft* boundary: everything up to
         # launch can still run; we mark launch blocked later. Any other refusal
         # is a hard stop.
-        non_tmux = [c for c in doctor.refused_clauses if c != "PCO-049"]
+        non_tmux = [c for c in refused_clauses if c != "PCO-049"]
         if non_tmux:
             guidance_data = (
-                _state_path_guidance(config.repo_root)
-                if "RED-G-4" in doctor.refused_clauses
+                _state_path_guidance(config.repo_root, config.state_root)
+                if "RED-G-4" in refused_clauses
                 else {}
             )
             result.phases.append(_record(
                 "doctor", status=STATUS_REFUSED,
-                detail=f"doctor refused: {', '.join(doctor.refused_clauses)}",
-                verify={"refused_clauses": doctor.refused_clauses},
+                detail=f"doctor refused: {', '.join(refused_clauses)}",
+                verify={"refused_clauses": refused_clauses},
                 data=guidance_data,
             ))
             result.ok = False
@@ -606,14 +671,20 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
             return result
     result.phases.append(_record(
         "doctor", status=STATUS_OK,
-        detail=doctor.detail,
+        detail=(
+            "doctor PASS (legacy state-path advisory)"
+            if legacy_state_clause and not refused_clauses
+            else doctor.detail
+        ),
         verify={
             "low_tmpdir": doctor.low_tmpdir,
             "path_gap": doctor.path_gap,
-            "refused_clauses": doctor.refused_clauses,
+            "refused_clauses": refused_clauses,
+            "legacy_state_clause_advisory": legacy_state_clause,
         },
+        data={"advisories": legacy_advisories} if legacy_advisories else {},
     ))
-    no_visible_terminal = "PCO-049" in doctor.refused_clauses
+    no_visible_terminal = "PCO-049" in refused_clauses
 
     # Phase 2 — install detect / acquire.
     try:
@@ -698,7 +769,13 @@ def run_onboard(config: OnboardConfig, *, legs: OnboardLegs | None = None) -> On
     # Phase 5 — workspace bootstrap (ce init + ce brain init). Idempotent: a
     # re-run is a safe no-op that reports current state.
     try:
-        init_data = _run_leg("bootstrap", legs.init, config.repo_root)
+        if state_layout_ready and legs.init is _default_init_leg:
+            init_data = {
+                "skipped": True,
+                "reason": f"{config.state_root}/ already present; legacy init not required",
+            }
+        else:
+            init_data = _run_leg("bootstrap", legs.init, config.repo_root)
         brain_data = _run_leg("bootstrap", legs.brain_init, config.state_root)
     except OnboardError as exc:
         return _fail_result(result, exc)
@@ -821,6 +898,11 @@ def _render_human(result: OnboardResult) -> str:
             lines.append("    next steps:")
             for step in next_steps:
                 lines.append(f"      - {step}")
+        advisories = phase.data.get("advisories")
+        if advisories:
+            lines.append("    advisories:")
+            for advisory in advisories:
+                lines.append(f"      - {advisory}")
     if not result.ok and result.reason:
         lines.append(f"  reason: {result.reason}")
     return "\n".join(lines)
