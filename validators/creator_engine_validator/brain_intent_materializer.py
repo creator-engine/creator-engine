@@ -10,7 +10,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +148,15 @@ class DryRunOutput:
 
 
 @dataclass(frozen=True)
+class CloseoutStatus:
+    is_advisory: bool
+    is_hard_failure: bool
+    deadline_utc: str
+    held_reason: str
+    materialization_key: str
+
+
+@dataclass(frozen=True)
 class MaterializerConfig:
     state_root: Path
     quarantine_root: Path
@@ -190,7 +199,21 @@ def assert_arming_enabled() -> None:
         raise RuntimeError(ARMING_DISABLED_MESSAGE)
 
 
-def construct_materialization_commit(*_args: Any, **_kwargs: Any) -> None:
+def _assert_armed_write_target(path: Path | str) -> None:
+    """Enforce the Operator-bounded armed write surface before any write attempt."""
+    rendered = str(path).replace("\\", "/")
+    for authorized in AUTHORIZED_WRITE_PATHS:
+        if authorized.endswith("/"):
+            if rendered.startswith(authorized):
+                return
+        elif rendered == authorized:
+            return
+    raise RuntimeError(f"materializer armed write target is outside authorized paths: {path}")
+
+
+def construct_materialization_commit(*_args: Any, write_paths: Sequence[Path | str] | None = None, **_kwargs: Any) -> None:
+    for target in write_paths or (LEDGER_PATH, ".ce/brain/append-intents/"):
+        _assert_armed_write_target(target)
     assert_arming_enabled()
 
 
@@ -213,9 +236,36 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
 def _require_state_subtree(path: Path) -> None:
     parts = path.parts
     for index, part in enumerate(parts[:-1]):
-        if part == ".ce" and index + 1 < len(parts) and parts[index + 1] == "state":
+        # The prior index-bound check was always true here: iterating parts[:-1]
+        # guarantees one following part whenever ".ce" is visited.
+        if part == ".ce" and parts[index + 1] == "state":
             return
     raise RuntimeError(f"materializer evidence path escapes .ce/state: {path}")
+
+
+def _parse_utc_z_naive(value: Any) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("held_at_utc must be a non-empty ISO-8601 string")
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _now_naive_utc(now_fn: Callable[[], datetime] | None) -> datetime:
+    value = now_fn() if now_fn is not None else datetime.utcnow()
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC).replace(tzinfo=None)
+    return value
+
+
+def _iso_utc_z_naive(value: datetime) -> str:
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC).replace(tzinfo=None)
+    return value.isoformat(timespec="seconds") + "Z"
 
 
 def _canonical_intent_sha256(path: Path | str) -> str:
@@ -271,6 +321,80 @@ class IntentDiscovery:
         intent_sha256 = _canonical_intent_sha256(source)
         key = MaterializationKey.compute(merge_commit_sha, str(intent_path), intent_sha256)
         return DiscoveredIntent(source, data, intent_sha256, key)
+
+
+class HistoryScanner:
+    """Discovers unconsumed append intents by walking origin/main first-parent history."""
+
+    INTENT_ROOT = ".ce/brain/append-intents/"
+
+    def __init__(
+        self,
+        repo_root: Path | str,
+        *,
+        git_runner: GitRunner | None = None,
+        main_ref: str = "origin/main",
+    ):
+        self.repo_root = Path(repo_root)
+        self.git_runner = git_runner or brain_append_worker._default_git_runner
+        self.main_ref = main_ref
+
+    def _git(self, args: Sequence[str]) -> str:
+        code, stdout, stderr = self.git_runner(args, self.repo_root)
+        if code != 0:
+            detail = stderr.strip() or stdout.strip() or f"git {' '.join(args)} failed"
+            raise RuntimeError(detail)
+        return stdout
+
+    def _intent_paths_at(self, git_ref: str) -> list[str]:
+        stdout = self._git(["ls-tree", "-r", "--name-only", git_ref, self.INTENT_ROOT])
+        return sorted(line.strip() for line in stdout.splitlines() if line.strip())
+
+    def scan(self) -> list[tuple[str, str]]:
+        log = self._git(["log", "--first-parent", "--format=%H", self.main_ref])
+        newest_first = [line.strip() for line in log.splitlines() if line.strip()]
+        if not newest_first:
+            return []
+
+        pending_current = set(self._intent_paths_at(self.main_ref))
+        if not pending_current:
+            return []
+
+        discovered: list[tuple[str, str]] = []
+        seen_paths: set[str] = set()
+        for sha in reversed(newest_first):
+            for intent_path in self._intent_paths_at(sha):
+                if intent_path in pending_current and intent_path not in seen_paths:
+                    discovered.append((sha, intent_path))
+                    seen_paths.add(intent_path)
+        return discovered
+
+    def __iter__(self):
+        return iter(self.scan())
+
+
+class CloseoutWindowPolicy:
+    """Evaluates HELD closeout status; gate registration is deferred until arming scope."""
+
+    WINDOW = timedelta(minutes=30)
+
+    @classmethod
+    def evaluate(
+        cls,
+        held_record: dict[str, Any],
+        now_fn: Callable[[], datetime] | None = None,
+    ) -> CloseoutStatus:
+        held_at = _parse_utc_z_naive(held_record.get("held_at_utc"))
+        deadline = held_at + cls.WINDOW
+        now = _now_naive_utc(now_fn)
+        is_hard_failure = now >= deadline
+        return CloseoutStatus(
+            is_advisory=not is_hard_failure,
+            is_hard_failure=is_hard_failure,
+            deadline_utc=_iso_utc_z_naive(deadline),
+            held_reason=str(held_record.get("held_reason", "")),
+            materialization_key=str(held_record.get("materialization_key", "")),
+        )
 
 
 class LedgerTailProof:
@@ -503,6 +627,51 @@ class MaterializerLease:
         self.release()
 
 
+class MaterializerRunLoop:
+    """Run one materializer poll/process cycle.
+
+    Under multi-instance topology, multiple run-loop invocations against the same repo state would produce competing leases; correctness requires an external linearizable lock with the same brain-append exclusion scope (Q4 ratified ruling).
+    """
+
+    def __init__(
+        self,
+        config: MaterializerConfig,
+        *,
+        poll_source: Callable[[], list[tuple[str, str]]] | None = None,
+        git_runner: GitRunner | None = None,
+        pr_number: int = 0,
+        now: Callable[[], datetime] | None = None,
+    ):
+        if not isinstance(config, MaterializerConfig):
+            raise MaterializerConfigError("config must be a MaterializerConfig")
+        self.config = config
+        self.poll_source = poll_source
+        self.git_runner = git_runner
+        self.pr_number = pr_number
+        self.now = now
+
+    def _default_poll_source(self) -> list[tuple[str, str]]:
+        return HistoryScanner(self.config.repo_root, git_runner=self.git_runner).scan()
+
+    def run_once(self, *, pr_number: int | None = None) -> list[DryRunOutput]:
+        source = self.poll_source or self._default_poll_source
+        outputs: list[DryRunOutput] = []
+        for merge_commit_sha, intent_path in source():
+            path = Path(intent_path)
+            outputs.append(
+                Materializer.run_dry(
+                    merge_commit_sha=merge_commit_sha,
+                    intent_path=intent_path,
+                    branch_slug=path.stem,
+                    pr_number=self.pr_number if pr_number is None else pr_number,
+                    config=self.config,
+                    git_runner=self.git_runner,
+                    now=self.now,
+                )
+            )
+        return outputs
+
+
 def _append_event(
     *,
     state_root: Path,
@@ -603,6 +772,9 @@ class Materializer:
                 )
                 return output
             except BrainAppendRefusal as exc:
+                # Artifact asymmetry: BrainAppendRefusal writes quarantine,
+                # HELD state, dry-run artifact, and JSONL event; HeldError
+                # writes HELD state and JSONL event only.
                 key = fallback_key
                 reason = "brain_intent_materialization_failed"
                 detail = f"{exc.invariant}: {exc.detail}"

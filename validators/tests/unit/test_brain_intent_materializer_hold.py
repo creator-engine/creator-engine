@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,12 +10,15 @@ import yaml
 
 from creator_engine_validator import brain_runtime
 from creator_engine_validator.brain_intent_materializer import (
+    AUTHORIZED_WRITE_PATHS,
     HELD_REASONS,
     HeldStateStore,
     MaterializationKey,
     Materializer,
     MaterializerConfig,
     QuarantineWriter,
+    _assert_armed_write_target,
+    _require_state_subtree,
 )
 
 
@@ -139,7 +143,11 @@ def test_tail_unprovable_holds_without_dry_run_artifact_or_ledger_bytes(tmp_path
     config = _config(tmp_path)
     intent = tmp_path / "ce-491-optiona-slice1.yaml"
     _valid_intent(intent)
-    key = MaterializationKey.compute("d" * 40, str(intent), __import__("hashlib").sha256(intent.read_text(encoding="utf-8").encode("utf-8")).hexdigest()).key_hex
+    key = MaterializationKey.compute(
+        "d" * 40,
+        str(intent),
+        hashlib.sha256(intent.read_text(encoding="utf-8").encode("utf-8")).hexdigest(),
+    ).key_hex
 
     output = Materializer.run_dry(
         merge_commit_sha="d" * 40,
@@ -155,3 +163,21 @@ def test_tail_unprovable_holds_without_dry_run_artifact_or_ledger_bytes(tmp_path
     assert output.refusal_reason == "brain_ledger_tail_unprovable"
     assert not (config.state_root / "dry-run" / f"{key}.json").exists()
     assert output.would_append_records == []
+
+
+def test_require_state_subtree_rejects_out_of_subtree_path():
+    with pytest.raises(RuntimeError, match="escapes .ce/state"):
+        _require_state_subtree(Path("/tmp/evil/key.json"))
+
+
+def test_authorized_write_paths_are_live_bounded_metadata():
+    assert isinstance(AUTHORIZED_WRITE_PATHS, frozenset)
+    assert AUTHORIZED_WRITE_PATHS == frozenset({".ce/brain/assertions.yaml", ".ce/brain/append-intents/"})
+    assert AUTHORIZED_WRITE_PATHS
+
+
+def test_armed_write_target_guard_rejects_out_of_bounds_path():
+    _assert_armed_write_target(".ce/brain/assertions.yaml")
+    _assert_armed_write_target(".ce/brain/append-intents/branch.yaml")
+    with pytest.raises(RuntimeError, match="outside authorized paths"):
+        _assert_armed_write_target(".ce/changelog/evil.md")
