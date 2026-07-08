@@ -1,6 +1,6 @@
 STATUS: READY
 BRANCH: ce-491-prearming
-COMMIT: see final READY signal
+COMMIT: see final READY signal after final READY-only commit
 CARRIER: .ce/pr-manifests/ce-491-prearming.md
 PROBE_ITEM1: open
 PROBE_ITEM2: open
