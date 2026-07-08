@@ -1079,14 +1079,15 @@ def _resume_state_pointer(state_root: Path | str) -> dict[str, Any] | None:
             content_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
             continue
-        candidates.append((content_sha256, str(path), path))
+        candidates.append((str(path), content_sha256, path))
     if not candidates:
         return None
-    _digest, _name, newest = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
+    # Resume-state filenames encode timestamps, so lexicographic path order is chronological.
+    _name, digest, newest = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
     stat = newest.stat()
     return {
         "path": str(newest),
-        "content_sha256": hashlib.sha256(newest.read_bytes()).hexdigest(),
+        "content_sha256": digest,
         "size_bytes": stat.st_size,
     }
 
