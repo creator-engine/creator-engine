@@ -31,7 +31,7 @@ flowchart LR
     Review -- feedback --> Shape
 ```
 
-The loop is Frame -> Shape -> Build -> Review -> Ship. Frame is ordinary conversation about the problem; Shape turns that intent into a Scope with Goal, Done-when, and Change-type; Build runs inside that Scope; Review checks artifacts and evidence; Ship lands the governed outcome or sends the work back with concrete feedback. Read the full stage guide in [How CE Builds Software](./docs/guide/how-ce-builds-software.md).
+The loop is Frame -> Shape -> Build -> Review -> Ship. Frame is ordinary conversation about the problem; Shape turns that intent into a Scope with Goal, Done-when, and Change-type; Build runs inside that Scope; Review checks artifacts and evidence; Ship lands the governed outcome or sends the work back with concrete feedback. Read the full stage guide in [Understanding CE](./docs/guide/understanding-ce.md).
 
 ## Quickstart
 
@@ -63,7 +63,7 @@ ce launch
 
 ### Developer Mode
 
-If you prefer to drive the pipeline yourself, use the canonical command path in [Creator Engine Quickstart](./docs/guide/quickstart.md). The core verbs are `ce brain init`, `ce launch`, `ce shape`, `ce scope`, `ce ratify`, `ce drive --spawn`, and `ce report`.
+If you prefer to drive the pipeline yourself, use the canonical command path in [Creator Engine Quickstart](./docs/guide/zero-to-governed-seat-quickstart.md). The core verbs are `ce brain init`, `ce launch`, `ce shape`, `ce scope`, `ce ratify`, `ce drive --spawn`, and `ce report`.
 
 ## Modes
 
@@ -81,10 +81,9 @@ The current release is reflected by the badge at the top of this README, [GitHub
 | Start here | Use it for |
 | --- | --- |
 | [Welcome](./docs/guide/welcome.md) | A product-level orientation before the first run |
-| [Quickstart](./docs/guide/quickstart.md) | The canonical copy-paste path for a first governed change |
-| [How CE Builds Software](./docs/guide/how-ce-builds-software.md) | The stage model, Scope fields, and Completion Report vocabulary |
-| [Understanding CE](./docs/guide/understanding-ce.md) | Plain-language concepts and terminology |
-| [Complete Walkthrough](./docs/guide/complete-walkthrough.md) | A fuller install-to-ship narrative |
+| [Quickstart](./docs/guide/zero-to-governed-seat-quickstart.md) | The canonical copy-paste path for a first governed change |
+| [Understanding CE](./docs/guide/understanding-ce.md) | Plain-language concepts, the stage model, and CE terminology |
+| [Beginner Walkthrough](./docs/guide/getting-started-step-by-step.md) | A fuller install-to-ship narrative, step by step |
 | [Pilot Runbook](./docs/guide/pilot-runbook.md) | Practical pilot operation and review flow |
 | [CLI Reference](./docs/reference/cli.md) | Public `ce` command inventory |
 | [Contributing](./CONTRIBUTING.md) | How to contribute to this repository |
