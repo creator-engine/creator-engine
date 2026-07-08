@@ -21,7 +21,13 @@ from .conveyor_daemon import (
     ConveyorDaemonLedgerRecord,
     ConveyorValidationLedgerBinding,
 )
-from .conveyor_discovery import ConveyorSeatDiscoveryRunner, SeatProbeSpec
+from .conveyor_discovery import (
+    ConveyorSeatDiscoveryRunner,
+    SeatProbeSpec,
+    parse_ready_for_harvest_signals,
+    subprocess_probe_runner,
+)
+from .conveyor_intake_queue import IntakeQueue, IntakeQueueReader
 from .daemon_lease import DEFAULT_LEASE_TTL_SECONDS, DaemonLease, acquire
 from .daemon_lease import DaemonLeaseError
 from .forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
@@ -59,6 +65,8 @@ class ConveyorDaemonConfig:
     ledger_path: Path | None = None
     validation_ledger_root: Path | None = None
     active_work_ledger_root: Path | None = None
+    intake_queue_root: Path | None = None
+    intake_enabled: bool = False
 
 
 class SanitizedSubprocessCommandRunner:
@@ -221,6 +229,8 @@ def load_config(env: Mapping[str, str] | None = None) -> ConveyorDaemonConfig:
             source,
             "CE_CONVEYOR_DAEMON_ACTIVE_WORK_LEDGER_ROOT",
         ),
+        intake_queue_root=_optional_path(source, "CE_CONVEYOR_INTAKE_QUEUE_ROOT"),
+        intake_enabled=source.get("CE_CONVEYOR_INTAKE_ENABLED", "").strip() == "1",
     )
 
 
@@ -303,12 +313,44 @@ def _ensure_private_dir(path: Path) -> None:
     path.chmod(0o700)
 
 
-def _build_daemon(config: ConveyorDaemonConfig, lease: DaemonLease) -> ConveyorDaemon:
+class _RecordingProbeRunner:
+    def __init__(self, specs: Sequence[SeatProbeSpec]) -> None:
+        self._seat_by_argv = {tuple(spec.argv): spec.seat_id for spec in specs}
+        self._results = {spec.seat_id: False for spec in specs}
+
+    def reset(self) -> None:
+        for seat_id in self._results:
+            self._results[seat_id] = False
+
+    @property
+    def seat_probe_results(self) -> Mapping[str, bool]:
+        return dict(self._results)
+
+    def __call__(self, argv: Sequence[str]) -> str:
+        seat_id = self._seat_by_argv.get(tuple(argv))
+        try:
+            pane_text = subprocess_probe_runner(argv)
+        except Exception:
+            if seat_id is not None:
+                self._results[seat_id] = False
+            raise
+        if seat_id is not None:
+            self._results[seat_id] = bool(parse_ready_for_harvest_signals(pane_text))
+        return pane_text
+
+
+def _build_daemon(
+    config: ConveyorDaemonConfig,
+    lease: DaemonLease,
+    *,
+    probe_runner: _RecordingProbeRunner | None = None,
+) -> ConveyorDaemon:
     roots = DaemonRuntimeRoots.from_root(config.runtime_root, create=True)
     path_allocator = DaemonPathAllocator(roots)
     discovery_runner = ConveyorSeatDiscoveryRunner(
         config.seat_probes,
         config.discovery_state,
+        probe_runner=probe_runner,
         audit_sink=_audit_sink,
     )
     receipt_issuer = ValidationSandboxReceiptIssuer(secret=config.signing_secret)
@@ -362,10 +404,22 @@ def _run_loop(config: ConveyorDaemonConfig, lease: DaemonLease) -> int:
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
     try:
-        daemon = _build_daemon(config, lease)
+        recording_probe = (
+            _RecordingProbeRunner(config.seat_probes)
+            if config.intake_enabled and config.intake_queue_root is not None
+            else None
+        )
+        daemon = _build_daemon(config, lease, probe_runner=recording_probe)
         completed = 0
         while not stop_event.is_set():
+            if recording_probe is not None:
+                recording_probe.reset()
             daemon.run_once()
+            if recording_probe is not None and config.intake_queue_root is not None:
+                try:
+                    _log_intake_plans(config.intake_queue_root, recording_probe.seat_probe_results)
+                except Exception as exc:
+                    _log(f"conveyor-intake planning failed: {exc}")
             completed += 1
             if config.iterations is not None and completed >= config.iterations:
                 break
@@ -375,6 +429,24 @@ def _run_loop(config: ConveyorDaemonConfig, lease: DaemonLease) -> int:
         signal.signal(signal.SIGINT, previous_sigint)
         lease.release()
     return 0
+
+
+def _log_intake_plans(intake_queue_root: Path, seat_probe_results: Mapping[str, bool]) -> None:
+    queue = IntakeQueue(intake_queue_root)
+    for plan in IntakeQueueReader(
+        queue,
+        seat_probe_results,
+        read_error_sink=_log_intake_read_error,
+    ):
+        _log(
+            "conveyor-intake dry-run: "
+            f"{plan.action} unit {plan.unit.unit_id} "
+            f"(branch {plan.unit.branch}) to seat {plan.seat_id}"
+        )
+
+
+def _log_intake_read_error(path: Path, exc: Exception) -> None:
+    _log(f"conveyor-intake skipped pending file {path}: {exc}")
 
 
 def main_with_existing_lease(
