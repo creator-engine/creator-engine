@@ -8,7 +8,7 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=55
 
-AUTHORIZED_PATHS_SHA256=487fccd63e9ef75989a3f0735c50f59e19d8ff52904b4c345b75a0c08bb4b905
+AUTHORIZED_PATHS_SHA256=792dc4f467ea3020864489985b7e4106ecf0366147b7e837b566d3ff95825fdb
 
 ```text
 .ce/brain/assertions.yaml
@@ -59,8 +59,8 @@ docs/downloads/0.3.4/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aa
 docs/downloads/0.3.4/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 docs/llms-install.md
 docs/llms.txt
-surfaces/manifest.yaml
 validators/creator_engine_validator/_version.py
+validators/creator_engine_validator/onboard_apply_live.py
 validators/creator_engine_validator/version.py
 validators/pyproject.toml
 validators/tests/integration/test_release_finalize_integration.py

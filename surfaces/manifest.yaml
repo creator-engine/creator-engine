@@ -24,16 +24,16 @@ surfaces:
     last_evaluated: "2026-06-26"
 
   - name: CE runtime image
-    version: "0.3.4"
-    commit_or_digest: <pending-0.3.4-image-build>
+    version: "0.3.3"
+    commit_or_digest: sha256:8f584e11f565b530b69eed2ad740387a2a78ba4207bdd290960c06741a17fa57
     source: ghcr.io/creator-engine/creator-engine/ce-runtime
     custody: creator-engine image
     update_policy: manifest-list digest required before tenant launch use
-    last_evaluated: "2026-07-08"
+    last_evaluated: "2026-07-06"
 
   - name: CE seat image
-    version: "0.3.4"
-    commit_or_digest: <pending-0.3.4-image-build>
+    version: "0.3.3"
+    commit_or_digest: sha256:1def5b0cd1e5e465cb42fa73934bc6ee4b1c93fe005bbd7d111a4589dc96b698
     source: ghcr.io/creator-engine/creator-engine/ce-seat
     custody: creator-engine image
     update_policy: manifest-list digest required before tenant launch use
