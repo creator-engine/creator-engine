@@ -441,6 +441,45 @@ def test_preflight_allows_brain_ledger_delta_when_live_base_tail_matches(
     assert "authoritative brain ledger tail is current" in out.getvalue()
 
 
+def test_run_preflight_enforces_brain_append_intent_xor_after_tail_gate(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    base_ledger = _ledger_text("base")
+    intent_path = ".ce/brain/append-intents/ce-491-prearming.yaml"
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths=f"{intent_path}\n{pr_preflight.BRAIN_LEDGER_PATH}\n",
+        ledger_show={
+            ("abc1234", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, base_ledger, ""),
+            ("origin/main", pr_preflight.BRAIN_LEDGER_PATH): pr_preflight.CommandResult(0, base_ledger, ""),
+        },
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    output = out.getvalue()
+    assert rc == 1
+    assert "[PASS] Creator Engine validator - brain ledger current-tail PR-diff gate" in output
+    assert "[FAIL] Creator Engine validator - brain_append_intent_xor_direct_ledger" in output
+    assert "brain_append_intent_xor_direct_ledger" in output
+    assert "hybrid PRs are refused" in output
+
+    intent_only_runner = FakeRunner(tmp_path, changed_paths=f"{intent_path}\n")
+    intent_only_out = io.StringIO()
+
+    intent_only_rc = pr_preflight.run_preflight(
+        _config(tmp_path),
+        runner=intent_only_runner,
+        out=intent_only_out,
+        err=io.StringIO(),
+    )
+
+    assert intent_only_rc == 0
+    assert "[PASS] Creator Engine validator - brain_append_intent_xor_direct_ledger" in intent_only_out.getvalue()
+
+
 def test_preflight_auto_reconciles_instance_local_brain_state_when_canonical_unchanged(
     tmp_path: Path, monkeypatch
 ):
