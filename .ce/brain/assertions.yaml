@@ -3954,4 +3954,57 @@ records:
   verification_method:
     evidence_ref: .github/workflows/validate.yml
     type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: d91e9ca990cd3cb7603a11ae3a092586d6a9139cc19e5416f0dbb1035b91d972
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 89c6d21642663de1fc3e94ecf8f4d74392aa6fd35f1c042b1bdeba298526ee4a
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-c33afd0c91dc4b8a693d251a
+  kind: brain-assertion
+  prev_hash: 31e1221164aaddeb70a785e6015b95632a75f04daada6cdd5a87564fffeb189c
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 151
+  statement: The full validator includes slow and integration test surfaces; long-running
+    execution is expected and should not be treated as a hang without evidence.
+  status: superseded
+  superseded_by: brain-assertion-d1b-39-full-validator-long-running-v6
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: 136b045d45cf46804ff1e7dca6f3e6dc6ef34d267139b105850ecd2e1a5bd71a
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 84d35083273b82d2421040c245c97d07adbd6a458ea73c66423d68a9919a1c9e
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-d1b-39-full-validator-long-running-v6
+  kind: brain-assertion
+  prev_hash: 89c6d21642663de1fc3e94ecf8f4d74392aa6fd35f1c042b1bdeba298526ee4a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 152
+  statement: doctrine-item asserts full-validator-long-running
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
 schema_version: '1'
