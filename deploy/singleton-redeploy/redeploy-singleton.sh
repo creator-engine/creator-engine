@@ -41,12 +41,12 @@ resolve_repo_root() {
 }
 
 sed_replacement_escape() {
-  printf '%s' "$1" | sed 's/[&#]/\\&/g'
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/[&#]/\\&/g'
 }
 
 validate_repo_root() {
   local repo_root="$1"
-  [[ -d "$repo_root/.git" ]] || die "repo root does not look like a git checkout: $repo_root"
+  [[ -d "$repo_root/.git" || -f "$repo_root/.git" ]] || die "repo root does not look like a git checkout: $repo_root"
   [[ -f "$repo_root/deploy/queue-daemon/$QUEUE_SERVICE" ]] || die "missing queue-daemon unit in checkout: $repo_root/deploy/queue-daemon/$QUEUE_SERVICE"
   [[ -x "$repo_root/deploy/queue-daemon/launch-queue-daemon.sh" ]] || die "missing executable health probe: $repo_root/deploy/queue-daemon/launch-queue-daemon.sh"
 }
@@ -96,6 +96,7 @@ dry_run_queue_daemon() {
   local dst="$SYSTEMD_UNIT_DIR/$QUEUE_SERVICE"
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/ce-singleton-unit.XXXXXX")"
+  trap 'rm -f -- "$tmp"' RETURN
   render_queue_unit "$repo_root" "$env_file" "$tmp"
 
   printf 'Dry-run redeploy plan for queue-daemon\n'
@@ -111,6 +112,7 @@ dry_run_queue_daemon() {
   printf 'Would wait up to 30 seconds for active state: %s\n' "$QUEUE_SERVICE"
   printf 'Would run health probe: %s --health\n' "$repo_root/deploy/queue-daemon/launch-queue-daemon.sh"
   rm -f -- "$tmp"
+  trap - RETURN
 }
 
 install_queue_unit_if_changed() {
@@ -119,6 +121,7 @@ install_queue_unit_if_changed() {
   local dst="$SYSTEMD_UNIT_DIR/$QUEUE_SERVICE"
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/ce-singleton-unit.XXXXXX")"
+  trap 'rm -f -- "$tmp"' RETURN
   render_queue_unit "$repo_root" "$env_file" "$tmp"
 
   if [[ -f "$dst" ]] && cmp -s "$tmp" "$dst"; then
@@ -132,6 +135,7 @@ install_queue_unit_if_changed() {
   fi
 
   rm -f -- "$tmp"
+  trap - RETURN
 }
 
 reload_systemd_if_needed() {
@@ -282,4 +286,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

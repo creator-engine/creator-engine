@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  deploy/dgx-runsc/build-image.sh [--image IMAGE] [--dry-run]
+  deploy/dgx-runsc/build-image.sh [--image IMAGE] [--arch ARCH] [--dry-run]
 
 Environment:
   CE_DGX_BUILD_IMAGE  Docker image tag (default: creator-engine/codex-runsc:0.142.4-aarch64)
@@ -22,12 +22,28 @@ quote_cmd() {
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 image="${CE_DGX_BUILD_IMAGE:-creator-engine/codex-runsc:0.142.4-aarch64}"
+host_arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+case "${host_arch}" in
+  aarch64)
+    render_arch="arm64"
+    ;;
+  x86_64)
+    render_arch="amd64"
+    ;;
+  *)
+    render_arch="${host_arch}"
+    ;;
+esac
 dry_run=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --image)
       image="${2:?missing image after --image}"
+      shift 2
+      ;;
+    --arch)
+      render_arch="${2:?missing arch after --arch}"
       shift 2
       ;;
     --dry-run)
@@ -48,7 +64,7 @@ done
 
 surface_build_args=()
 surface_build_args_file="$(mktemp "${TMPDIR:-/tmp}/ce-dgx-surface-build-args.XXXXXX")"
-python3 "${repo_root}/surfaces/render.py" --arch arm64 build-args > "${surface_build_args_file}"
+python3 "${repo_root}/surfaces/render.py" --arch "${render_arch}" build-args > "${surface_build_args_file}"
 while read -r flag assignment; do
   surface_build_args+=("${flag}" "${assignment}")
 done < "${surface_build_args_file}"

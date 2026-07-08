@@ -695,6 +695,8 @@ def test_seat_ready_default_test_command_caps_pytest_workers(tmp_path: Path, mon
     )
 
     assert rc == 0
+    assert "-n auto" not in pr_preflight.SEAT_READY_TEST_COMMAND
+    assert f"-n {pr_preflight.SEAT_READY_PYTEST_WORKER_CAP}" in pr_preflight.SEAT_READY_TEST_COMMAND
     pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
     assert "-n" in pytest_call[0]
     assert pytest_call[0][pytest_call[0].index("-n") + 1] == "4"
@@ -817,6 +819,38 @@ def test_seat_ready_autogen_gate_commits_only_regenerated_artifact(
             artifact,
         ]
     )
+
+
+def test_seat_ready_autogen_gate_commits_only_regenerated_schema_artifact(
+    tmp_path: Path, monkeypatch
+):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        changed_paths="schemas/work-sizing.schema.yaml\n",
+        autogen_artifact_changed=True,
+    )
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=runner,
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+
+    assert rc == 0
+    calls = runner.argv_calls()
+    artifact = ".ce/reference/schemas.generated.md"
+    assert [sys.executable, "scripts/gen_schema_reference.py", "--write"] in calls
+    assert ["git", "add", artifact] in calls
+    assert [
+        "git",
+        "commit",
+        "-m",
+        "chore: refresh schema_reference_autogen_sync artifact",
+        "--",
+        artifact,
+    ] in calls
 
 
 def test_seat_ready_autogen_gate_reports_env_skip_for_missing_generator_environment(

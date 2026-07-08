@@ -838,8 +838,8 @@ def _cli_reference_surface_touched(changed_paths: Sequence[str]) -> bool:
     from .checks import cli_reference_autogen_sync as cli_autogen
 
     cli_paths = {
-        str(cli_autogen.GENERATOR_RELATIVE),
-        str(cli_autogen.DOC_RELATIVE),
+        _normalize_changed_path(str(cli_autogen.GENERATOR_RELATIVE)),
+        _normalize_changed_path(str(cli_autogen.DOC_RELATIVE)),
         "validators/creator_engine_validator/ce_cli.py",
         "validators/creator_engine_validator/cli.py",
         "validators/creator_engine_validator/pr_preflight.py",
@@ -851,8 +851,8 @@ def _schema_reference_surface_touched(changed_paths: Sequence[str]) -> bool:
     from .checks import schema_reference_autogen_sync as schema_autogen
 
     schema_paths = {
-        str(schema_autogen.GENERATOR_RELATIVE),
-        str(schema_autogen.DOC_RELATIVE),
+        _normalize_changed_path(str(schema_autogen.GENERATOR_RELATIVE)),
+        _normalize_changed_path(str(schema_autogen.DOC_RELATIVE)),
     }
     return any(
         _normalize_changed_path(path) in schema_paths or _normalize_changed_path(path).startswith("schemas/")
