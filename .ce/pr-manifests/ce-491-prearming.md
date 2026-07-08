@@ -1,6 +1,6 @@
 # PR path manifest - ce-491-prearming
 
-Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, ce-ops#21 convention).
+Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`).
 This is the closed path set for the CE-491 materializer pre-arming checklist batch.
 
 - **Declared work class:** T
