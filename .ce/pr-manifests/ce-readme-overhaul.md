@@ -35,7 +35,7 @@ README command lines and the public CLI reference were grounded in local `origin
 - `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash` - `origin/main:docs/install.sh` header and `origin/main:docs/contracts/installer.md`.
 - `ce onboard` - `origin/main:docs/guide/zero-to-governed-seat-quickstart.md`, `origin/main:docs/guide/solo-dev-onboarding.md`, and `origin/main:validators/creator_engine_validator/ce_cli.py` help surface.
 - `ce launch` - `origin/main:docs/guide/zero-to-governed-seat-quickstart.md` and `origin/main:validators/creator_engine_validator/ce_cli.py` help surface.
-- Developer-mode verbs `ce brain init`, `ce shape`, `ce scope`, `ce ratify`, `ce drive --spawn`, and `ce report` - `origin/main:docs/guide/solo-dev-onboarding.md`, `origin/main:validators/creator_engine_validator/ce_cli.py`, and `origin/main:validators/creator_engine_validator/v3_cli.py`.
+- Developer-mode verbs `ce brain init`, `ce shape`, `ce scope`, `ce ratify`, `ce drive --spawn`, and `ce report` - `origin/main:docs/guide/quickstart.md`, `origin/main:validators/creator_engine_validator/ce_cli.py`, and `origin/main:validators/creator_engine_validator/v3_cli.py`.
 - `docs/reference/cli.md` public inventory - current `validators/creator_engine_validator/ce_cli.py` argparse registry, excluding command groups marked internal-only by `ce_cli.INTERNAL_COMMAND_GROUPS`.
 
 ## 30-Second-Comprehension Self-Test
