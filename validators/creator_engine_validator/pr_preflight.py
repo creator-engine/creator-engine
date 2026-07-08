@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
-from . import brain_runtime
+from . import brain_intent_xor_gate, brain_runtime
 from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class
 
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
@@ -375,6 +375,13 @@ def _assert_brain_ledger_delta_uses_current_tail(
             f"This prevents a semantic fork/re-chain from a non-current tail; {BRAIN_LEDGER_RECHAIN_TOOL_HINT}."
         )
     return f"passed; authoritative brain ledger tail is current ({live_base_tail or '<empty>'})"
+
+
+def _assert_brain_append_intent_xor(config: PreflightConfig, comparison_base: str, runner: Runner) -> str:
+    errors = brain_intent_xor_gate.check_xor(_changed_paths(config.repo_root, comparison_base, runner))
+    if errors:
+        raise RuntimeError("\n".join(error.format() for error in errors))
+    return "passed; append intents and direct brain ledger edits are mutually exclusive"
 
 
 def _brain_drift_remediation_note() -> str:
@@ -1116,6 +1123,17 @@ def run_preflight(
         _run_check(
             "Creator Engine validator - brain ledger current-tail PR-diff gate",
             lambda: _assert_brain_ledger_delta_uses_current_tail(config, comparison_base["value"], runner),
+            out,
+            err,
+        )
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out)
+        return 1
+    checks.append(
+        _run_check(
+            "Creator Engine validator - brain_append_intent_xor_direct_ledger",
+            lambda: _assert_brain_append_intent_xor(config, comparison_base["value"], runner),
             out,
             err,
         )
