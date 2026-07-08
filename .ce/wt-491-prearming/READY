@@ -1,0 +1,13 @@
+STATUS: READY
+BRANCH: ce-491-prearming
+COMMIT: see final READY signal
+CARRIER: .ce/pr-manifests/ce-491-prearming.md
+PROBE_ITEM1: open
+PROBE_ITEM2: open
+PROBE_ITEM3: open
+PROBE_ITEM4: open
+ITEMS_ADDRESSED: 4
+ACTOR_VERSION_NEW: ce-491-prearming
+VALIDATE_PR: GREEN
+GATE_NOISE: none
+READY ce-491-prearming see-final-signal .ce/pr-manifests/ce-491-prearming.md
