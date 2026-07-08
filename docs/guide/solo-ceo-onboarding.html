@@ -120,138 +120,264 @@
     </div>
     <article class="article">
 <h1 id="solo-ceo-mode-onboarding">Solo + CEO Mode Onboarding</h1>
-<p><em>This guide is for a solo developer who has chosen <strong>CEO mode</strong>: you frame your intent and ratify each gate; the agent does the rest. You do not type slash commands — the agent drives the CE Scope/Shape/build loop under the hood, assembles the plan and tasks, builds the work, and surfaces each decision point for your ratification. If you prefer to drive the pipeline yourself with explicit <code>ce</code> commands, see <a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a> for the Solo + Dev path.</em></p>
+<p><em>This guide is for a solo developer who has chosen <strong>CEO mode</strong>: you frame the work in plain language, authorize each gate, and judge the delivered artifacts. The governed agent turns that direction into scoped work, builds inside the approved envelope, and brings decisions back to you.</em></p>
+<p>If you prefer the command-driven path where you operate the pipeline yourself, use <a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a>.</p>
 <blockquote>
-<p><strong>You are in: Solo + CEO mode.</strong> In this cell you Frame the problem and Ratify each gate. The agent owns inception through execution — planning, tasking, building, reviewing — and brings decisions to you rather than waiting for you to type commands. Your irreducible gestures are: framing intent, confirming the Scope, ratifying the work, reviewing artifacts, and gating the merge. All the mechanical pipeline steps happen under the hood.</p>
+<p><strong>You are in: Solo + CEO mode.</strong> Your irreducible gestures are intent, authorization, artifact review, and final shipping approval. The agent handles the mechanical pipeline steps and tells you when a decision needs a human.</p>
 </blockquote>
 <hr>
 <h2 id="how-ceo-mode-differs-from-dev-mode">How CEO mode differs from Dev mode</h2>
-<p>The five-stage loop — <strong>Frame → Shape → Build → Review → Ship</strong> — is the same in every CE mode. What changes is who drives the stages and how:</p>
+<p>The five-stage loop -- <strong>Frame -&gt; Shape -&gt; Build -&gt; Review -&gt; Ship</strong> -- is the same in every CE mode. What changes is who drives the mechanics.</p>
 <table>
-<thead><tr><th>Stage</th><th>Solo + Dev (you type commands)</th><th>Solo + CEO (agent drives; you ratify)</th></tr></thead>
+<thead><tr>
+<th>Stage</th>
+<th>Solo + Dev</th>
+<th>Solo + CEO</th>
+</tr></thead>
 <tbody>
-<tr><td><strong>Frame</strong></td><td>You describe the problem to the agent</td><td>Same — you describe the problem conversationally</td></tr>
-<tr><td><strong>Shape</strong></td><td>You drive the Scope/Shape loop with <code>ce scope &lt;id&gt; --goal ... --change-type ...</code> and <code>ce shape &lt;id&gt;</code> — see <a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a></td><td>The agent drives the Scope/Shape loop; it assembles the Scope and presents it to you for review</td></tr>
-<tr><td><strong>Build</strong></td><td>You trigger the build after ratifying</td><td>Same — the build runs after you ratify; you don&#x27;t need to start it</td></tr>
-<tr><td><strong>Review</strong></td><td>You dispatch a reviewer, then read the PR artifacts</td><td>Same — you read the PR artifacts and judge them against the Done-when you confirmed</td></tr>
-<tr><td><strong>Ship</strong></td><td>You run <code>ce merge &lt;id&gt; --run &lt;run-id&gt; --apply</code></td><td>Same — <code>ce merge &lt;id&gt; --run &lt;run-id&gt; --apply</code> is the human-gated finish</td></tr>
+<tr>
+<td><strong>Frame</strong></td>
+<td>You describe the problem and drive the next commands.</td>
+<td>You describe the problem conversationally.</td>
+</tr>
+<tr>
+<td><strong>Shape</strong></td>
+<td>You operate the Scope and Shape loop yourself.</td>
+<td>The agent drafts the Scope and presents it for your review.</td>
+</tr>
+<tr>
+<td><strong>Build</strong></td>
+<td>You trigger the build after ratifying.</td>
+<td>The agent starts the build after you authorize it.</td>
+</tr>
+<tr>
+<td><strong>Review</strong></td>
+<td>You inspect the PR and its evidence.</td>
+<td>Same: you judge the PR against the accepted criteria.</td>
+</tr>
+<tr>
+<td><strong>Ship</strong></td>
+<td>You operate the merge gate directly.</td>
+<td>You authorize the agent to apply the merge gate.</td>
+</tr>
 </tbody></table>
-<p>The key difference is <strong>Shape</strong>: in CEO mode you never run the Scope/Shape loop by hand. The agent does that work on your behalf and surfaces the result — a drafted Scope with its Goal, Done-when, and Change-type filled in — for your review before anything is ratified.</p>
-<hr>
-<h2 id="phase-0-what-you-need-before-you-start">Phase 0 — What you need before you start</h2>
-<p>You need a CE install and a governed session. If you have not done either, follow the install steps in <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/zero-to-governed-seat-quickstart.md"><code>zero-to-governed-seat-quickstart.md</code></a> first. Once installed, <code>ce launch --backend host</code> is your daily entry point.</p>
-<h3 id="the-one-concept-to-anchor-on">The one concept to anchor on</h3>
-<p>In CEO mode the agent is your executor, not your co-typist. Instead of running <code>ce scope &lt;id&gt; --goal ... --change-type ...</code> and <code>ce shape &lt;id&gt;</code> yourself, you tell it <em>what you want to build</em>, in plain language. It translates that intent into the governed pipeline, then brings you the artifact to ratify. You are the CEO of the work: you set direction, you approve gates, you own the outcome. The agent handles the mechanics.</p>
-<hr>
-<h2 id="phase-1-launch-your-governed-session">Phase 1 — Launch your governed session</h2>
-<pre><code class="language-bash">ce launch --backend host</code></pre>
-<p>This opens your coding agent in a governed terminal pane — exactly the session you already know, with CE&#x27;s governance layer around it. There is no separate CEO-mode dashboard or interface; everything flows through the normal agent conversation. The governance layer is what changes the behavior.</p>
-<p>What you will see is your normal agent session. Tell it you want to work in CEO mode if it does not already know from your project configuration, and frame your first piece of work.</p>
-<hr>
-<h2 id="phase-2-frame-your-intent-your-first-gesture">Phase 2 — Frame your intent (your first gesture)</h2>
-<p>In your governed session, describe what you want to build in plain language. This is a conversational act — no commands to type. For example:</p>
-<blockquote>
-<p>&quot;I want to add rate limiting to the public login API: per-IP throttling with configurable limits and a clear 429 response for authenticated traffic.&quot;</p>
-</blockquote>
-<p>The agent will ask any clarifying questions it needs. Answer them. This is the <strong>Frame</strong> stage: you are helping the agent understand the problem well enough to plan it.</p>
-<p><strong>What you do here:</strong> Talk to the agent as you would to a capable colleague. The agent handles the rest of the planning pipeline — specification, clarification, planning, and task generation — internally. You do not need to run any step by hand.</p>
-<hr>
-<h2 id="phase-3-review-and-ratify-the-scope-your-second-gesture">Phase 3 — Review and ratify the Scope (your second gesture)</h2>
-<p>Once the agent has run the pipeline, it will present you with a <strong>Scope</strong> — the governed unit of work. A Scope has three required fields:</p>
+<p>The key difference is <strong>Shape</strong>. In CEO mode the agent assembles the Scope and brings you the three fields that matter:</p>
 <table>
-<thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+<thead><tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr></thead>
 <tbody>
-<tr><td><strong>Goal</strong></td><td>what you are building, in one line</td></tr>
-<tr><td><strong>Done-when</strong></td><td>the acceptance criteria that get graded at Review time</td></tr>
-<tr><td><strong>Change-type</strong></td><td>what kind of change this is (code, docs, deploy, etc.)</td></tr>
+<tr>
+<td><strong>Goal</strong></td>
+<td>what you are building, in one line</td>
+</tr>
+<tr>
+<td><strong>Done-when</strong></td>
+<td>the acceptance criteria that get graded at Review time</td>
+</tr>
+<tr>
+<td><strong>Change-type</strong></td>
+<td>what kind of change this is, such as code, docs, or deploy</td>
+</tr>
 </tbody></table>
-<p>CE may mark the Scope Ready after those fields are valid. Ready is the ratifiable state, not another Scope field.</p>
-<p><strong>Read the Scope carefully.</strong> The Done-when criteria are the most important part: they are what the external grader will check against at Review time, not a transcript of what the agent says. Make sure they reflect what you would actually accept as done. If anything is wrong, tell the agent and it will revise the Scope.</p>
-<p>When the Scope looks right and is marked <strong>Ready</strong>, ratify it:</p>
-<pre><code class="language-bash">ce ratify &lt;scope-id&gt; --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</code></pre>
-<p>The literal above is valid 64-hex syntax for the example. In a real run, generate a fresh approver ref with <code>openssl rand -hex 32</code> and pass that value. The <code>--approver-ref</code> is a value-free fingerprint: it records that a human ratified this Scope without encoding who or any credential.</p>
-<p><strong>Ratification is your explicit &quot;yes — build this.&quot;</strong> Nothing builds until a Ready Scope is ratified. The agent cannot ratify on its own behalf.</p>
-<blockquote>
-<p>You can inspect any Scope before ratifying with <code>ce show &lt;scope-id&gt;</code>, and see what is queued with <code>ce status</code>.</p>
-</blockquote>
+<p>You review that trio before anything is authorized. If it is wrong, say what to change. If it is right, authorize the agent to proceed.</p>
 <hr>
-<h2 id="phase-4-build-and-review-the-agent-s-lane-you-watch-and-judge">Phase 4 — Build and Review (the agent&#x27;s lane; you watch and judge)</h2>
-<p>Once ratified, the agent drives the <strong>Build</strong> and opens the pull request. You do not need to intervene. While it runs:</p>
+<h2 id="phase-0-what-you-need-before-you-start">Phase 0 -- What you need before you start</h2>
+<p>You need a CE install and a governed agent session. If you have not done either, start with <a href="quickstart.html"><code>quickstart.md</code></a>.</p>
+<p>There is no separate CEO dashboard. You work in the normal agent conversation; the difference is that you state intent and authorization while the agent runs the governed mechanics on your behalf.</p>
+<details><summary>For technical readers -- starting the session</summary>
+<p>The quickstart shows the exact launch command for your environment. Once the session is open, the CEO-mode flow in this guide happens through conversation.</p>
+</details>
+<hr>
+<h2 id="phase-1-frame-your-intent">Phase 1 -- Frame your intent</h2>
+<p>Start by telling the agent what you want built. Use normal language and include the outcome you care about.</p>
+<blockquote>
+<p>"I want to add rate limiting to the public login API: per-IP throttling with configurable limits and a clear 429 response."</p>
+</blockquote>
+<p>The agent may ask clarifying questions. Answer them directly. This is the <strong>Frame</strong> stage: you are helping the agent understand the problem well enough to shape a responsible unit of work.</p>
+<p>Good CEO-mode framing usually includes:</p>
 <ul>
-<li>The gate <strong>refuses</strong> any privileged action (push to a remote, access to credentials) and holds it for you — you will see the refusal in the session, with the exact rule that denied it. That is governance from outside the agent.</li>
-<li>If your lane has an explicit cap, CE tracks the run against that cap.</li>
+<li>the user-visible goal</li>
+<li>the boundary of the change</li>
+<li>any acceptance criteria you already know</li>
+<li>any risk or rollout concern the agent should account for</li>
 </ul>
-<p>When the build finishes, the agent opens the pull request and dispatches an independent reviewer. You will see the PR URL in the session.</p>
-<p><strong>Now you judge artifacts.</strong> Read the PR: the diff, the test evidence, the manifest-scoped changeset. Ask yourself: do the changes satisfy the Done-when criteria you confirmed in Phase 3? You are not grading a transcript — you are reading a real diff against the criteria you wrote.</p>
+<p>You do not need to name internal steps. The agent will translate your intent into the governed pipeline.</p>
 <hr>
-<h2 id="phase-5-gate-the-merge-your-third-gesture">Phase 5 — Gate the merge (your third gesture)</h2>
-<p>When the PR looks right and the gate is green, you perform the gated merge:</p>
-<pre><code class="language-bash">ce merge &lt;scope-id&gt; --run &lt;run-id&gt; --apply</code></pre>
-<p>Without <code>--apply</code>, this command reads the gate and tells you exactly what is satisfied and what is blocking — you can run it plan-only as many times as you like. With <code>--apply</code>, it performs the gated squash-merge through branch protection.</p>
-<p><strong>The merge gate checks:</strong> ratification bound to this Scope, independent review on the PR, CI green. Green CI is required — it is never sufficient. Ratification is what authorizes the merge; CI just verifies the change is well-formed.</p>
+<h2 id="phase-2-review-the-scope">Phase 2 -- Review the Scope</h2>
+<p>The agent will present a Scope before building. Read it as an authorization document, not as a transcript. The Scope should clearly state:</p>
+<ul>
+<li><strong>Goal:</strong> the change you intend to ship</li>
+<li><strong>Done-when:</strong> the evidence that will make the work acceptable</li>
+<li><strong>Change-type:</strong> the kind of work being performed</li>
+</ul>
+<p>If the Scope is too broad, too vague, or missing an acceptance criterion, say so:</p>
+<blockquote>
+<p>"Tighten the Done-when so it includes a test for the 429 response body."</p>
+</blockquote>
+<p>or:</p>
+<blockquote>
+<p>"Limit this Scope to the login API. Do not include signup throttling yet."</p>
+</blockquote>
+<p>The agent revises the Scope and shows it again. Nothing should build until the Scope describes the work you are willing to authorize.</p>
 <hr>
-<h2 id="phase-6-the-completion-report-evidence-not-memory">Phase 6 — The Completion Report (evidence, not memory)</h2>
-<p>After the merge:</p>
-<pre><code class="language-bash">ce report &lt;scope-id&gt; --run-id &lt;run-id&gt;</code></pre>
-<p>This renders the <strong>CE Completion Report</strong> — a compact record of what was delivered, how it scored against your Done-when criteria, and that tests were green and the change stayed in scope. The following is illustrative output:</p>
-<pre><code class="language-text">┌─ CE COMPLETION REPORT · run &lt;run-id&gt; · Scope &lt;scope-id&gt; ──────
-│ Outcome   PR opened → #N (merged)
-│ Verdict   Done-when 3/3 met · tests green · in scope
-│ Next      → (done)
-│ Inspect   gh pr view N  |  ce show &lt;scope-id&gt;  |  ce artifacts &lt;scope-id&gt; --run-id &lt;run-id&gt;
-└──────────────────────────────────────────────────────────────</code></pre>
-<p>This is your &quot;sprint review&quot; artifact. The evidence is durable — it persists under <code>.ce/state</code> and is replayable from a git clone. The next piece of work starts from artifacts, not from memory.</p>
+<h2 id="phase-3-authorize-the-build">Phase 3 -- Authorize the build</h2>
+<p>When the Scope is ready and the Goal, Done-when, and Change-type are correct, authorize the agent in plain language:</p>
+<blockquote>
+<p>"This Scope looks right. Go ahead and build it."</p>
+</blockquote>
+<p>or:</p>
+<blockquote>
+<p>"Approved: build the login rate-limiting Scope as written."</p>
+</blockquote>
+<p>That authorization is the CEO-mode equivalent of saying "yes, build this." The agent records your approval and starts the build inside the ratified envelope. The agent cannot authorize its own work.</p>
+<details><summary>Under the hood -- what the agent records</summary>
+<p>The agent records your authorization against the ready Scope using the ratify operation and a fresh approver reference. That reference is a value-free fingerprint: it records that a human approved the Scope without embedding a credential or personal identity in the command.</p>
+</details>
 <hr>
-<h2 id="your-decision-inbox">Your decision inbox</h2>
-<p>In CEO mode the agent may surface items that require your attention between Phases: escalations, gate holds, or items waiting for human input. These land in your <strong>decision inbox</strong>:</p>
-<pre><code class="language-bash">ce inbox --repo &lt;owner/repo&gt;</code></pre>
-<p>This is a read-only view of items awaiting operator decision. Check it when the agent flags something or when you want to see what is queued for you. Each item in the inbox has a decision the agent cannot make on its own — your input is what unblocks it.</p>
+<h2 id="phase-4-build-and-review">Phase 4 -- Build and Review</h2>
+<p>After authorization, the agent builds the change and opens a pull request. While it runs, the governance layer may refuse privileged actions and require the agent to surface the reason to you. If that happens, read the hold and decide whether to authorize, redirect, or stop.</p>
+<p>When the build finishes, the agent gives you the PR link and the validation evidence. Now your job is artifact review:</p>
+<ul>
+<li>read the diff</li>
+<li>read the tests or other validation evidence</li>
+<li>compare the result to the Done-when criteria you accepted</li>
+<li>ask for changes if the PR does not satisfy the Scope</li>
+</ul>
+<p>You are not grading how persuasive the agent sounds. You are judging whether the artifact matches the Goal and Done-when.</p>
+<hr>
+<h2 id="phase-5-authorize-shipping">Phase 5 -- Authorize shipping</h2>
+<p>When the PR satisfies the Scope, review is complete, and the required checks are green, authorize the agent to apply the merge gate:</p>
+<blockquote>
+<p>"The PR satisfies the Scope and the checks are green. Apply the merge gate."</p>
+</blockquote>
+<p>or:</p>
+<blockquote>
+<p>"Ship this change."</p>
+</blockquote>
+<p>The merge gate checks ratification, independent review, and green CI. Green CI is required, but it is not enough by itself. Your authorization is what lets the agent finish the change.</p>
+<details><summary>Under the hood -- what the agent applies</summary>
+<p>The agent reads the merge gate first. When the gate is satisfied and you have authorized shipping, the agent applies the governed merge operation for the ratified Scope and current run.</p>
+</details>
+<hr>
+<h2 id="phase-6-read-the-completion-report">Phase 6 -- Read the Completion Report</h2>
+<p>After shipping, the agent produces a Completion Report. Treat it as evidence, not memory. It should tell you:</p>
+<ul>
+<li>what was delivered</li>
+<li>which PR carried the work</li>
+<li>whether the Done-when criteria were met</li>
+<li>which validation evidence was green</li>
+<li>whether the change stayed in scope</li>
+</ul>
+<p>The next piece of work starts from these artifacts, not from a remembered chat summary.</p>
+<details><summary>Under the hood -- report retrieval</summary>
+<p>The agent can render the report and related artifacts from the recorded Scope and run. The report is durable enough to inspect from a fresh clone.</p>
+</details>
+<hr>
+<h2 id="awaiting-decision-items">Awaiting-decision items</h2>
+<p>Sometimes work pauses because the agent needs a human decision: a privileged surface is held, a review asks for product judgment, or a change would exceed the Scope you approved.</p>
+<p>The agent surfaces these awaiting-decision items in the forge UI where the work is already being reviewed, usually as PR comments, review threads, or issue comments. Each item should explain:</p>
+<ul>
+<li>what decision is needed</li>
+<li>what the agent recommends, if anything</li>
+<li>what happens if you approve, reject, or revise the request</li>
+</ul>
+<p>Answer in the forge or in the governed agent conversation. Your response unblocks the next step; the agent then records and executes the authorized action.</p>
 <hr>
 <h2 id="your-daily-rhythm-in-ceo-mode">Your daily rhythm in CEO mode</h2>
-<p>Once you have done the first Scope, every piece of work follows the same shape:</p>
+<p>Every piece of work follows the same shape:</p>
 <ol>
-<li><strong>Frame</strong> — tell the agent what you want to build, in plain language.</li>
-<li><strong>Review the Scope</strong> — read the Goal and Done-when the agent assembled; adjust if needed; confirm any lane-required cap.</li>
-<li><strong>Ratify</strong> — <code>ce ratify &lt;id&gt; --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</code> — your &quot;yes, build this.&quot;</li>
-<li><strong>Watch the build</strong> — the agent drives; the gate holds privileged actions for you.</li>
-<li><strong>Judge the PR</strong> — read the diff and evidence against your Done-when.</li>
-<li><strong>Gate the merge</strong> — <code>ce merge &lt;id&gt; --run &lt;run-id&gt; --apply</code>.</li>
-<li><strong>Read the report</strong> — <code>ce report &lt;id&gt; --run-id &lt;run-id&gt;</code> — capture the evidence, move on.</li>
+<li><strong>Frame</strong> -- tell the agent what you want, in plain language.</li>
+<li><strong>Review the Scope</strong> -- inspect the Goal, Done-when, and Change-type.</li>
+<li><strong>Revise if needed</strong> -- correct the Scope before any build is authorized.</li>
+<li><strong>Authorize the build</strong> -- tell the agent to proceed once the Scope is right.</li>
+<li><strong>Judge the PR</strong> -- read the diff and evidence against the Done-when.</li>
+<li><strong>Authorize shipping</strong> -- tell the agent to apply the merge gate when the PR is ready.</li>
+<li><strong>Read the report</strong> -- keep the delivered evidence with the work.</li>
 </ol>
-<p>New initiative? Tell the agent about the bigger goal; it will run the full planning pipeline and produce a backlog of Scopes. Your job is still to ratify each one individually — the agent cannot batch-ratify on your behalf.</p>
+<p>New initiative? Tell the agent the larger goal. It can turn that into a backlog of Scopes, but each Scope still needs its own review and authorization.</p>
 <hr>
-<h2 id="your-irreducible-gestures-what-the-agent-cannot-do-for-you">Your irreducible gestures — what the agent cannot do for you</h2>
+<h2 id="your-irreducible-gestures">Your irreducible gestures</h2>
 <p>CE is designed so that a small set of decisions always stays with you:</p>
 <table>
-<thead><tr><th>You always decide</th><th>The agent handles</th></tr></thead>
+<thead><tr>
+<th>You always decide</th>
+<th>The agent handles</th>
+</tr></thead>
 <tbody>
-<tr><td><strong>Ratifying</strong> the Scope (<code>ce ratify &lt;id&gt; --approver-ref 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</code>)</td><td>Running the build inside the ratified envelope</td></tr>
-<tr><td>Making a change <strong>riskier</strong></td><td>Making a change safer within its envelope</td></tr>
-<tr><td><strong>Judging the artifacts</strong> at Review</td><td>Producing the artifacts and the Completion Report</td></tr>
-<tr><td>The <strong>gated merge</strong> (<code>ce merge &lt;id&gt; --run &lt;run-id&gt; --apply</code>)</td><td>Opening the PR and reading the merge gate</td></tr>
-<tr><td>Authorizing <strong>privileged surfaces</strong></td><td>Refusing privileged actions and surfacing the reason</td></tr>
+<tr>
+<td>Whether the Scope's Goal, Done-when, and Change-type are acceptable</td>
+<td>Drafting and revising the Scope</td>
+</tr>
+<tr>
+<td>Whether to authorize the build</td>
+<td>Building inside the approved envelope</td>
+</tr>
+<tr>
+<td>Whether the PR satisfies the accepted Done-when</td>
+<td>Producing the PR, validation evidence, and report</td>
+</tr>
+<tr>
+<td>Whether to authorize shipping</td>
+<td>Reading and applying the merge gate after authorization</td>
+</tr>
+<tr>
+<td>Whether to allow privileged surfaces</td>
+<td>Refusing privileged actions until you decide</td>
+</tr>
 </tbody></table>
-<p>In CEO mode the agent handles significantly more of the mechanical work — it drives the Scope/Shape/build loop, drafts the plan, and manages the build and review pipeline. But the boundary is the same: you ratify, you judge artifacts, and you hold the privileged floor. The agent executes; you govern.</p>
+<p>The agent executes; you govern.</p>
 <hr>
 <h2 id="working-with-a-collaborator-on-your-repo">Working with a collaborator on your repo</h2>
-<p>Everything above describes working alone, but none of it is a solo-only mechanism — governance attaches to your <strong>repository</strong>, not to the number of people using it. The moment you add a collaborator, their pull requests move through the same required checks and the same review gate yours do. There is no separate setup for a second contributor: the branch protection you already have applies to everyone with write access, including you.</p>
-<p>One thing does change in practice. Earlier, review worked even though you were the only human involved because CE opens every pull request under its own identity, never as you directly — that separation is what let you be a valid, independent reviewer of your own agent&#x27;s work. With a collaborator, you get a more familiar shape on top of that: the two of you can review each other&#x27;s work directly, so cross-review between people replaces the single-human pattern. The underlying rule does not change — whoever authored a change is still not the one who clears its review.</p>
-<p>Ratification stays exactly as personal as before. Your collaborator opening and getting a Scope reviewed does not ratify anything on your behalf, and you do not ratify on theirs. Merges that fall inside a Scope&#x27;s ratified envelope — Done-when and Change-type — still go through automatically once the gate is green. Anything outside that envelope, from either of you, still waits for an explicit, ratified decision. Adding a second person to the repo does not widen anyone&#x27;s envelope.</p>
-<p>Because CE keeps identities distinct at every step — who framed the Scope, who ratified it, who reviewed the PR, who the merge shipped as — the evidence trail this produces is unambiguous even with two people working the same repo. Nothing has to be reconstructed from memory or Slack afterward; it is in the Completion Report and the PR history.</p>
+<p>Everything above describes working alone, but the mechanism attaches to your repository, not to the number of people using it. When you add a collaborator, their pull requests move through the same required checks and review gate.</p>
+<p>Review becomes more familiar with two people: you can review each other's work directly. The underlying rule does not change. The person who authored a change does not clear its review.</p>
+<p>Ratification stays personal. Your collaborator does not authorize work on your behalf, and you do not authorize work on theirs. Merges that stay inside a ratified Scope still go through the governed gate once review and CI are green. Anything outside that envelope waits for a new explicit decision.</p>
+<p>Because CE records each governance step -- framing, authorization, review, and ship -- the evidence trail remains clear even when more than one person works in the same repository.</p>
 <hr>
 <h2 id="where-to-go-next">Where to go next</h2>
 <table>
-<thead><tr><th>You want to…</th><th>Read</th></tr></thead>
+<thead><tr>
+<th>You want to...</th>
+<th>Read</th>
+</tr></thead>
 <tbody>
-<tr><td>The front door and big picture</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/welcome.md"><code>welcome.md</code></a></td></tr>
-<tr><td>The canonical command path</td><td><a href="quickstart.html"><code>quickstart.md</code></a></td></tr>
-<tr><td>How CE builds software</td><td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td></tr>
-<tr><td>The plain-language vocabulary tour</td><td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td></tr>
-<tr><td>The Solo + Dev hands-on path</td><td><a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a></td></tr>
-<tr><td>The complete start-to-ship walkthrough</td><td><a href="complete-walkthrough.html"><code>complete-walkthrough.md</code></a></td></tr>
-<tr><td>A worked SCRUM-to-CE mapping</td><td><a href="https://github.com/creator-engine/creator-engine/blob/main/docs/guide/agile-to-ce-sdlc.md"><code>agile-to-ce-sdlc.md</code></a></td></tr>
-<tr><td>The full install-to-ship pilot runbook</td><td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td></tr>
-<tr><td>Contribute to CE itself</td><td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td></tr>
+<tr>
+<td>The front door and big picture</td>
+<td><a href="welcome.html"><code>welcome.md</code></a></td>
+</tr>
+<tr>
+<td>The canonical command path</td>
+<td><a href="quickstart.html"><code>quickstart.md</code></a></td>
+</tr>
+<tr>
+<td>How CE builds software</td>
+<td><a href="how-ce-builds-software.html"><code>how-ce-builds-software.md</code></a></td>
+</tr>
+<tr>
+<td>The plain-language vocabulary tour</td>
+<td><a href="understanding-ce.html"><code>understanding-ce.md</code></a></td>
+</tr>
+<tr>
+<td>The Solo + Dev hands-on path</td>
+<td><a href="solo-dev-onboarding.html"><code>solo-dev-onboarding.md</code></a></td>
+</tr>
+<tr>
+<td>The complete start-to-ship walkthrough</td>
+<td><a href="complete-walkthrough.html"><code>complete-walkthrough.md</code></a></td>
+</tr>
+<tr>
+<td>A worked SCRUM-to-CE mapping</td>
+<td><a href="agile-to-ce-sdlc.html"><code>agile-to-ce-sdlc.md</code></a></td>
+</tr>
+<tr>
+<td>The full install-to-ship pilot runbook</td>
+<td><a href="pilot-runbook.html"><code>pilot-runbook.md</code></a></td>
+</tr>
+<tr>
+<td>Contribute to CE itself</td>
+<td><a href="contributing-to-ce.html"><code>contributing-to-ce.md</code></a></td>
+</tr>
 </tbody></table>
     </article>
   </div>
