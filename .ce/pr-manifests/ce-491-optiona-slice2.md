@@ -5,7 +5,7 @@ Per-PR carrier for branch `ce-491-optiona-slice2`.
 Scope:
 CE-491 Option A merge-time brain append intent materializer, slice 2. This slice keeps `ARMING_ENABLED = False`, adds only dry-run/importable materializer surfaces, and does not add live git write or GitHub API write paths.
 
-- **Declared work class:** M
+- **Declared work class:** S
 
 Changes:
 - Wire `brain_append_intent_xor_direct_ledger` into `pr_preflight.run_preflight` as a hard gate.
