@@ -36,6 +36,10 @@ def _surface(path: str = "README.md") -> chk.CurrentVersionSurface:
     return chk.CurrentVersionSurface(path, (chk.PACKAGE_PIN,))
 
 
+def _readme_surface(path: str = "README.md") -> chk.CurrentVersionSurface:
+    return chk.CurrentVersionSurface(path, (chk.README_CE_VERSION_TEXT,))
+
+
 def test_stale_current_version_claim_fails_with_line_and_version(tmp_path: Path):
     _write_repo(
         tmp_path,
@@ -108,8 +112,63 @@ def test_current_version_claim_passes(tmp_path: Path):
     assert errors == ()
 
 
+def test_readme_ce_version_text_matching_current_version_passes(tmp_path: Path):
+    matching_forms = [
+        "Current release: 0.3.2",
+        "Version 0.3.2",
+        "CE v0.3.2 is current",
+        "Creator Engine Version 0.3.2 is current",
+        "creator engine version 0.3.2 is current",
+    ]
+
+    for idx, line in enumerate(matching_forms):
+        repo = tmp_path / f"matching-{idx}"
+        _write_repo(repo, line=line)
+
+        errors = chk.evaluate(repo, surfaces=(_readme_surface(),))
+
+        assert errors == ()
+
+
+def test_readme_ce_version_text_stale_version_fails_for_public_current_claim_forms(tmp_path: Path):
+    stale_forms = [
+        "Current release: 0.3.1",
+        "Version 0.3.1",
+        "CE v0.3.1 is current",
+        "Creator Engine Version 0.3.1 is current",
+        "creator engine version 0.3.1 is current",
+        "CE release 0.3.1 is current",
+    ]
+
+    for idx, line in enumerate(stale_forms):
+        repo = tmp_path / f"stale-{idx}"
+        _write_repo(repo, line=line)
+
+        errors = chk.evaluate(repo, surfaces=(_readme_surface(),))
+
+        assert len(errors) == 1, line
+        assert errors[0].code == chk.CODE_STALE
+        assert errors[0].path == "README.md:1"
+        assert "'0.3.1'" in errors[0].message
+        assert "'0.3.2'" in errors[0].message
+
+
+def test_readme_without_version_text_passes(tmp_path: Path):
+    _write_repo(tmp_path, line="Creator Engine points readers to the release badge and changelog.")
+
+    errors = chk.evaluate(tmp_path, surfaces=(_readme_surface(),))
+
+    assert errors == ()
+
+
 def test_llms_txt_is_current_version_surface():
     assert any(surface.path == "docs/llms.txt" for surface in chk.CURRENT_VERSION_SURFACES)
+
+
+def test_readme_is_current_version_surface_with_ce_version_text_pattern():
+    readme = next(surface for surface in chk.CURRENT_VERSION_SURFACES if surface.path == "README.md")
+
+    assert chk.README_CE_VERSION_TEXT in readme.patterns
 
 
 def test_verify_version_drift_cli_returns_nonzero_for_stale_claim(tmp_path: Path, capsys):
