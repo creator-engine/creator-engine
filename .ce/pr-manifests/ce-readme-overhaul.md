@@ -6,7 +6,7 @@ Slug: `ce-readme-overhaul`
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** S
+- **Declared work class:** story
 
 ## Purpose
 
