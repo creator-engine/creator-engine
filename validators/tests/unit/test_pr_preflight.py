@@ -23,6 +23,9 @@ class FakeRunner:
         install_spec_signature_stdout: str = "ok\n",
         path_manifest_returncode: int = 0,
         path_manifest_stdout: str = "ok\n",
+        portability_returncode: int = 0,
+        portability_stdout: str = "ok\n",
+        portability_stderr: str = "",
         test_coupling_requires_marker: bool = False,
         head_test_result: pr_preflight.CommandResult | None = None,
         baseline_test_result: pr_preflight.CommandResult | None = None,
@@ -39,6 +42,9 @@ class FakeRunner:
         self.install_spec_signature_stdout = install_spec_signature_stdout
         self.path_manifest_returncode = path_manifest_returncode
         self.path_manifest_stdout = path_manifest_stdout
+        self.portability_returncode = portability_returncode
+        self.portability_stdout = portability_stdout
+        self.portability_stderr = portability_stderr
         self.test_coupling_requires_marker = test_coupling_requires_marker
         self.head_test_result = head_test_result or pr_preflight.CommandResult(0, "1 passed in 0.01s\n", "")
         self.baseline_test_result = baseline_test_result or pr_preflight.CommandResult(0, "1 passed in 0.01s\n", "")
@@ -98,6 +104,12 @@ class FakeRunner:
             return pr_preflight.CommandResult(self.malformed_returncode, "malformed rejected\n", "")
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "scan-install-spec-signature" in argv:
             return pr_preflight.CommandResult(self.install_spec_signature_returncode, self.install_spec_signature_stdout, "")
+        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "scan-portability-plane" in argv:
+            return pr_preflight.CommandResult(
+                self.portability_returncode,
+                self.portability_stdout,
+                self.portability_stderr,
+            )
         if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "verify-test-coupling" in argv:
             if not self.test_coupling_requires_marker:
                 return pr_preflight.CommandResult(0, "ok\n", "")
@@ -759,6 +771,52 @@ def test_seat_ready_pytest_env_uses_home_tmpdir(tmp_path: Path, monkeypatch):
     env = pytest_call[2]
     assert env is not None
     assert env["TMPDIR"] == str(tmp_path / "home" / "tmp")
+
+
+def test_seat_ready_profile_skips_portability_guard_failure(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        portability_returncode=1,
+        portability_stdout="FAIL portability_plane_detected\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=pr_preflight.SEAT_READY_PROFILE),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    output = out.getvalue()
+    assert rc == 0
+    assert "[PASS] Control-plane portability guard" in output
+    assert "skipped for seat-ready because seat-image runtime characteristics produce proven false failures" in output
+    assert "enforced by default-profile preflight at controller harvest" in output
+    assert not any("scan-portability-plane" in call for call in runner.argv_calls())
+
+
+def test_default_profile_enforces_portability_guard_failure(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        portability_returncode=1,
+        portability_stdout="FAIL portability_plane_detected\n",
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(
+        _config(tmp_path, profile=None),
+        runner=runner,
+        out=out,
+        err=io.StringIO(),
+    )
+
+    output = out.getvalue()
+    assert rc == 1
+    assert "[FAIL] Control-plane portability guard" in output
+    assert any("scan-portability-plane" in call for call in runner.argv_calls())
 
 
 def test_seat_ready_autogen_gate_runs_only_for_profile_and_touched_surface(
