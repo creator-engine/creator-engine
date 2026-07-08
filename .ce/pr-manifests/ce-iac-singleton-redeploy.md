@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=5c5fb1342b68f2e54df4359642db5f8a78de2beb9ff7ee60ceaf3cb73f1f3b33
+AUTHORIZED_PATHS_SHA256=a5f6f5064c3f64fc8acfa3ae533c89e5f6a76b9a559af1b75fba47ebfd50e57e
 
 ```text
 .ce/changelog/ce-iac-singleton-redeploy.md
@@ -16,4 +16,5 @@ AUTHORIZED_PATHS_SHA256=5c5fb1342b68f2e54df4359642db5f8a78de2beb9ff7ee60ceaf3cb7
 deploy/singleton-redeploy/redeploy-singleton.sh
 deploy/singleton-redeploy/smoke-singleton-redeploy.sh
 docs/operations/SINGLETON_DAEMON_REDEPLOY_RUNBOOK.md
+validators/creator_engine_validator/public_docs_confidentiality.py
 ```

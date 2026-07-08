@@ -169,6 +169,7 @@ KNOWN_OPERATIONS_EXCEPTIONS: frozenset[str] = frozenset(
         "docs/operations/SEAT_LAUNCH_GOVERNANCE_RUNBOOK.md",
         "docs/operations/SEAT_REAPER_PROTOCOL.md",
         "docs/operations/SIDE_EFFECT_LEDGER_PROTOCOL.md",
+        "docs/operations/SINGLETON_DAEMON_REDEPLOY_RUNBOOK.md",
         "docs/operations/STATE_BOUNDARY_PROTOCOL.md",
         "docs/operations/TRANSCRIPT_ARCHIVE_PROTOCOL.md",
         "docs/operations/WORKER_CONTAINER_PROTOCOL.md",
