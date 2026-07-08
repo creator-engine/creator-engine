@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Protocol, TextIO
 
 from . import brain_intent_xor_gate, brain_runtime
-from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class  # WORK_CLASSES re-exported; egress_broker/orchestrator.py imports it from here
+from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class
 
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
 NETWORK_SUBPROCESS_TIMEOUT_ENV = "CE_NETWORK_SUBPROCESS_TIMEOUT_SECONDS"
@@ -32,13 +32,6 @@ DEFAULT_TEST_COMMAND = (
 SEAT_READY_PROFILE = "seat-ready"
 SEAT_READY_PYTEST_WORKER_CAP = 4
 SEAT_READY_TEST_COMMAND = DEFAULT_TEST_COMMAND.replace("-n auto", f"-n {SEAT_READY_PYTEST_WORKER_CAP}", 1)
-TASK_WORK_CLASS_ALIASES = {
-    "T": "XS",
-    "t": "XS",
-    "task": "XS",
-}
-DECLARED_WORK_CLASS_INPUTS = (*WORK_CLASS_INPUTS, *TASK_WORK_CLASS_ALIASES)
-DECLARED_WORK_CLASS_HELP = "expected one of: XS, S, M, L (or T task alias)"
 DECLARED_WORK_CLASS_PATTERN = re.compile(
     r"^\s*(?:[-*]\s*)?(?:\*\*)?Declared work class(?:\*\*)?\s*:\s*(?:\*\*)?\s*"
     r"`?([A-Za-z][A-Za-z0-9_-]*)`?\s*(?:<!--.*-->)?\s*$",
@@ -330,13 +323,6 @@ def _extract_declared_work_classes(text: str) -> list[str]:
     return [match.group(1) for match in DECLARED_WORK_CLASS_PATTERN.finditer(text)]
 
 
-def _normalize_declared_work_class(value: str) -> str:
-    alias = TASK_WORK_CLASS_ALIASES.get(value.strip())
-    if alias is not None:
-        return alias
-    return normalize_work_class(value)
-
-
 def _changed_paths(repo_root: Path, base: str, runner: Runner) -> list[str]:
     stdout = _git_capture_optional(["diff", "--name-only", f"{base}..HEAD"], repo_root, runner)
     return [line.strip() for line in stdout.splitlines() if line.strip()]
@@ -433,11 +419,11 @@ def _resolve_declared_work_class(
 ) -> str:
     if config.declared_work_class:
         try:
-            return _normalize_declared_work_class(config.declared_work_class)
+            return normalize_work_class(config.declared_work_class)
         except ValueError:
             raise RuntimeError(
-                f"declared work class is invalid; {DECLARED_WORK_CLASS_HELP} "
-                "(legacy aliases: tiny, story, feature, epic, task)"
+                "declared work class is invalid; expected one of: "
+                f"{', '.join(WORK_CLASSES)} (legacy aliases: tiny, story, feature, epic)"
             ) from None
 
     from .checks.path_manifest_fidelity import MANIFEST_DIR, branch_slug
@@ -467,17 +453,17 @@ def _resolve_declared_work_class(
         locations = ", ".join(str(path.relative_to(config.repo_root)) for path, _ in found) or "none"
         raise RuntimeError(
             "PR body/carrier must contain exactly one declared work class line: "
-            "'- **Declared work class:** <XS|S|M|L|T>' "
-            "(legacy aliases accepted: tiny, story, feature, epic, task) "
+            "'- **Declared work class:** <XS|S|M|L>' "
+            "(legacy aliases accepted: tiny, story, feature, epic) "
             f"(found {len(values)}; locations: {locations})"
         )
     declared = values[0]
     try:
-        return _normalize_declared_work_class(declared)
+        return normalize_work_class(declared)
     except ValueError:
         raise RuntimeError(
-            f"declared work class is invalid; {DECLARED_WORK_CLASS_HELP} "
-            "(legacy aliases: tiny, story, feature, epic, task)"
+            "declared work class is invalid; expected one of: "
+            f"{', '.join(WORK_CLASSES)} (legacy aliases: tiny, story, feature, epic)"
         ) from None
 
 
@@ -1504,9 +1490,9 @@ def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
     parser.add_argument("--base", default="origin/main", help="base branch/ref to fetch and merge-base against (default: origin/main)")
     parser.add_argument(
         "--declared-work-class",
-        choices=DECLARED_WORK_CLASS_INPUTS,
+        choices=WORK_CLASS_INPUTS,
         help=(
-            "declared PR work class <XS|S|M|L|T>; legacy aliases tiny/story/feature/epic/task are accepted; "
+            "declared PR work class <XS|S|M|L>; legacy aliases tiny/story/feature/epic are accepted; "
             "when omitted, read exactly one declared-work-class line from the PR carrier/body"
         ),
     )
