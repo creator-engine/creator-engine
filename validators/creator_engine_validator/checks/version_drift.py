@@ -51,6 +51,12 @@ PACKAGE_VERSION_TEXT = _pattern(
     "creator-engine-validator package version text",
     rf"creator-engine-validator[`'\"]?\s+version[`'\"]?\s+[`'\"]{SEMVER_RE}[`'\"]",
 )
+README_CE_VERSION_TEXT = _pattern(
+    "README CE version text",
+    rf"(?i)\b(?:current\s+release|version|(?:ce|creator\s+engine)"
+    rf"(?:\s+(?:v(?:ersion)?|release|current\s+release))?)"
+    rf"\s*(?::|=|\bis\b)?\s*v?{SEMVER_RE}\b(?:\s+is\s+current)?",
+)
 CE_VALIDATOR_IMAGE = _pattern(
     "ce-validator image tag",
     rf"creator-engine/ce-validator:{SEMVER_RE}",
@@ -70,7 +76,7 @@ DOWNLOADS_VERSION_URL = _pattern(
 
 
 CURRENT_VERSION_SURFACES: tuple[CurrentVersionSurface, ...] = (
-    CurrentVersionSurface("README.md", (PACKAGE_PIN, PACKAGE_VERSION_TEXT)),
+    CurrentVersionSurface("README.md", (PACKAGE_PIN, PACKAGE_VERSION_TEXT, README_CE_VERSION_TEXT)),
     CurrentVersionSurface("docs/llms.txt", (DOWNLOADS_VERSION_URL,)),
     CurrentVersionSurface("deploy/oci/README.md", (CE_VALIDATOR_IMAGE,)),
     CurrentVersionSurface("deploy/oci/build-image.sh", (CE_VALIDATOR_IMAGE,)),

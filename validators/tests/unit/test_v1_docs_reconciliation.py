@@ -4,8 +4,9 @@ These tests are the "docs-vs-CLI consistency check" named in the traceability
 matrix. They derive the **as-built** ``ce`` command inventory by introspecting
 the argparse parser (the single source of truth) and assert that:
 
-* every shipped ``ce`` command group is documented as a v1.0 surface in
-  ``README.md`` (RV1-080);
+* every shipped public ``ce`` command group is documented as a v1.0 surface in
+  ``docs/reference/cli.md`` (RV1-080);
+* ``README.md`` links to the public CLI reference (RV1-080);
 * there is **no** ``ce dev`` command in v1.0, and the docs say so (RV1-080 /
   RV1-081);
 * the Option B install story (Python ``>=3.14``, uv-first + pip ``--no-index``
@@ -29,6 +30,7 @@ from creator_engine_validator import ce_cli
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _README = _REPO_ROOT / "README.md"
+_CLI_REFERENCE = _REPO_ROOT / "docs" / "reference" / "cli.md"
 _VALIDATORS_README = _REPO_ROOT / "validators" / "README.md"
 _PRODUCT_CONTRACT = _REPO_ROOT / "docs" / "governance" / "V1_PRODUCT_CONTRACT.md"
 
@@ -44,8 +46,12 @@ def _readme_text() -> str:
     return _README.read_text(encoding="utf-8")
 
 
+def _cli_reference_text() -> str:
+    return _CLI_REFERENCE.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
-# RV1-080 — README documents the as-built ce inventory
+# RV1-080 — public CLI reference documents the as-built ce inventory
 # ---------------------------------------------------------------------------
 
 
@@ -77,31 +83,35 @@ def test_internal_command_groups_are_a_subset_of_the_inventory():
     assert ce_cli.INTERNAL_COMMAND_GROUPS <= _ce_command_groups()
 
 
-def test_readme_documents_every_ce_command_group():
-    text = _readme_text()
+def test_readme_links_to_public_cli_reference():
+    assert "docs/reference/cli.md" in _readme_text()
+
+
+def test_cli_reference_documents_every_ce_command_group():
+    text = _cli_reference_text()
     # Internal-only groups (ce_cli.INTERNAL_COMMAND_GROUPS) are intentionally off
-    # the public product surface and exempt from README documentation.
+    # the public product surface and exempt from public CLI-reference documentation.
     public_groups = _ce_command_groups() - ce_cli.INTERNAL_COMMAND_GROUPS
     missing = [g for g in public_groups if not re.search(rf"\bce {re.escape(g)}\b", text)]
-    assert not missing, f"README.md does not document ce command group(s): {missing}"
+    assert not missing, f"docs/reference/cli.md does not document ce command group(s): {missing}"
 
 
 def test_no_ce_dev_command_in_v1():
     # The dev namespace must remain unbound in v1.0 ...
     assert "dev" not in _ce_command_groups()
-    # ... and the README must state that explicitly.
-    assert re.search(r"no\s+`?ce dev`?", _readme_text(), re.IGNORECASE)
+    # ... and the public CLI reference must state that explicitly.
+    assert re.search(r"no\s+`?ce dev`?", _cli_reference_text(), re.IGNORECASE)
 
 
-def test_readme_states_launch_hud_alias_no_rename():
-    text = _readme_text()
+def test_cli_reference_states_launch_hud_alias_no_rename():
+    text = _cli_reference_text()
     assert "ce launch" in text and "ce hud" in text
     # DP-1=A: ce wraps the retained validator; no distribution rename.
     assert "creator-engine-validator" in text
 
 
-def test_readme_documents_ce_init_project_scaffold():
-    text = _readme_text()
+def test_cli_reference_documents_ce_init_project_scaffold():
+    text = _cli_reference_text()
     assert "ce init" in text
     assert "CE-native project scaffolding" in text
     assert "path-manifest carriers" in text

@@ -4007,4 +4007,58 @@ records:
   verification_method:
     evidence_ref: validators/pyproject.toml
     type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: 2fc9703285e406f2b23d4f49d39ed488641ab9bf91b3a17fd87e575632af9285
+    item: 9
+    object: ce-cli-doc-coupling
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: b7971b46f61f2a26518628d8d86f0dfa6bbf00da79512c375c72c2ae45b7b967
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-d1b-09-ce-cli-doc-coupling-v5
+  kind: brain-assertion
+  prev_hash: 84d35083273b82d2421040c245c97d07adbd6a458ea73c66423d68a9919a1c9e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 153
+  statement: doctrine-item asserts ce-cli-doc-coupling
+  status: superseded
+  superseded_by: brain-assertion-d1b-09-ce-cli-doc-coupling-v6
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: f32105ff03a5f18b97f693b196cb128290edbd40f8665ded8fae63b62c04c9a7
+    item: 9
+    object: ce-cli-doc-coupling
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: d98dc13b21879e1735f715953ec7f27ffa5aa9695ac5afc6c9cb358e213c6e50
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-d1b-09-ce-cli-doc-coupling-v6
+  kind: brain-assertion
+  prev_hash: b7971b46f61f2a26518628d8d86f0dfa6bbf00da79512c375c72c2ae45b7b967
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 154
+  statement: doctrine-item asserts ce-cli-doc-coupling
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
 schema_version: '1'
