@@ -223,7 +223,7 @@ class HostOpsBroker:
             finished_at=finished_at,
             event="pre-mutation",
         )
-        append_audit(self.config.audit_log_path, record, now=self.now)
+        append_audit(self.config.audit_log_path, record)
         return f"hostops-audit:{request.request_id}:pre-mutation"
 
     def _append_final(
@@ -259,7 +259,7 @@ class HostOpsBroker:
             started_at=started_at,
             finished_at=finished_at,
         )
-        append_audit(self.config.audit_log_path, record, now=self.now)
+        append_audit(self.config.audit_log_path, record)
         return f"hostops-audit:{request.request_id}:final"
 
 

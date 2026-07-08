@@ -52,6 +52,45 @@ def _remove_checkout_build_artifacts(repo_root: Path) -> None:
         shutil.rmtree(repo_root / "validators" / rel, ignore_errors=True)
 
 
+def _git(cwd: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip()
+
+
+def _ignore_copy_noise(_directory: str, names: list[str]) -> set[str]:
+    ignored = {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "htmlcov",
+        "node_modules",
+        "tmp",
+    }
+    return {name for name in names if name in ignored or name.endswith((".pyc", ".pyo"))}
+
+
+def _copy_repo_fixture(repo_root: Path, tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    shutil.copytree(repo_root, repo, symlinks=True, ignore=_ignore_copy_noise)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "tests@example.invalid")
+    _git(repo, "config", "user.name", "CE Tests")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "wheel bake fixture")
+    return repo
+
+
 def _assert_surface_deterministic(repo_root: Path, tmp_path: Path, build_wheel) -> None:
     left = tmp_path / "left"
     right = tmp_path / "right"
@@ -134,14 +173,15 @@ def test_build_app_wheel_from_source_is_surface_deterministic(repo_root: Path, t
 
 @pytest.mark.xdist_group("wheel-build")
 def test_surface_determinism_ignores_stale_checkout_artifact_dirs(repo_root: Path, tmp_path: Path):
-    (repo_root / "validators" / "build" / "lib").mkdir(parents=True, exist_ok=True)
-    (repo_root / "validators" / "build" / "lib" / "stale.py").write_text("stale\n", encoding="utf-8")
-    (repo_root / "validators" / "creator_engine_validator.egg-info").mkdir(parents=True, exist_ok=True)
-    (repo_root / "validators" / "creator_engine_validator.egg-info" / "PKG-INFO").write_text(
+    fixture_root = _copy_repo_fixture(repo_root, tmp_path)
+    (fixture_root / "validators" / "build" / "lib").mkdir(parents=True, exist_ok=True)
+    (fixture_root / "validators" / "build" / "lib" / "stale.py").write_text("stale\n", encoding="utf-8")
+    (fixture_root / "validators" / "creator_engine_validator.egg-info").mkdir(parents=True, exist_ok=True)
+    (fixture_root / "validators" / "creator_engine_validator.egg-info" / "PKG-INFO").write_text(
         "stale\n", encoding="utf-8"
     )
 
-    _assert_surface_deterministic(repo_root, tmp_path, build_app_wheel_from_source)
+    _assert_surface_deterministic(fixture_root, tmp_path, build_app_wheel_from_source)
 
 
 @pytest.mark.xdist_group("wheel-build")

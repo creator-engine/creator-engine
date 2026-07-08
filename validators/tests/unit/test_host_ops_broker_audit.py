@@ -46,7 +46,7 @@ def _record(**overrides):
 
 def test_append_creates_parent_and_jsonl_record(tmp_path):
     path = tmp_path / "nested" / "audit.jsonl"
-    appended = append_audit(path, _record(), now=_now)
+    appended = append_audit(path, _record())
     assert path.is_file()
     assert appended["started_at"] == "2026-07-08T12:00:00Z"
     assert json.loads(path.read_text())["schema"] == "ce.host_ops.audit.v1"
@@ -54,8 +54,8 @@ def test_append_creates_parent_and_jsonl_record(tmp_path):
 
 def test_append_is_append_only_and_never_truncates(tmp_path):
     path = tmp_path / "audit.jsonl"
-    append_audit(path, _record(request_id="hostops-1"), now=_now)
-    append_audit(path, _record(request_id="hostops-2"), now=_now)
+    append_audit(path, _record(request_id="hostops-1"))
+    append_audit(path, _record(request_id="hostops-2"))
     lines = path.read_text().splitlines()
     assert len(lines) == 2
     assert json.loads(lines[0])["request_id"] == "hostops-1"
@@ -75,13 +75,13 @@ def test_append_is_append_only_and_never_truncates(tmp_path):
 def test_secret_by_key_or_token_shaped_value_is_rejected_before_write(tmp_path, record):
     path = tmp_path / "audit.jsonl"
     with pytest.raises(AuditSecretLeak):
-        append_audit(path, record, now=_now)
+        append_audit(path, record)
     assert not path.exists()
 
 
 def test_params_redacted_contains_only_schema_safe_non_secret_fields(tmp_path):
     rec = _record(params_redacted={"daemon": "agent", "mode": "restart", "wait_ready_seconds": 30})
-    append_audit(tmp_path / "audit.jsonl", rec, now=_now)
+    append_audit(tmp_path / "audit.jsonl", rec)
     assert rec["params_redacted"] == {"daemon": "agent", "mode": "restart", "wait_ready_seconds": 30}
 
 

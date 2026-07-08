@@ -52,7 +52,7 @@ def assert_secret_free(obj: object, *, _path: str = "") -> None:
         )
 
 
-def append_audit(path: str | Path, record: Mapping[str, Any], *, now: Callable[[], datetime] | None = None) -> dict[str, Any]:
+def append_audit(path: str | Path, record: Mapping[str, Any]) -> dict[str, Any]:
     """Append one secret-free audit record as JSONL and return the stamped record."""
     assert_secret_free(record)
     stamped = dict(record)

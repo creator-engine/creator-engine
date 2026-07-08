@@ -5,13 +5,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 HOST_OPS_ROOT = ROOT / "tools" / "host-ops-broker"
 if str(HOST_OPS_ROOT) not in sys.path:
     sys.path.insert(0, str(HOST_OPS_ROOT))
 
 from host_ops_broker.broker import HostOpsBroker
-from host_ops_broker.config import BrokerConfig
+from host_ops_broker.config import BrokerConfig, BrokerConfigError
 from host_ops_broker.rate_limit import InMemoryRateLimiter
 
 T0 = datetime(2026, 7, 8, 12, 0, 0, tzinfo=timezone.utc)
@@ -65,6 +67,33 @@ def test_broker_wide_kill_switch_disables_status_and_mutating_verbs(tmp_path):
     assert all(rec["disabled_reason_ref"] == "ops-stop" for rec in records)
 
 
+@pytest.mark.parametrize("disabled_value", [1, "yes", "false"])
+def test_present_non_false_disabled_value_fails_closed(tmp_path, disabled_value):
+    kill = tmp_path / "kill.json"
+    kill.write_text(json.dumps({"disabled": disabled_value, "reason_ref": "ops-stop"}))
+    broker = HostOpsBroker(_config(tmp_path, kill), now=_now)
+
+    resp = broker.dispatch(_request())
+
+    assert resp["result"] == "disabled"
+    rec = _audit_records(tmp_path / "audit.jsonl")[0]
+    assert rec["disabled_scope"] == "broker"
+    assert rec["disabled_reason_ref"] == "ops-stop"
+
+
+def test_explicit_false_disabled_value_keeps_broker_enabled(tmp_path):
+    kill = tmp_path / "kill.json"
+    kill.write_text(json.dumps({"disabled": False}))
+    broker = HostOpsBroker(_config(tmp_path, kill), now=_now)
+
+    resp = broker.dispatch(_request())
+
+    assert resp["result"] == "ok"
+    rec = _audit_records(tmp_path / "audit.jsonl")[0]
+    assert rec["result"] == "ok"
+    assert rec["disabled_scope"] is None
+
+
 def test_per_verb_disable_leaves_other_verbs_available(tmp_path):
     kill = tmp_path / "kill.json"
     kill.write_text(json.dumps({"disabled_verbs": {"restart-daemon": "daemon-freeze"}}))
@@ -76,6 +105,19 @@ def test_per_verb_disable_leaves_other_verbs_available(tmp_path):
     last = _audit_records(tmp_path / "audit.jsonl")[-1]
     assert last["disabled_scope"] == "verb:restart-daemon"
     assert last["disabled_reason_ref"] == "daemon-freeze"
+
+
+def test_disabled_verbs_must_be_mapping_or_broker_fails_closed(tmp_path):
+    kill = tmp_path / "kill.json"
+    kill.write_text(json.dumps({"disabled_verbs": "all"}))
+    broker = HostOpsBroker(_config(tmp_path, kill), now=_now)
+
+    resp = broker.dispatch(_request())
+
+    assert resp["result"] == "disabled"
+    rec = _audit_records(tmp_path / "audit.jsonl")[0]
+    assert rec["disabled_scope"] == "broker"
+    assert rec["disabled_reason_ref"].startswith("kill-switch-malformed:")
 
 
 def test_unreadable_flag_file_fails_closed_as_broker_wide_disabled(tmp_path):
@@ -101,3 +143,33 @@ def test_kill_switch_precedes_rate_limit_accounting(tmp_path):
     broker.dispatch(_request())
 
     assert store == {}
+
+
+def test_per_verb_kill_switch_precedes_rate_limit_accounting(tmp_path):
+    kill = tmp_path / "kill.json"
+    kill.write_text(json.dumps({"disabled_verbs": {"restart-daemon": "daemon-freeze"}}))
+    store = {}
+    limiter = InMemoryRateLimiter(now=_now, store=store)
+    broker = HostOpsBroker(_config(tmp_path, kill), rate_limiter=limiter, now=_now)
+
+    resp = broker.dispatch(_request("restart-daemon", {"daemon": "agent"}, "repair"))
+
+    assert resp["result"] == "disabled"
+    assert store == {}
+    rec = _audit_records(tmp_path / "audit.jsonl")[0]
+    assert rec["result"] == "disabled"
+    assert rec["disabled_scope"] == "verb:restart-daemon"
+    assert rec["disabled_reason_ref"] == "daemon-freeze"
+
+
+def test_broker_config_load_fails_closed_on_missing_file(tmp_path):
+    with pytest.raises(BrokerConfigError, match="missing"):
+        BrokerConfig.load(tmp_path / "missing.json")
+
+
+def test_broker_config_load_fails_closed_on_malformed_json(tmp_path):
+    path = tmp_path / "broker.json"
+    path.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(BrokerConfigError, match="unreadable or malformed"):
+        BrokerConfig.load(path)
