@@ -1410,6 +1410,90 @@ def test_ce_workflow_template_canonicalization_matches_release_publish():
     )
 
 
+CE_WORKFLOW_SIGNED_DOWNLOAD_GENERATION = b"""\
+name: Validate governance artifacts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate governance artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Creator Engine from signed release downloads
+        env:
+          CE_VERSION: "0.3.2"
+          CE_DOWNLOAD_BASE: "https://creator-engine.dev/downloads/0.3.2"
+          CE_APP_WHEEL: "creator_engine_validator-0.3.2-py3-none-any.whl"
+          CE_APP_WHEEL_URL: "https://creator-engine.dev/downloads/0.3.2/creator_engine_validator-0.3.2-py3-none-any.whl"
+        run: |
+          set -euo pipefail
+          mkdir -p .ce-validator-dist
+          curl -fsSLo .ce-validator-dist/SHA256SUMS "${CE_DOWNLOAD_BASE}/SHA256SUMS"
+          python -m pip install --no-index --find-links .ce-validator-dist "creator-engine-validator==${CE_VERSION}"
+      - name: Run CE governance checks
+        run: |
+          set -euo pipefail
+          ce check .ce/ --json > ce-check.json
+"""
+
+
+CE_WORKFLOW_PRESIGNED_ADVISORY_GENERATION = (
+    b"""\
+name: Validate governance artifacts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate governance artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Creator Engine validator
+        run: |
+          set -euo pipefail
+          cat > /tmp/ce-requirements.txt <<'REQ'
+"""
+    b"          creator-engine-validator @ https://creator-engine.dev/downloads/0.2.0/"
+    b"creator_engine_validator-0.2.0-py3-none-any.whl "
+    b"--hash=sha256:1111111111111111111111111111111111111111111111111111111111111111\n"
+    b"""\
+          REQ
+          python -m pip install --require-hashes --only-binary :all: -r /tmp/ce-requirements.txt
+      - name: Run CE governance checks
+        run: |
+          set -euo pipefail
+          ce check .ce/ | tee /tmp/ce-check.out || true
+"""
+)
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    (
+        CE_WORKFLOW_SIGNED_DOWNLOAD_GENERATION,
+        CE_WORKFLOW_PRESIGNED_ADVISORY_GENERATION,
+        onboard_apply.CE_WORKFLOW_CONTENT.encode("utf-8"),
+    ),
+)
+def test_refresh_workflow_recognizes_shipped_ce_workflow_generations(workflow):
+    assert onboard_apply._workflow_content_looks_ce(workflow)
+
+
 class WorkflowRefreshDriver(onboard_apply.ApplyDriver):
     def __init__(
         self,
@@ -1481,6 +1565,36 @@ def test_refresh_workflow_applied_to_stale_onboarded_repo():
     }]
 
 
+def test_refresh_workflow_applied_to_signed_download_generation():
+    driver = WorkflowRefreshDriver(CE_WORKFLOW_SIGNED_DOWNLOAD_GENERATION)
+
+    summary = onboard_apply.refresh_ce_workflow(driver, repo="owner/repo", branch="main")
+
+    assert summary["status"] == "updated"
+    assert summary["changed"] is True
+    assert driver.refresh_calls == [{
+        "repo": "owner/repo",
+        "branch": "main",
+        "path": onboard_apply.CE_WORKFLOW_PATH,
+        "current_sha": "blob-before",
+    }]
+
+
+def test_refresh_workflow_applied_to_presigned_advisory_generation():
+    driver = WorkflowRefreshDriver(CE_WORKFLOW_PRESIGNED_ADVISORY_GENERATION)
+
+    summary = onboard_apply.refresh_ce_workflow(driver, repo="owner/repo", branch="main")
+
+    assert summary["status"] == "updated"
+    assert summary["changed"] is True
+    assert driver.refresh_calls == [{
+        "repo": "owner/repo",
+        "branch": "main",
+        "path": onboard_apply.CE_WORKFLOW_PATH,
+        "current_sha": "blob-before",
+    }]
+
+
 def test_refresh_workflow_noop_when_current():
     driver = WorkflowRefreshDriver(onboard_apply.CE_WORKFLOW_CONTENT.encode("utf-8"))
 
@@ -1510,6 +1624,32 @@ def test_refresh_workflow_refuses_to_overwrite_non_ce_workflow():
 
     assert exc.value.code == "refresh_not_onboarded"
     assert "is not a CE validation workflow" in exc.value.detail
+    assert driver.refresh_calls == []
+
+
+def test_refresh_workflow_refuses_comment_only_creator_engine_validator_marker():
+    foreign_workflow = b"""\
+name: Validate governance artifacts
+on: [pull_request]
+jobs:
+  test:
+    name: Validate governance artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "custom CI"
+      # creator-engine-validator is mentioned in a note, not installed or run here.
+"""
+    driver = WorkflowRefreshDriver(foreign_workflow)
+
+    with pytest.raises(onboard_apply.ApplyRefused) as exc:
+        onboard_apply.refresh_ce_workflow(driver, repo="owner/repo", branch="main")
+
+    assert exc.value.code == "refresh_not_onboarded"
+    assert exc.value.detail == (
+        "this repo does not look onboarded yet: the workflow at "
+        f"{onboard_apply.CE_WORKFLOW_PATH} is not a CE validation workflow. Run the normal onboard "
+        "plan/apply flow first; refresh only updates an existing CE workflow."
+    )
     assert driver.refresh_calls == []
 
 
