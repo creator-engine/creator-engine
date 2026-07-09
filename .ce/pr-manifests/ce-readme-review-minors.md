@@ -35,6 +35,7 @@ Change-type: code and docs.
 
 ## Changed Paths
 
+- `.ce/brain/assertions.yaml` - ledger supersession v7: tombstone for brain-assertion-d1b-09-ce-cli-doc-coupling-v6 (seq 161) + active v7 (seq 162) with updated evidence sha256.
 - `.ce/changelog/ce-readme-review-minors.md` - changelog fragment.
 - `.ce/pr-manifests/ce-readme-review-minors.md` - this carrier.
 - `docs/reference/cli.md` - public `ce conveyor` reference.
@@ -42,17 +43,20 @@ Change-type: code and docs.
 - `validators/creator_engine_validator/checks/version_drift.py` - README CE-version regex context guard.
 - `validators/tests/unit/test_v1_docs_reconciliation.py` - pre-argparse public dispatch docs coverage.
 - `validators/tests/unit/test_version_drift.py` - CE and non-CE README version drift coverage.
+- `validators/tests/unit/test_ce_brain_drift.py` - ratchet bump 103 → 104 (tombstone+v7 net +1 raw active).
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=9
 
-AUTHORIZED_PATHS_SHA256=b1a8c806b771273b65a63672354f2c53cf96283f847fa6ab435cfa1dc93c86e6
+AUTHORIZED_PATHS_SHA256=5ffb012fb14b812ebf2c28a7ddc445bcc6e1dd574b292905ff21fb84d8441d23
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-readme-review-minors.md
 .ce/pr-manifests/ce-readme-review-minors.md
 docs/reference/cli.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/checks/version_drift.py
+validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_v1_docs_reconciliation.py
 validators/tests/unit/test_version_drift.py
 ```
