@@ -1,5 +1,0 @@
-STATUS: READY
-BRANCH: ce-502-standby-surface
-REVIEWED_IMPLEMENTATION_COMMIT: 4a014e5c
-WORK_CLASS: S
-NOTE: Final carrier marker added after fresh reviewer verdict blocked only on tracked READY and manifest inclusion.
