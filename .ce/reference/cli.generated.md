@@ -678,7 +678,7 @@ Options:
 | `--takeover-evidence` | no |  | path to a ce takeover --dry-run --json evidence packet that authorizes role=controller launch |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |
-| `--mcp-config` | no |  | CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config) |
+| `--mcp-config` | no |  | CE-owned MCP config path inside the repo for strict MCP pinning |
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |
@@ -756,7 +756,7 @@ Options:
 | `--handoff-sha` | no |  | expected byte-level SHA256 of --handoff |
 | `--command` | no |  | optional local command to run in the pane (defaults to a safe inert placeholder) |
 | `--claude-arg` | no |  | repeatable extra arg appended to a claude --command (use --claude-arg=<value> for dashed values) |
-| `--mcp-config` | no |  | CE-owned MCP config path inside the repo / .ce/state (pins --strict-mcp-config) |
+| `--mcp-config` | no |  | CE-owned MCP config path inside the repo for strict MCP pinning |
 | `--completion-report-ref` | no |  | deterministic completion-report pointer for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer for Ring 0 closeout verification |
 | `--operating-mode` | no | `auto, strict, transcendence` | lane operating mode (default: strict); auto/transcendence require --tenant-policy |
@@ -830,7 +830,7 @@ Options:
 | `--takeover-evidence` | no |  | path to a ce takeover --dry-run --json evidence packet that authorizes role=controller launch |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |
-| `--mcp-config` | no |  | CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config) |
+| `--mcp-config` | no |  | CE-owned MCP config path inside the repo for strict MCP pinning |
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |

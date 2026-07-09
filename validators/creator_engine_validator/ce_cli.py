@@ -549,7 +549,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mcp-config",
         dest="mcp_config",
         default=None,
-        help="CE-owned MCP config path inside the repo / .ce/state (pins --strict-mcp-config)",
+        help="CE-owned MCP config path inside the repo for strict MCP pinning",
     )
     launch.add_argument(
         "--completion-report-ref",
@@ -2175,7 +2175,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "--mcp-config",
             dest="mcp_config",
             default=None,
-            help="CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config)",
+            help="CE-owned MCP config path inside the repo for strict MCP pinning",
         )
         p.add_argument(
             "--completion-report-ref",

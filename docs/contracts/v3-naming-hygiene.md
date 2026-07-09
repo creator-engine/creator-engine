@@ -62,10 +62,10 @@ harness, nothing else.
 
 **Scoped exception to the v1 exclusion:** the load-bearing user-facing surfaces
 now default to `_versions.V3_LOCAL_STATE_ROOT` (`.ce/state`) for governed state.
-The ce-hermes-retirement change completes this cleanup for onboarding, launch
-help text, deployed runsc defaults, hook evidence roots, and current functional
-docs. This does not authorize a full v1 rename; templates, schemas, and v1-only
-surfaces remain under the deferred v1 freeze until a separate ratified migration.
+The ce-hermes-retirement change completes this cleanup for onboarding, deployed
+runsc defaults, hook evidence roots, and current functional docs. This does not
+authorize a full v1 rename; templates, schemas, and v1-only surfaces remain under
+the deferred v1 freeze until a separate ratified migration.
 
 ## Neutral v3 local-state convention
 
