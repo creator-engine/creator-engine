@@ -8,14 +8,14 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=27
 
-AUTHORIZED_PATHS_SHA256=21434cbdfe219cf88ed0e91b58b9f073c97e790367dad198dd904ebed6fa5617
+AUTHORIZED_PATHS_SHA256=9b8f779d11f4309023c4e48508c95f4866d5155a6d61b6909b6536cc0ae60748
 
 ```text
 .ce/brain/assertions.yaml
 .ce/changelog/ce-hermes-retirement.md
 .ce/pr-manifests/ce-hermes-retirement.md
 .ce/reference/cli.generated.md
-.ce/wt-hermes-r2/BLOCKED
+.ce/wt-hermes-r2/READY
 .claude/hooks/ce-hook-common.sh
 .claude/hooks/ce-pretooluse.sh
 .claude/hooks/ce-stop.sh

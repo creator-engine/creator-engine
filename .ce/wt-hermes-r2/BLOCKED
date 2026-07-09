@@ -1,4 +1,0 @@
-STATUS: BLOCKED
-BLOCKER: validate-pr has a head-only failure in validators/tests/integration/test_claude_hook_pack_stop.py, which is outside the R2 STOP LINE and appears to require updating stale .hermes expectations.
-GATE: OTHER
-CONTEXT: validators/tests/integration/test_claude_hook_pack_stop.py::test_stop_logs_advisory_observation_under_hermes expects .hermes/cc-g-c-hook-observations/observations.ndjson after ce-stop now writes under .ce/state; editing that test is outside the source brief STOP LINE. The in-scope .claude/hooks/ce-pretooluse.sh brain evidence_sha256 drift was repaired to d811bafa5208ee2394c78620120ef23ca005be60b2a4c9ab0809b53c7cc62b8b and ce brain verify passes; the focused brain drift test now fails only on its out-of-scope hardcoded active-count expectation of 97 versus the R2-required 103.
