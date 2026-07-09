@@ -12,4 +12,3 @@ issue: CE-491
 - Normalizes materializer evidence paths before enforcing `.ce/state` bounds.
 - Documents the HeldError artifact asymmetry beside the handler.
 - Adds run-preflight coverage proving the brain append intent/direct ledger XOR gate fires in the real check sequence.
-- Accepts the brief-required `T` task carrier class in preflight while preserving existing work-sizing classes downstream.
