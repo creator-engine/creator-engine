@@ -17,9 +17,21 @@ Required repository secret:
   ``GITHUB_TOKEN`` is scoped to this repository and cannot close cross-repo
   issues; never substitute it here.
 
-Fail-open contract: if the token is absent or empty, a workflow warning is
-emitted and the step exits 0 so it never blocks a merge.
+Fail-closed token contract: if the token is absent or empty, a workflow error is
+emitted and the step exits nonzero. The workflow step may still be configured
+continue-on-error so merges are not blocked silently.
 """
+# Acceptance-Evidence enforcement (P2)
+# Issues labeled exactly `directive` require proof in the closing PR body before
+# this bot may close them. The PR body field is line-based:
+#
+#     Acceptance-Evidence: <check-name or test path>
+#
+# Unlabeled issues, and issues without the `directive` label, keep the normal
+# autoclose behavior. A directive issue without evidence is left open and gets a
+# structured bot comment pointing back to the closing PR. Missing cross-repo
+# token configuration is fail-closed: the script exits nonzero and emits a
+# GitHub Actions error instead of silently skipping closures.
 from __future__ import annotations
 
 import json
@@ -44,6 +56,7 @@ if _PARSER_PATH.exists():
     _parser_mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_parser_mod)
     _parse_all_refs = _parser_mod.parse_all_refs
+    _parse_acceptance_evidence = _parser_mod.parse_acceptance_evidence
 else:
     # Fallback: inline minimal parser so the workflow still runs if the tools
     # directory is somehow absent (should not happen in CI).
@@ -77,6 +90,18 @@ else:
                         seen.add(n)
                         numbers.append(n)
         return numbers
+
+    def _parse_acceptance_evidence(body: str) -> str | None:  # type: ignore[misc]
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("Acceptance-Evidence"):
+                continue
+            field, separator, value = stripped.partition(":")
+            if field == "Acceptance-Evidence" and separator:
+                evidence = value.strip()
+                if evidence:
+                    return evidence
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -197,11 +222,37 @@ def _provenance_comment(issue_number: int, context: dict[str, Any]) -> str:
     )
 
 
+def _acceptance_evidence_required_comment(context: dict[str, Any]) -> str:
+    url = context.get("url") or "(no URL available)"
+    return (
+        "**Autoclose blocked — Acceptance-Evidence required.**\n\n"
+        "This issue carries the `directive` label. The closing PR did not supply\n"
+        "an `Acceptance-Evidence:` field in its body. Add a line of the form:\n\n"
+        "    Acceptance-Evidence: <check-name or test path>\n\n"
+        "to the PR body and the bot will close this issue on the next merge.\n\n"
+        f"Closing PR: {url}"
+    )
+
+
+def _is_directive_issue(issue: dict[str, Any]) -> bool:
+    return any(label.get("name") == "directive" for label in issue.get("labels", []))
+
+
 def close_issue_if_open(issue_number: int, token: str, context: dict[str, Any]) -> None:
     issue_path = f"/repos/{CE_OPS_REPO}/issues/{issue_number}"
     issue = _api_json("GET", issue_path, token)
     if issue.get("state") == "closed":
         print(f"ce-ops#{issue_number}: already closed, skipping")
+        return
+
+    if _is_directive_issue(issue) and not _parse_acceptance_evidence(context.get("body") or ""):
+        _api_json(
+            "POST",
+            f"{issue_path}/comments",
+            token,
+            {"body": _acceptance_evidence_required_comment(context)},
+        )
+        print(f"ce-ops#{issue_number}: Acceptance-Evidence required, leaving open")
         return
 
     _api_json(
@@ -240,11 +291,11 @@ def main() -> int:
     token = os.environ.get(_TOKEN_ENVVAR_PRIMARY) or os.environ.get(_TOKEN_ENVVAR_LEGACY)
     if not token:
         print(
-            f"::warning::{_TOKEN_ENVVAR_PRIMARY} (and legacy {_TOKEN_ENVVAR_LEGACY}) "
+            f"::error::{_TOKEN_ENVVAR_PRIMARY} (and legacy {_TOKEN_ENVVAR_LEGACY}) "
             "are not configured; skipping ce-ops autoclose. "
             "Provision a fine-grained token with issues:write on creator-engine/ce-ops."
         )
-        return 0
+        return 1
 
     print(f"ce-ops refs to close: {numbers}")
     for number in numbers:
