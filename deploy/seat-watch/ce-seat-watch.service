@@ -1,0 +1,30 @@
+[Unit]
+Description=Creator Engine seat-watch daemon (observe-only, slice 1)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=12
+
+[Service]
+Type=simple
+User=creator-engine
+WorkingDirectory=/workspace/creator-engine
+EnvironmentFile=/etc/creator-engine/ce-seat-watch.env
+Environment=CE_DAEMON_UNCONTAINED=1
+ExecStart=/bin/bash -lc 'exec /workspace/creator-engine/deploy/seat-watch/launch-seat-watch.sh'
+Restart=always
+RestartSec=5
+RuntimeDirectory=ce-seat-watch
+RuntimeDirectoryMode=0700
+StateDirectory=ce-seat-watch
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ce-seat-watch
+
+[Install]
+WantedBy=multi-user.target
+# Slice 1: observe-only. No dispatch authority. Enable only after Operator-gated deployment flip.
