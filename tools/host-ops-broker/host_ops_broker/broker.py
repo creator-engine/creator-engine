@@ -181,11 +181,15 @@ class HostOpsBroker:
             unit = self.config.resolve_unit(str(request.params["unit"]))
             return {"target_ref": f"unit:{unit}", "unit": unit}
         # Deferred verbs still pass through a conservative config-bound target check.
-        if request.verb == "prepare-owned-state-root" and request.params["root_name"] in self.config.state_roots:
-            return {"target_ref": f"state-root:{request.params['root_name']}", "unit": None}
+        if request.verb == "prepare-owned-state-root":
+            root_name = str(request.params["root_name"])
+            self.config.resolve_state_root(root_name)
+            return {"target_ref": f"state-root:{root_name}", "unit": None}
         if request.verb == "rotate-attempt-log" and request.params["subsystem"] in self.config.log_subsystems:
             return {"target_ref": f"log-subsystem:{request.params['subsystem']}", "unit": None}
         if request.verb == "run-ephemeral-container" and request.params["task"] in self.config.maintenance_tasks:
+            image = str(request.params.get("image", ""))
+            self.config.resolve_container_image(image)
             return {"target_ref": f"task:{request.params['task']}", "unit": None}
         if request.verb == "prune-stopped-owned-containers" and request.params["namespace"] in self.config.container_namespaces:
             return {"target_ref": f"namespace:{request.params['namespace']}", "unit": None}

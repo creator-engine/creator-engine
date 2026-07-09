@@ -89,3 +89,17 @@ def test_started_and_finished_are_rfc3339_utc_z():
     rec = _record()
     assert rec["started_at"].endswith("Z")
     assert rec["finished_at"].endswith("Z")
+
+
+def test_value_key_does_not_trigger_false_positive(tmp_path):
+    """Keys containing 'value' as a substring must not trigger AuditSecretLeak."""
+    path = tmp_path / "audit.jsonl"
+    rec = _record(
+        params_redacted={
+            "default_value": "summary",
+            "exit_value": 0,
+            "return_value": "ok",
+        }
+    )
+    append_audit(path, rec)
+    assert path.is_file()

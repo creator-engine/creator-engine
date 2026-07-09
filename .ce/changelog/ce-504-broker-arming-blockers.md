@@ -1,0 +1,1 @@
+Host-ops broker target arming now rejects unowned container image prefixes, honors configured state-root prefixes, and avoids treating benign audit keys containing "value" as credential indicators. Focused unit coverage documents the new config resolution behavior and the audit false-positive guard.

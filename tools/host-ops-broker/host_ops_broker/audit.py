@@ -15,7 +15,7 @@ from typing import Any
 
 from host_ops_broker.envelope import utc_z
 
-_FORBIDDEN_KEY_SUBSTRINGS = ("token", "secret", "pem", "private_key", "app_key", "password", "value")
+_FORBIDDEN_KEY_SUBSTRINGS = ("token", "secret", "pem", "private_key", "app_key", "password")
 _TOKEN_SHAPE = re.compile(
     r"(?:gh[opusr]_|github_pat_)[A-Za-z0-9_.\-]{8,}|eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}"
 )
