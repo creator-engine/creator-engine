@@ -1,6 +1,6 @@
 # PR path manifest - ce-427-approver-ref-provenance
 
-- **Declared work class:** S
+- **Declared work class:** story
 
 This carrier lists the complete authorized path set for the
 `ce-427-approver-ref-provenance` change.
