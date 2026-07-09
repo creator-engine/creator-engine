@@ -12,8 +12,9 @@ name: CE Ops Autoclose
 #   with issues:write on creator-engine/ce-ops ONLY.  Never substitute
 #   GITHUB_TOKEN — it is scoped to this repository.
 #
-# Fail-open: if the secret is absent/empty the step logs a warning and exits 0,
-# so this workflow never blocks a merge.
+# Fail-closed: a missing cross-repo token emits an ::error:: and exits nonzero.
+# continue-on-error keeps this cleanup job non-blocking; the script also invokes
+# its governance-alert hook when a suitable alert token is available.
 #
 # Issue refs are extracted via two paths:
 #   1. Title scan  — every ce-ops#N token in the PR title (CE convention:

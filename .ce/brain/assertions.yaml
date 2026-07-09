@@ -4161,8 +4161,8 @@ records:
   scope: global
   sequence: 159
   statement: User-facing v3 documentation, including docs/contracts/v3-naming-hygiene.md
-    and docs/operations/CLAUDE_CODE_HOOK_PACK.md, names .ce/state as canonical and treats
-    .hermes as legacy or advisory.
+    and docs/operations/CLAUDE_CODE_HOOK_PACK.md, names .ce/state as canonical and
+    treats .hermes as legacy or advisory.
   status: active
   superseded_by: null
   type: decision
@@ -4243,5 +4243,61 @@ records:
   type: convention
   verification_method:
     evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Cross-repository closing keywords are mention-only without the dedicated
+      close workflow; merged PRs rely on the close bot for issue closure.
+    evidence_sha256: 24882022b91f667b3c29f0fb8a0b9a7600cb87cada9ce4428b7584b3d8c7b282
+    item: 16
+    object: cross-repo-closes-bot
+    predicate: asserts
+    refs:
+    - .github/scripts/ceops_autoclose.py
+    - tools/ce-ops-autoclose/parse_issue_refs.py
+    subject: doctrine-item
+  content_hash: 3cf4ca5cb86f83c6a29817bf7119dd6610f296d71279d256c178a528f52ba382
+  evidence_ref: .github/workflows/ce-ops-autoclose.yml
+  id: brain-assertion-d1b-16-cross-repo-closes-bot-v2
+  kind: brain-assertion
+  prev_hash: 0415082d988c1864319af51b52e2fcf6dbec7ea3b2e6cfa1834a4adc307a0e1d
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 163
+  statement: Cross-repository closing keywords are mention-only without the dedicated
+    close workflow; merged PRs rely on the close bot for issue closure.
+  status: superseded
+  superseded_by: brain-assertion-d1b-16-cross-repo-closes-bot-v3
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/ce-ops-autoclose.yml
+    type: static
+- claim:
+    details: Cross-repository closing keywords are mention-only without the dedicated
+      close workflow; merged PRs rely on the close bot for issue closure.
+    evidence_sha256: ed1be82ac0a735fc4155633135ff2fdc25488c5bedf0c612041fb1d46ddae486
+    item: 16
+    object: cross-repo-closes-bot
+    predicate: asserts
+    refs:
+    - .github/scripts/ceops_autoclose.py
+    - tools/ce-ops-autoclose/parse_issue_refs.py
+    subject: doctrine-item
+  content_hash: 33cadaa941fc40af057753733fbba3cfe392c763a89117e2184667380723d5a6
+  evidence_ref: .github/workflows/ce-ops-autoclose.yml
+  id: brain-assertion-d1b-16-cross-repo-closes-bot-v3
+  kind: brain-assertion
+  prev_hash: 3cf4ca5cb86f83c6a29817bf7119dd6610f296d71279d256c178a528f52ba382
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 164
+  statement: Cross-repository closing keywords are mention-only without the dedicated
+    close workflow; merged PRs rely on the close bot for issue closure.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .github/workflows/ce-ops-autoclose.yml
     type: static
 schema_version: '1'
