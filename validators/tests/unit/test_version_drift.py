@@ -40,6 +40,10 @@ def _readme_surface(path: str = "README.md") -> chk.CurrentVersionSurface:
     return chk.CurrentVersionSurface(path, (chk.README_CE_VERSION_TEXT,))
 
 
+def _readme_surface_with_package_pin(path: str = "README.md") -> chk.CurrentVersionSurface:
+    return chk.CurrentVersionSurface(path, (chk.PACKAGE_PIN, chk.README_CE_VERSION_TEXT))
+
+
 def test_stale_current_version_claim_fails_with_line_and_version(tmp_path: Path):
     _write_repo(
         tmp_path,
@@ -115,9 +119,10 @@ def test_current_version_claim_passes(tmp_path: Path):
 def test_readme_ce_version_text_matching_current_version_passes(tmp_path: Path):
     matching_forms = [
         "Current release: 0.3.2",
-        "Version 0.3.2",
+        "CE version 0.3.2",
         "CE v0.3.2 is current",
         "Creator Engine Version 0.3.2 is current",
+        "creator-engine version 0.3.2 is current",
         "creator engine version 0.3.2 is current",
     ]
 
@@ -133,9 +138,10 @@ def test_readme_ce_version_text_matching_current_version_passes(tmp_path: Path):
 def test_readme_ce_version_text_stale_version_fails_for_public_current_claim_forms(tmp_path: Path):
     stale_forms = [
         "Current release: 0.3.1",
-        "Version 0.3.1",
+        "CE version 0.3.1",
         "CE v0.3.1 is current",
         "Creator Engine Version 0.3.1 is current",
+        "creator-engine version 0.3.1 is current",
         "creator engine version 0.3.1 is current",
         "CE release 0.3.1 is current",
     ]
@@ -159,6 +165,58 @@ def test_readme_without_version_text_passes(tmp_path: Path):
     errors = chk.evaluate(tmp_path, surfaces=(_readme_surface(),))
 
     assert errors == ()
+
+
+def test_readme_python_version_text_does_not_trigger_ce_version_drift(tmp_path: Path):
+    _write_repo(
+        tmp_path,
+        line="Requires Python version 3.14.0 and creator-engine-validator==0.3.2.",
+    )
+
+    errors = chk.evaluate(tmp_path, surfaces=(_readme_surface_with_package_pin(),))
+
+    assert errors == ()
+
+
+def test_readme_ce_version_current_claim_passes(tmp_path: Path):
+    _write_repo(
+        tmp_path,
+        line="CE version 0.3.2 ships with creator-engine-validator==0.3.2.",
+    )
+
+    errors = chk.evaluate(tmp_path, surfaces=(_readme_surface_with_package_pin(),))
+
+    assert errors == ()
+
+
+def test_readme_ce_version_stale_claim_fails(tmp_path: Path):
+    _write_repo(
+        tmp_path,
+        line="CE version 0.2.9 ships with creator-engine-validator==0.3.2.",
+    )
+
+    errors = chk.evaluate(tmp_path, surfaces=(_readme_surface_with_package_pin(),))
+
+    assert len(errors) == 1
+    assert errors[0].code == chk.CODE_STALE
+    assert errors[0].path == "README.md:1"
+    assert "'0.2.9'" in errors[0].message
+    assert "'0.3.2'" in errors[0].message
+
+
+def test_readme_common_runtime_version_text_does_not_trigger_ce_version_drift(tmp_path: Path):
+    for idx, line in enumerate(
+        [
+            "Requires Python version 3.12.0 or later.",
+            "Node version 20.0.0 is used by the website toolchain.",
+        ]
+    ):
+        repo = tmp_path / f"runtime-{idx}"
+        _write_repo(repo, line=line)
+
+        errors = chk.evaluate(repo, surfaces=(_readme_surface(),))
+
+        assert errors == ()
 
 
 def test_llms_txt_is_current_version_surface():

@@ -53,7 +53,7 @@ PACKAGE_VERSION_TEXT = _pattern(
 )
 README_CE_VERSION_TEXT = _pattern(
     "README CE version text",
-    rf"(?i)\b(?:current\s+release|version|(?:ce|creator\s+engine)"
+    rf"(?i)\b(?:current\s+release|(?:ce|creator[\s-]+engine)"
     rf"(?:\s+(?:v(?:ersion)?|release|current\s+release))?)"
     rf"\s*(?::|=|\bis\b)?\s*v?{SEMVER_RE}\b(?:\s+is\s+current)?",
 )

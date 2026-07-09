@@ -96,6 +96,21 @@ def test_cli_reference_documents_every_ce_command_group():
     assert not missing, f"docs/reference/cli.md does not document ce command group(s): {missing}"
 
 
+def test_cli_reference_documents_every_pre_argparse_dispatch_group():
+    text = _cli_reference_text()
+    # Groups dispatched before argparse in main() are not in _ce_command_groups().
+    # They must be checked separately so they cannot silently drop out of the docs.
+    public_pre_argparse = ce_cli.PRE_ARGPARSE_DISPATCH_GROUPS - ce_cli.PRE_ARGPARSE_INTERNAL_GROUPS
+    missing = [g for g in public_pre_argparse if not re.search(rf"\bce {re.escape(g)}\b", text)]
+    assert not missing, (
+        f"docs/reference/cli.md does not document pre-argparse ce command group(s): {missing}"
+    )
+
+
+def test_pre_argparse_internal_command_groups_are_declared_dispatches():
+    assert ce_cli.PRE_ARGPARSE_INTERNAL_GROUPS <= ce_cli.PRE_ARGPARSE_DISPATCH_GROUPS
+
+
 def test_no_ce_dev_command_in_v1():
     # The dev namespace must remain unbound in v1.0 ...
     assert "dev" not in _ce_command_groups()

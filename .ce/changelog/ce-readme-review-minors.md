@@ -1,0 +1,1 @@
+Tighten README current-version detection so non-CE runtime version mentions do not raise stale-release drift errors, document the shipped `ce conveyor` queue repair command, and extend CLI reference reconciliation so public command groups dispatched before argparse stay covered by tests.
