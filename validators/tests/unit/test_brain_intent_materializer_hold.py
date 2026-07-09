@@ -113,7 +113,7 @@ def test_quarantine_writer_uses_out_of_band_state_path(tmp_path: Path):
     assert path == tmp_path / ".ce" / "state" / "brain-intent-quarantine" / f"{key}.json"
     assert ".ce/brain" not in str(path)
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["actor_version"] == "ce-491-optiona-slice1"
+    assert data["actor_version"] == "ce-491-prearming"
     assert data["timestamp"] == "2026-07-08T12:00:00Z"
 
 
@@ -168,6 +168,15 @@ def test_tail_unprovable_holds_without_dry_run_artifact_or_ledger_bytes(tmp_path
 def test_require_state_subtree_rejects_out_of_subtree_path():
     with pytest.raises(RuntimeError, match="escapes .ce/state"):
         _require_state_subtree(Path("/tmp/evil/key.json"))
+
+
+def test_require_state_subtree_rejects_dotdot_traversal(tmp_path: Path):
+    base = tmp_path / ".ce" / "state"
+    base.mkdir(parents=True)
+    traversal = base / ".." / ".." / ".." / "outside" / "key.json"
+
+    with pytest.raises(RuntimeError, match="escapes .ce/state"):
+        _require_state_subtree(traversal)
 
 
 def test_authorized_write_paths_are_live_bounded_metadata():

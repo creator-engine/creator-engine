@@ -29,7 +29,7 @@ AUTHORIZED_WRITE_PATHS = frozenset(
     }
 )
 LEDGER_PATH = ".ce/brain/assertions.yaml"
-ACTOR_VERSION = "ce-491-optiona-slice1"
+ACTOR_VERSION = "ce-491-prearming"
 HELD_REASONS = frozenset(
     {
         "brain_intent_materialization_failed",
@@ -234,6 +234,7 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
 
 
 def _require_state_subtree(path: Path) -> None:
+    path = path.resolve()
     parts = path.parts
     for index, part in enumerate(parts[:-1]):
         # The prior index-bound check was always true here: iterating parts[:-1]
@@ -818,6 +819,8 @@ class Materializer:
                 )
                 return output
             except HeldError as exc:
+                # Artifact asymmetry: HeldError writes HELD state and JSONL event only
+                # (no quarantine, no dry-run artifact; contrast BrainAppendRefusal handler above).
                 key = fallback_key
                 HeldStateStore(config.state_root, now=now).write(
                     held_reason=exc.reason,
