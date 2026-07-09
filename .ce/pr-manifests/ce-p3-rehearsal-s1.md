@@ -1,6 +1,6 @@
 # PR path manifest — ce-p3-rehearsal-s1 · Fresh-Tenant Rehearsal harness slice 1
 
-Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, the ce-ops#21 convention). CI runs:
+Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`). CI runs:
 
 ```bash
 verify-path-manifest --base <PR base sha> --manifest-dir .ce/pr-manifests --head-ref ce-p3-rehearsal-s1
@@ -27,6 +27,8 @@ Per-file purpose (closed path-set — 6 paths):
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
+
+- **Declared work class:** feature
 
 AUTHORIZED_PATHS_COUNT=6
 
