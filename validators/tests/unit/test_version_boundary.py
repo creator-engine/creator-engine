@@ -164,7 +164,9 @@ def test_taxonomy_counts_and_disjoint():
     # ce-ops#447 unit A added ``runner.docker_backend``, the plain-Docker
     # runner backend, classified alongside its runner-backend siblings
     # (62 -> 63).
-    assert len(ver.V3_RUNTIME) == 63
+    # ce-p8-review-daemon-s1 added ``forge.review_dry_run`` for review-pickup
+    # dry-run daemon planning (63 -> 64).
+    assert len(ver.V3_RUNTIME) == 64
     assert ver.V1_RUNTIME.isdisjoint(ver.V3_RUNTIME)
 
 

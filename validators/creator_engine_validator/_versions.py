@@ -200,6 +200,9 @@ V3_RUNTIME: frozenset[str] = frozenset(
         # family; shares the boundary-neutral Search core (pickup_search) with
         # the v1 poller, so no v1<->v3 import edge is created.
         "forge.review_pickup",
+        # P8 review-pickup dry-run daemon wrapper; same v3 forge adapter family
+        # classification as ``forge.review_pickup``.
+        "forge.review_dry_run",
         # ce-ops#95: pure fleet-liveness read-model for `ce seats ls`, reading
         # lifecycle/sentinel state files only. v3 forge surface; imports no v1.
         "forge.seats_status",

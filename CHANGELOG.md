@@ -6,6 +6,14 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
+### Added
+
+- Review-pickup dry-run daemon slice 1: `forge.review_dry_run` module adds
+  `run_dry_run_pass` / `run_dry_run_loop` (wrapping `forge.review_pickup` with
+  `dry_run=True`), the Operator-held gate (label + held-list file), and a named
+  WOULD_ASSIGN / WOULD_SKIP JSONL feed. Read-only; no GitHub writes. Slice 2 will
+  add the `cev3 review-dry-run` CLI surface.
+
 ### Changed
 
 - **Acceptance-Evidence autoclose enforcement.** Directive-labeled ce-ops issues now stay open with a structured warning comment when a merged PR lacks an `Acceptance-Evidence:` field; missing cross-repo token configuration now exits nonzero with a GitHub Actions error instead of silently skipping closures.
