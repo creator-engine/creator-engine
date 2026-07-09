@@ -1,0 +1,1 @@
+Acceptance-Evidence autoclose handling now avoids duplicate warning comments, keeps directive issues open when warning delivery fails, and emits a best-effort governance alert when required token configuration is absent. Workflow comment refresh is deferred pending the next brain-ledger window.
