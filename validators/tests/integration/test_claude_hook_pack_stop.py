@@ -6,7 +6,7 @@ text. Hard Stop blocking (closeout / completion-report pointer verification)
 is deferred to the Ring 0 kernel (CC-G-D), which injects the deterministic
 pointers this hook is forbidden from inferring. These tests run the real
 POSIX-sh hook as a subprocess and prove it never emits a block and records a
-best-effort advisory observation under the ignored ``.hermes/`` evidence root.
+best-effort advisory observation under the ignored ``.ce/state/`` evidence root.
 """
 
 from __future__ import annotations

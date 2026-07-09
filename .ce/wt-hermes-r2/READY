@@ -1,5 +1,7 @@
 STATUS: READY
-COMMIT: c76c4b9a3b866dfe637bfa21950727a7bfdcbe01
+COMMIT: 7fb82cbf4293f50be13bbff07791e9bd738c9dcb
+COMMIT_MEANING: validated payload commit / signaled branch head at the time READY was written
+READY_SIGNAL_COMMIT: PR head / git HEAD after this metadata commit; cannot literally contain its own SHA
 ACTIVE_ASSERTIONS: 103
 N_APPENDED: 6
 LEDGER_HEAD_SEQUENCE: 160
