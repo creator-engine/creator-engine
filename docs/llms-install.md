@@ -27,7 +27,7 @@ artifact_manifest:
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
-  answers_schema_sha256: be67d554691a0c84db16e12511dcdaf9c17bd78a4c659d93a188922b4b8dbb3c
+  answers_schema_sha256: 621a76f2768c71b48bbf3eac8aa4378aee97c2705dc2b6d82a6a5103cf023f71
   app_wheel: creator_engine_validator-0.3.4-py3-none-any.whl
   required_wheels:
     - filename: attrs-26.1.0-py3-none-any.whl
