@@ -229,12 +229,12 @@ def test_app_with_tenant_fields_valid() -> None:
     registry = valid_registry()
     registry["apps"].append(
         {
-            "app_id": 4103119,
-            "install_id": 141552951,
+            "app_id": 9999999,
+            "install_id": 12345678,
             "repo_scope": "chmod735-dor/* (all repos, account-wide installation)",
-            "pem_custody": "file://~/.ce-keys/mythos-ce.2026-06-20.private-key.pem",
-            "app_name": "mythos-ce",
-            "client_id": "Iv23liuJp6OxfCWvwfSl",
+            "pem_custody": "file://EXAMPLE/tenant/key-custody-pointer",
+            "app_name": "EXAMPLE_TENANT-ce",
+            "client_id": "Iv23_EXAMPLE_CLIENT_ID",
             "tenant_scope": "account-wide",
         }
     )
