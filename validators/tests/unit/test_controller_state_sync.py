@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,27 @@ def _commit_manifest(tmp_path: Path, *extra_args: str) -> dict[str, object]:
     )
     assert rc == 0
     return json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+
+
+def _forbid_descriptor_opens_below(monkeypatch, forbidden_root: Path) -> None:
+    """Fail the test if production code ever opens the external tree."""
+    real_open = os.open
+    forbidden_root = forbidden_root.resolve()
+
+    def guarded_open(path, flags, mode=0o777, *, dir_fd=None):
+        if dir_fd is None:
+            descriptor = real_open(path, flags, mode)
+        else:
+            descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        try:
+            opened_path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            opened_path.relative_to(forbidden_root)
+        except (OSError, ValueError):
+            return descriptor
+        os.close(descriptor)
+        raise AssertionError(f"opened forbidden external path: {opened_path}")
+
+    monkeypatch.setattr(controller_state_sync.os, "open", guarded_open)
 
 
 def test_denylist_excludes_pat_files(tmp_path):
@@ -299,6 +321,114 @@ def test_source_mutation_after_collection_refuses_publication(tmp_path):
         controller_state_sync.write_snapshot(manifest, out, tmp_path)
 
     assert not out.exists()
+
+
+def test_source_ancestor_swap_refuses_without_external_read(
+    tmp_path, tmp_path_factory, monkeypatch
+):
+    source = tmp_path / ".ce/state"
+    _seed(source / "research/state.md", "trusted\n")
+    manifest = controller_state_sync.collect_manifest(tmp_path)
+
+    pinned_source = tmp_path / ".ce/state-pinned"
+    source.rename(pinned_source)
+    external = tmp_path_factory.mktemp("external-source")
+    external_file = _seed(external / "research/state.md", "external-secret\n")
+    source.symlink_to(external, target_is_directory=True)
+    _forbid_descriptor_opens_below(monkeypatch, external)
+
+    out = tmp_path / "out"
+    with pytest.raises(controller_state_sync.SnapshotError, match="ancestor"):
+        controller_state_sync.write_snapshot(manifest, out, tmp_path)
+
+    assert external_file.read_text(encoding="utf-8") == "external-secret\n"
+    assert not out.exists()
+    assert not any(path.name == "manifest.json" for path in pinned_source.rglob("*"))
+
+
+def test_memory_ancestor_swap_refuses_without_external_read(
+    tmp_path, tmp_path_factory, monkeypatch
+):
+    memory_root = tmp_path / "memory"
+    memory_parent = memory_root / "project"
+    _seed(memory_parent / "MEMORY.md", "trusted-memory\n")
+    manifest = controller_state_sync.collect_manifest(
+        tmp_path, include_memory=True, memory_root=memory_root
+    )
+
+    pinned_memory = memory_root / "project-pinned"
+    memory_parent.rename(pinned_memory)
+    external = tmp_path_factory.mktemp("external-memory")
+    external_file = _seed(external / "MEMORY.md", "external-memory-secret\n")
+    memory_parent.symlink_to(external, target_is_directory=True)
+    _forbid_descriptor_opens_below(monkeypatch, external)
+
+    out = tmp_path / "out"
+    with pytest.raises(controller_state_sync.SnapshotError, match="ancestor"):
+        controller_state_sync.write_snapshot(
+            manifest,
+            out,
+            tmp_path,
+            include_memory=True,
+            memory_root=memory_root,
+        )
+
+    assert external_file.read_text(encoding="utf-8") == "external-memory-secret\n"
+    assert not out.exists()
+
+
+def test_static_output_parent_symlink_refuses_without_external_write(
+    tmp_path, tmp_path_factory, monkeypatch
+):
+    _seed(tmp_path / ".ce/state/research/state.md")
+    manifest = controller_state_sync.collect_manifest(tmp_path)
+    external = tmp_path_factory.mktemp("external-output")
+    output_parent = tmp_path / "linked-output"
+    output_parent.symlink_to(external, target_is_directory=True)
+    _forbid_descriptor_opens_below(monkeypatch, external)
+
+    with pytest.raises(controller_state_sync.SnapshotError, match="path component"):
+        controller_state_sync.write_snapshot(
+            manifest, output_parent / "snapshot", tmp_path
+        )
+
+    assert not any(external.iterdir())
+    assert not (external / "snapshot/manifest.json").exists()
+
+
+def test_output_parent_swap_before_rename_refuses_without_external_write(
+    tmp_path, tmp_path_factory, monkeypatch
+):
+    _seed(tmp_path / ".ce/state/research/state.md")
+    manifest = controller_state_sync.collect_manifest(tmp_path)
+    output_parent = tmp_path / "output-parent"
+    output_parent.mkdir()
+    pinned_parent = tmp_path / "output-parent-pinned"
+    external = tmp_path_factory.mktemp("external-output-swap")
+    original_verify = controller_state_sync._verify_pinned_directory
+    swapped = False
+
+    def swap_then_verify(path, descriptor):
+        nonlocal swapped
+        assert not swapped
+        swapped = True
+        output_parent.rename(pinned_parent)
+        output_parent.symlink_to(external, target_is_directory=True)
+        return original_verify(path, descriptor)
+
+    monkeypatch.setattr(
+        controller_state_sync, "_verify_pinned_directory", swap_then_verify
+    )
+
+    with pytest.raises(controller_state_sync.SnapshotError, match="parent changed"):
+        controller_state_sync.write_snapshot(
+            manifest, output_parent / "snapshot", tmp_path
+        )
+
+    assert swapped
+    assert not any(external.iterdir())
+    assert not (external / "snapshot/manifest.json").exists()
+    assert not any(pinned_parent.iterdir())
 
 
 def test_publication_copies_only_files_recorded_in_manifest(tmp_path):

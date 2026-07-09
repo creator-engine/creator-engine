@@ -6,12 +6,11 @@ import datetime as dt
 import hashlib
 import json
 import os
-import shutil
 import socket
 import stat
 import sys
 import tarfile
-import tempfile
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -34,9 +33,142 @@ SNAPSHOT_SOURCES = (
     ("dispatch_claims", Path(".ce/claims"), Path("dispatch_claims")),
 )
 
+_REQUIRED_DIR_FD_CALLABLES = {
+    "open": os.open,
+    "stat": os.stat,
+    "mkdir": os.mkdir,
+    "rename": os.rename,
+    "unlink": os.unlink,
+    "rmdir": os.rmdir,
+}
+_UNSUPPORTED_DESCRIPTOR_PRIMITIVES = tuple(
+    name
+    for name, function in _REQUIRED_DIR_FD_CALLABLES.items()
+    if function not in os.supports_dir_fd
+)
+if os.listdir not in os.supports_fd:
+    _UNSUPPORTED_DESCRIPTOR_PRIMITIVES += ("listdir(fd)",)
+if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+    _UNSUPPORTED_DESCRIPTOR_PRIMITIVES += ("O_DIRECTORY/O_NOFOLLOW",)
+
 
 class SnapshotError(RuntimeError):
     """The snapshot cannot be published without weakening its guarantees."""
+
+
+def _require_descriptor_primitives() -> None:
+    if _UNSUPPORTED_DESCRIPTOR_PRIMITIVES:
+        names = ", ".join(sorted(_UNSUPPORTED_DESCRIPTOR_PRIMITIVES))
+        raise SnapshotError(f"descriptor-relative no-follow filesystem operations unsupported: {names}")
+
+
+def _lexical_absolute(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path.expanduser())))
+
+
+def _directory_flags() -> int:
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
+def _validate_relative(path: Path) -> Path:
+    if path.is_absolute() or not path.parts or ".." in path.parts:
+        raise SnapshotError(f"invalid relative snapshot path: {path}")
+    return path
+
+
+def _open_directory_path(path: Path, *, create: bool = False) -> int:
+    """Open a directory by walking every absolute component without following links."""
+    _require_descriptor_primitives()
+    absolute = _lexical_absolute(path)
+    descriptor = os.open(absolute.anchor, _directory_flags())
+    try:
+        for component in absolute.parts[1:]:
+            try:
+                child = os.open(component, _directory_flags(), dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                child = os.open(component, _directory_flags(), dir_fd=descriptor)
+            except OSError as exc:
+                raise SnapshotError(
+                    f"refused symlinked or non-directory path component {component!r} in {absolute}"
+                ) from exc
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _open_directory_at(root_descriptor: int, relative: Path, *, create: bool = False) -> int:
+    relative = _validate_relative(relative)
+    descriptor = os.dup(root_descriptor)
+    try:
+        for component in relative.parts:
+            try:
+                child = os.open(component, _directory_flags(), dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                child = os.open(component, _directory_flags(), dir_fd=descriptor)
+            except OSError as exc:
+                raise SnapshotError(
+                    f"refused symlinked or non-directory ancestor in relative path {relative}"
+                ) from exc
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _open_parent_at(root_descriptor: int, relative: Path, *, create: bool = False) -> tuple[int, str]:
+    relative = _validate_relative(relative)
+    if len(relative.parts) == 1:
+        return os.dup(root_descriptor), relative.name
+    parent = Path(*relative.parts[:-1])
+    return _open_directory_at(root_descriptor, parent, create=create), relative.name
+
+
+def _open_regular_file_at(root_descriptor: int, relative: Path) -> int:
+    parent_descriptor, leaf = _open_parent_at(root_descriptor, relative)
+    try:
+        try:
+            descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor)
+        except OSError as exc:
+            raise SnapshotError(f"refused unreadable or symlinked source file: {relative}") from exc
+    finally:
+        os.close(parent_descriptor)
+
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise SnapshotError(f"refused non-regular source file: {relative}")
+    return descriptor
+
+
+def _hash_descriptor(descriptor: int, display_path: Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    with os.fdopen(descriptor, "rb") as handle:
+        before = os.fstat(handle.fileno())
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+        after = os.fstat(handle.fileno())
+
+    identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    if identity_before != identity_after:
+        raise SnapshotError(f"source changed while it was being hashed: {display_path}")
+    return after.st_size, digest.hexdigest()
 
 
 def find_source_root(start: Path | None = None) -> Path:
@@ -47,31 +179,14 @@ def find_source_root(start: Path | None = None) -> Path:
     raise RuntimeError("could not auto-detect source root: no .git found")
 
 
-def _hash_regular_file(path: Path) -> tuple[int, str]:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise SnapshotError(f"refused unreadable or symlinked source file: {path}") from exc
-
-    digest = hashlib.sha256()
-    with os.fdopen(descriptor, "rb") as handle:
-        before = os.fstat(handle.fileno())
-        if not stat.S_ISREG(before.st_mode):
-            raise SnapshotError(f"refused non-regular source file: {path}")
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-        after = os.fstat(handle.fileno())
-
-    identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-    identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-    if identity_before != identity_after:
-        raise SnapshotError(f"source changed while it was being hashed: {path}")
-    return after.st_size, digest.hexdigest()
-
-
 def sha256_file(path: Path) -> str:
-    return _hash_regular_file(path)[1]
+    absolute = _lexical_absolute(path)
+    parent_descriptor = _open_directory_path(absolute.parent)
+    try:
+        descriptor = _open_regular_file_at(parent_descriptor, Path(absolute.name))
+        return _hash_descriptor(descriptor, absolute)[1]
+    finally:
+        os.close(parent_descriptor)
 
 
 def relative_posix(path: Path, root: Path) -> str:
@@ -101,49 +216,69 @@ def is_denied_path(path: Path, root: Path | None = None) -> bool:
     return path.suffix.lower() in DENYLIST_SUFFIXES
 
 
+def _walk_entries_at(root_descriptor: int, prefix: Path | None = None) -> Iterable[tuple[Path, os.stat_result]]:
+    prefix = prefix or Path()
+    try:
+        names = sorted(os.listdir(root_descriptor))
+    except OSError as exc:
+        raise SnapshotError("source directory changed during traversal") from exc
+
+    for name in names:
+        if name == ".git":
+            continue
+        relative = prefix / name
+        try:
+            entry_stat = os.stat(name, dir_fd=root_descriptor, follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"source entry changed during traversal: {relative}") from exc
+        if stat.S_ISDIR(entry_stat.st_mode):
+            child_descriptor = _open_directory_at(root_descriptor, Path(name))
+            try:
+                yield from _walk_entries_at(child_descriptor, relative)
+            finally:
+                os.close(child_descriptor)
+        else:
+            yield relative, entry_stat
+
+
 def iter_entries(root: Path) -> Iterable[Path]:
-    """Yield files and symlinks lexically below root without following links."""
-    if root.is_symlink():
-        yield root
-        return
-    if not root.exists():
-        return
-
-    for current, directory_names, file_names in os.walk(root, followlinks=False):
-        directory_names.sort()
-        file_names.sort()
-        current_path = Path(current)
-
-        for directory_name in list(directory_names):
-            path = current_path / directory_name
-            if directory_name == ".git":
-                directory_names.remove(directory_name)
-            elif path.is_symlink():
-                directory_names.remove(directory_name)
-                yield path
-
-        for file_name in file_names:
-            yield current_path / file_name
+    absolute = _lexical_absolute(root)
+    descriptor = _open_directory_path(absolute)
+    try:
+        for relative, _entry_stat in _walk_entries_at(descriptor):
+            yield absolute / relative
+    finally:
+        os.close(descriptor)
 
 
 def iter_files(root: Path) -> Iterable[Path]:
-    for path in iter_entries(root):
-        if not path.is_symlink() and stat.S_ISREG(path.stat(follow_symlinks=False).st_mode):
-            yield path
+    absolute = _lexical_absolute(root)
+    descriptor = _open_directory_path(absolute)
+    try:
+        for relative, entry_stat in _walk_entries_at(descriptor):
+            if stat.S_ISREG(entry_stat.st_mode):
+                yield absolute / relative
+    finally:
+        os.close(descriptor)
 
 
-def _file_record(path: Path, source_root: Path, rel_path: str | None = None) -> dict[str, object]:
-    size, digest = _hash_regular_file(path)
+def _file_record_at(
+    root_descriptor: int,
+    source_relative: Path,
+    manifest_path: str,
+) -> dict[str, object]:
+    descriptor = _open_regular_file_at(root_descriptor, source_relative)
+    size, digest = _hash_descriptor(descriptor, source_relative)
     return {
-        "path": rel_path or relative_posix(path, source_root),
+        "path": manifest_path,
         "size": size,
         "sha256": digest,
     }
 
 
 def default_memory_root(repo_root: Path, *, home: Path | None = None) -> Path:
-    resolved_repo = repo_root.expanduser().resolve()
-    project_slug = resolved_repo.as_posix().replace("/", "-")
+    absolute_repo = _lexical_absolute(repo_root)
+    project_slug = absolute_repo.as_posix().replace("/", "-")
     return (home or Path.home()) / ".claude" / "projects" / project_slug / "memory"
 
 
@@ -165,12 +300,13 @@ def collect_manifest(
     memory_root: Path | None = None,
     target_branch: str | None = None,
 ) -> dict[str, object]:
-    source_root = source_root.resolve()
+    _require_descriptor_primitives()
+    source_root = _lexical_absolute(source_root)
     memory_root_source = "override" if memory_root is not None else "derived-from-repo-root"
     memory_root = (
-        memory_root.expanduser().resolve()
+        _lexical_absolute(memory_root)
         if memory_root is not None
-        else default_memory_root(source_root).resolve()
+        else _lexical_absolute(default_memory_root(source_root))
     )
     target_branch = target_branch or f"ce-controller-state/{socket.gethostname()}"
 
@@ -178,44 +314,64 @@ def collect_manifest(
     denied_paths: set[str] = set()
     missing_sources: list[str] = []
 
-    for path in iter_entries(source_root):
-        if is_denied_path(path, source_root):
-            denied_paths.add(relative_posix(path, source_root))
+    source_root_descriptor = _open_directory_path(source_root)
+    try:
+        for relative, _entry_stat in _walk_entries_at(source_root_descriptor):
+            if is_denied_path(relative):
+                denied_paths.add(relative.as_posix())
 
-    for missing_name, relative_source, _output_relative in SNAPSHOT_SOURCES:
-        source = source_root / relative_source
-        if not source.exists():
-            print(f"warning: missing source for {missing_name}: {source}", file=sys.stderr)
-            missing_sources.append(missing_name)
-            continue
+        for missing_name, relative_source, _output_relative in SNAPSHOT_SOURCES:
+            try:
+                source_descriptor = _open_directory_at(source_root_descriptor, relative_source)
+            except FileNotFoundError:
+                print(
+                    f"warning: missing source for {missing_name}: {source_root / relative_source}",
+                    file=sys.stderr,
+                )
+                missing_sources.append(missing_name)
+                continue
 
-        for path in iter_entries(source):
-            rel_path = relative_posix(path, source_root)
-            if path.is_symlink() or is_denied_path(path, source_root):
-                denied_paths.add(rel_path)
-                continue
-            if not stat.S_ISREG(path.stat(follow_symlinks=False).st_mode):
-                denied_paths.add(rel_path)
-                continue
-            files.append(_file_record(path, source_root, rel_path))
+            try:
+                for source_relative, entry_stat in _walk_entries_at(source_descriptor):
+                    repo_relative = relative_source / source_relative
+                    rel_path = repo_relative.as_posix()
+                    if stat.S_ISLNK(entry_stat.st_mode) or is_denied_path(repo_relative):
+                        denied_paths.add(rel_path)
+                        continue
+                    if not stat.S_ISREG(entry_stat.st_mode):
+                        denied_paths.add(rel_path)
+                        continue
+                    files.append(
+                        _file_record_at(source_root_descriptor, repo_relative, rel_path)
+                    )
+            finally:
+                os.close(source_descriptor)
+    finally:
+        os.close(source_root_descriptor)
 
     data_classes = ["arc_state", "dispatch_state"]
     if include_memory:
         data_classes.append("memory")
-        if not memory_root.exists():
+        try:
+            memory_root_descriptor = _open_directory_path(memory_root)
+        except FileNotFoundError:
             print(f"warning: missing source for memory: {memory_root}", file=sys.stderr)
             missing_sources.append("memory")
         else:
-            for path in iter_entries(memory_root):
-                memory_rel = relative_posix(path, memory_root)
-                manifest_path = f"memory/{memory_rel}"
-                if path.is_symlink() or is_denied_path(path, memory_root):
-                    denied_paths.add(manifest_path)
-                    continue
-                if not stat.S_ISREG(path.stat(follow_symlinks=False).st_mode):
-                    denied_paths.add(manifest_path)
-                    continue
-                files.append(_file_record(path, memory_root, manifest_path))
+            try:
+                for memory_relative, entry_stat in _walk_entries_at(memory_root_descriptor):
+                    manifest_path = f"memory/{memory_relative.as_posix()}"
+                    if stat.S_ISLNK(entry_stat.st_mode) or is_denied_path(memory_relative):
+                        denied_paths.add(manifest_path)
+                        continue
+                    if not stat.S_ISREG(entry_stat.st_mode):
+                        denied_paths.add(manifest_path)
+                        continue
+                    files.append(
+                        _file_record_at(memory_root_descriptor, memory_relative, manifest_path)
+                    )
+            finally:
+                os.close(memory_root_descriptor)
 
     manifest: dict[str, object] = {
         "schema_version": "1",
@@ -236,44 +392,54 @@ def collect_manifest(
     return manifest
 
 
-def _manifest_source_and_destination(
-    manifest_path: str,
-    source_root: Path,
-    memory_root: Path,
-) -> tuple[Path, Path | None]:
+def _manifest_source_and_destination(manifest_path: str) -> tuple[str, Path, Path | None]:
     relative = Path(manifest_path)
     if relative.is_absolute() or ".." in relative.parts:
         raise SnapshotError(f"invalid path in manifest: {manifest_path}")
 
     if relative.parts and relative.parts[0] == "memory":
         memory_relative = Path(*relative.parts[1:])
-        return memory_root / memory_relative, None
+        return "memory", _validate_relative(memory_relative), None
 
     for _name, relative_source, output_relative in SNAPSHOT_SOURCES:
         try:
             payload_relative = relative.relative_to(relative_source)
         except ValueError:
             continue
-        return source_root / relative, output_relative / payload_relative
+        return "repo", relative, output_relative / payload_relative
     raise SnapshotError(f"manifest path is outside snapshot sources: {manifest_path}")
 
 
-def _copy_verified(source: Path, destination: Path, record: dict[str, object]) -> None:
+def _create_file_at(root_descriptor: int, relative: Path) -> int:
+    parent_descriptor, leaf = _open_parent_at(root_descriptor, relative, create=True)
+    try:
+        return os.open(
+            leaf,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+    finally:
+        os.close(parent_descriptor)
+
+
+def _copy_verified_at(
+    source_root_descriptor: int,
+    source_relative: Path,
+    destination_root_descriptor: int,
+    destination_relative: Path,
+    record: dict[str, object],
+) -> None:
     expected_size = int(record["size"])
     expected_digest = str(record["sha256"])
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        descriptor = os.open(source, flags)
-    except OSError as exc:
-        raise SnapshotError(f"source disappeared or became a symlink: {source}") from exc
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    source_descriptor = _open_regular_file_at(source_root_descriptor, source_relative)
+    destination_descriptor = _create_file_at(destination_root_descriptor, destination_relative)
     digest = hashlib.sha256()
     copied_size = 0
-    with os.fdopen(descriptor, "rb") as source_handle, destination.open("xb") as output_handle:
+    with os.fdopen(source_descriptor, "rb") as source_handle, os.fdopen(
+        destination_descriptor, "wb"
+    ) as output_handle:
         before = os.fstat(source_handle.fileno())
-        if not stat.S_ISREG(before.st_mode):
-            raise SnapshotError(f"refused non-regular source file: {source}")
         for chunk in iter(lambda: source_handle.read(1024 * 1024), b""):
             output_handle.write(chunk)
             digest.update(chunk)
@@ -283,9 +449,103 @@ def _copy_verified(source: Path, destination: Path, record: dict[str, object]) -
     identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
     identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
     if identity_before != identity_after:
-        raise SnapshotError(f"source changed during publication: {source}")
+        raise SnapshotError(f"source changed during publication: {source_relative}")
     if copied_size != expected_size or digest.hexdigest() != expected_digest:
-        raise SnapshotError(f"source changed between collection and publication: {source}")
+        raise SnapshotError(
+            f"source changed between collection and publication: {source_relative}"
+        )
+
+
+def _write_bytes_at(root_descriptor: int, relative: Path, payload: bytes) -> None:
+    descriptor = _create_file_at(root_descriptor, relative)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(payload)
+
+
+def _clear_directory(descriptor: int) -> None:
+    for name in os.listdir(descriptor):
+        entry_stat = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        if stat.S_ISDIR(entry_stat.st_mode):
+            child_descriptor = _open_directory_at(descriptor, Path(name))
+            try:
+                _clear_directory(child_descriptor)
+            finally:
+                os.close(child_descriptor)
+            os.rmdir(name, dir_fd=descriptor)
+        else:
+            os.unlink(name, dir_fd=descriptor)
+
+
+def _remove_tree_at(parent_descriptor: int, name: str) -> None:
+    try:
+        descriptor = _open_directory_at(parent_descriptor, Path(name))
+    except FileNotFoundError:
+        return
+    try:
+        _clear_directory(descriptor)
+    finally:
+        os.close(descriptor)
+    os.rmdir(name, dir_fd=parent_descriptor)
+
+
+def _create_staging_directory(parent_descriptor: int, output_name: str) -> tuple[str, int]:
+    for _attempt in range(32):
+        name = f".{output_name}.staging-{uuid.uuid4().hex}"
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=parent_descriptor)
+        except FileExistsError:
+            continue
+        return name, _open_directory_at(parent_descriptor, Path(name))
+    raise SnapshotError("could not allocate a unique staging directory")
+
+
+def _assert_empty_output_or_absent(parent_descriptor: int, output_name: str) -> None:
+    try:
+        entry_stat = os.stat(output_name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(entry_stat.st_mode):
+        raise SnapshotError(f"refused non-empty or symlink output entry: {output_name}")
+    descriptor = _open_directory_at(parent_descriptor, Path(output_name))
+    try:
+        if os.listdir(descriptor):
+            raise SnapshotError(f"refused non-empty output directory: {output_name}")
+    finally:
+        os.close(descriptor)
+
+
+def _verify_pinned_directory(path: Path, pinned_descriptor: int) -> None:
+    """Refuse if the lexical parent path no longer names the pinned directory."""
+    try:
+        check_descriptor = _open_directory_path(path)
+    except (FileNotFoundError, SnapshotError) as exc:
+        raise SnapshotError(f"output parent changed before publication: {path}") from exc
+    try:
+        pinned = os.fstat(pinned_descriptor)
+        current = os.fstat(check_descriptor)
+        if (pinned.st_dev, pinned.st_ino) != (current.st_dev, current.st_ino):
+            raise SnapshotError(f"output parent changed before publication: {path}")
+    finally:
+        os.close(check_descriptor)
+
+
+def _write_memory_archive(
+    staging_descriptor: int,
+    memory_staging_descriptor: int,
+    records: list[tuple[dict[str, object], Path]],
+) -> None:
+    archive_descriptor = _create_file_at(staging_descriptor, Path("memory.tar.gz"))
+    with os.fdopen(archive_descriptor, "wb") as archive_handle:
+        with tarfile.open(fileobj=archive_handle, mode="w:gz") as archive:
+            for record, memory_relative in records:
+                source_descriptor = _open_regular_file_at(
+                    memory_staging_descriptor, memory_relative
+                )
+                with os.fdopen(source_descriptor, "rb") as source_handle:
+                    info = tarfile.TarInfo(memory_relative.as_posix())
+                    info.size = int(record["size"])
+                    info.mode = 0o600
+                    archive.addfile(info, source_handle)
 
 
 def write_snapshot(
@@ -296,70 +556,122 @@ def write_snapshot(
     include_memory: bool = False,
     memory_root: Path | None = None,
 ) -> None:
-    output_dir = output_dir.expanduser().absolute()
-    source_root = source_root.resolve()
+    _require_descriptor_primitives()
+    output_dir = _lexical_absolute(output_dir)
+    source_root = _lexical_absolute(source_root)
     memory_root = (
-        memory_root.expanduser().resolve()
+        _lexical_absolute(memory_root)
         if memory_root is not None
-        else default_memory_root(source_root).resolve()
+        else _lexical_absolute(default_memory_root(source_root))
     )
+    if not output_dir.name:
+        raise SnapshotError("output directory must have a final path component")
 
-    if output_dir.is_symlink():
-        raise SnapshotError(f"refused symlink output directory: {output_dir}")
-    if output_dir.exists():
-        if not output_dir.is_dir() or any(output_dir.iterdir()):
-            raise SnapshotError(f"refused non-empty output directory: {output_dir}")
+    records = manifest.get("files")
+    if not isinstance(records, list):
+        raise SnapshotError("manifest.files must be a list")
+    parsed_records: list[tuple[dict[str, object], str, Path, Path | None]] = []
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+            raise SnapshotError("manifest contains an invalid file record")
+        source_kind, source_relative, payload_relative = _manifest_source_and_destination(
+            str(record["path"])
+        )
+        if source_kind == "memory" and not include_memory:
+            raise SnapshotError("manifest contains memory files but memory inclusion is disabled")
+        parsed_records.append((record, source_kind, source_relative, payload_relative))
 
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    staging_dir = Path(
-        tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=output_dir.parent)
-    )
-    memory_staging = staging_dir / ".memory-staging"
-
+    source_root_descriptor = _open_directory_path(source_root)
+    memory_root_descriptor: int | None = None
+    parent_descriptor: int | None = None
+    staging_descriptor: int | None = None
+    memory_staging_descriptor: int | None = None
+    staging_name: str | None = None
+    published = False
     try:
-        records = manifest.get("files")
-        if not isinstance(records, list):
-            raise SnapshotError("manifest.files must be a list")
+        if any(source_kind == "memory" for _r, source_kind, _s, _d in parsed_records):
+            memory_root_descriptor = _open_directory_path(memory_root)
 
-        memory_records: list[tuple[dict[str, object], Path]] = []
-        for record in records:
-            if not isinstance(record, dict) or not isinstance(record.get("path"), str):
-                raise SnapshotError("manifest contains an invalid file record")
-            source, payload_relative = _manifest_source_and_destination(
-                str(record["path"]), source_root, memory_root
-            )
-            if payload_relative is None:
-                memory_relative = Path(*Path(str(record["path"])).parts[1:])
-                _copy_verified(source, memory_staging / memory_relative, record)
-                memory_records.append((record, memory_relative))
-            else:
-                _copy_verified(source, staging_dir / payload_relative, record)
-
-        if memory_records:
-            if not include_memory:
-                raise SnapshotError("manifest contains memory files but memory inclusion is disabled")
-            with tarfile.open(staging_dir / "memory.tar.gz", "w:gz") as archive:
-                for _record, memory_relative in memory_records:
-                    archive.add(memory_staging / memory_relative, arcname=memory_relative)
-            shutil.rmtree(memory_staging)
-        elif include_memory and "memory" in manifest.get("data_classes", []):
-            # An included-but-empty memory source has no archive payload to restore.
-            pass
-
-        (staging_dir / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        parent_descriptor = _open_directory_path(output_dir.parent, create=True)
+        _assert_empty_output_or_absent(parent_descriptor, output_dir.name)
+        staging_name, staging_descriptor = _create_staging_directory(
+            parent_descriptor, output_dir.name
         )
 
-        if output_dir.exists():
-            if output_dir.is_symlink() or not output_dir.is_dir() or any(output_dir.iterdir()):
-                raise SnapshotError(f"output directory changed during publication: {output_dir}")
-            output_dir.rmdir()
-        os.replace(staging_dir, output_dir)
-    except Exception:
-        if staging_dir.exists():
-            shutil.rmtree(staging_dir)
-        raise
+        memory_records: list[tuple[dict[str, object], Path]] = []
+        for record, source_kind, source_relative, payload_relative in parsed_records:
+            if source_kind == "memory":
+                if memory_root_descriptor is None:
+                    raise SnapshotError("memory root was not pinned")
+                if memory_staging_descriptor is None:
+                    memory_staging_descriptor = _open_directory_at(
+                        staging_descriptor, Path(".memory-staging"), create=True
+                    )
+                _copy_verified_at(
+                    memory_root_descriptor,
+                    source_relative,
+                    memory_staging_descriptor,
+                    source_relative,
+                    record,
+                )
+                memory_records.append((record, source_relative))
+            else:
+                if payload_relative is None:
+                    raise SnapshotError("repository record has no payload destination")
+                _copy_verified_at(
+                    source_root_descriptor,
+                    source_relative,
+                    staging_descriptor,
+                    payload_relative,
+                    record,
+                )
+
+        if memory_records:
+            if memory_staging_descriptor is None:
+                raise SnapshotError("memory staging directory was not pinned")
+            _write_memory_archive(
+                staging_descriptor, memory_staging_descriptor, memory_records
+            )
+            os.close(memory_staging_descriptor)
+            memory_staging_descriptor = None
+            _remove_tree_at(staging_descriptor, ".memory-staging")
+
+        manifest_payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+        _write_bytes_at(staging_descriptor, Path("manifest.json"), manifest_payload)
+
+        _verify_pinned_directory(output_dir.parent, parent_descriptor)
+        _assert_empty_output_or_absent(parent_descriptor, output_dir.name)
+        try:
+            os.rmdir(output_dir.name, dir_fd=parent_descriptor)
+        except FileNotFoundError:
+            pass
+        os.rename(
+            staging_name,
+            output_dir.name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+        )
+        published = True
+    finally:
+        if memory_staging_descriptor is not None:
+            os.close(memory_staging_descriptor)
+        if staging_descriptor is not None:
+            if not published:
+                try:
+                    _clear_directory(staging_descriptor)
+                except (OSError, SnapshotError):
+                    pass
+            os.close(staging_descriptor)
+        if not published and staging_name is not None and parent_descriptor is not None:
+            try:
+                os.rmdir(staging_name, dir_fd=parent_descriptor)
+            except OSError:
+                pass
+        if parent_descriptor is not None:
+            os.close(parent_descriptor)
+        if memory_root_descriptor is not None:
+            os.close(memory_root_descriptor)
+        os.close(source_root_descriptor)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -407,17 +719,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        source_root = args.repo_root.resolve() if args.repo_root else find_source_root()
+        source_root = _lexical_absolute(args.repo_root) if args.repo_root else find_source_root()
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    manifest = collect_manifest(
-        source_root,
-        include_memory=args.include_memory,
-        memory_root=args.memory_root,
-        target_branch=args.target_branch,
-    )
+    try:
+        manifest = collect_manifest(
+            source_root,
+            include_memory=args.include_memory,
+            memory_root=args.memory_root,
+            target_branch=args.target_branch,
+        )
+    except (OSError, SnapshotError) as exc:
+        print(f"snapshot refused: {exc}", file=sys.stderr)
+        return 1
 
     should_write = args.commit and not args.dry_run and not args.manifest_only
     if should_write:
