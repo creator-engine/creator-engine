@@ -39,6 +39,7 @@ Optional environment:
   CE_APPROVAL_WALL_SECRET_TTL_SECONDS       default 600
   CE_APPROVAL_WALL_MARKER_TTL_SECONDS       default 3600
   CE_QUEUE_DAEMON_DRY_RUN                   set to 1 only for controlled dry-run tests
+  CE_QUEUE_DAEMON_CANARY                    set to 1 for dry-run canary with dormant wall
   CE_DAEMON_UNCONTAINED                     set to 1 for the legacy direct-launch escape hatch
   CE_CONTAINER_ENGINE                       docker or podman for contained launch; default docker
   CE_DAEMON_IMAGE                           canonical runtime image for contained launch
@@ -63,6 +64,10 @@ require_env() {
   fi
 }
 
+is_canary_mode() {
+  [[ "${CE_QUEUE_DAEMON_CANARY:-0}" == "1" ]]
+}
+
 repo_root() {
   if [[ -n "${CE_QUEUE_DAEMON_REPO_ROOT:-}" ]]; then
     cd -- "$CE_QUEUE_DAEMON_REPO_ROOT" >/dev/null
@@ -75,15 +80,29 @@ repo_root() {
 
 validate_required_env() {
   require_env GH_TOKEN
-  require_env BAO_TOKEN
-  require_env BAO_ADDR
   require_env CE_GATE_REPO
   require_env CE_GATE_AUTHORIZED_REVIEWERS
+  if is_canary_mode; then
+    return
+  fi
+  require_env BAO_TOKEN
+  require_env BAO_ADDR
   require_env CE_OPENBAO_KV_MOUNT
   require_env CE_APPROVAL_WALL_SECRET_PATH
   require_env CE_APPROVAL_WALL_SECRET_FIELD
   require_env CE_APPROVAL_WALL_POLICY_SHA
   require_env CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA
+}
+
+canary_state_root_isolation_check() {
+  local live_root="/var/lib/ce-queue-daemon/v3"
+  require_env CE_DAEMON_STATE_ROOT
+  if [[ "$CE_DAEMON_STATE_ROOT" == "$live_root" ]]; then
+    die "canary state root collision: CE_DAEMON_STATE_ROOT must not equal live daemon root $live_root"
+  fi
+  if [[ "${CE_QUEUE_DAEMON_ROOT:-$CE_DAEMON_STATE_ROOT}" == "$live_root" ]]; then
+    die "canary queue daemon root collision: CE_QUEUE_DAEMON_ROOT must not equal live daemon root $live_root"
+  fi
 }
 
 resolve_queue_daemon_command() {
@@ -275,6 +294,10 @@ health() {
   validate_required_env
   daemon_alive || die "ce-queue-daemon is not active. Check: systemctl status ce-queue-daemon.service"
   check_gh_token || die "GH_TOKEN validation failed. Refresh the overwatch/integrator token in /etc/creator-engine/ce-queue-daemon.env."
+  if is_canary_mode; then
+    printf 'OK: ce-queue-daemon alive; GH_TOKEN is valid; BAO_TOKEN skipped for canary mode\n'
+    return
+  fi
   check_bao_token || die "BAO_TOKEN validation failed against $BAO_ADDR. Refresh the least-privilege OpenBao daemon token."
   printf 'OK: ce-queue-daemon alive; GH_TOKEN and BAO_TOKEN are valid\n'
 }
@@ -309,21 +332,33 @@ main_uncontained() {
     return
   fi
 
-  validate_required_env
-
   local root
   root="$(repo_root)"
   cd -- "$root"
 
-  export PYTHONPATH="${PYTHONPATH:-$root/validators}"
-  export CE_APPROVAL_WALL_SECRET_TARGET_FILE="${CE_APPROVAL_WALL_SECRET_TARGET_FILE:-/run/ce-queue-daemon/approval-wall-secret}"
-  export CE_APPROVAL_WALL_STATE="${CE_APPROVAL_WALL_STATE:-/var/lib/ce-queue-daemon/approval-wall-state.json}"
+  validate_required_env
+  local canary_mode=0
+  if is_canary_mode; then
+    canary_mode=1
+    canary_state_root_isolation_check
+  fi
 
-  umask 077
-  install -d -m 0700 "$(dirname -- "$CE_APPROVAL_WALL_SECRET_TARGET_FILE")" "$(dirname -- "$CE_APPROVAL_WALL_STATE")"
+  export PYTHONPATH="${PYTHONPATH:-$root/validators}"
+  if [[ "$canary_mode" != "1" ]]; then
+    export CE_APPROVAL_WALL_SECRET_TARGET_FILE="${CE_APPROVAL_WALL_SECRET_TARGET_FILE:-/run/ce-queue-daemon/approval-wall-secret}"
+    export CE_APPROVAL_WALL_STATE="${CE_APPROVAL_WALL_STATE:-/var/lib/ce-queue-daemon/approval-wall-state.json}"
+
+    umask 077
+    install -d -m 0700 "$(dirname -- "$CE_APPROVAL_WALL_SECRET_TARGET_FILE")" "$(dirname -- "$CE_APPROVAL_WALL_STATE")"
+  fi
 
   local -a QUEUE_DAEMON_CMD
   resolve_queue_daemon_command "$root"
+
+  local daemon_root="${CE_QUEUE_DAEMON_ROOT:-/var/lib/ce-queue-daemon/v3}"
+  if [[ "$canary_mode" == "1" ]]; then
+    daemon_root="${CE_QUEUE_DAEMON_ROOT:-$CE_DAEMON_STATE_ROOT}"
+  fi
 
   local -a args=(
     queue-daemon
@@ -333,6 +368,13 @@ main_uncontained() {
     --approval-settle-seconds "${CE_QUEUE_DAEMON_APPROVAL_SETTLE_SECONDS:-0}"
     --token-env GH_TOKEN
     --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS"
+  )
+
+  if [[ "$canary_mode" == "1" ]]; then
+    printf 'CANARY MODE — dry_run=true, wall=dormant, no merge authority\n' >&2
+    args+=(--dry-run)
+  else
+    args+=(
     --approval-wall-secret-backend openbao
     --approval-wall-secret-mount "$CE_OPENBAO_KV_MOUNT"
     --approval-wall-secret-path "$CE_APPROVAL_WALL_SECRET_PATH"
@@ -348,14 +390,15 @@ main_uncontained() {
     --approval-wall-marker-ttl-seconds "${CE_APPROVAL_WALL_MARKER_TTL_SECONDS:-3600}"
     --approval-wall-state "$CE_APPROVAL_WALL_STATE"
     --approval-wall-policy-sha "$CE_APPROVAL_WALL_POLICY_SHA"
-    --root "${CE_QUEUE_DAEMON_ROOT:-/var/lib/ce-queue-daemon/v3}"
-    --json
-  )
+    )
+  fi
 
-  if [[ -n "${CE_APPROVAL_WALL_SECRET_VERSION:-}" ]]; then
+  args+=(--root "$daemon_root" --json)
+
+  if [[ "$canary_mode" != "1" && -n "${CE_APPROVAL_WALL_SECRET_VERSION:-}" ]]; then
     args+=(--approval-wall-secret-version "$CE_APPROVAL_WALL_SECRET_VERSION")
   fi
-  if [[ "${CE_QUEUE_DAEMON_DRY_RUN:-0}" == "1" ]]; then
+  if [[ "$canary_mode" != "1" && "${CE_QUEUE_DAEMON_DRY_RUN:-0}" == "1" ]]; then
     args+=(--dry-run)
   fi
 
@@ -375,6 +418,11 @@ main() {
   esac
 
   if [[ "${CE_DAEMON_UNCONTAINED:-0}" == "1" ]]; then
+    main_uncontained "$@"
+    return
+  fi
+
+  if is_canary_mode; then
     main_uncontained "$@"
     return
   fi
