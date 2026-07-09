@@ -1,0 +1,1 @@
+The daemon container smoke now makes the generated signing secret readable by the image uid under rootful Docker, while preserving best-effort behavior for rootless engines. Cleanup also emits captured per-pass smoke logs before deleting the temporary directory so timeout failures retain their diagnostic output.
