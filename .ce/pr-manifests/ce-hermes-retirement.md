@@ -6,15 +6,16 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=24
+AUTHORIZED_PATHS_COUNT=25
 
-AUTHORIZED_PATHS_SHA256=f6bb4a7e9c31862eea158053e86e8835a4a778ae4a031cfc2cf174beca7d1382
+AUTHORIZED_PATHS_SHA256=f175485bfb01ce6aafb16808f05dfdd549d5737d6d5f4a4c8f33329d22776144
 
 ```text
 .ce/brain/assertions.yaml
 .ce/changelog/ce-hermes-retirement.md
 .ce/pr-manifests/ce-hermes-retirement.md
 .ce/reference/cli.generated.md
+.ce/wt-hermes-r2/BLOCKED
 .claude/hooks/ce-hook-common.sh
 .claude/hooks/ce-pretooluse.sh
 .claude/hooks/ce-stop.sh
