@@ -313,7 +313,7 @@ def test_red_g4_onboard_refusal_includes_actionable_state_path_guidance():
     assert ".ce/state/" in doctor.data["guidance"]
     assert ".hermes/" not in doctor.data["guidance"]
     assert ".gitignore" not in doctor.data["guidance"]
-    assert "ce init --repo-root /tmp/user-repo" in doctor.data["guidance"]
+    assert "ce brain init" in doctor.data["guidance"]
     assert "ce onboard --repo-root /tmp/user-repo" in doctor.data["guidance"]
     assert all("Add `.hermes/` to .gitignore" not in step for step in doctor.data["next_steps"])
 

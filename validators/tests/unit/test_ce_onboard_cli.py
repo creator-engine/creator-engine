@@ -109,7 +109,7 @@ def test_onboard_human_surface_prints_red_g4_guidance(monkeypatch, capsys):
     assert ".ce/state/" in out
     assert ".hermes/" not in out
     assert ".gitignore" not in out
-    assert "ce init --repo-root ." in out
+    assert "ce brain init" in out
     assert "ce onboard --repo-root ." in out
 
 

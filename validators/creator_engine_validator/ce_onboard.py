@@ -80,7 +80,7 @@ GITHUB_APP_OPERATOR_INPUT = {
 
 STATE_PATH_GUIDANCE = (
     "{state_root}/ must exist before CE writes local governed state. "
-    "Run `ce init --repo-root {repo_root}` to bootstrap `{state_root}/`, "
+    "Run `ce brain init` to bootstrap `{state_root}/`, "
     "then re-run `ce onboard --repo-root {repo_root}`."
 )
 
@@ -585,7 +585,7 @@ def _state_path_guidance(repo_root: str, state_root: str = V3_LOCAL_STATE_ROOT) 
     return {
         "guidance": STATE_PATH_GUIDANCE.format(repo_root=repo_root, state_root=state_root),
         "next_steps": [
-            f"Run `ce init --repo-root {repo_root}`",
+            "Run `ce brain init`",
             f"Re-run `ce onboard --repo-root {repo_root}`",
         ],
     }

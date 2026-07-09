@@ -2,20 +2,19 @@
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-hermes-retirement` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
-- **Declared work class:** S
+- **Declared work class:** story
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=28
+AUTHORIZED_PATHS_COUNT=27
 
-AUTHORIZED_PATHS_SHA256=8a513f122f277ef3fa3730dc46aaa0bd72fd2e0cc1a31ca03dec88d5d77e8d03
+AUTHORIZED_PATHS_SHA256=e8d6a4620afa4542154113ea4f3755a4cf13a99c13be54063dba61ea4de561ca
 
 ```text
 .ce/brain/assertions.yaml
 .ce/changelog/ce-hermes-retirement.md
 .ce/pr-manifests/ce-hermes-retirement.md
 .ce/reference/cli.generated.md
-.ce/wt-hermes-r2/READY
 .claude/hooks/ce-hook-common.sh
 .claude/hooks/ce-pretooluse.sh
 .claude/hooks/ce-stop.sh
