@@ -64,6 +64,15 @@ def _patch_drill_pass(monkeypatch) -> None:
     )
 
 
+def _standby_liveness_json() -> str:
+    return json.dumps(
+        {
+            "ring0_verify": {"ok": True},
+            "initial_state": "AWAITING-OPERATOR",
+        }
+    )
+
+
 def test_cadence_weekly_until_two_consecutive_clean_runs():
     first = drill.compute_cadence(as_of="2026-07-06", prior_runs=())
     assert first.phase == "weekly-until-two-clean-runs"
@@ -115,6 +124,7 @@ def test_continuity_drill_json_proves_benign_gate_cycle_without_mutation(
     _patch_drill_pass(monkeypatch)
     monkeypatch.setattr(drill, "_current_run_at", lambda: "2026-07-06T17:00:00Z")
     monkeypatch.setattr(drill.seat_lifecycle, "default_host_id", lambda: "host-a")
+    monkeypatch.setenv("CE_STANDBY_LIVENESS_JSON", _standby_liveness_json())
     before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
 
     rc = ce_cli.main(
@@ -147,9 +157,115 @@ def test_continuity_drill_json_proves_benign_gate_cycle_without_mutation(
     assert {action["execute"] for action in payload["benign_gate_cycle"]["takeover_actions"]} == {False}
     assert payload["takeover_evidence"]["dry_run"] is True
     assert payload["takeover_evidence"]["predecessor"]["detected"] is True
+    assert payload["standby_liveness"]["ok"] is True
+    assert payload["status"] == "GREEN"
     assert payload["clean"] is True
     after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
     assert after == before
+
+
+def test_continuity_drill_records_standby_liveness_when_context_provided(
+    tmp_path, monkeypatch, capsys
+):
+    _seed_takeover_state(tmp_path)
+    _patch_drill_pass(monkeypatch)
+    monkeypatch.setenv("CE_STANDBY_LIVENESS_JSON", _standby_liveness_json())
+
+    rc = ce_cli.main(
+        [
+            "continuity-drill",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["standby_liveness"]["ok"] is True
+    assert payload["standby_liveness"]["evidence"]["initial_state"] == "AWAITING-OPERATOR"
+    assert payload["status"] == "GREEN"
+    assert payload["clean"] is True
+
+
+def test_continuity_drill_rejects_raw_standby_liveness_env_flag(
+    tmp_path, monkeypatch, capsys
+):
+    _seed_takeover_state(tmp_path)
+    _patch_drill_pass(monkeypatch)
+    monkeypatch.setenv("CE_STANDBY_LIVENESS", "1")
+
+    rc = ce_cli.main(
+        [
+            "continuity-drill",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "WARNING"
+    assert payload["clean"] is False
+    assert payload["standby_liveness"]["ok"] is False
+    assert payload["standby_liveness"]["evidence"]["source"] == "CE_STANDBY_LIVENESS"
+    assert "not accepted as standby proof" in payload["standby_liveness"]["note"]
+
+
+def test_continuity_drill_rejects_direct_boolean_standby_liveness(
+    tmp_path, monkeypatch
+):
+    _seed_takeover_state(tmp_path)
+    _patch_drill_pass(monkeypatch)
+
+    record = drill.build_record(
+        predecessor="ce-controller",
+        harness="claude",
+        repo_root=tmp_path,
+        standby_liveness=True,
+    )
+
+    assert record.status == "WARNING"
+    assert record.clean is False
+    assert record.standby_liveness.ok is False
+    assert record.standby_liveness.evidence["source"] == "boolean"
+    assert "structured ce takeover --dry-run --json" in record.standby_liveness.note
+
+
+def test_continuity_drill_warns_when_standby_liveness_absent(
+    tmp_path, monkeypatch, capsys
+):
+    _seed_takeover_state(tmp_path)
+    _patch_drill_pass(monkeypatch)
+
+    rc = ce_cli.main(
+        [
+            "continuity-drill",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "WARNING"
+    assert payload["clean"] is False
+    assert payload["standby_liveness"]["ok"] is False
+    assert payload["standby_liveness"]["note"] == drill.STANDBY_LIVENESS_ABSENT_NOTE
 
 
 def test_continuity_drill_reports_missing_predecessor_as_not_clean(
