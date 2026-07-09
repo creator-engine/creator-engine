@@ -6,7 +6,9 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
-(nothing yet — use this section for features landing after 0.3.4 while waiting for the next tag)
+### Changed
+
+- **Acceptance-Evidence autoclose enforcement.** Directive-labeled ce-ops issues now stay open with a structured warning comment when a merged PR lacks an `Acceptance-Evidence:` field; missing cross-repo token configuration now exits nonzero with a GitHub Actions error instead of silently skipping closures.
 
 ## v0.3.4 — broker-lanes + takeover-core + memory-layer + continuity-drill (2026-07-08)
 

@@ -50,6 +50,7 @@ _CLOSING_CLAUSE_RE = re.compile(
 )
 _CLAUSE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+_ACCEPTANCE_EVIDENCE_RE = re.compile(r"^\s*Acceptance-Evidence\s*:\s*(?P<value>.*?)\s*$")
 
 
 def _extract_from_clause(clause_text: str, seen: set[int], numbers: list[int]) -> None:
@@ -100,6 +101,18 @@ def parse_body_closing_refs(body: str) -> list[int]:
     for raw_clause in _CLAUSE_SPLIT_RE.split(body):
         _extract_from_clause(raw_clause, seen, numbers)
     return numbers
+
+
+def parse_acceptance_evidence(body: str) -> str | None:
+    """Return the PR body's ``Acceptance-Evidence:`` value, when present."""
+    for line in body.splitlines():
+        m = _ACCEPTANCE_EVIDENCE_RE.match(line)
+        if not m:
+            continue
+        value = m.group("value").strip()
+        if value:
+            return value
+    return None
 
 
 def parse_all_refs(title: str, body: str) -> list[int]:
