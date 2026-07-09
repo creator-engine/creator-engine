@@ -6,7 +6,7 @@ Slug: `ce-readme-review-minors`
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** story
+- **Declared work class:** tiny
 
 ## Goal / Done-when / Change-type
 
