@@ -234,6 +234,46 @@ def _acceptance_evidence_required_comment(context: dict[str, Any]) -> str:
     )
 
 
+def _has_existing_warn_comment(issue_number: int, token: str) -> bool:
+    """Return True if the Acceptance-Evidence warning is already present."""
+    comments_path = f"/repos/{CE_OPS_REPO}/issues/{issue_number}/comments"
+    marker = "**Autoclose blocked — Acceptance-Evidence required.**"
+    try:
+        comments = _api_json("GET", comments_path, token)
+    except Exception:
+        return False
+    if not isinstance(comments, list):
+        return False
+    return any(
+        isinstance(comment, dict) and str(comment.get("body", "")).startswith(marker)
+        for comment in comments
+    )
+
+
+def _alert_governance_failure(reason: str) -> None:
+    """Emit a repository-dispatch alert for governance-class failures."""
+    alert_token = os.environ.get("GITHUB_TOKEN", "")
+    if not alert_token:
+        print("governance-alert: no GITHUB_TOKEN available for dispatch, skipping alert")
+        return
+    try:
+        _api_json(
+            "POST",
+            f"/repos/{CE_OPS_REPO.split('/')[0]}/creator-engine/dispatches",
+            alert_token,
+            {
+                "event_type": "governance-alert",
+                "client_payload": {
+                    "source": "ceops_autoclose",
+                    "reason": reason,
+                },
+            },
+        )
+        print(f"governance-alert dispatched: {reason}")
+    except Exception as exc:
+        print(f"governance-alert dispatch failed (non-blocking): {exc}")
+
+
 def _is_directive_issue(issue: dict[str, Any]) -> bool:
     return any(label.get("name") == "directive" for label in issue.get("labels", []))
 
@@ -246,12 +286,22 @@ def close_issue_if_open(issue_number: int, token: str, context: dict[str, Any]) 
         return
 
     if _is_directive_issue(issue) and not _parse_acceptance_evidence(context.get("body") or ""):
-        _api_json(
-            "POST",
-            f"{issue_path}/comments",
-            token,
-            {"body": _acceptance_evidence_required_comment(context)},
-        )
+        already_warned = _has_existing_warn_comment(issue_number, token)
+        if already_warned:
+            print(
+                f"ce-ops#{issue_number}: "
+                "Acceptance-Evidence warn already posted, skipping dedup"
+            )
+        else:
+            try:
+                _api_json(
+                    "POST",
+                    f"{issue_path}/comments",
+                    token,
+                    {"body": _acceptance_evidence_required_comment(context)},
+                )
+            except Exception as exc:
+                print(f"ce-ops#{issue_number}: Acceptance-Evidence warn comment failed: {exc}")
         print(f"ce-ops#{issue_number}: Acceptance-Evidence required, leaving open")
         return
 
@@ -295,6 +345,7 @@ def main() -> int:
             "are not configured; skipping ce-ops autoclose. "
             "Provision a fine-grained token with issues:write on creator-engine/ce-ops."
         )
+        _alert_governance_failure("token_absent")
         return 1
 
     print(f"ce-ops refs to close: {numbers}")

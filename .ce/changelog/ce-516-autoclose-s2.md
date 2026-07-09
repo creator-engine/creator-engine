@@ -1,0 +1,1 @@
+Acceptance-Evidence autoclose handling now avoids duplicate warning comments, keeps directive issues open when warning delivery fails, and emits a best-effort governance alert when required token configuration is absent. The workflow comment now matches the fail-closed behavior.

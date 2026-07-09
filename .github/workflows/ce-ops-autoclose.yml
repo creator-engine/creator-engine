@@ -12,8 +12,9 @@ name: CE Ops Autoclose
 #   with issues:write on creator-engine/ce-ops ONLY.  Never substitute
 #   GITHUB_TOKEN — it is scoped to this repository.
 #
-# Fail-open: if the secret is absent/empty the step logs a warning and exits 0,
-# so this workflow never blocks a merge.
+# Fail-closed: if the secret is absent/empty the step emits a ::error:: annotation
+# and exits nonzero. The step is configured continue-on-error so merges are not
+# silently blocked, but a governance alert is dispatched to the operator.
 #
 # Issue refs are extracted via two paths:
 #   1. Title scan  — every ce-ops#N token in the PR title (CE convention:

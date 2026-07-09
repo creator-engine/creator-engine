@@ -88,6 +88,29 @@ def test_directive_issue_without_evidence_posts_warning_comment_and_does_not_clo
     assert "https://github.com/creator-engine/creator-engine/pull/42" in post_calls[0][3]["body"]
 
 
+def test_warn_comment_post_failure_leaves_issue_open(monkeypatch):
+    autoclose = _load_autoclose()
+    calls = []
+
+    def fake_api_json(method, path, token, payload=None):
+        calls.append((method, path, token, payload))
+        if method == "GET" and path.endswith("/issues/7"):
+            return {"state": "open", "labels": [{"name": "directive"}]}
+        if method == "GET" and path.endswith("/issues/7/comments"):
+            return []
+        if method == "POST" and path.endswith("/issues/7/comments"):
+            raise RuntimeError("simulated API failure: 503 Service Unavailable")
+        if method == "PATCH":
+            raise AssertionError("close must not be called when warn POST fails")
+        return None
+
+    monkeypatch.setattr(autoclose, "_api_json", fake_api_json)
+
+    autoclose.close_issue_if_open(7, "token", _context(f"Closes {CE_REF}"))
+
+    assert not any(call[0] == "PATCH" for call in calls)
+
+
 def test_directive_issue_with_evidence_closes_normally(monkeypatch):
     autoclose = _load_autoclose()
     calls = []
