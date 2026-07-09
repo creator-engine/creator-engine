@@ -272,3 +272,26 @@ def test_run_dry_run_loop_rate_limited_pass_is_logged_and_continues(monkeypatch)
     assert len(calls) == 2
     assert logs[0]["event"] == "review_dry_run_rate_limited"
     assert logs[0]["status"] == 429
+
+
+def test_run_dry_run_pass_pins_dry_run_kwargs(monkeypatch):
+    """Pin the dry-run invariant at assertion level: a refactor that flips
+    apply/dry_run on the poll_review_pickup call must fail this test."""
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _result(items=[])
+
+    monkeypatch.setattr(review_dry_run, "poll_review_pickup", _capture)
+
+    review_dry_run.run_dry_run_pass(
+        token="ghp_fake",
+        reviewer_seats=["reviewer-a"],
+        gh_runner=_FakeGhRunner(),
+        repo="owner/repo",
+        clock=_clock,
+    )
+
+    assert captured["apply"] is False
+    assert captured["dry_run"] is True
