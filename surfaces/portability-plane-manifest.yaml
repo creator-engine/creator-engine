@@ -1,5 +1,6 @@
 portability_plane:
   runtime_plane_paths:
+    - validators/creator_engine_validator/container_launcher.py
     - validators/creator_engine_validator/containment_probe.py
     - validators/creator_engine_validator/lane_runtime.py
     - validators/creator_engine_validator/launch_runtime.py
