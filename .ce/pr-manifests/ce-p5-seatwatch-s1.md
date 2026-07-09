@@ -12,7 +12,7 @@ Base:
 `402192ddc921a4eb0c439ee5c7eb9b1304dcb9bd` (`origin/main`, worktree creation base).
 
 Summary:
-- **Declared work class:** story
+- **Declared work class:** feature
 - Adds the observe-only seat-watch daemon core and environment runner.
 - Adds systemd and launcher deployment artifacts under `deploy/seat-watch/`.
 - Adds focused unit coverage for event emission, pane error classification, idle tracking, dispatch acknowledgements, config parsing, and multi-seat state isolation.
