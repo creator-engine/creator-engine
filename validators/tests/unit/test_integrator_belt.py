@@ -1317,6 +1317,92 @@ def test_daemon_head_mismatch_without_current_authorized_approval_skips_with_rea
     assert gh.merge_calls == []
 
 
+def test_expired_refusal_with_valid_review_sets_mint_needed():
+    expired_marker = _approval_marker(expires_at=EXPIRES_AT)
+    pr = _daemon_pr(body=_body_with_approval(expired_marker), changed_paths=(CARRIER, "docs/a.md"))
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issued: list[tuple[belt.DaemonPullRequest, belt.DaemonApprovalWitness]] = []
+    updates: list[str] = []
+
+    def issuer(candidate, witness):
+        issued.append((candidate, witness))
+        return _approval_marker(
+            repo=candidate.repo,
+            pr_number=candidate.pr_number,
+            head_sha=candidate.head_sha,
+            approved_by=witness.reviewer_login,
+            issued_at=EXPIRES_AT + 1,
+            expires_at=EXPIRES_AT + 601,
+        )
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(now=EXPIRES_AT),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=issuer,
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.defer_count == 1
+    assert result.decisions[0].reason == "approval_capability_minted"
+    assert "approval_capability_reason=expired" in result.decisions[0].evidence
+    assert "approval_capability_reason=expired_review_valid" in result.decisions[0].evidence
+    assert len(issued) == 1
+    assert issued[0][1].reviewer_login == AUTHORIZED_REVIEWER
+    assert len(updates) == 1
+    assert expired_marker not in updates[0]
+    assert gh.merge_calls == []
+
+
+def test_expired_refusal_with_absent_review_keeps_skip():
+    expired_marker = _approval_marker(expires_at=EXPIRES_AT, approved_by="unvetted-reviewer")
+    pr = _daemon_pr(
+        body=_body_with_approval(expired_marker),
+        changed_paths=(CARRIER, "docs/a.md"),
+        approving_reviewers=("unvetted-reviewer",),
+        approval_witnesses=(
+            belt.DaemonApprovalWitness(
+                reviewer_login="unvetted-reviewer",
+                commit_oid=HEAD,
+                state="APPROVED",
+                review_id="review-unvetted",
+            ),
+        ),
+    )
+    gh = FakeDaemonGh(raw_contents=(_carrier_text((CARRIER, "docs/a.md")),))
+    issuer_calls: list[str] = []
+    updates: list[str] = []
+
+    result = belt.run_daemon_pass(
+        token="ghp_fake",
+        repo=REPO,
+        gh_runner=gh,
+        approval_wall=_approval_wall(now=EXPIRES_AT),
+        candidates=(pr,),
+        approval_settle_seen=_settled(pr),
+        authorized_reviewers=(AUTHORIZED_REVIEWER,),
+        approval_marker_issuer=lambda _pr, _witness: issuer_calls.append("called") or _approval_marker(),
+        pr_body_updater=lambda _pr, body: updates.append(body)
+        or subprocess.CompletedProcess(["fake-update"], 0, stdout="", stderr=""),
+    )
+
+    assert result.enqueue_count == 0
+    assert result.skip_count == 1
+    assert result.decisions[0].reason == "approval_capability_invalid"
+    assert "approval_capability_reason=expired" in result.decisions[0].evidence
+    assert "approval_capability_reason=expired_review_absent" in result.decisions[0].evidence
+    assert "current_approval_reason=approval_reviewer_unauthorized" in result.decisions[0].evidence
+    assert issuer_calls == []
+    assert updates == []
+    assert gh.merge_calls == []
+
+
 def test_daemon_following_pass_with_minted_marker_enqueues_normally():
     marker = _approval_marker(approved_by=AUTHORIZED_REVIEWER)
     pr = _daemon_pr(body=f"Controller approval wall\n\n{marker}\n", changed_paths=(CARRIER, "docs/a.md"))

@@ -760,6 +760,7 @@ def run_daemon_pass(
         head_mismatch_refusal = (
             _approval_capability_invalid_reason(gate) == "head_mismatch"
         )
+        expired_refusal = _approval_marker_expired_review_check(gate)
         mint_needed = _approval_marker_mint_needed(
             gate,
             approval_verifier,
@@ -779,6 +780,27 @@ def run_daemon_pass(
                 approval_marker_issuer,
             ):
                 mint_needed = True
+        if expired_refusal:
+            trusted_witness, trusted_refusal = _trusted_current_approval_witness(pr, authorized)
+            if trusted_witness is None:
+                gate = DaemonGateEvaluation(
+                    "approval_capability_invalid",
+                    (
+                        *gate.evidence,
+                        "approval_capability_reason=expired_review_absent",
+                        f"current_approval_reason={trusted_refusal}",
+                    ),
+                )
+            elif _approval_marker_minting_available(
+                approval_verifier,
+                approval_wall,
+                approval_marker_issuer,
+            ):
+                mint_needed = True
+                gate = DaemonGateEvaluation(
+                    None,
+                    (*gate.evidence, "approval_capability_reason=expired_review_valid"),
+                )
         if mint_needed:
             non_wall_gate = _daemon_non_wall_gate(pr)
             if non_wall_gate.refusal_reason is not None:
@@ -1685,6 +1707,14 @@ def _approval_marker_mint_needed(
         approval_verifier,
         approval_wall,
         approval_marker_issuer,
+    )
+
+
+def _approval_marker_expired_review_check(gate: DaemonGateEvaluation) -> bool:
+    """True when the capability gate fired with reason=expired."""
+    return (
+        gate.refusal_reason == "approval_capability_invalid"
+        and _approval_capability_invalid_reason(gate) == "expired"
     )
 
 
