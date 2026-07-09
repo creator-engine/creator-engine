@@ -51,14 +51,15 @@ apps:
     repo_scope: EXAMPLE_ORG/EXAMPLE_REPO
     pem_custody: vault://EXAMPLE/path
   # Tenant Apps — added by ce-470 schema slice
-  - app_name: mythos-ce
-    app_id: 4103119
-    client_id: Iv23liuJp6OxfCWvwfSl
-    install_id: 141552951
+  - app_name: EXAMPLE_TENANT-ce
+    app_id: 1234567
+    client_id: Iv23_EXAMPLE_CLIENT_ID
+    install_id: 87654321
     tenant_scope: account-wide
-    repo_scope: "chmod735-dor/* (all repos, account-wide installation)"
-    pem_custody: "file://~/.ce-keys/mythos-ce.2026-06-20.private-key.pem"
-    # PRECEDENCE: this entry is authoritative; env files are stale if they differ.
+    repo_scope: "EXAMPLE_ORG/* (all repos, account-wide installation)"
+    pem_custody: vault://EXAMPLE/tenant/path
+    # PRECEDENCE: the INTERNAL registry entry is authoritative; env files are stale if they differ.
+    # Real tenant identifiers live ONLY in the internal registry (see header) — never in this public example.
 
 tokens:
   - type: PAT
