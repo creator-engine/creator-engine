@@ -618,10 +618,37 @@ $defs:
       approver_ref:
         type: string
         pattern: "^[0-9a-f]{64}$"
-        description: Opaque digest standing in for the ratifying human.
+        description: >-
+          Opaque digest standing in for the ratifying human. When
+          approver_ref_provenance is present, this value MUST equal
+          sha256(client_id + ":" + ratified_prompt_sha + ":" + gesture_salt).
       educate_acknowledged:
         type: boolean
         const: true
         description: |
           The educate-first copy was shown and acknowledged; a binding
           without it cannot validate (the file cannot skip education).
+      approver_ref_provenance:
+        type: object
+        required: [client_id, gesture_salt]
+        additionalProperties: false
+        description: >-
+          Optional. When present, binds the approver_ref to a specific
+          client App identity, making the ratification gesture structurally
+          verifiable instead of only self-asserted. If omitted, the binding
+          is accepted for legacy compatibility but is not client-identity-bound.
+        properties:
+          client_id:
+            type: string
+            minLength: 1
+            description: >-
+              GitHub OAuth App client_id of the client App that minted the
+              approver_ref. Non-secret. Used to verify the approver_ref
+              derivation.
+          gesture_salt:
+            type: string
+            pattern: "^[0-9a-f]{1,128}$"
+            description: >-
+              Hex salt used as the third component of the approver_ref
+              derivation: sha256(client_id + ":" + ratified_prompt_sha + ":"
+              + gesture_salt).

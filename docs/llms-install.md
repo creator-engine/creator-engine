@@ -13,8 +13,8 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFQnVyaWtMQlU3K213Q0QrVVFGV25RejkwSS8rOHc0YmVmZ3YvYlA3K05TSm5aR3NnUGNBMEVzUEgKQUJuS0lLM2g3QUlVRHFKTStIVE1JMFpqMGl0SGdOCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: 535a2650a9621931201531147cf52424287d3b3b0e41612f090e59757880fc8c
+  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRDA3TlduZzVIUmNqZVU4NHRFRDdqams0LzVwb3QwdDB2T0E5OHVFOGowbCtPSVJYZ0JNOUFmR0cKak1NblpFVEFjNTlGaGV6bXp6RUYyU3NEQm5aWUFNCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
+  content_sha256: 2327464e711149348a2e46cbee7242ce090412a6a2859e7bbf324a0489113a7a
 
 artifact_manifest:
   artifact_manifest_version: 1
@@ -27,7 +27,7 @@ artifact_manifest:
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
-  answers_schema_sha256: be67d554691a0c84db16e12511dcdaf9c17bd78a4c659d93a188922b4b8dbb3c
+  answers_schema_sha256: 621a76f2768c71b48bbf3eac8aa4378aee97c2705dc2b6d82a6a5103cf023f71
   app_wheel: creator_engine_validator-0.3.4-py3-none-any.whl
   required_wheels:
     - filename: attrs-26.1.0-py3-none-any.whl
