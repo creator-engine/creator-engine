@@ -1097,6 +1097,23 @@ def run_preflight(
         skipped_tests["value"] = result.head_skip_count
         return result.detail
 
+    def portability_guard() -> str:
+        if config.profile == SEAT_READY_PROFILE:
+            return (
+                "not applicable; skipped for seat-ready because seat-image runtime characteristics "
+                "produce proven false failures; enforced by default-profile preflight at controller harvest"
+            )
+        _run_checked(
+            "Control-plane portability guard",
+            [py, "-m", "creator_engine_validator", "scan-portability-plane", "."],
+            config.repo_root,
+            runner=runner,
+            env=py_env,
+            out=out,
+            err=err,
+        )
+        return "no undeclared Linux runtime-plane assumptions"
+
     checks.append(
         _run_check(
             "clean worktree",
@@ -1188,18 +1205,7 @@ def run_preflight(
     checks.append(
         _run_check(
             "Control-plane portability guard",
-            lambda: (
-                _run_checked(
-                    "Control-plane portability guard",
-                    [py, "-m", "creator_engine_validator", "scan-portability-plane", "."],
-                    config.repo_root,
-                    runner=runner,
-                    env=py_env,
-                    out=out,
-                    err=err,
-                ),
-                "no undeclared Linux runtime-plane assumptions",
-            )[1],
+            portability_guard,
             out,
             err,
         )
