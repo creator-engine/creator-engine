@@ -2,6 +2,10 @@
 # The authoritative CE identity registry with real values is maintained
 # INTERNALLY (not in this public repo). Do not put real fleet identities,
 # accounts, App/installation IDs, host IPs, or credential paths here.
+#
+# PRECEDENCE RULE (ce-470): When an identifier is present in this file, it is
+# authoritative. Controllers MUST NOT override registry values from env files,
+# MEMORY.md prose, or live API calls. Registry WINS over all other sources.
 
 repos:
   - name: EXAMPLE_REPO
@@ -46,6 +50,16 @@ apps:
     install_id: TODO_VERIFY
     repo_scope: EXAMPLE_ORG/EXAMPLE_REPO
     pem_custody: vault://EXAMPLE/path
+  # Tenant Apps — added by ce-470 schema slice
+  - app_name: EXAMPLE_TENANT-ce
+    app_id: 1234567
+    client_id: Iv23_EXAMPLE_CLIENT_ID
+    install_id: 87654321
+    tenant_scope: account-wide
+    repo_scope: "EXAMPLE_ORG/* (all repos, account-wide installation)"
+    pem_custody: vault://EXAMPLE/tenant/path
+    # PRECEDENCE: the INTERNAL registry entry is authoritative; env files are stale if they differ.
+    # Real tenant identifiers live ONLY in the internal registry (see header) — never in this public example.
 
 tokens:
   - type: PAT

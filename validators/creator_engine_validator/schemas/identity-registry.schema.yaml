@@ -5,6 +5,10 @@ description: >-
   Machine-readable non-secret SSOT for GitHub identities, App installation
   bindings, token storage pointers, signing-key custody pointers, host
   topology, and author/reviewer separation status.
+
+  Precedence rule: when an infra identifier is present in this registry, that
+  value is authoritative. Controllers and seats MUST NOT derive or override it
+  from env files, MEMORY.md prose, or live API calls. The registry WINS.
 type: object
 required:
   - repos
@@ -162,7 +166,25 @@ $defs:
         $ref: "#/$defs/non_empty_string"
       pem_custody:
         type: string
-        pattern: "^(TODO_VERIFY|vault://[^\\s]+|openbao-ref:[^\\s]+)$"
+        pattern: "^(TODO_VERIFY|vault://[^\\s]+|openbao-ref:[^\\s]+|file://[^\\s]+)$"
+      app_name:
+        $ref: "#/$defs/todo_or_string"
+        description: >-
+          Human-readable App name / slug (e.g. mythos-ce). Optional but
+          recommended for operator readability.
+      client_id:
+        $ref: "#/$defs/todo_or_string"
+        description: >-
+          GitHub OAuth App client_id (format: Iv23li... or TODO_VERIFY).
+          Non-secret — safe to store in the public registry. Used by the
+          recall path to resolve the App without a live API call.
+      tenant_scope:
+        type: string
+        enum: [selected-repos, account-wide, TODO_VERIFY]
+        description: >-
+          Scope of the App installation: account-wide (all repos of the
+          installing account) or selected-repos (subset). TODO_VERIFY if not yet
+          confirmed.
   token:
     type: object
     required:
