@@ -95,7 +95,7 @@ def test_governed_stop_never_blocks(tmp_path):
         assert json.loads(out).get("decision") != "block"
 
 
-def test_stop_logs_advisory_observation_under_hermes(tmp_path):
+def test_stop_logs_advisory_observation_under_state(tmp_path):
     proc = _run_stop(tmp_path, {"hook_event_name": "Stop"})
     assert proc.returncode == 0
     obs = tmp_path / ".ce/state/cc-g-c-hook-observations/observations.ndjson"
