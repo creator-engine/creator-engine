@@ -29,6 +29,7 @@ class BrokerConfig:
     backup_destinations: frozenset[str] = field(default_factory=frozenset)
     log_subsystems: frozenset[str] = field(default_factory=frozenset)
     maintenance_tasks: frozenset[str] = field(default_factory=frozenset)
+    container_image_allowlist: tuple[str, ...] = ()
     rate_limit_overrides: Mapping[str, RateLimitRule] = field(default_factory=dict)
     repeated_failure_policy: Mapping[str, Any] = field(default_factory=dict)
 
@@ -60,6 +61,9 @@ class BrokerConfig:
         backup_destinations = frozenset(_str_list(raw.get("backup_destinations", []), "backup_destinations"))
         log_subsystems = frozenset(_str_list(raw.get("log_subsystems", []), "log_subsystems"))
         maintenance_tasks = frozenset(_str_list(raw.get("maintenance_tasks", []), "maintenance_tasks"))
+        container_image_allowlist = tuple(
+            _str_list(raw.get("container_image_allowlist", []), "container_image_allowlist")
+        )
         overrides = _rate_overrides(raw.get("rate_limit_overrides", {}))
         repeated = raw.get("repeated_failure_policy", {})
         if not isinstance(repeated, Mapping):
@@ -78,6 +82,7 @@ class BrokerConfig:
             backup_destinations=backup_destinations,
             log_subsystems=log_subsystems,
             maintenance_tasks=maintenance_tasks,
+            container_image_allowlist=container_image_allowlist,
             rate_limit_overrides=overrides,
             repeated_failure_policy=dict(repeated),
         )
@@ -92,6 +97,24 @@ class BrokerConfig:
         if not unit:
             raise BrokerConfigError(f"daemon {daemon!r} is not CE-owned")
         return self.resolve_unit(unit)
+
+    def resolve_container_image(self, image: str) -> str:
+        """Return image if it starts with a CE-owned registry prefix; raise otherwise."""
+        if not self.container_image_allowlist:
+            raise BrokerConfigError("container_image_allowlist is empty - no images are CE-owned")
+        if any(image.startswith(prefix) for prefix in self.container_image_allowlist):
+            return image
+        raise BrokerConfigError(
+            f"image {image!r} does not match any CE-owned registry in container_image_allowlist"
+        )
+
+    def resolve_state_root(self, root_name: str) -> str:
+        """Return root_name when exact or prefix config marks it CE-owned."""
+        if root_name in self.state_roots or any(root_name.startswith(p) for p in self.state_root_prefixes):
+            return root_name
+        raise BrokerConfigError(
+            f"state root {root_name!r} is not CE-owned (no exact match and no prefix match)"
+        )
 
     def resolve_status_target(self, target: str | None) -> str:
         if target is None:
