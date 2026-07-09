@@ -71,14 +71,28 @@ main() {
   "$script" --help > "$tmpdir/help.out"
   assert_grep "Usage: redeploy-singleton.sh" "$tmpdir/help.out"
   assert_grep "--daemon NAME" "$tmpdir/help.out"
+  assert_grep "--service-user NAME" "$tmpdir/help.out"
 
-  "$script" --daemon queue-daemon --dry-run --repo-root "$root" --env-file "$env_file" > "$tmpdir/dry-run.out"
+  "$script" --daemon queue-daemon --dry-run --repo-root "$root" --env-file "$env_file" --service-user ce-smoke > "$tmpdir/dry-run.out"
   assert_grep_either "Would install|Would leave unchanged" "$tmpdir/dry-run.out"
+  assert_grep "Would render service user: ce-smoke" "$tmpdir/dry-run.out"
   assert_grep "Would reload" "$tmpdir/dry-run.out"
   assert_grep "Would enable" "$tmpdir/dry-run.out"
   assert_grep "Would restart" "$tmpdir/dry-run.out"
   assert_grep "Would wait up to 30 seconds" "$tmpdir/dry-run.out"
   assert_grep "Would run health probe" "$tmpdir/dry-run.out"
+  assert_grep "rendered unit Environment= values" "$tmpdir/dry-run.out"
+
+  validate_repo_root "$root"
+
+  local rendered_unit="$tmpdir/rendered.service"
+  render_queue_unit "$root" "$env_file" "ce-smoke" "$rendered_unit"
+  assert_grep "User=ce-smoke" "$rendered_unit"
+  assert_grep "EnvironmentFile=$env_file" "$rendered_unit"
+  assert_grep "Environment=CE_QUEUE_DAEMON_REPO_ROOT=$root" "$rendered_unit"
+
+  unit_environment_assignments "$rendered_unit" > "$tmpdir/unit-env.out"
+  assert_grep "CE_DAEMON_REPO_ROOT=$root" "$tmpdir/unit-env.out"
 
   if "$script" --daemon queue-daemon --dry-run --repo-root "$root" --env-file "$tmpdir/missing.env" > "$tmpdir/missing.out" 2>&1; then
     die "missing explicit env file unexpectedly passed"

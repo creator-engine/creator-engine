@@ -8,10 +8,9 @@ StartLimitBurst=12
 
 [Service]
 Type=simple
-User=ce-dev-1
+User=creator-engine
 WorkingDirectory=/workspace/creator-engine
 EnvironmentFile=/etc/creator-engine/ce-queue-daemon.env
-Environment=BAO_ADDR=https://100.72.252.20:8200
 Environment=CE_QUEUE_DAEMON_REPO_ROOT=/workspace/creator-engine
 Environment=CE_DAEMON_REPO_ROOT=/workspace/creator-engine
 Environment=CE_DAEMON_STATE_ROOT=/var/lib/ce-queue-daemon
