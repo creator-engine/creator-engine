@@ -122,9 +122,7 @@ write_secret_file() {
   umask 077
   printf '%s\n' "$SMOKE_SECRET_VALUE" > "$path"
   chmod 0600 "$path"
-  if [[ -n "${CE_DAEMON_IMAGE_UID:-}" ]]; then
-    chown "${CE_DAEMON_IMAGE_UID}:${CE_DAEMON_IMAGE_UID}" "$path" 2>/dev/null || true
-  fi
+  chown "${CE_DAEMON_IMAGE_UID:-10001}:${CE_DAEMON_IMAGE_UID:-10001}" "$path" 2>/dev/null || true
 }
 
 write_mixed_uid_probe_engine() {
