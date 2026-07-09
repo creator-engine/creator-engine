@@ -122,6 +122,7 @@ write_secret_file() {
   umask 077
   printf '%s\n' "$SMOKE_SECRET_VALUE" > "$path"
   chmod 0600 "$path"
+  chown "${CE_DAEMON_IMAGE_UID:-10001}:${CE_DAEMON_IMAGE_UID:-10001}" "$path" 2>/dev/null || true
 }
 
 write_mixed_uid_probe_engine() {
@@ -238,6 +239,15 @@ stop_current_container() {
 
 cleanup() {
   stop_current_container
+  if [[ -n "$SMOKE_TMPDIR" && -d "$SMOKE_TMPDIR" ]]; then
+    for _log in "$SMOKE_TMPDIR"/smoke-pass-*.log; do
+      [[ -f "$_log" ]] || continue
+      local _label
+      _label="$(basename "$_log" .log)"
+      printf '%s\n' "---- $_label log (cleanup dump) ----" >&2
+      sed -n '1,220p' "$_log" >&2 || true
+    done
+  fi
   [[ -z "$SMOKE_TMPDIR" ]] || rm -rf -- "$SMOKE_TMPDIR"
 }
 
