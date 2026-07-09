@@ -72,8 +72,8 @@ repo). In a normal worktree launch these coincide.
 
 The CC-G-C Stop hook **must not block** and **must not parse the transcript**
 for closeout text. It drains the Stop event and records a best-effort,
-non-blocking advisory observation under the ignored `.hermes/` evidence root
-(`.hermes/cc-g-c-hook-observations/observations.ndjson`). It emits no
+non-blocking advisory observation under the ignored `.ce/state/` evidence root
+(`.ce/state/cc-g-c-hook-observations/observations.ndjson`). It emits no
 `{"decision":"block"}`.
 
 Hard Stop blocking — verifying the canonical closeout terminal sections and a
@@ -128,7 +128,7 @@ and `lane_runtime.launch` (`ce lane launch`, code `G3-CLAUDE-REFUSED`).
 ## Decision shapes emitted to Claude
 
 `ce-pretooluse.sh` calls `hook-check --stdin --format claude --posture-root
-"$ROOT" --evidence-root .hermes` and passes the Claude-hook-shaped JSON through
+"$ROOT" --evidence-root .ce/state` and passes the Claude-hook-shaped JSON through
 verbatim:
 
 - **PreToolUse deny** (governed scope/secret/mechanics violation):
@@ -136,16 +136,18 @@ verbatim:
 - **PreToolUse allow**: same shape with `permissionDecision: "allow"`.
 - **Ungoverned advisory**: maps to `permissionDecision: "allow"` (an ungoverned
   lane is never hard-denied) with the advisory context preserved in the reason.
-- `--evidence-root .hermes` keeps ignored instance-evidence writes from being
+- `--evidence-root .ce/state` keeps ignored instance-evidence writes from being
   denied under governed posture (D3).
 - **`--ledger-root` (Gate B, posture-claim reachability):** a governed lane
   launched via `ce lane launch` exports its absolute Active-Work Ledger root as
   `CE_LEDGER_ROOT`; `ce-pretooluse.sh` forwards it as `--ledger-root` so the §7
   posture is resolved from the seat's **real** claim — reachable even from a
-  worktree that carries no local ledger. When unset, discovery is scoped to
-  `<posture-root>/.hermes/active-work-ledger`, never the whole posture-root tree,
-  so tracked `examples/**` claim/pane fixtures can never be matched as governing
-  claims. Mirrors the `--reviewer-authority-ref` launch-pinned seam.
+  worktree that carries no local ledger. When `CE_LEDGER_ROOT` is unset, the
+  validator uses scoped posture discovery only; it never scans the whole
+  posture-root tree, so tracked `examples/**` claim/pane fixtures can never be
+  matched as governing claims. The current `hook_check.py` legacy fallback is
+  `<posture-root>/.hermes/active-work-ledger`. Mirrors the
+  `--reviewer-authority-ref` launch-pinned seam.
 
 The Stop bridge shape (`{"decision":"block","reason":"…"}`) exists in Ring 2 but
 is **not** emitted by the CC-G-C Stop hook (advisory-only, D2).

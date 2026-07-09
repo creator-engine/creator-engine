@@ -15,8 +15,12 @@ residue from one harness.
 
 - **v1 keeps `.hermes/`** — frozen, retained for coexistence. Renaming it churns
   the live v1 substrate; deferred (see "Deferred", below).
-- **v3 / v3.1 must NOT inherit the residue** — neither the `.hermes/` local-state
-  root nor the CE bootstrapping-harness names in its code/schema surface. This is
+- **v3 / v3.1 no longer hard-require `.hermes/` for user-facing state** — the
+  active v3 state root is `.ce/state`; ce-hermes-retirement completes the
+  user-facing retirement of the inherited local-state precondition while leaving
+  v1 coexistence intact.
+- **v3 / v3.1 must NOT inherit the residue** — neither a `.hermes/` local-state
+  hard requirement nor the CE bootstrapping-harness names in its code/schema surface. This is
   enforced **by machine, not by chance**: green on day one (the v3 surface is
   clean) and ratcheting.
 
@@ -48,20 +52,20 @@ harness, nothing else.
 
 **Scope exclusions** (the check does NOT scan these):
 
-- **v3 docs** — they legitimately point to the current `.hermes/research/` root
-  (the live local-state location until the v3 neutral root is wired in
-  production at G-7);
+- **v3 docs** — historical/research documents may legitimately point to archived
+  `.hermes/research/` provenance; current user-facing functional docs must use
+  `.ce/state`;
 - the **v1 / shared** surface — v1 checks legitimately validate v1's `.hermes/`
   layout;
 - the **grandfathered legacy corpus** (`specs/001`/`002` + the docs mirroring
   them).
 
-**Scoped exception to the v1 exclusion:** the load-bearing `ce launch` surface is
-now the live spawn path for v3 governed seats. Its MCP config and lifecycle
-ledger defaults are scanned for `.hermes/` path residue and must use
-`_versions.V3_LOCAL_STATE_ROOT` (`.ce/state`) instead. This does not authorize a
-full v1 rename; lane/PCO/worker/fan-in surfaces remain under the deferred v1
-freeze until a separate ratified migration.
+**Scoped exception to the v1 exclusion:** the load-bearing user-facing surfaces
+now default to `_versions.V3_LOCAL_STATE_ROOT` (`.ce/state`) for governed state.
+The ce-hermes-retirement change completes this cleanup for onboarding, deployed
+runsc defaults, hook evidence roots, and current functional docs. This does not
+authorize a full v1 rename; templates, schemas, and v1-only surfaces remain under
+the deferred v1 freeze until a separate ratified migration.
 
 ## Neutral v3 local-state convention
 
@@ -88,10 +92,10 @@ or wires v3 local state under `.hermes/`.
 ## Deferred (NOT this contract's concern)
 
 The full **legacy-terminology-corpus migration** (`specs/001`/`002` + the docs
-mirroring them: `Source`/`Hermes` → Operator/Controller) and the **v1
-`.hermes/`→`.ce/` rename** migrate grandfathered/frozen legacy and touch the live
-v1 substrate. They belong together in ONE separate, post-pilot, ratifiable
-terminology/naming-migration gate.
+mirroring them: `Source`/`Hermes` → Operator/Controller) and any rename of
+v1-frozen `.hermes/` templates/schema constants migrate grandfathered legacy and
+touch the live v1 substrate. They belong together in ONE separate, post-pilot,
+ratifiable terminology/naming-migration gate.
 
 See also: `docs/architecture/agent-interaction-model.md` (current-terminology
 note), `creator_engine_validator/checks/version_boundary.py` (the sibling v1⊥v3

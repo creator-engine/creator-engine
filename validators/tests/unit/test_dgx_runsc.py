@@ -20,7 +20,7 @@ ENTRYPOINT = REPO_ROOT / "deploy" / "dgx-runsc" / "herdr-harness-entrypoint.sh"
 DOCKERFILE = REPO_ROOT / "deploy" / "dgx-runsc" / "Dockerfile"
 HOOK = REPO_ROOT / ".codex" / "hooks" / "ce-pretooluse-codex.py"
 HOOK_COMMAND = (
-    "CE_LEDGER_ROOT=/workspace/creator-engine/.hermes/active-work-ledger "
+    "CE_LEDGER_ROOT=/workspace/creator-engine/.ce/state/active-work-ledger "
     "PYTHONPATH=/workspace/creator-engine/validators "
     "python3 /workspace/creator-engine/.codex/hooks/ce-pretooluse-codex.py"
 )
@@ -384,8 +384,8 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
 
 def test_codex_config_embeds_container_visible_governance_refs(tmp_path: Path) -> None:
     config_path = tmp_path / "contained-codex.toml"
-    host_ledger = "/repo/creator-engine/.hermes/active-work-ledger"
-    host_ref = "/repo/creator-engine/.hermes/reviewer-authority.ce.yml"
+    host_ledger = "/repo/creator-engine/.ce/state/active-work-ledger"
+    host_ref = "/repo/creator-engine/.ce/state/reviewer-authority.ce.yml"
 
     run_wrapper(
         "tui",
@@ -397,8 +397,8 @@ def test_codex_config_embeds_container_visible_governance_refs(tmp_path: Path) -
     text = config_path.read_text(encoding="utf-8")
     assert "allow_managed_hooks_only = true" in text
     assert (
-        "CE_LEDGER_ROOT=/workspace/creator-engine/.hermes/active-work-ledger "
-        "CE_REVIEWER_AUTHORITY_REF=/workspace/creator-engine/.hermes/reviewer-authority.ce.yml "
+        "CE_LEDGER_ROOT=/workspace/creator-engine/.ce/state/active-work-ledger "
+        "CE_REVIEWER_AUTHORITY_REF=/workspace/creator-engine/.ce/state/reviewer-authority.ce.yml "
         "PYTHONPATH=/workspace/creator-engine/validators "
         "python3 /workspace/creator-engine/.codex/hooks/ce-pretooluse-codex.py"
     ) in text

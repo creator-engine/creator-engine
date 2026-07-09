@@ -7,7 +7,7 @@
 # deterministic closeout / completion_report_ref pointers this hook is
 # forbidden from inferring. This hook therefore does NOT parse the transcript
 # and never emits {"decision":"block"}. It records a best-effort, non-blocking
-# advisory observation under the ignored `.hermes/` evidence root and exits 0.
+# advisory observation under the ignored `.ce/state/` evidence root and exits 0.
 # See docs/operations/CLAUDE_CODE_HOOK_PACK.md.
 set -eu
 
@@ -23,7 +23,7 @@ CE_POSTURE_ROOT=$(ce_hook_posture_root "$CE_REPO_ROOT")
 # block on a full pipe.
 cat >/dev/null 2>&1 || true
 
-# Best-effort, non-blocking observability under the ignored `.hermes/` root.
+# Best-effort, non-blocking observability under the ignored `.ce/state/` root.
 ce_hook_log_observation "$CE_POSTURE_ROOT" "Stop"
 
 # Advisory-only: emit no decision (no-decision == allow), never block.

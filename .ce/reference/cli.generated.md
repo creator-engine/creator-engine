@@ -619,7 +619,7 @@ Options:
 | Option | Required | Choices | Description |
 | --- | --- | --- | --- |
 | `--request` | yes |  | path to the fan-in request (YAML/JSON) |
-| `--packet-root` | yes |  | ignored output root for the packet (e.g. .hermes/fan-in/) |
+| `--packet-root` | yes |  | ignored output root for the packet (e.g. .ce/state/fan-in/) |
 | `--repo-root` | no |  | repo root for the git-ignore guard |
 | `--packet-id` | no |  | override the request's packet_id |
 | `--ratify` | no |  | refuse-only flag: ratification is never granted by fan-in (always refused) |
@@ -678,7 +678,7 @@ Options:
 | `--takeover-evidence` | no |  | path to a ce takeover --dry-run --json evidence packet that authorizes role=controller launch |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |
-| `--mcp-config` | no |  | CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config) |
+| `--mcp-config` | no |  | CE-owned MCP config path inside the repo for strict MCP pinning |
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |
@@ -751,12 +751,12 @@ Options:
 | `--prompt` | yes |  | path to the consumed prompt pointer |
 | `--prompt-sha` | yes |  | expected byte-level SHA256 of --prompt |
 | `--repo-root` | yes |  |  |
-| `--ledger-root` | yes |  | path to .hermes/active-work-ledger |
+| `--ledger-root` | yes |  | path to .ce/state/active-work-ledger |
 | `--handoff` | no |  | optional consumed handoff pointer path |
 | `--handoff-sha` | no |  | expected byte-level SHA256 of --handoff |
 | `--command` | no |  | optional local command to run in the pane (defaults to a safe inert placeholder) |
 | `--claude-arg` | no |  | repeatable extra arg appended to a claude --command (use --claude-arg=<value> for dashed values) |
-| `--mcp-config` | no |  | CE-owned MCP config path inside the repo / .hermes (pins --strict-mcp-config) |
+| `--mcp-config` | no |  | CE-owned MCP config path inside the repo for strict MCP pinning |
 | `--completion-report-ref` | no |  | deterministic completion-report pointer for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer for Ring 0 closeout verification |
 | `--operating-mode` | no | `auto, strict, transcendence` | lane operating mode (default: strict); auto/transcendence require --tenant-policy |
@@ -830,7 +830,7 @@ Options:
 | `--takeover-evidence` | no |  | path to a ce takeover --dry-run --json evidence packet that authorizes role=controller launch |
 | `--claude-arg` | no |  | repeatable extra arg passed to the claude harness (use --claude-arg=<value> for dashed values) |
 | `--codex-arg` | no |  | repeatable allowlisted extra arg passed to the codex harness (use --codex-arg=<value> for dashed values) |
-| `--mcp-config` | no |  | CE-owned MCP config path under .ce/state/launch (pins --strict-mcp-config) |
+| `--mcp-config` | no |  | CE-owned MCP config path inside the repo for strict MCP pinning |
 | `--completion-report-ref` | no |  | deterministic completion-report pointer recorded for Ring 0 closeout verification |
 | `--closeout-file` | no |  | deterministic closeout file pointer recorded for Ring 0 closeout verification |
 | `--runtime-policy` | no |  | v3.5-F: path to the ratified runtime policy whose resource_envelopes bound this seat (systemd-run --user wrap); --dry-run renders the resource_bound block offline |
@@ -863,7 +863,7 @@ Options:
 | `--occurred-at` | yes |  | ISO-8601 UTC timestamp or source-controlled ref |
 | `--repo-root` | yes |  |  |
 | `--side-effect-ledger-root` | yes |  |  |
-| `--active-work-ledger-root` | yes |  | path to .hermes/active-work-ledger |
+| `--active-work-ledger-root` | yes |  | path to .ce/state/active-work-ledger |
 | `--actor-role` | no | `architect, controller, implementer, reviewer, verification` |  |
 | `--pane-ref` | no |  |  |
 | `--subject-ref` | no |  |  |
@@ -951,7 +951,7 @@ Options:
 | `--operating-mode` | yes |  | operating-mode context strict\|auto\|transcendence (recorded only; an unknown mode is refused with G2-PCL-MODE-INVALID) |
 | `--recorded-at` | yes |  | UTC timestamp YYYY-MM-DDThh:mm:ssZ |
 | `--body-json` | yes |  | record body mapping as JSON |
-| `--repo-root` | no |  | repo root (records must not target .hermes/) |
+| `--repo-root` | no |  | repo root (records must target .ce/state for live local state) |
 | `--key-id` | no |  | shape-only signature key_id |
 | `--signature-value` | no |  | refuse-guarded: must stay reserved-inactive (no cryptography) |
 | `--json` | no |  | emit machine-readable JSON |
@@ -1144,7 +1144,7 @@ Options:
 | Option | Required | Choices | Description |
 | --- | --- | --- | --- |
 | `--request` | yes |  | path to the dry-run request (YAML/JSON) |
-| `--preview-root` | yes |  | ignored output root for the preview (e.g. .hermes/integration-queue/) |
+| `--preview-root` | yes |  | ignored output root for the preview (e.g. .ce/state/integration-queue/) |
 | `--repo-root` | no |  | repo root for the git-ignore guard |
 | `--preview-id` | no |  | override the request's preview_id |
 | `--json` | no |  | emit machine-readable JSON |
@@ -1414,7 +1414,7 @@ Options:
 | `--lane-id` | yes |  |  |
 | `--claim-ref` | yes |  | claim path relative to --active-work-ledger-root |
 | `--lease-ref` | yes |  | lease path relative to --active-work-ledger-root |
-| `--active-work-ledger-root` | yes |  | path to .hermes/active-work-ledger |
+| `--active-work-ledger-root` | yes |  | path to .ce/state/active-work-ledger |
 | `--container-instance-root` | yes |  | root for container-instance records |
 | `--instance-id` | yes |  |  |
 | `--started-at` | no |  | ISO-8601 UTC start timestamp (defaults to now) |

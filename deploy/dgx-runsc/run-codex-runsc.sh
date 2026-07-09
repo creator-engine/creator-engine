@@ -40,7 +40,7 @@ Environment:
   CE_DGX_CONTAINER_EGRESS_BROKER_SOCKET Container broker socket path
                             (default: /run/ce-egress-broker.sock)
   CE_LEDGER_ROOT            Host or container Active-Work Ledger root forwarded to the managed
-                            Codex PreToolUse hook (default: container repo .hermes ledger)
+                            Codex PreToolUse hook (default: container repo .ce/state ledger)
   CE_REVIEWER_AUTHORITY_REF Reviewer-authority envelope ref forwarded to the managed hook
   CE_DGX_SEAT_LOG_DIR       Host log dir mounted at /var/log/ce-seat
                             (default: ~/.ce/logs/seats/<seat-id>)
@@ -294,7 +294,7 @@ prepare_contained_codex_config() {
   local config_dir hook_command ledger_root reviewer_ref
   config_dir="$(dirname "${CE_DGX_CONTAINED_CODEX_CONFIG}")"
   mkdir -p "${config_dir}"
-  ledger_root="${CE_LEDGER_ROOT:-${CE_DGX_REPO}/.hermes/active-work-ledger}"
+  ledger_root="${CE_LEDGER_ROOT:-${CE_DGX_REPO}/.ce/state/active-work-ledger}"
   ledger_root="$(container_repo_path "${ledger_root}")"
   hook_command="CE_LEDGER_ROOT=$(shell_quote_env_value "${ledger_root}")"
   if [ -n "${CE_REVIEWER_AUTHORITY_REF:-}" ]; then

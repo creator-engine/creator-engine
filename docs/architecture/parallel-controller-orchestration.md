@@ -106,7 +106,7 @@ mechanics arrive in later slices.
 | **Completion Report** | Deterministic return packet for every Source-ratified gate. Binds envelope+SHA to outcome, evidence, and the next ratifiable prompt pointer. | Slice 0.5: tracked schema (`schemas/completion-report.schema.yaml`); prose protocol [`../operations/COMPLETION_REPORT_PROTOCOL.md`](../operations/COMPLETION_REPORT_PROTOCOL.md); per-class templates; CR-001/CR-002/CR-003 validators. |
 | **Fan-in verification** | Reconstructs candidate integrated state from lane artifacts, validator output, ledgers, reports, pane records, and side-effect records rather than lane self-report. | Slice 5: prose protocol [`../operations/PCO_FANIN_PROTOCOL.md`](../operations/PCO_FANIN_PROTOCOL.md); schema/examples/validator/CLI/runtime implementation deferred. |
 
-The runtime directory shape (`.hermes/active-work-ledger/`), the
+The runtime directory shape (`.ce/state/active-work-ledger/`), the
 atomic-write rule (temp + fsync + rename), the advisory-lock rule
 (`flock(2)` on `locks/<lane-id>.lock`), and the pre-launch
 read/validate discipline are documented in
@@ -207,7 +207,7 @@ runtime tooling after.
    visible-pane identity records: which Architect, Implementer,
    Reviewer, or Verification pane is bound to which claim, on which
    host. Runtime records are ignored local state under
-   `.hermes/active-work-ledger/panes/<controller-id>/<lane-id>.yaml`.
+   `.ce/state/active-work-ledger/panes/<controller-id>/<lane-id>.yaml`.
    Operator-visible compliance requires tmux identity
    (`session_id`, `window_id`, `pane_id`); `plain_terminal` and
    `unknown` remain transitional or legacy evidence categories only.

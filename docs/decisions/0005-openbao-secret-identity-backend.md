@@ -59,9 +59,11 @@ crosswalk:
 
 CE now runs a growing fleet of dev and reviewer seats with unique identities.
 The retired shared-author credential pattern cannot support that model. Current
-secrets are scattered across host-local paths such as `~/.ce-keys`,
-`~/.hermes/.env`, per-host GitHub App PEMs, reviewer tokens, and bootstrap
-tokens. That blocks portable containerized seats, per-dev identity custody, and
+secrets are scattered across host-local paths such as `~/.ce-keys`, host-local
+environment files, per-host GitHub App PEMs, reviewer tokens, and bootstrap
+tokens. Current CE credential material is modeled as SecretRefs backed by
+OpenBao/`SecretIdentityBackend`, with temporary PEM files kept on tmpfs rather
+than in repository state. That blocks portable containerized seats, per-dev identity custody, and
 the ce-ops#117 shared-App waitlist path because users must not receive the
 shared App private key ([ce-ops-113], [design]).
 

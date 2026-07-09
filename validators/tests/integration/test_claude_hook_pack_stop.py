@@ -6,7 +6,7 @@ text. Hard Stop blocking (closeout / completion-report pointer verification)
 is deferred to the Ring 0 kernel (CC-G-D), which injects the deterministic
 pointers this hook is forbidden from inferring. These tests run the real
 POSIX-sh hook as a subprocess and prove it never emits a block and records a
-best-effort advisory observation under the ignored ``.hermes/`` evidence root.
+best-effort advisory observation under the ignored ``.ce/state/`` evidence root.
 """
 
 from __future__ import annotations
@@ -95,10 +95,10 @@ def test_governed_stop_never_blocks(tmp_path):
         assert json.loads(out).get("decision") != "block"
 
 
-def test_stop_logs_advisory_observation_under_hermes(tmp_path):
+def test_stop_logs_advisory_observation_under_state(tmp_path):
     proc = _run_stop(tmp_path, {"hook_event_name": "Stop"})
     assert proc.returncode == 0
-    obs = tmp_path / ".hermes/cc-g-c-hook-observations/observations.ndjson"
+    obs = tmp_path / ".ce/state/cc-g-c-hook-observations/observations.ndjson"
     assert obs.is_file()
     record = json.loads(obs.read_text(encoding="utf-8").splitlines()[-1])
     assert record["hookEventName"] == "Stop"

@@ -155,13 +155,13 @@ merge, or otherwise mutate any state.
 If any preflight check fails, the consumer halts and escalates per
 §i rather than improvising a workaround.
 
-## g. No mixing of `.hermes` live state or handoff artifacts into upstream tracked docs
+## g. No mixing of `.ce/state` live state or legacy `.hermes` artifacts into upstream tracked docs
 
 Hermes / controller working state — including but not limited to
-`.hermes/` directories, handoff markdowns, scheduling artifacts,
-session backups, and forensic transcripts — is **runtime-local** and
-MUST NOT be propagated into upstream tracked documents under this
-envelope.
+`.ce/state/` directories, legacy `.hermes/` artifacts, handoff markdowns,
+scheduling artifacts, session backups, and forensic transcripts — is
+**runtime-local** and MUST NOT be propagated into upstream tracked documents
+under this envelope.
 
 1. Handoff artifacts MAY be referenced by repo-relative path from a
    completion report, but their contents MUST NOT be copy-pasted
@@ -277,8 +277,8 @@ decisions, not consumer-side housekeeping:
    / repository setting) is privileged per Feature 001 FR-008 and is
    handled outside this protocol under a separately ratified
    envelope.
-5. **No `.hermes` / handoff leakage into governed artifacts.**
-   Hermes runtime state is referenced, not embedded.
+5. **No `.ce/state` live state, legacy `.hermes` artifacts, or handoff leakage
+   into governed artifacts.** Runtime state is referenced, not embedded.
 6. **No cross-project state.** The worktree is bounded to the
    canonical Creator Engine clone it lives under.
 7. **Privileged mutation classes remain Source-only** regardless of
@@ -298,8 +298,8 @@ This document satisfies the Slice E envelope's
 - Names preflight checks for current branch, HEAD, cleanliness,
   worktree list, auth / readiness, active panes, and stash isolation
   (§f).
-- States the no-mixing rule for `.hermes` live state and handoff
-  artifacts (§g).
+- States the no-mixing rule for `.ce/state` live state, legacy `.hermes`
+  artifacts, and handoff artifacts (§g).
 - States the no-cross-project-state-leakage rule (§h).
 - Enumerates prohibited Git / GitHub operations unless separately
   ratified (§i).
