@@ -2,7 +2,7 @@
 
 This per-PR carrier lists the closed authorized path-set for this branch and includes itself.
 
-- **Declared work class:** S
+- **Declared work class:** story
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
