@@ -1,9 +1,11 @@
 STATUS: READY
 BRANCH: ce-501-queue-canary
-COMMIT: 21c233bfd29cca27cafa0f19d55a25027e0d46d4
-COMMIT_SEMANTICS: validated implementation commit before the READY signal commit
-READY_SIGNAL_COMMIT: final pushed refs/heads/ce-501-queue-canary HEAD; verify via PR 919 headRefOid after push
+COMMIT: PR_919_HEAD_REF_OID_AFTER_FINAL_PUSH
+COMMIT_SEMANTICS: self-referential tracked-file commit hashes are impossible; resolve COMMIT by reading PR 919 headRefOid after the final push
+READY_SIGNAL_REF: refs/heads/ce-501-queue-canary
+READY_SIGNAL_VERIFY: gh pr view 919 --repo creator-engine/creator-engine --json headRefOid --jq .headRefOid
 PR: 919
+CANARY_CANONICAL_LAUNCHER_TEST: PASS
 CANARY_MODE_BANNER_TEST: PASS
 STATE_ROOT_ISOLATION_TEST: PASS
 BAO_REGRESSION_GUARD_TEST: PASS

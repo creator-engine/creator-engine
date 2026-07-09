@@ -422,6 +422,11 @@ main() {
     return
   fi
 
+  if is_canary_mode; then
+    main_uncontained "$@"
+    return
+  fi
+
   container_adapter "$@"
 }
 

@@ -19,7 +19,12 @@ def write_executable(path: Path, text: str) -> Path:
     return path
 
 
-def run_launcher(tmp_path: Path, env_overrides: dict[str, str | None]) -> subprocess.CompletedProcess[str]:
+def run_launcher(
+    tmp_path: Path,
+    env_overrides: dict[str, str | None],
+    *,
+    uncontained: bool = False,
+) -> subprocess.CompletedProcess[str]:
     fake_daemon = write_executable(tmp_path / "fake-queue-daemon", "#!/bin/sh\nexit 0\n")
     fake_lease_python = write_executable(
         tmp_path / "fake-lease-python",
@@ -30,12 +35,13 @@ def run_launcher(tmp_path: Path, env_overrides: dict[str, str | None]) -> subpro
     )
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "CE_DAEMON_UNCONTAINED": "1",
         "CE_DAEMON_LEASE_PYTHON": str(fake_lease_python),
         "CE_DAEMON_LEASE_ROOT": str(tmp_path / "leases"),
         "CE_QUEUE_DAEMON_BIN": str(fake_daemon),
         "PYTHONPATH": str(REPO_ROOT / "validators"),
     }
+    if uncontained:
+        env["CE_DAEMON_UNCONTAINED"] = "1"
     for key, value in env_overrides.items():
         if value is None:
             env.pop(key, None)
@@ -66,6 +72,7 @@ def test_canary_mode_requires_no_bao_vars(tmp_path: Path) -> None:
     result = run_launcher(tmp_path, canary_env(tmp_path))
 
     assert result.returncode == 0, result.stderr
+    assert "container engine not found" not in result.stderr
     assert "missing required environment variable: BAO_TOKEN" not in result.stderr
     argv = shlex.split(result.stdout)
     assert "--dry-run" in argv
@@ -100,6 +107,7 @@ def test_non_canary_mode_still_requires_bao(tmp_path: Path) -> None:
             "CE_GATE_REPO": "creator-engine/creator-engine",
             "CE_GATE_AUTHORIZED_REVIEWERS": "authorized-reviewer",
         },
+        uncontained=True,
     )
 
     assert result.returncode != 0
