@@ -6,11 +6,12 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=21
+AUTHORIZED_PATHS_COUNT=24
 
-AUTHORIZED_PATHS_SHA256=e784d9ce315651a151d97c4b9112b4a20b604eaa8937a5b07e8aaf96859ce28f
+AUTHORIZED_PATHS_SHA256=f6bb4a7e9c31862eea158053e86e8835a4a778ae4a031cfc2cf174beca7d1382
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-hermes-retirement.md
 .ce/pr-manifests/ce-hermes-retirement.md
 .ce/reference/cli.generated.md
@@ -32,4 +33,6 @@ validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/ce_onboard.py
 validators/tests/unit/test_ce_onboard.py
 validators/tests/unit/test_ce_onboard_cli.py
+validators/tests/unit/test_dgx_runsc.py
+validators/tests/unit/test_vps_runsc_launcher.py
 ```

@@ -4061,4 +4061,129 @@ records:
   verification_method:
     evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
     type: static
+- claim:
+    object: ce-state-layout
+    predicate: requires-precondition
+    subject: ce-onboard
+  content_hash: 1648316b6574ee6322dc71226a47135f687967910003d16c18d52c18cc4bb39f
+  evidence_ref: validators/creator_engine_validator/ce_onboard.py
+  id: brain-assertion-hermes-retirement-onboard-precondition
+  kind: brain-assertion
+  prev_hash: d98dc13b21879e1735f715953ec7f27ffa5aa9695ac5afc6c9cb358e213c6e50
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 155
+  statement: ce onboard requires the .ce/state layout as its hard precondition instead
+    of a .hermes gitignore entry.
+  status: active
+  superseded_by: null
+  type: decision
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/ce_onboard.py
+    type: manual-attested
+- claim:
+    object: advisory-only-warning
+    predicate: is-severity
+    subject: ce-onboard-hermes-check
+  content_hash: 460ce413588ba00c22a7821059b81baff4c0774f0c25bb4f92193bf82fb98c54
+  evidence_ref: validators/creator_engine_validator/ce_onboard.py
+  id: brain-assertion-hermes-retirement-hermes-check-advisory
+  kind: brain-assertion
+  prev_hash: 1648316b6574ee6322dc71226a47135f687967910003d16c18d52c18cc4bb39f
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 156
+  statement: .hermes directory presence without a gitignore entry is advisory-only
+    in ce onboard.
+  status: active
+  superseded_by: null
+  type: decision
+  verification_method:
+    evidence_ref: validators/creator_engine_validator/ce_onboard.py
+    type: manual-attested
+- claim:
+    object: .ce/state/active-work-ledger
+    predicate: defaults-to
+    subject: runsc-launchers-ledger-root
+  content_hash: 52408b8addbbc02f054b7772e4b54432d0a0e219a10413428af143ce3786c8b4
+  evidence_ref: deploy/dgx-runsc/run-codex-runsc.sh
+  id: brain-assertion-hermes-retirement-launcher-ledger-path
+  kind: brain-assertion
+  prev_hash: 460ce413588ba00c22a7821059b81baff4c0774f0c25bb4f92193bf82fb98c54
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 157
+  statement: DGX and VPS runsc launchers default CE_LEDGER_ROOT to .ce/state/active-work-ledger.
+  status: active
+  superseded_by: null
+  type: decision
+  verification_method:
+    evidence_ref: deploy/dgx-runsc/run-codex-runsc.sh
+    type: manual-attested
+- claim:
+    object: .ce/state
+    predicate: uses-canonical-root
+    subject: ce-hook-scripts-evidence-root
+  content_hash: 9ecca133e42694e76ef8427e7b3348e71e61143fd0c61ed565147d429c8d113a
+  evidence_ref: .claude/hooks/ce-hook-common.sh
+  id: brain-assertion-hermes-retirement-hook-evidence-root
+  kind: brain-assertion
+  prev_hash: 52408b8addbbc02f054b7772e4b54432d0a0e219a10413428af143ce3786c8b4
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 158
+  statement: CE hook scripts use .ce/state as the evidence root after retiring .hermes
+    for v3 surfaces.
+  status: active
+  superseded_by: null
+  type: decision
+  verification_method:
+    evidence_ref: .claude/hooks/ce-hook-common.sh
+    type: manual-attested
+- claim:
+    object: .ce/state
+    predicate: name-canonical-state-root
+    subject: user-facing-v3-docs
+  content_hash: b66528dd4607d0d5d3616ee410b8dda80c295487a2bce2399bb52b14702ac46b
+  evidence_ref: docs/contracts/v3-naming-hygiene.md
+  id: brain-assertion-hermes-retirement-docs-updated
+  kind: brain-assertion
+  prev_hash: 9ecca133e42694e76ef8427e7b3348e71e61143fd0c61ed565147d429c8d113a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 159
+  statement: User-facing v3 documentation names .ce/state as canonical and treats
+    .hermes as legacy or advisory.
+  status: active
+  superseded_by: null
+  type: decision
+  verification_method:
+    evidence_ref: docs/contracts/v3-naming-hygiene.md
+    type: manual-attested
+- claim:
+    object: legacy-hermes-and-ce-state
+    predicate: documents-compatibility
+    subject: gitignore-state-entries
+  content_hash: bc25f0e0bac1c64623f6c1dc92c42b7e5aa7d5549375dc9d9898e485f351be2c
+  evidence_ref: .gitignore
+  id: brain-assertion-hermes-retirement-gitignore-annotation
+  kind: brain-assertion
+  prev_hash: b66528dd4607d0d5d3616ee410b8dda80c295487a2bce2399bb52b14702ac46b
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 160
+  statement: .gitignore keeps .hermes as legacy v1 compatibility and confirms .ce/state
+    is ignored.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .gitignore
+    type: manual-attested
 schema_version: '1'
