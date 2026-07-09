@@ -18,6 +18,8 @@ Options:
 
 Required environment:
   CE_SEAT_WATCH_SEAT_PROBES       JSON array: [{"seat_id":"<seat-id>","argv":["<probe-command>"]}]
+                                  (argv MUST be read-only pane-read commands; the daemon
+                                   cannot reject write-capable commands — operator-enforced)
   CE_SEAT_WATCH_FEED_PATH         absolute path to append-only JSONL event feed
   CE_DAEMON_LEASE_ROOT            singleton lease root
 

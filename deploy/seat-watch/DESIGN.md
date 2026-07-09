@@ -159,6 +159,17 @@ until it disappears and appears again in a later successful probe result.
 
 ## Configuration
 
+> **Operator safety — probe argv must be read-only.** Probe `argv` entries must be
+> read-only pane-read commands (e.g. `herdr pane read w1:p1 --source recent --lines 80`).
+> The daemon cannot validate or reject write-capable commands; operator-side
+> configuration is the only enforcement of the observe-only invariant.
+>
+> **Event semantics for consumers.** `blocked_signal` fires on ANY pane line matching
+> `BLOCKED <word> <text>` — brief/dispatch text visible in a pane can produce spurious
+> events; configure probes to return terminal output, not document content. `ready_signal`
+> and `blocked_signal` are emitted once per matching line PER POLL while the line remains
+> visible — feed consumers must deduplicate by (seat_id, branch, sha).
+
 Required environment:
 
 | Variable | Description |

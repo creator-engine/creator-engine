@@ -4,7 +4,7 @@ date: 2026-07-09
 kind: added
 scope: seat-watch daemon observe-only slice 1
 issue: ce-p5-seatwatch-s1
-work_class: story
+work_class: feature
 ---
 
 **Add seat-watch daemon slice 1 (observe-only).**
