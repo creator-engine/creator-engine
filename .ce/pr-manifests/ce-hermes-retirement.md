@@ -6,9 +6,9 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=25
+AUTHORIZED_PATHS_COUNT=27
 
-AUTHORIZED_PATHS_SHA256=f175485bfb01ce6aafb16808f05dfdd549d5737d6d5f4a4c8f33329d22776144
+AUTHORIZED_PATHS_SHA256=21434cbdfe219cf88ed0e91b58b9f073c97e790367dad198dd904ebed6fa5617
 
 ```text
 .ce/brain/assertions.yaml
@@ -32,6 +32,8 @@ docs/delivery/NEXT_TASK_PROTOCOL.md
 docs/delivery/WORKTREE_RUNTIME_PROTOCOL.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/ce_onboard.py
+validators/tests/integration/test_claude_hook_pack_stop.py
+validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_ce_onboard.py
 validators/tests/unit/test_ce_onboard_cli.py
 validators/tests/unit/test_dgx_runsc.py

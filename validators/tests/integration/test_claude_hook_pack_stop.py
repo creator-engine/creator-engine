@@ -98,7 +98,7 @@ def test_governed_stop_never_blocks(tmp_path):
 def test_stop_logs_advisory_observation_under_hermes(tmp_path):
     proc = _run_stop(tmp_path, {"hook_event_name": "Stop"})
     assert proc.returncode == 0
-    obs = tmp_path / ".hermes/cc-g-c-hook-observations/observations.ndjson"
+    obs = tmp_path / ".ce/state/cc-g-c-hook-observations/observations.ndjson"
     assert obs.is_file()
     record = json.loads(obs.read_text(encoding="utf-8").splitlines()[-1])
     assert record["hookEventName"] == "Stop"
