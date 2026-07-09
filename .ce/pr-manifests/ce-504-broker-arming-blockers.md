@@ -6,14 +6,13 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-AUTHORIZED_PATHS_COUNT=8
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=d740bf20ade2d13cf69aec144b0e0755add2590431f08ee6330e0e56047f2031
+AUTHORIZED_PATHS_SHA256=c8200edee802eebb7845a466b38dbed375ece5e277f6b1e246b6abddf53b9a61
 
 ```text
 .ce/changelog/ce-504-broker-arming-blockers.md
 .ce/pr-manifests/ce-504-broker-arming-blockers.md
-.ce/wt-504/READY
 tools/host-ops-broker/host_ops_broker/audit.py
 tools/host-ops-broker/host_ops_broker/broker.py
 tools/host-ops-broker/host_ops_broker/config.py
