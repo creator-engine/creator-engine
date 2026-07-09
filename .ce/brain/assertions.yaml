@@ -4148,7 +4148,10 @@ records:
     object: .ce/state
     predicate: name-canonical-state-root
     subject: user-facing-v3-docs
-  content_hash: 89bed3350190875e284b870162b4523cdd057b83c3eb5174d4ed0801633ea58f
+    updated_docs:
+    - docs/contracts/v3-naming-hygiene.md
+    - docs/operations/CLAUDE_CODE_HOOK_PACK.md
+  content_hash: 5c8235dbe1471b89465e252f5cc2aef307268aabc60a8a82626d6ed41e4046be
   evidence_ref: docs/contracts/v3-naming-hygiene.md
   id: brain-assertion-hermes-retirement-docs-updated
   kind: brain-assertion
@@ -4157,7 +4160,8 @@ records:
   schema_version: '1'
   scope: global
   sequence: 159
-  statement: User-facing v3 documentation names .ce/state as canonical and treats
+  statement: User-facing v3 documentation, including docs/contracts/v3-naming-hygiene.md
+    and docs/operations/CLAUDE_CODE_HOOK_PACK.md, names .ce/state as canonical and treats
     .hermes as legacy or advisory.
   status: active
   superseded_by: null
@@ -4169,11 +4173,11 @@ records:
     object: legacy-hermes-and-ce-state
     predicate: documents-compatibility
     subject: gitignore-state-entries
-  content_hash: c3cabbdcc0b28c844094dc994b93cd8ef894093b79cba5e6cf0b30fefdc05e50
+  content_hash: 757233a49b3cb28679a3a83848337cefe5a31bfb826e8eceafebe0c54d7571a0
   evidence_ref: .gitignore
   id: brain-assertion-hermes-retirement-gitignore-annotation
   kind: brain-assertion
-  prev_hash: 89bed3350190875e284b870162b4523cdd057b83c3eb5174d4ed0801633ea58f
+  prev_hash: 5c8235dbe1471b89465e252f5cc2aef307268aabc60a8a82626d6ed41e4046be
   record_type: brain_assertion
   schema_version: '1'
   scope: global
