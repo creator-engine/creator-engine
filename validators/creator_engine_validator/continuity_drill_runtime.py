@@ -18,6 +18,9 @@ DRILL_KIND = "ce-continuity-drill-record"
 SCHEMA_VERSION = 1
 WEEKLY_INTERVAL_DAYS = 7
 REQUIRED_CLEAN_RUNS = 2
+STANDBY_LIVENESS_ABSENT_NOTE = (
+    "ABSENT — D6 Drill #1 gap; provision standby surface per ce-502"
+)
 FORBIDDEN_MECHANICS = (
     "merge",
     "approve",
@@ -82,6 +85,22 @@ class CadenceStatus:
 
 
 @dataclass(frozen=True)
+class StandbyLiveness:
+    ok: bool
+    status: str
+    note: str
+    evidence: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "status": self.status,
+            "note": self.note,
+            "evidence": dict(self.evidence),
+        }
+
+
+@dataclass(frozen=True)
 class DrillRecord:
     predecessor: str
     harness: str
@@ -92,9 +111,10 @@ class DrillRecord:
     posture: controller_posture.PostureBanner
     takeover_plan: takeover_runtime.TakeoverPlan
     gate_cycle: dict[str, Any]
+    standby_liveness: StandbyLiveness
 
     @property
-    def clean(self) -> bool:
+    def base_clean(self) -> bool:
         return bool(
             self.takeover_plan.predecessor_detected
             and self.takeover_plan.ring0_ok
@@ -103,8 +123,20 @@ class DrillRecord:
         )
 
     @property
+    def status(self) -> str:
+        if not self.base_clean:
+            return "RED"
+        if not self.standby_liveness.ok:
+            return "WARNING"
+        return "GREEN"
+
+    @property
+    def clean(self) -> bool:
+        return self.status == "GREEN"
+
+    @property
     def exit_code(self) -> int:
-        return 0 if self.clean else 1
+        return 1 if self.status == "RED" else 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -119,11 +151,13 @@ class DrillRecord:
             "posture": self.posture.to_dict(),
             "takeover_evidence": self.takeover_plan.to_dict(),
             "benign_gate_cycle": self.gate_cycle,
+            "standby_liveness": self.standby_liveness.to_dict(),
+            "status": self.status,
             "clean": self.clean,
         }
 
     def format_lines(self) -> list[str]:
-        clean = "CLEAN" if self.clean else "NEEDS-ATTENTION"
+        clean = "CLEAN" if self.status == "GREEN" else self.status
         lines = [
             f"ce continuity-drill: {clean}",
             f"cadence: {self.cadence.phase} ({self.cadence.reason})",
@@ -136,6 +170,7 @@ class DrillRecord:
             f"run at: {self.run_at}",
             f"host id: {self.host_id}",
             f"Ring-0 verify: {'PASS' if self.takeover_plan.ring0_ok else 'WOULD-REFUSE'}",
+            f"standby liveness: {self.standby_liveness.status} ({self.standby_liveness.note})",
             f"posture allowed: {self.posture.allowed_posture}",
             "benign governed gate cycle:",
         ]
@@ -254,6 +289,7 @@ def build_record(
     promotion_candidate: bool = False,
     environ: Mapping[str, str] | None = None,
     which: Any | None = None,
+    standby_liveness: bool | Mapping[str, Any] | None = None,
 ) -> DrillRecord:
     root = Path(repo_root).resolve()
     cadence = compute_cadence(
@@ -275,7 +311,15 @@ def build_record(
         dry_run=True,
         which=which,
     )
-    gate_cycle = _gate_cycle_proof(posture=posture, takeover_plan=takeover_plan)
+    resolved_standby_liveness = _standby_liveness_from_context(
+        standby_liveness=standby_liveness,
+        environ=environ,
+    )
+    gate_cycle = _gate_cycle_proof(
+        posture=posture,
+        takeover_plan=takeover_plan,
+        standby_liveness=resolved_standby_liveness,
+    )
     return DrillRecord(
         predecessor=predecessor,
         harness=harness,
@@ -286,6 +330,90 @@ def build_record(
         posture=posture,
         takeover_plan=takeover_plan,
         gate_cycle=gate_cycle,
+        standby_liveness=resolved_standby_liveness,
+    )
+
+
+def _standby_liveness_from_context(
+    *,
+    standby_liveness: bool | Mapping[str, Any] | None,
+    environ: Mapping[str, str] | None,
+) -> StandbyLiveness:
+    if standby_liveness is not None:
+        return _standby_liveness_from_value(standby_liveness)
+
+    env = environ or {}
+    raw_json = env.get("CE_STANDBY_LIVENESS_JSON")
+    if raw_json:
+        try:
+            payload = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            return StandbyLiveness(
+                ok=False,
+                status="WARNING",
+                note=f"invalid CE_STANDBY_LIVENESS_JSON: {exc}",
+                evidence={"source": "CE_STANDBY_LIVENESS_JSON"},
+            )
+        if isinstance(payload, Mapping):
+            return _standby_liveness_from_value(payload)
+        return StandbyLiveness(
+            ok=False,
+            status="WARNING",
+            note="CE_STANDBY_LIVENESS_JSON must decode to an object",
+            evidence={"source": "CE_STANDBY_LIVENESS_JSON"},
+        )
+
+    raw_flag = env.get("CE_STANDBY_LIVENESS")
+    if raw_flag is not None:
+        return StandbyLiveness(
+            ok=False,
+            status="WARNING",
+            note=(
+                "CE_STANDBY_LIVENESS is not accepted as standby proof; expected "
+                "CE_STANDBY_LIVENESS_JSON from ce takeover --dry-run --json"
+            ),
+            evidence={"source": "CE_STANDBY_LIVENESS", "value": raw_flag},
+        )
+
+    return StandbyLiveness(
+        ok=False,
+        status="WARNING",
+        note=STANDBY_LIVENESS_ABSENT_NOTE,
+        evidence={"source": "absent"},
+    )
+
+
+def _standby_liveness_from_value(value: bool | Mapping[str, Any]) -> StandbyLiveness:
+    if isinstance(value, bool):
+        return StandbyLiveness(
+            ok=False,
+            status="WARNING",
+            note=(
+                "standby liveness requires structured ce takeover --dry-run --json "
+                "evidence"
+            ),
+            evidence={"source": "boolean"},
+        )
+
+    evidence = dict(value)
+    ring0_verify = evidence.get("ring0_verify", {})
+    if not isinstance(ring0_verify, Mapping):
+        ring0_verify = {}
+    ring0_ok = ring0_verify.get("ok") is True
+    initial_state_ok = evidence.get("initial_state") == "AWAITING-OPERATOR"
+    ok = ring0_ok and initial_state_ok
+    if ok:
+        note = "standby emitted valid ce takeover --dry-run --json packet"
+    else:
+        note = (
+            "standby liveness packet invalid: expected ring0_verify.ok=true and "
+            "initial_state=AWAITING-OPERATOR"
+        )
+    return StandbyLiveness(
+        ok=ok,
+        status="PASS" if ok else "WARNING",
+        note=note,
+        evidence=evidence,
     )
 
 
@@ -293,6 +421,7 @@ def _gate_cycle_proof(
     *,
     posture: controller_posture.PostureBanner,
     takeover_plan: takeover_runtime.TakeoverPlan,
+    standby_liveness: StandbyLiveness,
 ) -> dict[str, Any]:
     takeover_actions = [dict(action) for action in takeover_plan.hydration_actions]
     steps = [
@@ -326,6 +455,12 @@ def _gate_cycle_proof(
                 "queue_decision": "not-submitted",
                 "merge_decision": "not-submitted",
             },
+        },
+        {
+            "name": "verify-standby-liveness",
+            "status": "PASS" if standby_liveness.ok else "WARNING",
+            "execute": False,
+            "evidence": standby_liveness.to_dict(),
         },
     ]
     step_side_effects = [step for step in steps if step.get("execute") is not False]
