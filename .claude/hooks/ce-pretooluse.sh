@@ -25,7 +25,7 @@ set -- hook-check --stdin --format claude \
 
 # Gate B: forward the launch-pinned absolute ledger root (if any) so the validator
 # scopes §7 posture to the seat's REAL ledger. Unset => omit the flag; the validator
-# then scopes to <posture_root>/.ce/state/active-work-ledger (never the whole tree).
+# uses its scoped posture fallback, never the whole tree.
 CE_LEDGER_ROOT_VAL=$(ce_hook_ledger_root)
 if [ -n "$CE_LEDGER_ROOT_VAL" ]; then
     set -- "$@" --ledger-root "$CE_LEDGER_ROOT_VAL"

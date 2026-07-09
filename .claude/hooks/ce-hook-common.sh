@@ -83,8 +83,8 @@ ce_hook_reviewer_authority_ref() {
 # to quote) so the entry hook forwards it to the validator as `--ledger-root`, which
 # scopes §7 posture claim/pane discovery to the seat's REAL ledger — reachable even
 # from a worktree that carries no local ledger. Empty/unset prints nothing: the
-# validator then scopes to <posture_root>/.ce/state/active-work-ledger, never the whole
-# tree, so tracked examples/** fixtures can never be matched as governing claims.
+# validator uses its scoped posture fallback, never the whole tree, so tracked
+# examples/** fixtures can never be matched as governing claims.
 ce_hook_ledger_root() {
     printf '%s\n' "${CE_LEDGER_ROOT:-}"
 }
