@@ -8,4 +8,10 @@ issue: ce-506
 
 **Add the daemon-vs-agent routing rubric.**
 
-Codifies the ratified routing rubric for deterministic daemons and bounded agent-organs, applies it organ by organ, defines the hydration contract, and specifies the AutoReview and belt-driven triage patterns. DESIGN-PREVIEW: hold for Operator review before merge.
+Proposes a routing rubric for deterministic daemons and bounded agent-organs,
+applies it organ by organ, defines an SSOT-first advisory hydration contract,
+and sketches AutoReview and belt-driven triage patterns. AutoReview is bound to
+trusted digest-pinned policy and cannot approve or ratify; recall remains a
+rebuildable non-canonical projection. DESIGN-PREVIEW: hold for Operator review
+before merge; this artifact is not ratified and grants no implementation
+authority.
