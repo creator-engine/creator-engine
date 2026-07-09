@@ -17,11 +17,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=8
 
-AUTHORIZED_PATHS_SHA256=d3813b2da53bb23bbeff2448fbf38e3b918a821ea3cbb029d3f43b7b7ab07b43
+AUTHORIZED_PATHS_SHA256=bc223c28c033641ac52343b7e2362d65d4e623b26e71d2d2aa32bb717b5830aa
 
 ```text
+.ce/changelog/ce-p8-review-daemon-s1.md
 .ce/pr-manifests/ce-p8-review-daemon-s1.md
 CHANGELOG.md
 validators/creator_engine_validator/_versions.py
