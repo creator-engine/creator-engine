@@ -219,3 +219,39 @@ def test_human_contributor_with_optional_owning_seat_and_host_is_valid() -> None
     )
 
     assert_valid(registry)
+
+
+# --- tenant App validation (added by ce-470 schema slice) ---
+
+
+def test_app_with_tenant_fields_valid() -> None:
+    """An app entry with the new optional tenant fields validates successfully."""
+    registry = valid_registry()
+    registry["apps"].append(
+        {
+            "app_id": 4103119,
+            "install_id": 141552951,
+            "repo_scope": "chmod735-dor/* (all repos, account-wide installation)",
+            "pem_custody": "file://~/.ce-keys/mythos-ce.2026-06-20.private-key.pem",
+            "app_name": "mythos-ce",
+            "client_id": "Iv23liuJp6OxfCWvwfSl",
+            "tenant_scope": "account-wide",
+        }
+    )
+
+    assert_valid(registry)
+
+
+def test_app_without_tenant_fields_still_valid() -> None:
+    """Existing app entries without tenant metadata remain valid."""
+    registry = valid_registry()
+
+    assert_valid(registry)
+
+
+def test_app_invalid_tenant_scope_rejected() -> None:
+    """tenant_scope must be one of the allowed enum values."""
+    registry = valid_registry()
+    registry["apps"][0]["tenant_scope"] = "all"
+
+    assert_invalid(registry, "apps/0/tenant_scope")
