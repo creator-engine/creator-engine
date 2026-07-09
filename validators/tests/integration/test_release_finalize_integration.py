@@ -51,10 +51,16 @@ def _ignore_copy_noise(_directory: str, names: list[str]) -> set[str]:
         ".tox",
         ".venv",
         "__pycache__",
+        "build",
+        "dist",
         "htmlcov",
         "node_modules",
     }
-    return {name for name in names if name in ignored or name.endswith((".pyc", ".pyo"))}
+    return {
+        name
+        for name in names
+        if name in ignored or name.endswith((".pyc", ".pyo", ".egg-info"))
+    }
 
 
 def _copy_repo_fixture(tmp_path: Path) -> Path:
