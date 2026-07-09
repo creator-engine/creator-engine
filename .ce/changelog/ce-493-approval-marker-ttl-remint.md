@@ -1,0 +1,1 @@
+Queue daemon approval capability markers that expire during retry loops are now re-minted only when a trusted current-head approval is still present. Expired markers without a current authorized review continue to fail closed with explicit evidence.
