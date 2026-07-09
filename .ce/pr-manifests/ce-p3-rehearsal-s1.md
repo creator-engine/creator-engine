@@ -18,7 +18,7 @@ Solo + CEO first-hour stage list, stubs live model/GitHub/PR/completed-run phase
 explicit `CE_REHEARSAL_STUB:` markers, and emits a schema-versioned JSON evidence bundle.
 
 Per-file purpose (closed path-set — 6 paths):
-- **`.ce/changelog/ce-p3-rehearsal-s1.md`** *(A)* — changelog fragment, work class story.
+- **`.ce/changelog/ce-p3-rehearsal-s1.md`** *(A)* — changelog fragment, work class M (feature).
 - **`.ce/pr-manifests/ce-p3-rehearsal-s1.md`** *(A)* — this carrier (self-inclusive).
 - **`deploy/rehearsal/README.md`** *(A)* — public usage, environment, container, stage, and stub inventory docs.
 - **`deploy/rehearsal/evidence-format.md`** *(A)* — authoritative JSON evidence schema and versioning policy.
