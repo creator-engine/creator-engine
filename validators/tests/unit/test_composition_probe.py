@@ -3,9 +3,9 @@ from __future__ import annotations
 import io
 import json
 import os
-import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -338,7 +338,7 @@ def test_production_default_validates_real_composed_commit_against_exact_main(
     assert observed["status"] == ""
     assert observed["feature"] == "feature\n"
     argv = observed["argv"]
-    assert argv[0] == str(Path(probe.sys.executable).resolve())
+    assert argv[0] == probe.sys.executable
     assert argv[1:5] == ["-I", "-m", "creator_engine_validator.ce_cli", "validate-pr"]
     assert argv[5:7] == ["--base", main_sha]
     assert list(parent.iterdir()) == []
@@ -429,11 +429,26 @@ def test_production_validator_subprocess_ignores_hostile_git_environment_and_hoo
     for key, value in hostile.items():
         monkeypatch.setenv(key, value)
 
-    venv_bin = tmp_path / "venv" / "bin"
+    venv_root = tmp_path / "venv"
+    venv_bin = venv_root / "bin"
     venv_bin.mkdir(parents=True)
     git = shutil.which("git")
     assert git is not None
     interpreter = venv_bin / "python"
+    interpreter.symlink_to(Path(probe.sys.executable).resolve())
+    (venv_root / "pyvenv.cfg").write_text(
+        "home = /usr/bin\ninclude-system-site-packages = false\n",
+        encoding="utf-8",
+    )
+    site_packages = (
+        venv_root
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    package = site_packages / "creator_engine_validator"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
     absent = (
         "GIT_DIR",
         "GIT_WORK_TREE",
@@ -441,20 +456,25 @@ def test_production_validator_subprocess_ignores_hostile_git_environment_and_hoo
         "GIT_OBJECT_DIRECTORY",
         "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     )
-    absence_checks = "\n".join(f'[ -z "${{{key}+x}}" ] || exit 17' for key in absent)
-    interpreter_body = (
-        "#!/bin/sh\n"
-        f"{absence_checks}\n"
-        '[ "$1" = "-I" ] || exit 18\n'
-        '[ "$2" = "-m" ] || exit 19\n'
-        '[ "$3" = "creator_engine_validator.ce_cli" ] || exit 20\n'
-        '[ "$4" = "validate-pr" ] || exit 21\n'
-        f"printf '%s\\n' \"PATH=$PATH\" \"GIT_CONFIG_NOSYSTEM=$GIT_CONFIG_NOSYSTEM\" \"GIT_CONFIG_GLOBAL=$GIT_CONFIG_GLOBAL\" > {shlex.quote(str(observed))}\n"
-        f"printf '%s\\n' \"GIT_CONFIG_KEY_0=$GIT_CONFIG_KEY_0\" \"GIT_CONFIG_VALUE_0=$GIT_CONFIG_VALUE_0\" >> {shlex.quote(str(observed))}\n"
-        f"{shlex.quote(git)} checkout --detach HEAD\n"
+    (package / "ce_cli.py").write_text(
+        "import os\n"
+        "import subprocess\n"
+        "import sys\n"
+        f"absent = {absent!r}\n"
+        "if any(key in os.environ for key in absent):\n"
+        "    raise SystemExit(17)\n"
+        "if sys.argv[1:2] != ['validate-pr']:\n"
+        "    raise SystemExit(21)\n"
+        "if sys.prefix == sys.base_prefix:\n"
+        "    raise SystemExit(22)\n"
+        f"with open({str(observed)!r}, 'w', encoding='utf-8') as output:\n"
+        "    for key in ('PATH', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', "
+        "'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0'):\n"
+        "        output.write(f'{key}={os.environ[key]}\\n')\n"
+        "    output.write(f'PREFIX={sys.prefix}\\n')\n"
+        f"subprocess.run([{git!r}, 'checkout', '--detach', 'HEAD'], check=True)\n",
+        encoding="utf-8",
     )
-    interpreter.write_text(interpreter_body, encoding="utf-8")
-    interpreter.chmod(0o755)
     monkeypatch.setattr(probe.sys, "executable", str(interpreter))
 
     result = probe._default_validator(str(repo), main_sha)
@@ -467,6 +487,21 @@ def test_production_validator_subprocess_ignores_hostile_git_environment_and_hoo
     assert received["GIT_CONFIG_GLOBAL"] == os.devnull
     assert received["GIT_CONFIG_KEY_0"] == "core.hooksPath"
     assert received["GIT_CONFIG_VALUE_0"] == os.devnull
+    assert received["PREFIX"] == str(venv_root)
+
+
+def test_validator_entrypoint_preserves_absolute_venv_symlink(monkeypatch, tmp_path):
+    venv_root = tmp_path / "venv"
+    interpreter = venv_root / "bin" / "python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.symlink_to(Path(probe.sys.executable).resolve())
+    (venv_root / "pyvenv.cfg").write_text(
+        "home = /usr/bin\ninclude-system-site-packages = false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(probe.sys, "executable", str(interpreter))
+
+    assert probe._trusted_validator_argv()[:1] == [str(interpreter)]
 
 
 def test_validator_entrypoint_fails_closed_without_absolute_executable(monkeypatch):

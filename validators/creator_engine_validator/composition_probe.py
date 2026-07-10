@@ -571,10 +571,6 @@ def _trusted_validator_argv() -> list[str]:
     executable = Path(sys.executable)
     if not executable.is_absolute():
         raise RuntimeError("validator interpreter is not an absolute path")
-    try:
-        executable = executable.resolve(strict=True)
-    except OSError as exc:
-        raise RuntimeError("validator interpreter cannot be resolved") from exc
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RuntimeError("validator interpreter is not executable")
     return [str(executable), "-I", "-m", "creator_engine_validator.ce_cli"]
