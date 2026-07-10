@@ -1811,6 +1811,74 @@ def test_daemon_loop_does_not_crash_after_exhausted_search_rate_limit(tmp_path):
     assert any(log["action"] == "daemon_rate_limited" for log in logs)
 
 
+def test_daemon_rate_limit_does_not_clear_alarm_continuity(monkeypatch):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "2")
+    monkeypatch.setenv("CE_APPROVED_AGE_N", "1")
+    logs: list[dict] = []
+    valid_pass = belt.DaemonPassResult(
+        decisions=(_skip_decision("governance_missing"),),
+        dry_run=True,
+        evaluated_prs=(_daemon_pr(pr_number=901),),
+    )
+    outcomes = iter((
+        valid_pass,
+        belt.SearchApiRateLimited("Search API rate limit exhausted"),
+        valid_pass,
+    ))
+
+    def run_pass(**_kwargs):
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    class StopLoop(Exception):
+        pass
+
+    sleep_count = 0
+
+    def stop_after_third_pass(_seconds):
+        nonlocal sleep_count
+        sleep_count += 1
+        if sleep_count == 3:
+            raise StopLoop
+
+    monkeypatch.setattr(belt, "run_daemon_pass", run_pass)
+    try:
+        belt.run_daemon_loop(
+            token="ghp_fake",
+            repo=REPO,
+            once=False,
+            interval_seconds=1,
+            gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(argv, 0, "", ""),
+            sleep=stop_after_third_pass,
+            log_sink=logs.append,
+        )
+    except StopLoop:
+        pass
+    else:
+        raise AssertionError("daemon loop did not stop after the third pass")
+
+    alarms = [entry for entry in logs if entry["action"] == "daemon_alarm"]
+    assert [(entry["pass_number"], entry["alarm_class"], entry["details"]) for entry in alarms] == [
+        (3, "skip_anomaly_recurrence", {
+            "repo": REPO,
+            "pr_number": PR,
+            "head_sha": HEAD,
+            "reason": "governance_missing",
+            "pass_count": 2,
+            "threshold": 2,
+        }),
+        (3, "approved_pr_age_exceeded", {
+            "repo": REPO,
+            "pr_number": 901,
+            "head_sha": HEAD,
+            "age": 2,
+            "threshold": 1,
+        }),
+    ]
+
+
 def _skip_decision(reason: str, pr_number: int = PR) -> belt.DaemonDecision:
     return belt.DaemonDecision(
         status="skip",

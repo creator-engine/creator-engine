@@ -691,6 +691,7 @@ def run_daemon_loop(
     index = 1
     while True:
         _log(log_sink, "daemon_pass_start", index=index, repo=repo, org=org, dry_run=dry_run)
+        observed = True
         try:
             result = run_daemon_pass(
                 token=token,
@@ -719,6 +720,10 @@ def run_daemon_loop(
                 retry_after_seconds=exc.retry_after_seconds,
                 dry_run=dry_run,
             )
+            # Search discovery did not complete, so this is not an observation
+            # of either alarm condition.  In particular, an empty synthetic
+            # result must not clear recurrence or approved-age continuity.
+            observed = False
             result = DaemonPassResult(decisions=(), dry_run=dry_run)
         tick = DaemonLoopTick(index=index, result=result)
         ticks = [tick] if not once else [*ticks, tick]
@@ -732,14 +737,15 @@ def run_daemon_loop(
             failed_count=result.failed_count,
         )
         _write_liveness_state(_liveness_path, index=index, failed_count=result.failed_count)
-        for record in _observe_daemon_alarms(
-            state=alarm_state,
-            pass_number=index,
-            decisions=result.decisions,
-            candidates=result.evaluated_prs,
-        ):
-            _append_daemon_alarm_record(alarm_events_path, record)
-            _log(log_sink, "daemon_alarm", **record)
+        if observed:
+            for record in _observe_daemon_alarms(
+                state=alarm_state,
+                pass_number=index,
+                decisions=result.decisions,
+                candidates=result.evaluated_prs,
+            ):
+                _append_daemon_alarm_record(alarm_events_path, record)
+                _log(log_sink, "daemon_alarm", **record)
         if once:
             break
         if interval_seconds:
