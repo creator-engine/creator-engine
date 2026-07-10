@@ -39,7 +39,8 @@
 
   Previously, these cases could reach docker, fail at container-creation time,
   or produce an unresolvable launch-probe timeout with no actionable message;
-  (a) still fails this way today, (b) now surfaces a named warning instead of
+  (a) now raises a hard pre-spawn refusal (``ContainedLaunchPreflightRefused``)
+  before any runtime side effect, (b) now surfaces a named warning instead of
   silence.
 
   Out of scope for slice 1: the sentinel HUP race / kill-session exited event,
