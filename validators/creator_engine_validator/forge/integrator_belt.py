@@ -21,7 +21,7 @@ import sys
 import time
 from base64 import b64decode
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -87,6 +87,8 @@ DEFAULT_APPROVAL_SETTLE_SECONDS = 0.0
 DEFAULT_SWEEP_REPO = "creator-engine/creator-engine"
 DEFAULT_QUEUE_BRANCH = "main"
 DEFAULT_SWEEP_FIRST = 100
+DEFAULT_SKIP_ANOMALY_K = 3
+DEFAULT_APPROVED_AGE_N = 10
 
 
 class IntegratorBeltError(Exception):
@@ -286,6 +288,7 @@ class DaemonPassResult:
 
     decisions: tuple[DaemonDecision, ...]
     dry_run: bool
+    evaluated_prs: tuple[DaemonPullRequest, ...] = ()
 
     @property
     def enqueue_count(self) -> int:
@@ -312,6 +315,16 @@ class DaemonPassResult:
             "failed_count": self.failed_count,
             "decisions": [decision.to_dict() for decision in self.decisions],
         }
+
+
+@dataclass
+class DaemonAlarmState:
+    """In-memory detection state scoped to one supervised daemon loop."""
+
+    skip_key: tuple[str, tuple[str, ...]] | None = None
+    skip_pass_count: int = 0
+    approved_ages: dict[tuple[str, int], int] = field(default_factory=dict)
+    alerted_approved_prs: set[tuple[str, int]] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -672,6 +685,8 @@ def run_daemon_loop(
         _env_liveness = os.environ.get("CE_DAEMON_LIVENESS_STATE_PATH")
         if _env_liveness:
             _liveness_path = Path(_env_liveness)
+    alarm_events_path = _liveness_events_path(_liveness_path)
+    alarm_state = DaemonAlarmState()
 
     index = 1
     while True:
@@ -717,6 +732,14 @@ def run_daemon_loop(
             failed_count=result.failed_count,
         )
         _write_liveness_state(_liveness_path, index=index, failed_count=result.failed_count)
+        for record in _observe_daemon_alarms(
+            state=alarm_state,
+            pass_number=index,
+            decisions=result.decisions,
+            candidates=result.evaluated_prs,
+        ):
+            _append_daemon_alarm_record(alarm_events_path, record)
+            _log(log_sink, "daemon_alarm", **record)
         if once:
             break
         if interval_seconds:
@@ -754,6 +777,141 @@ def _write_liveness_state(
             f"WARNING: daemon liveness state write failed ({path}): {exc}",
             file=sys.stderr,
         )
+
+
+def _liveness_events_path(liveness_path: Path | None) -> Path | None:
+    """Keep append-only alarm records beside the daemon's liveness state."""
+
+    if liveness_path is None:
+        return None
+    return liveness_path.with_suffix(".events.jsonl")
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    """Read a positive detection threshold, safely retaining the default otherwise."""
+
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _observe_daemon_alarms(
+    *,
+    state: DaemonAlarmState,
+    pass_number: int,
+    decisions: Sequence[DaemonDecision],
+    candidates: Sequence[DaemonPullRequest],
+) -> tuple[dict[str, Any], ...]:
+    """Observe one pass and return durable, detection-only alarm records."""
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    records: list[dict[str, Any]] = []
+    skip_threshold = _positive_env_int("CE_SKIP_ANOMALY_K", DEFAULT_SKIP_ANOMALY_K)
+    skipped = tuple(decision for decision in decisions if decision.status == "skip")
+    reasons = {decision.reason for decision in skipped}
+    if skipped and len(skipped) == len(decisions) and len(reasons) == 1:
+        reason = next(iter(reasons))
+        signature = tuple(sorted(f"{item.repo}#{item.pr_number}" for item in skipped))
+        key = (reason, signature)
+        if state.skip_key == key:
+            state.skip_pass_count += 1
+        else:
+            state.skip_key = key
+            state.skip_pass_count = 1
+        if state.skip_pass_count == skip_threshold:
+            records.append(
+                _daemon_alarm_record(
+                    timestamp=timestamp,
+                    pass_number=pass_number,
+                    alarm_class="skip_anomaly_recurrence",
+                    details={
+                        "reason": reason,
+                        "pr_count": len(signature),
+                        "pass_count": state.skip_pass_count,
+                        "threshold": skip_threshold,
+                    },
+                )
+            )
+    else:
+        state.skip_key = None
+        state.skip_pass_count = 0
+
+    approved = {
+        (candidate.repo, candidate.pr_number)
+        for candidate in candidates
+        if candidate.review_decision == "APPROVED"
+    }
+    for key in tuple(state.approved_ages):
+        if key not in approved:
+            state.approved_ages.pop(key)
+            state.alerted_approved_prs.discard(key)
+    for key in approved:
+        state.approved_ages[key] = state.approved_ages.get(key, 0) + 1
+
+    age_threshold = _positive_env_int("CE_APPROVED_AGE_N", DEFAULT_APPROVED_AGE_N)
+    oldest_unalerted = min(
+        (key for key, age in state.approved_ages.items()
+         if age > age_threshold and key not in state.alerted_approved_prs),
+        default=None,
+        key=lambda key: (-state.approved_ages[key], key[0], key[1]),
+    )
+    if oldest_unalerted is not None:
+        age = state.approved_ages[oldest_unalerted]
+        state.alerted_approved_prs.add(oldest_unalerted)
+        records.append(
+            _daemon_alarm_record(
+                timestamp=timestamp,
+                pass_number=pass_number,
+                alarm_class="approved_pr_age_exceeded",
+                details={
+                    "pr_number": oldest_unalerted[1],
+                    "age": age,
+                    "threshold": age_threshold,
+                },
+            )
+        )
+    return tuple(records)
+
+
+def _daemon_alarm_record(
+    *,
+    timestamp: str,
+    pass_number: int,
+    alarm_class: str,
+    details: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the common, secret-free alarm envelope."""
+
+    return {
+        "timestamp": timestamp,
+        "pass_number": pass_number,
+        "alarm_class": alarm_class,
+        "details": dict(details),
+        "journald_priority": 3,
+    }
+
+
+def _append_daemon_alarm_record(path: Path | None, record: Mapping[str, Any]) -> None:
+    """Append a JSONL alarm and issue the equivalent high-priority journald line."""
+
+    print(
+        "PRIORITY=3 daemon_alarm "
+        f"alarm_class={record['alarm_class']} details={json.dumps(record['details'], sort_keys=True)}",
+        file=sys.stderr,
+    )
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(dict(record), sort_keys=True) + "\n")
+    except OSError as exc:  # pragma: no cover - I/O failure must not steer the daemon
+        print(f"WARNING: daemon alarm record write failed ({path}): {exc}", file=sys.stderr)
 
 
 def run_daemon_pass(
@@ -1024,7 +1182,11 @@ def run_daemon_pass(
         )
         decisions.append(decision)
         _log_daemon_decision(log_sink, decision)
-    return DaemonPassResult(decisions=tuple(decisions), dry_run=dry_run)
+    return DaemonPassResult(
+        decisions=tuple(decisions),
+        dry_run=dry_run,
+        evaluated_prs=tuple(prs),
+    )
 
 
 def discover_daemon_candidates(

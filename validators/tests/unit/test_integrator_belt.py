@@ -1811,6 +1811,128 @@ def test_daemon_loop_does_not_crash_after_exhausted_search_rate_limit(tmp_path):
     assert any(log["action"] == "daemon_rate_limited" for log in logs)
 
 
+def _skip_decision(reason: str, pr_number: int = PR) -> belt.DaemonDecision:
+    return belt.DaemonDecision(
+        status="skip",
+        reason=reason,
+        repo=REPO,
+        pr_number=pr_number,
+        head_sha=HEAD,
+    )
+
+
+def test_skip_anomaly_recurrence_alarms_exactly_at_threshold(monkeypatch):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "3")
+    state = belt.DaemonAlarmState()
+    decisions = (_skip_decision("governance_missing"),)
+
+    first = belt._observe_daemon_alarms(
+        state=state, pass_number=1, decisions=decisions, candidates=()
+    )
+    second = belt._observe_daemon_alarms(
+        state=state, pass_number=2, decisions=decisions, candidates=()
+    )
+    third = belt._observe_daemon_alarms(
+        state=state, pass_number=3, decisions=decisions, candidates=()
+    )
+    fourth = belt._observe_daemon_alarms(
+        state=state, pass_number=4, decisions=decisions, candidates=()
+    )
+
+    assert first == second == fourth == ()
+    assert third[0]["alarm_class"] == "skip_anomaly_recurrence"
+    assert third[0]["details"] == {
+        "reason": "governance_missing",
+        "pr_count": 1,
+        "pass_count": 3,
+        "threshold": 3,
+    }
+
+
+def test_skip_anomaly_recurrence_resets_for_reason_or_pr_set_change(monkeypatch):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "2")
+    state = belt.DaemonAlarmState()
+
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=1, decisions=(_skip_decision("first_reason"),), candidates=()
+    ) == ()
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=2, decisions=(_skip_decision("changed_reason"),), candidates=()
+    ) == ()
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=3, decisions=(_skip_decision("changed_reason", 902),), candidates=()
+    ) == ()
+    records = belt._observe_daemon_alarms(
+        state=state, pass_number=4, decisions=(_skip_decision("changed_reason", 902),), candidates=()
+    )
+
+    assert records[0]["details"]["reason"] == "changed_reason"
+    assert records[0]["details"]["pass_count"] == 2
+
+
+def test_approved_pr_age_alarms_after_threshold_and_resets_on_merge(monkeypatch):
+    monkeypatch.setenv("CE_APPROVED_AGE_N", "2")
+    state = belt.DaemonAlarmState()
+    approved = _daemon_pr(pr_number=901)
+
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=1, decisions=(), candidates=(approved,)
+    ) == ()
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=2, decisions=(), candidates=(approved,)
+    ) == ()
+    records = belt._observe_daemon_alarms(
+        state=state, pass_number=3, decisions=(), candidates=(approved,)
+    )
+    assert records[0]["alarm_class"] == "approved_pr_age_exceeded"
+    assert records[0]["details"] == {"pr_number": 901, "age": 3, "threshold": 2}
+
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=4, decisions=(), candidates=()
+    ) == ()
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=5, decisions=(), candidates=(approved,)
+    ) == ()
+
+
+def test_daemon_alarm_record_is_well_formed_jsonl_and_journald_loud(
+    tmp_path: Path, monkeypatch, capsys
+):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "1")
+    liveness_path = tmp_path / "liveness.json"
+    logs: list[dict] = []
+
+    monkeypatch.setattr(
+        belt,
+        "run_daemon_pass",
+        lambda **_kwargs: belt.DaemonPassResult(
+            decisions=(_skip_decision("same_reason"),),
+            dry_run=True,
+            evaluated_prs=(),
+        ),
+    )
+    belt.run_daemon_loop(
+        token="ghp_fake",
+        repo=REPO,
+        once=True,
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(argv, 0, "", ""),
+        liveness_state_path=liveness_path,
+        log_sink=logs.append,
+    )
+
+    records = [json.loads(line) for line in liveness_path.with_suffix(".events.jsonl").read_text().splitlines()]
+    assert records == [{
+        "timestamp": records[0]["timestamp"],
+        "pass_number": 1,
+        "alarm_class": "skip_anomaly_recurrence",
+        "details": {"reason": "same_reason", "pr_count": 1, "pass_count": 1, "threshold": 1},
+        "journald_priority": 3,
+    }]
+    assert "T" in records[0]["timestamp"]
+    assert any(log["action"] == "daemon_alarm" for log in logs)
+    assert "PRIORITY=3 daemon_alarm" in capsys.readouterr().err
+
+
 def _assert_valid_daemon_search_query(query: str) -> None:
     assert query.count("{") == query.count("}")
     assert "$query" not in query
