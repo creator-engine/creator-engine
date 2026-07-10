@@ -36,11 +36,16 @@ class VerifyInstallResult:
     venv: dict[str, Any] = field(default_factory=dict)
     problems: tuple[str, ...] = ()
 
+    @property
+    def header(self) -> str:
+        return f"checking root: {self.install_root}"
+
     def to_json(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "status": self.status,
             "reason": self.reason,
+            "header": self.header,
             "install_root": self.install_root,
             "state": dict(self.state),
             "manifest": dict(self.manifest),
@@ -176,7 +181,7 @@ def _verify_record(
     else:
         anchor = "installed_record"
         assurance = "local_install_state_only"
-        rows = _parse_record_rows(record.read_text(encoding="utf-8", newline=""))
+        rows = _parse_record_rows(record.read_text(encoding="utf-8"))
 
     checked = 0
     for rel, digest, size in rows:
@@ -363,11 +368,21 @@ def verify_install(
         target = root / target
     if expected_target_name and target.name != expected_target_name:
         problems.append("venv_target_pin_mismatch")
-    if not target.is_dir():
+    target_in_root = _path_inside(target, root)
+    if not target_in_root:
+        problems.append("venv_target_outside_install_root")
+    elif not target.is_dir():
         problems.append("venv_target_missing")
 
     live_venv = root / "venv"
-    if live_venv.exists() and target.exists() and live_venv.resolve() != target.resolve():
+    if live_venv.exists() and not _path_inside(live_venv, root):
+        problems.append("live_venv_outside_install_root")
+    elif (
+        live_venv.exists()
+        and target_in_root
+        and target.exists()
+        and live_venv.resolve() != target.resolve()
+    ):
         problems.append("live_venv_not_pinned")
     elif not live_venv.exists():
         problems.append("live_venv_missing")
@@ -398,7 +413,7 @@ def verify_install(
         "anchor": "published_wheel" if trusted_record_text else "installed_record",
         "assurance": "published_release" if trusted_record_text else "local_install_state_only",
     }
-    if target.is_dir() and version:
+    if target_in_root and target.is_dir() and version:
         record_problems, venv_info = _verify_record(
             target, version, trusted_record_text=trusted_record_text
         )
