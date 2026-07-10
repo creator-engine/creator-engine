@@ -113,5 +113,6 @@ from . import fleet_manifest_guard as fleet_manifest_guard  # noqa: E402,F401
 from . import identity_denylist_autogen_sync as identity_denylist_autogen_sync  # noqa: E402,F401
 from . import schema_reference_autogen_sync as schema_reference_autogen_sync  # noqa: E402,F401
 from . import cli_reference_autogen_sync as cli_reference_autogen_sync  # noqa: E402,F401
+from . import documented_verbs as documented_verbs  # noqa: E402,F401
 from . import skill_antidrift_guard as skill_antidrift_guard  # noqa: E402,F401
 from . import test_coupling as test_coupling  # noqa: E402,F401
