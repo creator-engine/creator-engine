@@ -120,7 +120,7 @@ def test_review_pickup_token_supplier_uses_backend_defaults(monkeypatch) -> None
     assert request.ttl_seconds == 300
     assert request.secret_ref.backend == "openbao"
     assert request.secret_ref.mount == "ce-kv"
-    assert request.secret_ref.path == "forge/ce-dev-" "2/gh-token"
+    assert request.secret_ref.path == "forge/reviewer/gh-token"
     assert request.secret_ref.field == "token"
     assert request.secret_ref.purpose == "review-pickup-token"
     assert request.secret_ref.owner_ref == "controller:reviewer"
