@@ -1,0 +1,28 @@
+[Unit]
+Description=Creator Engine shared-App mint broker
+Documentation=https://github.com/creator-engine/creator-engine/tree/main/tools/mint-broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ce-mint-broker
+Group=ce-mint-broker
+EnvironmentFile=/etc/creator-engine/ce-mint-broker.env
+Environment=PYTHONPATH=/workspace/creator-engine/tools/mint-broker:/workspace/creator-engine/tools/egress-broker:/workspace/creator-engine/validators
+WorkingDirectory=/workspace/creator-engine
+ExecStart=/usr/bin/env python3 tools/mint-broker/ce_mint_broker_server.py \
+  --config "$CE_MINT_BROKER_CONFIG" \
+  --port "$CE_MINT_BROKER_PORT" \
+  --bind-address "$CE_MINT_BROKER_BIND_ADDRESS"
+Restart=on-failure
+RestartSec=30s
+LogsDirectory=ce-mint-broker
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log/ce /run/ce /dev/shm
+
+[Install]
+WantedBy=multi-user.target
