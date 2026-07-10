@@ -3,9 +3,14 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator import cli
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks import signed_artifact_pins as guard
+
+# Absolute path to the repo root so tests can read the REAL signed artifact.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 SPEC = """<!--
@@ -374,3 +379,90 @@ def test_whole_document_pin_change_gets_distinct_resign_notice():
     message = result.warnings[0].message
     assert "whole-document" in message
     assert "not a missing pinned-file update" in message
+
+
+# --- Regression: real docs/llms-install.md shape (prose-then-YAML comment) --
+#
+# The real signed artifact opens its HTML comment block with human-readable
+# prose (including colon-bearing text like URLs and inline code) BEFORE the
+# ``signature:`` / ``artifact_manifest:`` YAML block, separated by a blank
+# line.  The parser must skip the prose and find the YAML section, not attempt
+# to parse the entire comment content as YAML (which fails on prose colons).
+#
+# These tests directly exercise the real on-disk file so a format change to
+# docs/llms-install.md that breaks the parser is caught immediately in CI
+# rather than only at gate time.
+
+SPEC_WITH_PROSE = """\
+<!--
+This is human-readable prose that describes the spec.  It references
+https://creator-engine.dev/llms-install.md and mentions the CE trust root.
+It may contain colon-bearing text (no CE tooling: that is what breaks the
+bootstrap circularity).
+Contract: docs/contracts/installer.md.
+
+signature:
+  key_id: ce-root-v1
+  algo: ssh-ed25519
+  namespace: ce-spec-v1
+  value: mock
+  content_sha256: 0000000000000000000000000000000000000000000000000000000000000000
+
+artifact_manifest:
+  artifact_manifest_version: 1
+  python_requires: >=3.14
+  sha256s_url: https://creator-engine.dev/downloads/0.3.4/SHA256SUMS
+  sha256s_sha256: 1111111111111111111111111111111111111111111111111111111111111111
+  answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
+  answers_schema_sha256: 2222222222222222222222222222222222222222222222222222222222222222
+
+# YAML comment: illustrating that comment lines inside the block are fine too.
+-->
+
+# Install (prose follows the comment)
+"""
+
+
+def test_discover_pins_handles_prose_before_yaml_in_comment():
+    """Parser must skip human-readable prose in the HTML comment before YAML."""
+    pins = guard.discover_pins(SPEC_WITH_PROSE)
+    pin_keys = {p.key for p in pins}
+    assert "sha256s_sha256" in pin_keys
+    assert "answers_schema_sha256" in pin_keys
+
+
+def test_prose_comment_colon_text_does_not_raise_yaml_error():
+    """Colon-space in prose (e.g. ``(no CE tooling: that is what breaks the …)``)
+    must NOT trigger a SignedArtifactCorruption — only genuine YAML parse failures
+    on the YAML section should raise."""
+    # The prose contains ``(no CE tooling: that is what breaks the`` which is
+    # the exact text that triggers the upstream bug (YAML maps ``CE tooling`` to
+    # ``that is what breaks the``).
+    try:
+        guard.discover_pins(SPEC_WITH_PROSE)
+    except guard.SignedArtifactCorruption as exc:
+        raise AssertionError(f"unexpected SignedArtifactCorruption on prose-then-YAML doc: {exc}") from exc
+
+
+@pytest.mark.skipif(
+    not (_REPO_ROOT / "docs" / "llms-install.md").exists(),
+    reason="docs/llms-install.md not present in this worktree",
+)
+def test_discover_pins_parses_real_signed_artifact():
+    """discover_pins must succeed on the actual on-disk docs/llms-install.md.
+
+    This test pins the real file's on-disk format so that any future structural
+    change to the HTML-comment block (e.g. adding / removing a prose paragraph)
+    is caught immediately rather than surfacing only at PR-gate time.
+    """
+    text = (_REPO_ROOT / "docs" / "llms-install.md").read_text(encoding="utf-8")
+    pins = guard.discover_pins(text)
+    assert len(pins) >= 2, (
+        f"expected at least 2 *_sha256 pins in the real docs/llms-install.md, got {len(pins)}: "
+        + ", ".join(p.key for p in pins)
+    )
+    pin_keys = {p.key for p in pins}
+    # The two externally-tracked pins whose source aliases are hard-coded in
+    # PIN_KEY_SOURCE_ALIASES must always be discoverable.
+    assert "sha256s_sha256" in pin_keys, "sha256s_sha256 pin missing from real signed artifact"
+    assert "answers_schema_sha256" in pin_keys, "answers_schema_sha256 pin missing from real signed artifact"
