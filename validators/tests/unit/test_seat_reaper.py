@@ -528,3 +528,38 @@ def test_active_seat_is_skipped_not_reaped(tmp_path):
                 executor_for=lambda _k: fake, pid_alive=lambda _pid: True)
     assert out["skipped_active_or_unknown"] == 1 and out["reaped"] == 0 and out["escalated"] == 0
     assert fake.calls == []
+
+
+def test_stale_live_tmux_launch_teaches_exact_self_service_kill(tmp_path):
+    root = tmp_path / "state"
+    run_id = "run-stale-live-20260613T100000Z"
+    old = NOW - timedelta(seconds=seat_reaper.DEFAULT_STALE_SECONDS + 60)
+    _write_seat(
+        root,
+        run_id,
+        dispatch=_dispatch(run_id),
+        events=[_launched(run_id, ts=old)],
+    )
+    fake = FakeExecutor(tmp_path / "arch")
+
+    out = _reap(
+        root,
+        ledger_root=tmp_path / "l",
+        repo_root=tmp_path,
+        executor_for=lambda _k: fake,
+        pid_alive=lambda _pid: True,
+    )
+
+    assert out["escalated"] == 1 and out["reaped"] == 0
+    assert fake.calls == []
+    guidance = out["escalations"][0]["operator_guidance"]
+    assert guidance == {
+        "session_id": "$1",
+        "command": "tmux kill-session -t '$1'",
+        "next_command": "ce reap once",
+    }
+    rec = yaml.safe_load(next((root / "escalations").glob("*.yaml")).read_text())
+    assert rec["escalation_id"].startswith("reaper-stale-launched-")
+    assert "Live tmux session '$1'" in rec["decision_needed"]
+    assert "tmux kill-session -t '$1'" in rec["recommendation"]
+    assert "ce reap once" in rec["recommendation"]

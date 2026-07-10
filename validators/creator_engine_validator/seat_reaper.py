@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -519,10 +520,26 @@ def _escalation_digest(seat_id: str, reason: str, source_ref: str) -> str:
 
 
 def build_escalation(
-    *, seat_id: str, reason: str, source_ref: str, created_at: str
+    *,
+    seat_id: str,
+    reason: str,
+    source_ref: str,
+    created_at: str,
+    operator_guidance: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build a schema-valid escalation record for a reaper refusal/escalation case."""
     title, decision, recommendation = _ESCALATION_COPY[reason]
+    if reason == "stale-launched" and operator_guidance:
+        session_id = operator_guidance.get("session_id")
+        command = operator_guidance.get("command")
+        if session_id and command:
+            decision = (
+                f"{decision} Live tmux session {session_id!r} is still present."
+            )
+            recommendation = (
+                f"Clear the named stale launch surface with `{command}`, then rerun "
+                "`ce reap once`."
+            )
     digest = _escalation_digest(seat_id, reason, source_ref)
     return {
         "kind": "escalation-record",
@@ -566,6 +583,7 @@ class Classification:
     outcome: str | None = None
     outcome_source: str = seat_sentinel.OUTCOME_SOURCE_UNRESOLVED
     source_ref: str = ""
+    operator_guidance: dict[str, str] = field(default_factory=dict)
 
 
 def _source_ref(seat: SeatObservation) -> str:
@@ -582,6 +600,21 @@ def _launched_pid(events: Sequence[dict[str, Any]]) -> int | None:
             if isinstance(pid, int):
                 return pid
     return None
+
+
+def _stale_launch_guidance(dispatch: dict[str, Any]) -> dict[str, str]:
+    terminal = dispatch.get("terminal") if isinstance(dispatch.get("terminal"), dict) else None
+    if not terminal or terminal.get("kind") != SUBSTRATE_TMUX:
+        return {}
+    session_id = terminal.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return {}
+    command = f"tmux kill-session -t {shlex.quote(session_id)}"
+    return {
+        "session_id": session_id,
+        "command": command,
+        "next_command": "ce reap once",
+    }
 
 
 def _last_event_ts(events: Sequence[dict[str, Any]]) -> datetime | None:
@@ -660,7 +693,13 @@ def classify_seat(
         if alive and not stale:
             return Classification(CLASS_ACTIVE_OR_UNKNOWN, source_ref=src)
         reason = "stale-launched" if alive else "unclean-stop"
-        return Classification(CLASS_ESCALATE_UNCLEAN_STOP, reason=reason, source_ref=src)
+        guidance = _stale_launch_guidance(dispatch) if reason == "stale-launched" else {}
+        return Classification(
+            CLASS_ESCALATE_UNCLEAN_STOP,
+            reason=reason,
+            source_ref=src,
+            operator_guidance=guidance,
+        )
 
     # launched + exited → terminal-clean candidate; resolve the outcome READ-ONLY
     if has_launched and has_exited:
@@ -845,7 +884,7 @@ def _empty_step_counts() -> dict[str, int]:
 
 
 def _seat_row(seat: SeatObservation, cls: Classification) -> dict[str, Any]:
-    return {
+    row = {
         "seat_id": seat.seat_id,
         "run_id": seat.run_id,
         "classification": cls.classification,
@@ -853,6 +892,9 @@ def _seat_row(seat: SeatObservation, cls: Classification) -> dict[str, Any]:
         "outcome": cls.outcome,
         "outcome_source": cls.outcome_source,
     }
+    if cls.operator_guidance:
+        row["operator_guidance"] = dict(cls.operator_guidance)
+    return row
 
 
 def reap_status(
@@ -972,9 +1014,18 @@ def reap_once(
     retirements: list[dict[str, Any]] = []
     escalations: list[dict[str, Any]] = []
 
-    def _emit_escalation(seat: SeatObservation, reason: str, src: str) -> None:
+    def _emit_escalation(
+        seat: SeatObservation,
+        reason: str,
+        src: str,
+        operator_guidance: dict[str, str] | None = None,
+    ) -> None:
         record = build_escalation(
-            seat_id=seat.seat_id, reason=reason, source_ref=src, created_at=created_at
+            seat_id=seat.seat_id,
+            reason=reason,
+            source_ref=src,
+            created_at=created_at,
+            operator_guidance=operator_guidance,
         )
         path = _escalation_path(state_root, record["escalation_id"])
         reused = path.is_file()
@@ -989,9 +1040,10 @@ def reap_once(
                 encoding="utf-8",
             )
         counters["escalated"] += 1
-        escalations.append(
-            {"escalation_id": record["escalation_id"], "reason": reason, "reused": reused}
-        )
+        item = {"escalation_id": record["escalation_id"], "reason": reason, "reused": reused}
+        if operator_guidance:
+            item["operator_guidance"] = dict(operator_guidance)
+        escalations.append(item)
 
     for seat in seats:
         if seat.dispatch is not None:
@@ -1018,7 +1070,7 @@ def reap_once(
             continue
         if cls.classification in _ESCALATING:
             assert cls.reason is not None
-            _emit_escalation(seat, cls.reason, cls.source_ref)
+            _emit_escalation(seat, cls.reason, cls.source_ref, cls.operator_guidance)
             continue
 
         # eligible | archive_then_retire — run the ordered pipeline
