@@ -1,0 +1,38 @@
+[Unit]
+Description=Creator Engine seat-watch daemon (supervised example)
+Documentation=file:/workspace/creator-engine/deploy/seat-watch/DESIGN.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=12
+
+[Service]
+Type=simple
+User=creator-engine
+WorkingDirectory=/workspace/creator-engine
+EnvironmentFile=/etc/creator-engine/ce-seat-watch.env
+Environment=CE_DAEMON_UNCONTAINED=1
+Environment=CE_DAEMON_STATE_ROOT=/var/lib/ce-seat-watch
+Environment=CE_DAEMON_LEASE_ROOT=/var/lib/ce-seat-watch/daemon-leases
+Environment=CE_SEAT_WATCH_FEED_PATH=/var/lib/ce-seat-watch/feed/seat-watch.jsonl
+ExecStart=/bin/bash -lc 'exec /workspace/creator-engine/deploy/seat-watch/launch-seat-watch.sh'
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=0
+RestartPreventExitStatus=2 73
+RuntimeDirectory=ce-seat-watch
+RuntimeDirectoryMode=0700
+StateDirectory=ce-seat-watch
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ce-seat-watch
+
+[Install]
+WantedBy=multi-user.target
+
+# Example only. Seat probes and operator-specific paths belong in the
+# EnvironmentFile; this file does not perform live rollout or IaC changes.

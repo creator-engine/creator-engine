@@ -24,6 +24,14 @@ from .seat_watch_daemon import SeatWatchDaemon, WatchEvent
 
 DEFAULT_INTERVAL_SECONDS = 30.0
 DEFAULT_IDLE_THRESHOLD_POLLS = 5
+EXIT_OK = 0
+EXIT_RUNTIME_ERROR = 1
+EXIT_CONFIG = 2
+EXIT_LEASE_UNAVAILABLE = 73
+DETECTOR_EVENT_TYPES = {
+    "idle_without_signal": "idle-without-signal",
+    "dispatch_undelivered": "dispatch-undelivered",
+}
 
 
 class ConfigError(ValueError):
@@ -34,7 +42,9 @@ class ConfigError(ValueError):
 class SeatWatchConfig:
     seat_probes: tuple[SeatProbeSpec, ...]
     feed_path: Path
+    state_root: Path
     lease_root: Path
+    detector_events_path: Path
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS
     idle_threshold_polls: int = DEFAULT_IDLE_THRESHOLD_POLLS
     dispatch_patterns: tuple[str, ...] = ()
@@ -46,10 +56,15 @@ class SeatWatchConfig:
 
 def load_config(env: Mapping[str, str] | None = None) -> SeatWatchConfig:
     source = os.environ if env is None else env
+    state_root = Path(
+        source.get("CE_DAEMON_STATE_ROOT") or _require_env(source, "CE_DAEMON_LEASE_ROOT")
+    )
     return SeatWatchConfig(
         seat_probes=_parse_seat_probes(_require_env(source, "CE_SEAT_WATCH_SEAT_PROBES")),
         feed_path=_required_absolute_path(source, "CE_SEAT_WATCH_FEED_PATH"),
+        state_root=state_root,
         lease_root=Path(_require_env(source, "CE_DAEMON_LEASE_ROOT")),
+        detector_events_path=state_root / "seat-watch" / "detector-events.jsonl",
         interval_seconds=_parse_positive_float(
             source,
             "CE_SEAT_WATCH_INTERVAL_SECONDS",
@@ -83,7 +98,7 @@ def main_with_existing_lease(
     except ConfigError as exc:
         _error(str(exc))
         lease.release()
-        return 2
+        return EXIT_CONFIG
     return _run_loop(config, lease)
 
 
@@ -92,10 +107,12 @@ def main(env: Mapping[str, str] | None = None) -> int:
         config = load_config(env)
     except ConfigError as exc:
         _error(str(exc))
-        return 2
+        return EXIT_CONFIG
 
+    _ensure_private_dir(config.state_root)
     _ensure_private_dir(config.lease_root)
     _ensure_private_dir(config.feed_path.parent)
+    _ensure_private_dir(config.detector_events_path.parent)
     if config.webhook_file is not None:
         _ensure_private_dir(config.webhook_file.parent)
     try:
@@ -107,7 +124,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
         )
     except DaemonLeaseError as exc:
         _error(_lease_refusal_error(config, exc))
-        return 73
+        return EXIT_LEASE_UNAVAILABLE
     return _run_loop(config, lease)
 
 
@@ -132,6 +149,7 @@ def _run_loop(config: SeatWatchConfig, lease: DaemonLease) -> int:
             events = daemon.run_once(poll_index)
             for event in events:
                 _write_event(config.feed_path, event)
+                _write_detector_record(config.detector_events_path, event)
                 if config.webhook_file is not None:
                     _write_event(config.webhook_file, event)
             poll_index += 1
@@ -142,7 +160,7 @@ def _run_loop(config: SeatWatchConfig, lease: DaemonLease) -> int:
         signal.signal(signal.SIGTERM, previous_sigterm)
         signal.signal(signal.SIGINT, previous_sigint)
         lease.release()
-    return 0
+    return EXIT_OK
 
 
 def _write_event(path: Path, event: WatchEvent) -> None:
@@ -163,6 +181,27 @@ def _write_event(path: Path, event: WatchEvent) -> None:
             os.unlink(tmp)
         except FileNotFoundError:
             pass
+
+
+def _write_detector_record(path: Path, event: WatchEvent) -> None:
+    detector_class = DETECTOR_EVENT_TYPES.get(event.event_type)
+    if detector_class is None:
+        return
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    record = {
+        "schema_version": event.schema_version,
+        "seat_id": event.seat_id,
+        "class": detector_class,
+        "timestamp": event.ts,
+        "evidence": {
+            "poll_index": event.poll_index,
+            **event.detail,
+        },
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _holder_id(config: SeatWatchConfig) -> str:

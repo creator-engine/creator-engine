@@ -54,6 +54,7 @@ class SeatWatchDaemon:
         self._pane_hashes: dict[str, str] = {}
         self._pane_texts: dict[str, str] = {}
         self._unchanged_counts: dict[str, int] = {}
+        self._dispatch_missing_counts: dict[tuple[str, str], int] = {}
 
     def run_once(self, poll_index: int) -> list[WatchEvent]:
         """Run one poll pass. Returns all events from this pass."""
@@ -90,7 +91,14 @@ class SeatWatchDaemon:
                 if idle_event is not None:
                     events.append(idle_event)
 
-            events.extend(self._dispatch_ack_events(spec.seat_id, pane_text, poll_index))
+            events.extend(
+                self._dispatch_events(
+                    spec.seat_id,
+                    pane_text,
+                    current_hash,
+                    poll_index,
+                )
+            )
             self._pane_hashes[spec.seat_id] = current_hash
             self._pane_texts[spec.seat_id] = pane_text
 
@@ -165,10 +173,11 @@ class SeatWatchDaemon:
             },
         )
 
-    def _dispatch_ack_events(
+    def _dispatch_events(
         self,
         seat_id: str,
         pane_text: str,
+        current_hash: str,
         poll_index: int,
     ) -> list[WatchEvent]:
         previous_text = self._pane_texts.get(seat_id, "")
@@ -179,6 +188,7 @@ class SeatWatchDaemon:
         for pattern in self.dispatch_patterns:
             pattern_lower = pattern.lower()
             if pattern_lower in current_lower and pattern_lower not in previous_lower:
+                self._dispatch_missing_counts[(seat_id, pattern_lower)] = 0
                 events.append(
                     self._event(
                         "dispatch_delivery_ack",
@@ -190,6 +200,31 @@ class SeatWatchDaemon:
                         },
                     )
                 )
+                continue
+
+            if pattern_lower in current_lower:
+                self._dispatch_missing_counts[(seat_id, pattern_lower)] = 0
+                continue
+
+            key = (seat_id, pattern_lower)
+            count = self._dispatch_missing_counts.get(key, 0) + 1
+            self._dispatch_missing_counts[key] = count
+            if count < self.idle_threshold_polls:
+                continue
+
+            self._dispatch_missing_counts[key] = 0
+            events.append(
+                self._event(
+                    "dispatch_undelivered",
+                    seat_id,
+                    poll_index,
+                    {
+                        "pattern_expected": pattern,
+                        "polls_without_ack": count,
+                        "pane_hash": current_hash,
+                    },
+                )
+            )
         return events
 
     def _event(
