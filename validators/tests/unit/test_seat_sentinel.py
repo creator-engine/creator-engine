@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -273,8 +274,15 @@ def test_wrapper_child_sigkill_yields_137(tmp_path):
 
 @pytest.mark.parametrize("sig,code", [(signal.SIGTERM, 143), (signal.SIGHUP, 129)])
 def test_wrapper_trapped_signal_writes_exit(tmp_path, sig, code):
+    child_ready = tmp_path / "child-ready"
     sentinel = _materialize(
-        tmp_path, ["/bin/sh", "-c", "sleep 30"], python_exe="/nonexistent/python"
+        tmp_path,
+        [
+            "/bin/sh",
+            "-c",
+            f": > {shlex.quote(str(child_ready))} && exec sleep 30",
+        ],
+        python_exe="/nonexistent/python",
     )
     proc = subprocess.Popen(
         sentinel.pane_command, env=_wrapper_env(), start_new_session=True
@@ -285,6 +293,9 @@ def test_wrapper_trapped_signal_writes_exit(tmp_path, sig, code):
         lambda: sentinel.events_path.is_file()
         and bool(sentinel.events_path.read_text().strip())
     ), "wrapper never wrote its launched line within the ceiling"
+    assert _poll_until(child_ready.is_file), (
+        "foreground child never joined the process group within the ceiling"
+    )
     # the pane-kill reality: the signal hits the whole process group
     os.killpg(os.getpgid(proc.pid), sig)
     # bound the wait by the same generous ceiling: a genuinely hung process still
