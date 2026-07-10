@@ -81,7 +81,7 @@ def _manifest(sha256s_text: str, *, wheel_sha: str | None = None) -> str:
 """
 
 
-def _install_root(tmp_path: Path):
+def _install_root(tmp_path: Path, *, root: Path | None = None):
     """Build a genuine install tree + the trusted published wheel + SHA256SUMS.
 
     Returns ``(root, sha256s_text, manifest_text, wheel_bytes)`` so online tests
@@ -101,7 +101,7 @@ def _install_root(tmp_path: Path):
     wheel_sha = _sha256(wheel_bytes)
     sha256s_text = f"{wheel_sha}  {_WHEEL_FILENAME}\n"
     sha256s_sha = _sha256(sha256s_text.encode("utf-8"))
-    root = tmp_path / "install"
+    root = root or tmp_path / "install"
     target = root / f"venv-0.2.0-{sha256s_sha}"
     package = target / "lib" / "python3.14" / "site-packages" / "creator_engine_validator"
     dist = target / "lib" / "python3.14" / "site-packages" / "creator_engine_validator-0.2.0.dist-info"
@@ -123,6 +123,14 @@ def _install_root(tmp_path: Path):
         encoding="utf-8",
     )
     return root, sha256s_text, _manifest(sha256s_text, wheel_sha=wheel_sha), wheel_bytes
+
+
+def _configured_default_root(monkeypatch, tmp_path: Path) -> Path:
+    monkeypatch.delenv("CE_INSTALL_ROOT", raising=False)
+    monkeypatch.delenv("CE_HOME", raising=False)
+    xdg_data = tmp_path / "xdg-data"
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+    return xdg_data / "creator-engine" / "bootstrap"
 
 
 def test_genuine_match_passes_online_with_live_sha256s(tmp_path: Path):
@@ -322,6 +330,50 @@ def test_missing_install_state_refuses(tmp_path: Path):
     assert result.to_json()["problems"] == ["missing_install_state"]
 
 
+def test_non_default_root_does_not_probe_populated_default_root(monkeypatch, tmp_path: Path):
+    default_root = _configured_default_root(monkeypatch, tmp_path)
+    default_root, _sha256s_text, manifest, _wheel_bytes = _install_root(
+        tmp_path, root=default_root
+    )
+    default_target = next(default_root.glob("venv-0.2.0-*"))
+    custom_root = tmp_path / "custom-install"
+    custom_root.mkdir()
+    (custom_root / "install-state").write_text(
+        (default_root / "install-state").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (custom_root / "venv").symlink_to(default_target)
+
+    result = ce_provenance.verify_install(
+        custom_root,
+        offline=True,
+        manifest_bytes=manifest.encode("utf-8"),
+    )
+
+    payload = result.to_json()
+    assert result.ok is False
+    assert payload["install_root"] == str(custom_root)
+    assert "venv_target_outside_install_root" in payload["problems"]
+    assert "live_venv_outside_install_root" in payload["problems"]
+
+
+def test_non_default_root_missing_does_not_fall_back_to_default(monkeypatch, tmp_path: Path):
+    default_root = _configured_default_root(monkeypatch, tmp_path)
+    _install_root(tmp_path, root=default_root)
+    custom_root = tmp_path / "missing-custom-install"
+
+    result = ce_provenance.verify_install(
+        custom_root,
+        offline=True,
+        manifest_bytes=_manifest("").encode("utf-8"),
+    )
+
+    payload = result.to_json()
+    assert result.ok is False
+    assert payload["install_root"] == str(custom_root)
+    assert payload["problems"] == ["missing_install_state"]
+
+
 def test_ce_verify_install_cli_json(monkeypatch, tmp_path: Path, capsys):
     root, _sha256s_text, _manifest_text, _wheel_bytes = _install_root(tmp_path)
 
@@ -330,3 +382,4 @@ def test_ce_verify_install_cli_json(monkeypatch, tmp_path: Path, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "pass"
+    assert payload["header"] == f"checking root: {root}"
