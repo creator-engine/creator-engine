@@ -10,7 +10,7 @@ import json
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,7 @@ class StaleTicketMatch:
     ticket_number: int
     pr_number: int
     evidence: tuple[str, ...]
+    ticket_repo: str = DEFAULT_TICKET_REPO
 
     @property
     def evidence_tag(self) -> str:
@@ -53,8 +54,9 @@ class StaleTicketMatch:
 
     @property
     def report_line(self) -> str:
+        repo_name = self.ticket_repo.rsplit("/", 1)[-1]
         return (
-            f"STALE-OPEN ce-ops#{self.ticket_number} <- PR#{self.pr_number} "
+            f"STALE-OPEN {repo_name}#{self.ticket_number} <- PR#{self.pr_number} "
             f"({self.evidence_tag})"
         )
 
@@ -85,7 +87,7 @@ def reconcile_stale_tickets(
             matches.setdefault((ticket.number, pr.number), set()).update(evidence)
 
     return [
-        StaleTicketMatch(ticket_number, pr_number, _ordered_evidence(evidence))
+        StaleTicketMatch(ticket_number, pr_number, _ordered_evidence(evidence), ticket_repo)
         for (ticket_number, pr_number), evidence in sorted(matches.items())
     ]
 
@@ -103,9 +105,11 @@ def render_json(matches: Sequence[StaleTicketMatch]) -> str:
     payload = {
         "matches": [
             {
-                **asdict(match),
+                "evidence": list(match.evidence),
                 "evidence_tag": match.evidence_tag,
+                "pr_number": match.pr_number,
                 "report_line": match.report_line,
+                "ticket_number": match.ticket_number,
             }
             for match in sorted(matches)
         ]
