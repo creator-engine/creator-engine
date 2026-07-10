@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import fcntl
 import json
+import math
 import os
 import re
 import secrets
@@ -116,10 +117,10 @@ class IntakeQueue:
             launch_fenced_at=None,
         )
         filename = _unit_filename(pending)
-        with _claim_transition_guard(self.root / f".{filename}.transition-lock"):
-            existing = self._publication_record(filename)
+        with _claim_transition_guard(self._unit_lock_path(pending.unit_id)):
+            existing = self._publication_record(pending.unit_id)
             if existing is not None:
-                location, current = existing
+                location, _path, current = existing
                 # Replaying the identical controller publication is a no-op.
                 # Any other extant lifecycle record owns this entry; do not
                 # rewrite it back to pending or change its payload.
@@ -151,8 +152,18 @@ class IntakeQueue:
         expires_at = _claim_expiry(now, ttl_seconds)
         self._reclaim_stale(now)
         for path in self._ordered_pending_paths():
-            claimed_path = self.claimed_dir / path.name
-            with _claim_transition_guard(self.root / f".{path.name}.transition-lock"):
+            try:
+                candidate = _read_unit(path)
+            except FileNotFoundError:
+                continue
+            with _claim_transition_guard(self._unit_lock_path(candidate.unit_id)):
+                current_record = self._publication_record(candidate.unit_id)
+                if current_record is None:
+                    continue
+                location, current_path, _current = current_record
+                if location != "pending" or current_path != path:
+                    continue
+                claimed_path = self.claimed_dir / path.name
                 try:
                     _replace_durable(path, claimed_path)
                 except FileNotFoundError:
@@ -260,7 +271,10 @@ class IntakeQueue:
         if claimed_path is None:
             raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
         clean_claimer = _required_str({"claimer": claimer}, "claimer")
-        with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
+        with _claim_transition_guard(self._unit_lock_path(unit_id)):
+            claimed_path = self._claimed_path_for_unit(unit_id)
+            if claimed_path is None:
+                raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
             try:
                 claimed = _read_unit(claimed_path)
             except FileNotFoundError as exc:
@@ -321,7 +335,10 @@ class IntakeQueue:
         if claimed_path is None:
             raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
         clean_claimer = _required_str({"claimer": claimer}, "claimer")
-        with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
+        with _claim_transition_guard(self._unit_lock_path(unit_id)):
+            claimed_path = self._claimed_path_for_unit(unit_id)
+            if claimed_path is None:
+                raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
             try:
                 claimed = _read_unit(claimed_path)
             except FileNotFoundError as exc:
@@ -354,7 +371,10 @@ class IntakeQueue:
         claimed_path = self._claimed_path_for_unit(unit_id)
         if claimed_path is None:
             raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
-        with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
+        with _claim_transition_guard(self._unit_lock_path(unit_id)):
+            claimed_path = self._claimed_path_for_unit(unit_id)
+            if claimed_path is None:
+                raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
             try:
                 claimed = _read_unit(claimed_path)
             except FileNotFoundError as exc:
@@ -388,7 +408,14 @@ class IntakeQueue:
             if not claimed_path.is_file() or claimed_path.suffix not in _SUPPORTED_SUFFIXES:
                 continue
             try:
-                with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
+                candidate = _read_unit(claimed_path)
+                with _claim_transition_guard(self._unit_lock_path(candidate.unit_id)):
+                    current_record = self._publication_record(candidate.unit_id)
+                    if current_record is None:
+                        continue
+                    location, current_path, _current = current_record
+                    if location != "claimed" or current_path != claimed_path:
+                        continue
                     try:
                         unit = _read_unit(claimed_path)
                     except FileNotFoundError:
@@ -462,7 +489,13 @@ class IntakeQueue:
                     "recovery", ValueError(f"claimed record has incompatible {unit.status!r} state")
                 )
             destination = (self.pending_dir if unit.status == "pending" else self.done_dir) / path.name
-            with _claim_transition_guard(self.root / f".{path.name}.transition-lock"):
+            with _claim_transition_guard(self._unit_lock_path(unit.unit_id)):
+                current_record = self._publication_record(unit.unit_id)
+                if current_record is None:
+                    continue
+                location, current_path, _current = current_record
+                if location != "claimed" or current_path != path:
+                    continue
                 # Another recovery/transition may have completed while the
                 # lock was acquired; only move the exact stranded state.
                 try:
@@ -482,32 +515,44 @@ class IntakeQueue:
                         raise IntakeTransitionError("recovery", exc) from exc
 
     def _claimed_path_for_unit(self, unit_id: str) -> Path | None:
-        for path in sorted(self.claimed_dir.iterdir()):
-            if path.is_file() and path.suffix in _SUPPORTED_SUFFIXES and _read_unit(path).unit_id == unit_id:
-                return path
-        return None
+        record = self._publication_record(unit_id)
+        if record is None:
+            return None
+        location, path, _unit = record
+        return path if location == "claimed" else None
 
-    def _publication_record(self, filename: str) -> tuple[str, IntakeUnit] | None:
-        """Return the sole lifecycle record for a publication filename.
+    def _unit_lock_path(self, unit_id: str) -> Path:
+        if not _UNIT_ID_PATTERN.fullmatch(unit_id):
+            raise ValueError("intake unit_id must contain only letters, digits, '.', '_', or '-'")
+        return self.root / f".{unit_id}.transition-lock"
 
-        Called under the same stable per-entry lock as claim and lifecycle
-        transitions.  More than one location is a split-brain condition, not
-        an invitation to overwrite an owner.
+    def _publication_record(self, unit_id: str) -> tuple[str, Path, IntakeUnit] | None:
+        """Return the sole lifecycle record for a stable unit identity.
+
+        A unit may be serialized under either supported suffix and its priority
+        prefix can change between controller publications.  The record lookup
+        therefore follows the payload's immutable ``unit_id``, never a sorted
+        filename.  More than one matching lifecycle record is split-brain, not
+        an invitation to select an arbitrary generation.
         """
-        records: list[tuple[str, IntakeUnit]] = []
+        records: list[tuple[str, Path, IntakeUnit]] = []
         for location, directory in (
             ("pending", self.pending_dir),
             ("claimed", self.claimed_dir),
             ("done", self.done_dir),
         ):
-            path = directory / filename
-            try:
-                records.append((location, _read_unit(path)))
-            except FileNotFoundError:
-                continue
+            for path in sorted(directory.iterdir()):
+                if not path.is_file() or path.suffix not in _SUPPORTED_SUFFIXES:
+                    continue
+                try:
+                    current = _read_unit(path)
+                except FileNotFoundError:
+                    continue
+                if current.unit_id == unit_id:
+                    records.append((location, path, current))
         if len(records) > 1:
             raise IntakeTransitionError(
-                "publish", ValueError(f"intake publication has duplicate lifecycle records: {filename}")
+                "lifecycle_lookup", ValueError(f"intake publication has duplicate lifecycle records: {unit_id}")
             )
         return records[0] if records else None
 
@@ -783,10 +828,16 @@ def _parse_rfc3339_z(value: str, field: str) -> datetime:
 def _claim_expiry(now: str, ttl_seconds: float | int | None) -> str | None:
     if ttl_seconds is None:
         return None
+    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)):
+        raise ValueError("claim ttl_seconds must be a finite number")
     seconds = float(ttl_seconds)
-    if seconds <= 0:
-        raise ValueError("claim ttl_seconds must be positive")
-    return (_parse_rfc3339_z(now, "clock") + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not math.isfinite(seconds) or not 0 < seconds <= _MAX_CLAIM_TTL_SECONDS:
+        raise ValueError(f"claim ttl_seconds must be finite and in 0 < t <= {_MAX_CLAIM_TTL_SECONDS}")
+    try:
+        expires_at = _parse_rfc3339_z(now, "clock") + timedelta(seconds=seconds)
+    except OverflowError as exc:
+        raise ValueError("claim ttl_seconds overflows the clock") from exc
+    return expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class _claim_transition_guard:
@@ -810,3 +861,4 @@ class _claim_transition_guard:
 
 _SERIALIZATION_SUFFIX = ".yaml" if yaml is not None else ".json"
 _SUPPORTED_SUFFIXES = (".yaml", ".json")
+_MAX_CLAIM_TTL_SECONDS = 3600

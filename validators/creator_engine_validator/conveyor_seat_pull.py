@@ -142,10 +142,11 @@ class SeatPullAdapter:
         try:
             _validate_identity(seat_id, "seat_id")
             unit = self.queue.claim_entry(seat_id, ttl_seconds=ttl_seconds, clock=clock)
-        except (OSError, ValueError, IntakeTransitionError) as exc:
+        except Exception as exc:
             # Claim placement has already been reconciled to a single pending
-            # record where possible.  Initial queue storage, TTL, scan, and
-            # lock failures are all bounded at this seat-facing seam.
+            # record where possible.  Initial queue storage, parsing, TTL,
+            # clock, scan, and lock failures are all bounded at this
+            # seat-facing seam; no malformed controller input escapes it.
             return SeatPullOutcome(
                 state="blocked_released", claim_state="empty", seat_id=seat_id,
                 detail=f"claim_refused:{type(exc).__name__}",

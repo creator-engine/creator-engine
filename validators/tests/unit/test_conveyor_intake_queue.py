@@ -11,6 +11,7 @@ from creator_engine_validator.conveyor_daemon_runner import load_config
 from creator_engine_validator.conveyor_intake_queue import (
     IntakeQueue,
     IntakeQueueReader,
+    IntakeTransitionError,
     IntakeUnit,
 )
 import creator_engine_validator.conveyor_intake_queue as intake
@@ -256,6 +257,46 @@ def test_duplicate_publication_is_idempotent_only_while_pending_and_never_reclai
     with pytest.raises(FileExistsError, match="done"):
         queue.publish_entry(unit)
     assert len(list(queue.done_dir.iterdir())) == 1
+
+
+def test_publication_uses_stable_unit_identity_across_priority_and_serialization(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    unit = _unit("unit-a", priority=10)
+    queue.publish_entry(unit)
+
+    yaml_path = next(queue.pending_dir.iterdir())
+    json_path = queue.pending_dir / "00010-unit-a.json"
+    json_path.write_text(json.dumps(dataclasses.asdict(unit)), encoding="utf-8")
+    yaml_path.unlink()
+
+    # An identical replay matches the extant JSON publication even though the
+    # controller's serializer currently emits YAML.
+    queue.publish_entry(unit)
+    assert list(queue.pending_dir.iterdir()) == [json_path]
+
+    # Changing priority changes the filename, but never creates a second
+    # lifecycle record for the immutable identity.
+    with pytest.raises(FileExistsError, match="pending"):
+        queue.publish_entry(dataclasses.replace(unit, priority=20))
+    assert list(queue.pending_dir.iterdir()) == [json_path]
+
+
+def test_completion_refuses_duplicate_unit_identity_instead_of_selecting_a_generation(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.publish_entry(_unit("unit-a", priority=10))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=60)
+    assert claimed is not None
+
+    claimed_path = queue._claimed_path_for_unit("unit-a")
+    assert claimed_path is not None
+    duplicate = queue.claimed_dir / "99999-unit-a.json"
+    duplicate.write_text(json.dumps(dataclasses.asdict(claimed)), encoding="utf-8")
+
+    with pytest.raises(IntakeTransitionError, match="duplicate lifecycle"):
+        queue.complete_entry(
+            "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        )
+    assert claimed_path.exists() and duplicate.exists()
 
 
 def test_publish_and_claim_share_the_entry_lock_without_overwriting_a_winner(monkeypatch, tmp_path: Path):

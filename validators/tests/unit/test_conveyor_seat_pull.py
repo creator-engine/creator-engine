@@ -92,7 +92,10 @@ def test_empty_queue_is_a_deterministic_noop(tmp_path: Path):
     assert (outcome.state, outcome.claim_state) == ("empty", "empty")
 
 
-@pytest.mark.parametrize("failure", [OSError("queue storage unavailable"), ValueError("invalid queue clock")])
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("queue storage unavailable"), ValueError("invalid queue clock"), OverflowError("clock overflow")],
+)
 def test_initial_claim_storage_and_ttl_failures_are_structured(monkeypatch, tmp_path: Path, failure: Exception):
     queue = IntakeQueue(tmp_path / "queue")
     adapter = _adapter(queue, tmp_path)
@@ -113,6 +116,37 @@ def test_invalid_initial_ttl_is_a_structured_refusal(tmp_path: Path):
     assert (outcome.state, outcome.claim_state, outcome.detail) == (
         "blocked_released", "empty", "claim_refused:ValueError",
     )
+
+
+@pytest.mark.parametrize("ttl", [float("nan"), float("inf"), float("-inf"), 3601])
+def test_non_finite_or_unbounded_initial_ttl_is_a_structured_refusal(tmp_path: Path, ttl: float):
+    outcome = _adapter(IntakeQueue(tmp_path / "queue"), tmp_path).pull_one("seat-a", ttl_seconds=ttl)
+
+    assert (outcome.state, outcome.claim_state, outcome.detail) == (
+        "blocked_released", "empty", "claim_refused:ValueError",
+    )
+
+
+def test_overflowing_initial_clock_is_a_structured_refusal(tmp_path: Path):
+    def overflowing_clock() -> str:
+        raise OverflowError("clock overflow")
+
+    outcome = _adapter(IntakeQueue(tmp_path / "queue"), tmp_path).pull_one("seat-a", clock=overflowing_clock)
+
+    assert (outcome.state, outcome.claim_state, outcome.detail) == (
+        "blocked_released", "empty", "claim_refused:OverflowError",
+    )
+
+
+def test_malformed_yaml_in_pending_queue_is_a_structured_claim_refusal(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "queue")
+    queue._ensure_dirs()
+    (queue.pending_dir / "00001-bad.yaml").write_text("unit_id: [\n", encoding="utf-8")
+
+    outcome = _adapter(queue, tmp_path).pull_one("seat-a")
+
+    assert (outcome.state, outcome.claim_state) == ("blocked_released", "empty")
+    assert outcome.detail.startswith("claim_refused:")
 
 
 @pytest.mark.parametrize("window", ["destination", "source"])
