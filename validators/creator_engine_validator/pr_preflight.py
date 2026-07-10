@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Protocol, TextIO
 
 from . import brain_intent_xor_gate, brain_runtime
+from .disk_headroom import DiskHeadroomError, check_headroom, effective_min_free_gb
 from .worktree_venv import (
     CE_VALIDATOR_PYTHON_ENV,
     ensure_worktree_python,
@@ -68,6 +69,7 @@ CONTAINED_SEAT_CARRIER_NOTICE = (
     "because the per-PR carrier is generated harvest-side."
 )
 BRAIN_LEDGER_PATH = ".ce/brain/assertions.yaml"
+DISK_HEADROOM_CHECK_NAME = "disk_headroom (suite pre-flight)"
 BRAIN_LEDGER_RECHAIN_TOOL_HINT = (
     "rebase onto the current base and re-run the brain re-chain tool "
     "(`ce brain assert` for appends, or `ce brain correct` for supersede/re-pin cascades)"
@@ -1155,6 +1157,18 @@ def run_preflight(
         )
         return "no undeclared Linux runtime-plane assumptions"
 
+    def disk_headroom_gate() -> str:
+        """Refuse to start the suite when free disk space is below threshold.
+
+        Fail-closed before any test process is spawned; never mid-write.
+        Threshold: CE_SUITE_MIN_FREE_GB env var, default 30 GiB.
+        """
+        threshold = effective_min_free_gb()
+        measured = check_headroom(config.repo_root, threshold)
+        return (
+            f"disk_headroom: {measured:.1f} GiB free >= {threshold:.1f} GiB required on {config.repo_root}"
+        )
+
     checks.append(
         _run_check(
             "clean worktree",
@@ -1206,6 +1220,17 @@ def run_preflight(
                 "value",
                 _resolve_declared_work_class(config, comparison_base.get("value", config.base), runner),
             ),
+            out,
+            err,
+        )
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out)
+        return 1
+    checks.append(
+        _run_check(
+            DISK_HEADROOM_CHECK_NAME,
+            disk_headroom_gate,
             out,
             err,
         )

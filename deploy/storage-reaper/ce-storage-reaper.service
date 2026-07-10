@@ -1,0 +1,26 @@
+[Unit]
+Description=Creator Engine scratch-storage reaper (F-1.3)
+Documentation=deploy/storage-reaper/reap-scratch.sh
+After=local-fs.target
+# Do not run if the timer unit is masked.
+ConditionPathExists=/var/tmp
+
+[Service]
+Type=oneshot
+# Run as root so it can remove /var/tmp entries from multiple users.
+User=root
+# Path to the script; adjust CE_REPO_ROOT if the repo is installed elsewhere.
+# Operators can override by dropping a systemd override file.
+Environment=CE_REPO_ROOT=/home/ce-dev-2/creator-engine
+ExecStart=/bin/bash ${CE_REPO_ROOT}/deploy/storage-reaper/reap-scratch.sh
+# Log to journald only; no writable filesystem path dependency.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ce-storage-reaper
+# Resource limits: low priority, bounded CPU.
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target
