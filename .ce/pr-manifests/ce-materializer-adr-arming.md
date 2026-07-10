@@ -11,10 +11,10 @@ Canonicalization:
 
 AUTHORIZED_PATHS_COUNT=3
 
-AUTHORIZED_PATHS_SHA256=2318d24788623f3ade8d810e6c322f6ab7a8b8baeceaa840bea5a6fbee913be9
+AUTHORIZED_PATHS_SHA256=e803a61d9dd8b886945b39850895d74d6e0a49ddab4eb142f3cb0da8a6b83334
 
 ```text
 .ce/changelog/ce-materializer-adr-arming.md
 .ce/pr-manifests/ce-materializer-adr-arming.md
-docs/decisions/0006-materializer-arming-credential-lease.md
+docs/decisions/ADR-0015-materializer-arming-credential-lease.md
 ```
