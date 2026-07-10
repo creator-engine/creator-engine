@@ -254,6 +254,34 @@ def test_claims_collected(tmp_path):
     assert (tmp_path / "out/dispatch_claims/claim.md").is_file()
 
 
+def test_claude_agents_collected(tmp_path):
+    _seed(tmp_path / ".claude/agents/implementer.md", "role\n")
+
+    manifest = _commit_manifest(tmp_path)
+
+    assert "claude_agents" in manifest["data_classes"]
+    assert any(
+        item["path"] == ".claude/agents/implementer.md"
+        for item in manifest["files"]
+    )
+    assert (tmp_path / "out/claude_agents/implementer.md").is_file()
+
+
+def test_missing_claude_agents_dir_yields_warning_not_error(tmp_path, capsys):
+    out = tmp_path / "out"
+
+    rc = controller_state_sync.main(
+        ["--source-root", str(tmp_path), "--commit", "--output-dir", str(out)]
+    )
+
+    captured = capsys.readouterr()
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert rc == 0
+    assert "warning: missing source for claude_agents" in captured.err
+    assert "claude_agents" in manifest["missing_sources"]
+    assert not (out / "claude_agents").exists()
+
+
 def test_missing_source_dir_yields_warning_not_error(tmp_path, capsys):
     out = tmp_path / "out"
 

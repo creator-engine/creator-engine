@@ -142,6 +142,7 @@ KNOWN_OPERATIONS_EXCEPTIONS: frozenset[str] = frozenset(
         "docs/operations/CONTROLLER_BOOTSTRAP.md",
         "docs/operations/CONTROLLER_BOUNDARY_POLICY.md",
         "docs/operations/CONTROLLER_IDENTITY_PROTOCOL.md",
+        "docs/operations/CONTROLLER_MIGRATION_COMPLETENESS.md",
         "docs/operations/CONTROLLER_RUNTIME_CONTRACT_PROTOCOL.md",
         "docs/operations/DISTRIBUTED_IDENTITY_PROTOCOL.md",
         "docs/operations/EVIDENCE_FAN_IN_PROTOCOL.md",

@@ -31,6 +31,7 @@ SNAPSHOT_SOURCES = (
     ("arc_state", Path(".ce/state/research"), Path("arc_state")),
     ("dispatch_briefs", Path(".ce/briefs"), Path("dispatch_briefs")),
     ("dispatch_claims", Path(".ce/claims"), Path("dispatch_claims")),
+    ("claude_agents", Path(".claude/agents"), Path("claude_agents")),
 )
 
 _REQUIRED_DIR_FD_CALLABLES = {
@@ -70,6 +71,16 @@ def _directory_flags() -> int:
     return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
+def _is_directory_without_following(parent_descriptor: int, component: str) -> bool:
+    try:
+        entry_stat = os.stat(component, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise SnapshotError(f"could not inspect path component {component!r}") from exc
+    return stat.S_ISDIR(entry_stat.st_mode)
+
+
 def _validate_relative(path: Path) -> Path:
     if path.is_absolute() or not path.parts or ".." in path.parts:
         raise SnapshotError(f"invalid relative snapshot path: {path}")
@@ -84,6 +95,10 @@ def _open_directory_path(path: Path, *, create: bool = False) -> int:
     try:
         for component in absolute.parts[1:]:
             try:
+                if not _is_directory_without_following(descriptor, component):
+                    raise SnapshotError(
+                        f"refused symlinked or non-directory path component {component!r} in {absolute}"
+                    )
                 child = os.open(component, _directory_flags(), dir_fd=descriptor)
             except FileNotFoundError:
                 if not create:
@@ -111,6 +126,10 @@ def _open_directory_at(root_descriptor: int, relative: Path, *, create: bool = F
     try:
         for component in relative.parts:
             try:
+                if not _is_directory_without_following(descriptor, component):
+                    raise SnapshotError(
+                        f"refused symlinked or non-directory ancestor in relative path {relative}"
+                    )
                 child = os.open(component, _directory_flags(), dir_fd=descriptor)
             except FileNotFoundError:
                 if not create:
@@ -289,7 +308,8 @@ def restore_steps(target_branch: str) -> list[str]:
         "3. Copy arc_state/ to <replacement-repo-root>/.ce/state/research/.",
         "4. Copy dispatch_briefs/ to <replacement-repo-root>/.ce/briefs/.",
         "5. Copy dispatch_claims/ to <replacement-repo-root>/.ce/claims/.",
-        "6. If memory archive is present: tar -xf memory.tar.gz -C <replacement-memory-root>/.",
+        "6. Copy claude_agents/ to <replacement-repo-root>/.claude/agents/ before dispatching workers.",
+        "7. If memory archive is present: tar -xf memory.tar.gz -C <replacement-memory-root>/.",
     ]
 
 
@@ -349,7 +369,7 @@ def collect_manifest(
     finally:
         os.close(source_root_descriptor)
 
-    data_classes = ["arc_state", "dispatch_state"]
+    data_classes = ["arc_state", "dispatch_state", "claude_agents"]
     if include_memory:
         data_classes.append("memory")
         try:
