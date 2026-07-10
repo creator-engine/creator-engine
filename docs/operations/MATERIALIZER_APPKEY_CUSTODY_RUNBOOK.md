@@ -44,6 +44,37 @@ separate, implemented design that defines and verifies all of the following:
 These are future requirements only. This runbook does not claim that any of
 them is implemented, deployed, configured, or enforced.
 
+## Future Rotation, Recovery, and Incident Prerequisites
+
+While `ARMING_ENABLED=False`, rotation, recovery, revocation, and incident
+response remain future-only procedures and are not available. Before a future
+Operator-ratified arming proposal, Operator custody must ratify documented
+evidence for replacement, recovery, immediate revocation, incident escalation,
+and audit handling. A future procedure must fail closed--leaving arming,
+signing, pushing, and release disabled--whenever that ratification or its
+required evidence is absent. This records no current rotation, recovery,
+revocation, or incident-response enforcement.
+
+## Future Per-Call Signing Boundary
+
+While `ARMING_ENABLED=False`, no signing boundary is live. Any future
+Operator-ratified design must require a separately authorized per-call signing
+operation, with no reusable credential material exposed to workers, tracked
+files, prompts, logs, command arguments, or evidence. Absent the ratified
+design and its evidence, the future design must fail closed with signing,
+pushing, and release disabled. This runbook neither configures nor asserts a
+current signer or signing integration.
+
+## Future Single-Host Lease and Topology Prerequisite
+
+While `ARMING_ENABLED=False`, no materializer lease is live. Any future
+Operator-ratified deployment must establish a single-host lease constraint and
+fail closed when its ownership evidence is absent or contested. Before any
+future multi-host use, an Operator must reconsider and ratify the topology,
+ownership, recovery, and lease model; no multi-host use is authorized by this
+runbook. This is a future prerequisite, not current lease or topology
+enforcement.
+
 ## Roles and Non-Authorities
 
 Only a future ratified Operator procedure may assign custody or recovery
