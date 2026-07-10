@@ -2,6 +2,7 @@
   "data_classes": [
     "arc_state",
     "dispatch_state",
+    "claude_agents",
     "memory"
   ],
   "denied_paths": [
@@ -573,6 +574,11 @@
       "size": 4049
     },
     {
+      "path": ".ce/briefs/BRIEF_dev1_n8_queue_daemon_iac_20260710.md",
+      "sha256": "674d88baee64fde6bd73c2443af25ca056d96a1e13c8d90b93ed8d16f0a8a32e",
+      "size": 3089
+    },
+    {
       "path": ".ce/briefs/BRIEF_dev1_p0_takeover_20260706.md",
       "sha256": "45c7fcaf3e16a36598937fea2ac81cbc19bbeb9bd1e5631e60ca29ce8aab2851",
       "size": 2037
@@ -618,6 +624,16 @@
       "size": 1384
     },
     {
+      "path": ".ce/briefs/BRIEF_dev3_419_mint_broker_server_20260710.md",
+      "sha256": "c52410eaebe1874678f39d7369bf43176c1f1aedbffaf2bfeb0a9e0c905dfc62",
+      "size": 4128
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_453b_hashpin_ci_visibility_20260710.md",
+      "sha256": "ed3125ff92b26034d605f4341160e27a6a11ad4948f1bcc8696b8cb452c0768c",
+      "size": 4564
+    },
+    {
       "path": ".ce/briefs/BRIEF_dev3_467_r2_20260706.md",
       "sha256": "bb5330a984810a6057f9d83fda98a741cf4ed8fca530d7c24c3bcdc12b426be0",
       "size": 2696
@@ -631,6 +647,11 @@
       "path": ".ce/briefs/BRIEF_dev3_469_safe_slice_20260710.md",
       "sha256": "b480179f77dcf86eaa7b5f657ac895848bfbce76aa1d4e89e94c4ccbaa3d52ca",
       "size": 3615
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_470b_registry_recall_20260710.md",
+      "sha256": "1dc2b9d721bd71767bbebe158ec1c77986de7f016e1dcdf99188a8a21bb0b361",
+      "size": 3330
     },
     {
       "path": ".ce/briefs/BRIEF_dev3_476_claim_lifecycle_20260706.md",
@@ -663,9 +684,29 @@
       "size": 2117
     },
     {
+      "path": ".ce/briefs/BRIEF_dev3_510s2_ship_gate_20260710.md",
+      "sha256": "c73b7f15b8ae6796fc95927a3b29304c9c53655f1506245eee75e77565a66698",
+      "size": 2962
+    },
+    {
       "path": ".ce/briefs/BRIEF_dev3_512_redeploy_portability_20260709.md",
       "sha256": "ea22f8a7664c971ba2e355a047769ad9f88c6433868212dc50c6056a36f403c6",
       "size": 2874
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_518s2_reconcile_feed_20260710.md",
+      "sha256": "d12cfa3c9e65ac87b490eef011f6307696e00bd0aa49fd15da4b1cc65a031cb3",
+      "size": 2896
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_521a_worktree_venv_20260710.md",
+      "sha256": "08a04b639c53e5b73858388500d0aff9e619ee9f489a976cdb66f2704a413994",
+      "size": 2925
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_523c_sentinel_trapped_signal_20260710.md",
+      "sha256": "8af4e30e642cc225e973a78da8ec3ff29587554520f03cd63d8b433bee1a6b7c",
+      "size": 3922
     },
     {
       "path": ".ce/briefs/BRIEF_dev3_868_r2_20260706.md",
@@ -753,6 +794,21 @@
       "size": 13553
     },
     {
+      "path": ".ce/briefs/BRIEF_dev3_f3_migration_runbook_20260710.md",
+      "sha256": "8171bfef7b290d7f9c26e6a1bc11b90c113d32d68bd6896ee7b2523111807c88",
+      "size": 3732
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_materializer_appkey_custody_runbook_20260710.md",
+      "sha256": "4a0d7a2311e1b55bcc5d0c0514893bf007ef770954901f4be4dbe84fd1a79c29",
+      "size": 8057
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_n15b_composition_probe_20260710.md",
+      "sha256": "4099f11368feeb7e221f195b644ddd403a2adecdabf060289e709c0e07755ef2",
+      "size": 6069
+    },
+    {
       "path": ".ce/briefs/BRIEF_dev3_night_20260706.md",
       "sha256": "79ebeb58ed0294c4198dae563d0f0b639fd0414902a6b4548c85ec9003a14f67",
       "size": 3361
@@ -801,6 +857,11 @@
       "path": ".ce/briefs/BRIEF_dev3_runner_dedup_refusal_msg.md",
       "sha256": "120f217225403f4a157fc1c8538fa63a910a621c4e452e7ee2fc2ce835f612da",
       "size": 3893
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev3_terra_default_flip_20260710.md",
+      "sha256": "8c49f9957b075623fc2d13380002782398b2ab47c2546ce10f66d534ba49a11e",
+      "size": 2727
     },
     {
       "path": ".ce/briefs/BRIEF_dev4_464_sweep_design_20260706.md",
@@ -856,6 +917,16 @@
       "path": ".ce/briefs/BRIEF_dev4_513_ratification_binding_design_20260709.md",
       "sha256": "b0e54acec9c23c33aaad69a44f5358a9eb920b361196c230f4fda835620e4ec7",
       "size": 2929
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev4_523_sentinel_flake_20260710.md",
+      "sha256": "ac24b490c7d0c85cc6d6a512a25c08bf297d633db5f4eaad781f60bf070dd762",
+      "size": 2120
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev4_529_broker_robustness_20260710.md",
+      "sha256": "6940c4dc0935e54faf4b9f05961cc0c81ecca312768846a90ab19999382ffef5",
+      "size": 12756
     },
     {
       "path": ".ce/briefs/BRIEF_dev4_858_revision_20260706.md",
@@ -926,6 +997,31 @@
       "path": ".ce/briefs/BRIEF_dev4_batch_conveyor_prearming_20260708.md",
       "sha256": "ae3568dd75a86572f7850b48d8accb500ad123112ebb93c4f258cedd134188f6",
       "size": 24583
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev4_f1s2_env_propagation_20260710.md",
+      "sha256": "4da5ceeefcb8742addff0f3776386ea7caca3453bd7bb657057e4865ceb7f1dc",
+      "size": 4437
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev4_materializer_prearm_20260710.md",
+      "sha256": "93c11dbebba92b068c23d0162ef4a6ee106f4d92706380786faae687e90b04cd",
+      "size": 4757
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev4_n11s1_intake_queue_substrate_20260710.md",
+      "sha256": "1df9eb6689ba7ddd1768660e79fd0fedb8278dd7203007e7949b1c470ab9f32f",
+      "size": 7788
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev4_n15a_skip_anomaly_20260710.md",
+      "sha256": "095416bf3e92e686e0cf0c4e0a151f7ad0a11ee3761f5b70349c5ab581c43e21",
+      "size": 5786
+    },
+    {
+      "path": ".ce/briefs/BRIEF_dev4_n1s2_review_pickup_acting_20260710.md",
+      "sha256": "3b63aaa289dcedc83c85856a73513644726c4406161d15f5e4bd842bccdc1351",
+      "size": 10531
     },
     {
       "path": ".ce/briefs/BRIEF_dev4_night_490_20260706.md",
@@ -2093,6 +2189,11 @@
       "size": 1941
     },
     {
+      "path": ".ce/briefs/repair-n15b-current-main-carrier-20260710.md",
+      "sha256": "13e6fd4223c58a3a82157edfe45c4684e8fdfe2ccf5bd5007476e334cae2e115",
+      "size": 2848
+    },
+    {
       "path": ".ce/briefs/repair-pr931-ancestor-symlink-toctou.md",
       "sha256": "752b27d366ae431c91c0ba8693f1b40e6c114142ca52addbb1757fe42ddb4925",
       "size": 3351
@@ -2106,6 +2207,11 @@
       "path": ".ce/briefs/repair-pr932-daemon-agent-rubric.md",
       "sha256": "ce6996aa678f0022c3fc5fefc89e0b65d7e86e18250943e98906b26c36a3b535",
       "size": 3255
+    },
+    {
+      "path": ".ce/briefs/research-n12-triage-organ-slice1-20260710.md",
+      "sha256": "27be2a0124511ab94094460cb8e8585b726e8d305f039d26e62c57e16df08668",
+      "size": 2613
     },
     {
       "path": ".ce/briefs/review-ce516-item3-brain-window.md",
@@ -2393,6 +2499,11 @@
       "size": 503
     },
     {
+      "path": ".ce/claims/ce-419-mint-broker-server.md",
+      "sha256": "a2042561a1deb5e52ec7a43484885f1b76a255bd89f81bf841abcba2a069361d",
+      "size": 977
+    },
+    {
       "path": ".ce/claims/ce-423-tenant-denylist-matrix.md",
       "sha256": "5e12944b9ec97ae5c874adece8f8e61d71302cf9eca74cc1facb0dee5cc90701",
       "size": 438
@@ -2451,6 +2562,11 @@
       "path": ".ce/claims/ce-451-454-dev1-batch4.md",
       "sha256": "ff4e57200b57b001ba8067bce37dad1c2e1637d03212f1068bd075bc7efc8c05",
       "size": 305
+    },
+    {
+      "path": ".ce/claims/ce-453b-hashpin-ci-visibility.md",
+      "sha256": "6995c07cf3b910f4b1f32ac19897440ee145b3b5a02307e5cbecb47a3ee7df49",
+      "size": 1705
     },
     {
       "path": ".ce/claims/ce-455-refusal-message-tenant-lens.md",
@@ -2678,6 +2794,11 @@
       "size": 724
     },
     {
+      "path": ".ce/claims/ce-523c-sentinel-trapped-signal-deflake.md",
+      "sha256": "e30a9c9fed1f551fea5f69551274cee2132880a48e690b54ac013efe9ff943a1",
+      "size": 1102
+    },
+    {
       "path": ".ce/claims/ce-796-804-review-followups.md",
       "sha256": "9f076a35ffb092d679aa9ee366548b2b8404131cb6d4d173ce40db8fe3547de9",
       "size": 257
@@ -2768,6 +2889,11 @@
       "size": 49
     },
     {
+      "path": ".ce/claims/ce-f1s2-preflight-env-propagation.md",
+      "sha256": "7d0a71e3512ff8bdf6108931f568849d85b391eb91b3f29c48d0e9069493db0d",
+      "size": 1281
+    },
+    {
       "path": ".ce/claims/ce-followups2-20260708.md",
       "sha256": "b3a1f3327bb64dc2d837999b6813cf884f2750abd5a477a608685074b0eeaa5c",
       "size": 407
@@ -2778,6 +2904,21 @@
       "size": 305
     },
     {
+      "path": ".ce/claims/ce-materializer-appkey-custody-runbook.md",
+      "sha256": "794f5b88b1392d3f65f743db109b5db93a1c1aeb8820dbddd7a62b65f5541831",
+      "size": 1202
+    },
+    {
+      "path": ".ce/claims/ce-n11s1-intake-queue-substrate.md",
+      "sha256": "d59f406a430ed39794d26a58fbc44b5b8805a0d7db14cd4bf848c22f99b48ebc",
+      "size": 1241
+    },
+    {
+      "path": ".ce/claims/ce-n1s2-review-pickup-acting.md",
+      "sha256": "d6244dc02aff5b98ffab86d07a0818063fa2a9e679bc09140f7d7d3aa5110c93",
+      "size": 1447
+    },
+    {
       "path": ".ce/claims/ce-n4c-automerge-tier-design.md",
       "sha256": "f98ea653a29c399ed07750cb0d3c3f191f5ffd2b6bb5743d161d3f78b2c8b66b",
       "size": 584
@@ -2786,6 +2927,11 @@
       "path": ".ce/claims/ce-n5-worktree-prune.md",
       "sha256": "3a75c64833ca7ed9a9182dd2a37cba4099c8b26b60edbd2f4f35e768128c301e",
       "size": 617
+    },
+    {
+      "path": ".ce/claims/ce-n8-queue-daemon-iac.md",
+      "sha256": "a9cd82e9fa4f0953932061e9ff351351787fe9ab66f974e10d5b91c1f42626dc",
+      "size": 1110
     },
     {
       "path": ".ce/claims/ce-npm-path-fix.md",
@@ -2923,6 +3069,11 @@
       "size": 635
     },
     {
+      "path": ".ce/claims/repair-n15b-current-main-carrier-20260710.md",
+      "sha256": "0e07358ee401399fa68258bd3f03d41178ea5b56570fe9e79c1f84aeb3f4ebd4",
+      "size": 683
+    },
+    {
       "path": ".ce/claims/repair-pr931-ancestor-symlink-toctou.md",
       "sha256": "5087c512378d710f81c045a367d4de57f01a887feafb65aa01a097bff39eddc6",
       "size": 416
@@ -2936,6 +3087,11 @@
       "path": ".ce/claims/repair-pr932-daemon-agent-rubric.md",
       "sha256": "95216a8f832b8098c1e248b7062e9882e447b5c9de57df02d6575d4cc679e140",
       "size": 488
+    },
+    {
+      "path": ".ce/claims/research-n12-triage-organ-slice1-20260710.md",
+      "sha256": "8ded42c7da1adc5613348e32f2cf7964013ba97d3ccd44fa76e7a300f8a5d576",
+      "size": 521
     },
     {
       "path": ".ce/claims/review-ce516-item3-brain-window.md",
@@ -3133,14 +3289,24 @@
       "size": 16994
     },
     {
+      "path": ".ce/state/research/ARC_STRANGELOOP2_LEDGER_20260710.md",
+      "sha256": "453f597a0a0e75e41b6ac9bd4c01696c58869d9abdced9b8d05f8fc757b78f8e",
+      "size": 6972
+    },
+    {
       "path": ".ce/state/research/ARC_STRANGELOOP2_MANDATE_DRAFT_20260710.md",
       "sha256": "779b02d275a048de7e75f018aa9a7fdfb493c2bf530b889a444d1560a61d9623",
       "size": 4116
     },
     {
       "path": ".ce/state/research/ARC_STRANGELOOP2_SUPPLEMENT_RATIFIED_20260710.md",
-      "sha256": "98ee395addec039c66d85fa7a6dc12154aa3da1297fb508df400c4a316927682",
-      "size": 3527
+      "sha256": "6076bd10d5019c9f56729955a0a098ad0799425a6d3d36bcb138e8272e554875",
+      "size": 6610
+    },
+    {
+      "path": ".ce/state/research/ARC_STRANGELOOP_NIGHT3_MANDATE_20260710.md",
+      "sha256": "2539021711225efb68c10e77f162448875d5619ed4c70634856178342685270d",
+      "size": 6946
     },
     {
       "path": ".ce/state/research/AUTOMERGE_TIER_EXPANSION_PROPOSAL_dev4_20260702.md",
@@ -3256,6 +3422,11 @@
       "path": ".ce/state/research/CODEX_CONTROLLER_ACTIVATION.md",
       "sha256": "32593a7161466fe5aaa2402434789a57bb44cc783955b376e483635e18951254",
       "size": 1688
+    },
+    {
+      "path": ".ce/state/research/CONTINUITY_DRILL_EVIDENCE_20260710.md",
+      "sha256": "b256ce6996fdbb3e5a68dc55bb0ade37a54941db7ada922ee1298606a76d7b7a",
+      "size": 9849
     },
     {
       "path": ".ce/state/research/CONTRIBUTOR_ONBOARDING_PLAN_20260627.md",
@@ -3406,6 +3577,21 @@
       "path": ".ce/state/research/INCIDENT_openbao_merge_gate_20260702.md",
       "sha256": "1c744fe2a503463e473a2f83bb559930cbec292975af09055031735ef4243486",
       "size": 7613
+    },
+    {
+      "path": ".ce/state/research/INDEPENDENT_VERIFICATION_RESEARCH_20260710.md",
+      "sha256": "972af97b2ef1bde1b5ec6fa6aba40e91cf976351da1755fb3d72b3b2249b6b3b",
+      "size": 41528
+    },
+    {
+      "path": ".ce/state/research/MATERIALIZER_ARMING_EVIDENCE_20260710.md",
+      "sha256": "1b0e14f6859e4857efc45144c2e52d55910bcce00dce987c0cdac79ae18049b7",
+      "size": 4459
+    },
+    {
+      "path": ".ce/state/research/MODEL_ROUTING_GPT56_RATIFIED_20260710.md",
+      "sha256": "59b9b8f2a8464dcb2050889cd557e669f9fe9212c9e346c5221b8cf722972fba",
+      "size": 3157
     },
     {
       "path": ".ce/state/research/MORNING_GO_NO_GO_20260625.md",
@@ -4463,6 +4649,26 @@
       "size": 3666
     },
     {
+      "path": ".ce/state/research/RESUME_STATE_CE_DEV2_STRANGELOOP2B_20260710.md",
+      "sha256": "4f966ec5cf0c2a1e541ce9e3653dbeaeb28a25f9fdde8e3e74b13e8cb03fa362",
+      "size": 3697
+    },
+    {
+      "path": ".ce/state/research/RESUME_STATE_CE_DEV2_STRANGELOOP2C_20260710.md",
+      "sha256": "2f6df33a8a08ae790f23a1174f786fe0fb49b421845a4cb1a4661541b3432a68",
+      "size": 3369
+    },
+    {
+      "path": ".ce/state/research/RESUME_STATE_CE_DEV2_STRANGELOOP2D_20260710.md",
+      "sha256": "1ea98d291f848be6e981c56e7461aec098a3f4bf422913c86c23673c9cb6decd",
+      "size": 4244
+    },
+    {
+      "path": ".ce/state/research/RESUME_STATE_CE_DEV2_STRANGELOOP2E_20260710.md",
+      "sha256": "afd11d21e8311d8ea25c1745784529ca05ee95bec07c5e4bfa48b9f806dab10f",
+      "size": 3971
+    },
+    {
       "path": ".ce/state/research/RING1_PROMOTION_PACKET_20260708.md",
       "sha256": "9eedf720a3a0ce8f6124d22fea2902476a0ea01295c85fcdc840d9b681570c87",
       "size": 7286
@@ -4543,9 +4749,39 @@
       "size": 18092
     },
     {
+      "path": ".claude/agents/README.md",
+      "sha256": "42cce4f44c389029cdb22462d19740bf2a971fb979054cf3abbd0f9ba241d124",
+      "size": 1737
+    },
+    {
+      "path": ".claude/agents/architect_research.md",
+      "sha256": "4260a27d5ec63a816e1476cbda97cf214b4536ede705bffbbb6ef4a6a233e199",
+      "size": 3544
+    },
+    {
+      "path": ".claude/agents/canary_qa.md",
+      "sha256": "9b1b768b0bcc816020766955985526e237a4234ecb1a1e603a9731a5197d2c35",
+      "size": 4531
+    },
+    {
+      "path": ".claude/agents/implementer.md",
+      "sha256": "2a4ca4721afba399a189b93f617c5d7cb1a537ddb350dd78076b77006ce9095a",
+      "size": 2340
+    },
+    {
+      "path": ".claude/agents/reviewer.md",
+      "sha256": "5c093e44619d0d530b4c67cb99d779630fa1159ef6660c3f60e13ff1e1fdf187",
+      "size": 3522
+    },
+    {
+      "path": ".claude/agents/verification.md",
+      "sha256": "2eb46b90fda94a2dc4a45ef3bdb3d95e9fb4d2e34ade3cdce14b28c047d5f21f",
+      "size": 3842
+    },
+    {
       "path": "memory/MEMORY.md",
-      "sha256": "b0595c9c7a6f2b35fce3f215aaa5b92826ab0c1828660fb8bd8ea1c1c20e3a19",
-      "size": 19356
+      "sha256": "edcd2fa35963d0bbbdc65180cbda4e5fcf7ea2507fd643ef06fbc6ca99cd5c28",
+      "size": 19680
     },
     {
       "path": "memory/MEMORY.md.bak-20260628T0745Z",
@@ -4629,8 +4865,8 @@
     },
     {
       "path": "memory/ce-agent-paced-estimation.md",
-      "sha256": "f178fa760cc98274d62e990aa73f898bd096b0cc8ab17b2e44a14b034d906d0a",
-      "size": 6353
+      "sha256": "82e805d724d171595d71a8af28322870ed47886148d6576293a75f43461ad52c",
+      "size": 6635
     },
     {
       "path": "memory/ce-agent-pointed-install-model.md",
@@ -4654,8 +4890,8 @@
     },
     {
       "path": "memory/ce-approval-wall-stale-marker-head-mismatch.md",
-      "sha256": "015508320098aa4c9b1f8a45dc52e2e8c8ba6d084246836619acff42c0ab830e",
-      "size": 1921
+      "sha256": "5831a76a8b3d73da9fbca4c993adcde29f3f7054785807a049511079e41812a3",
+      "size": 2358
     },
     {
       "path": "memory/ce-arad-pilot-onboarding.md",
@@ -4934,8 +5170,8 @@
     },
     {
       "path": "memory/ce-contained-seat-dispatch-mechanics.md",
-      "sha256": "e7bc8405d3189d5c23b431583a725abe7f7b2f35aa80ccd449db66dd0f151d87",
-      "size": 3372
+      "sha256": "08d748700da7287ee35ddbc8b7154a9042ed43bf6e51408381975468c2eb1137",
+      "size": 4691
     },
     {
       "path": "memory/ce-contained-seats-cannot-submit-reviews.md",
@@ -4944,8 +5180,8 @@
     },
     {
       "path": "memory/ce-contained-seats-have-git-egress.md",
-      "sha256": "c74f06b91ce24d8f9cc74bbcd207eb32045b56622e41bff478c2b9e5b0d698ed",
-      "size": 1993
+      "sha256": "6fb15a7a4ac1ce61d619f175569ebaa5525d7b552be628c721ff76df28122e72",
+      "size": 2807
     },
     {
       "path": "memory/ce-contained-self-push-proven.md",
@@ -5099,8 +5335,8 @@
     },
     {
       "path": "memory/ce-dev2-orchestrator-role.md",
-      "sha256": "9890666a615eacfe0c6d03d315303118e50cc0c98c728d4775a350a3cc84da4f",
-      "size": 2401
+      "sha256": "7753b388f224da7a8b9375f79d04f7e6e3e05cc4f6068b200df46b729a677656",
+      "size": 2973
     },
     {
       "path": "memory/ce-dev2-vps-migration-bundle.md",
@@ -5206,6 +5442,11 @@
       "path": "memory/ce-ephemeral-controllers-nanoclaws-direction.md",
       "sha256": "7680b54a84d069426f68d9048c5f4cc112f2b19a3c79576439285b8fe50176d6",
       "size": 1770
+    },
+    {
+      "path": "memory/ce-estimate-in-arcs-not-days.md",
+      "sha256": "a5f4b6b0f0804280866b504a6890815b425acebcf4cbe1053254459b175d8175",
+      "size": 1256
     },
     {
       "path": "memory/ce-every-agent-containerized-direction.md",
@@ -5489,8 +5730,8 @@
     },
     {
       "path": "memory/ce-model-effort-routing-policy.md",
-      "sha256": "d377584661ab3fb6f02b5b3f7cd6d3fc73080bce4c9b8af3c452431940597772",
-      "size": 10294
+      "sha256": "88689cb670f5f3082a41aca3405e256b5a8be6222c31c89bd34ba0db4d87cc63",
+      "size": 12239
     },
     {
       "path": "memory/ce-multi-controller-operator-pattern.md",
@@ -5579,8 +5820,8 @@
     },
     {
       "path": "memory/ce-no-egress-seat-self-contained-briefs.md",
-      "sha256": "b6c522182029035fdb1c26790db37e5dbc1dedffdf8ccbda40a9bf90fc925e61",
-      "size": 1482
+      "sha256": "10baea053796a8c460b13d04f69fa65710737965e6d27685a478be7c2c9bc40b",
+      "size": 2001
     },
     {
       "path": "memory/ce-no-forks-for-execution-use-restricted-agents.md",
@@ -5829,8 +6070,8 @@
     },
     {
       "path": "memory/ce-seat-dispatch-prompt-pointer-sha.md",
-      "sha256": "81170cea806deb060a401ff5087c063ee020b7669bd33f4a6cb74f9fa0a735a5",
-      "size": 3154
+      "sha256": "62adeb4f50ff102da893fed70ee9a557b8c501da6026667448a5c8627b9495ba",
+      "size": 3592
     },
     {
       "path": "memory/ce-seat-done-not-committed.md",
@@ -5919,8 +6160,8 @@
     },
     {
       "path": "memory/ce-subagent-model-efficiency-directive.md",
-      "sha256": "b963641d8753b2e1f6a8b4e9cb4f0d4c3b5a515694e0a58eea096e272c624832",
-      "size": 1355
+      "sha256": "425c774a16ce3b850614180ec4ff188befeb58e6538165988c28a05a235d3230",
+      "size": 3049
     },
     {
       "path": "memory/ce-substrate-acp-decision.md",
@@ -6294,7 +6535,7 @@
     }
   ],
   "memory_root": "/home/ce-dev-2/.claude/projects/-home-ce-dev-2-creator-engine/memory",
-  "memory_root_source": "derived-from-repo-root",
+  "memory_root_source": "override",
   "restore_instructions": "See RESTORE section below.",
   "restore_steps": [
     "1. Clone or fetch the target repo to the replacement host.",
@@ -6302,10 +6543,11 @@
     "3. Copy arc_state/ to <replacement-repo-root>/.ce/state/research/.",
     "4. Copy dispatch_briefs/ to <replacement-repo-root>/.ce/briefs/.",
     "5. Copy dispatch_claims/ to <replacement-repo-root>/.ce/claims/.",
-    "6. If memory archive is present: tar -xf memory.tar.gz -C <replacement-memory-root>/."
+    "6. Copy claude_agents/ to <replacement-repo-root>/.claude/agents/ before dispatching workers.",
+    "7. If memory archive is present: tar -xf memory.tar.gz -C <replacement-memory-root>/."
   ],
   "schema_version": "1",
-  "snapshot_at": "2026-07-10T05:47:19+00:00",
+  "snapshot_at": "2026-07-10T16:58:11+00:00",
   "source_host": "ce-pilot-1",
   "source_root": "/home/ce-dev-2/creator-engine",
   "target_branch": "controller-state-snapshot-ce-pilot-1"

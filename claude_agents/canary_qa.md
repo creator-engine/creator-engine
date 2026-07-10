@@ -1,6 +1,6 @@
 ---
 name: canary_qa
-model: sonnet
+model: claude-sonnet-4-6
 description: CE governed canary/QA worker for end-to-end released-artifact install and product validation from disposable scratch; returns evidence only.
 tools: Read, Grep, Glob, Bash
 ---
