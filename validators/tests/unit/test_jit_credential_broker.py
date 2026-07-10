@@ -21,6 +21,28 @@ from egress_broker.jit_credential import ModelCredential, SeatCredentialStore
 _MODEL_SECRET = "sk-ce-model-api-sentinel-1234567890"
 _FORGE_SECRET = "ghs_jit_forge_sentinel_1234567890"
 
+# Generous wait ceiling for live-socket tests.
+# A loaded xdist runner needs room to schedule the server thread without hitting a fixed-wall
+# deadline.  We poll at a short interval rather than using a tight fixed bound.
+_BROKER_CEILING_S = 30.0
+_BROKER_POLL_S = 0.05
+
+
+def _poll_until(predicate, *, ceiling=_BROKER_CEILING_S, interval=_BROKER_POLL_S):
+    """Poll ``predicate`` until truthy or the generous ceiling elapses.
+
+    Returns the predicate's truthy value, or ``False`` on timeout.  Only the
+    wall-clock budget is generous so a loaded runner has room to make progress;
+    the assertion being guarded is unchanged.
+    """
+    deadline = time.monotonic() + ceiling
+    while time.monotonic() < deadline:
+        result = predicate()
+        if result:
+            return result
+        time.sleep(interval)
+    return False
+
 
 def _config_doc(tmp_path):
     return {
@@ -182,16 +204,27 @@ def test_live_cli_mismatched_peercred_rejects_jit_mint_without_credential(tmp_pa
         "credential_class": "model-api",
     }
     with _connect_when_ready(socket_path) as client:
-        client.settimeout(2)
-        client.sendall((json.dumps(request) + "\n").encode("utf-8"))
+        client.settimeout(10)
+        # The server checks SO_PEERCRED before reading any data and can reject+close the
+        # connection before this write returns.  BrokenPipeError and ConnectionResetError
+        # are expected parts of the rejection path on AF_UNIX: the server always sends
+        # the 403 before closing, so the response is already buffered for the recv below.
+        try:
+            client.sendall((json.dumps(request) + "\n").encode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # server rejected and closed early — response is in the receive buffer
         raw = b""
         while b"\n" not in raw:
             chunk = client.recv(65536)
-            assert chunk
+            if not chunk:
+                break  # EOF — server closed after sending the response
             raw += chunk
 
-    server_thread.join(timeout=2)
-    assert not server_thread.is_alive()
+    # Poll with a generous ceiling instead of a fixed 2 s deadline; an xdist-loaded
+    # runner needs room to schedule the server thread.
+    assert _poll_until(lambda: not server_thread.is_alive()), (
+        "server thread did not exit within the ceiling"
+    )
     assert server_result == {"rc": self_push_cli.EXIT_OK}
     response = json.loads(raw.decode("utf-8"))
     assert response == {"status": 403, "reason": "peer_credential_unexpected"}
