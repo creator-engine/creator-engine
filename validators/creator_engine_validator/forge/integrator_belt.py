@@ -639,11 +639,17 @@ def run_daemon_loop(
     pr_body_updater: PrBodyUpdater | None = None,
     approval_settle_seconds: float = DEFAULT_APPROVAL_SETTLE_SECONDS,
     clock: Callable[[], float] = time.monotonic,
+    liveness_state_path: "Path | str | None" = None,
 ) -> DaemonLoopResult:
     """Run the supervised autonomous merge daemon.
 
     ``once=True`` performs a single pass. ``once=False`` loops until interrupted
     by the caller/process supervisor.
+
+    ``liveness_state_path`` names a JSON file refreshed on every completed pass
+    (last_pass_timestamp, pass_index, failed_count).  If not supplied the path
+    is read from ``CE_DAEMON_LIVENESS_STATE_PATH``.  Omitting both disables the
+    file; a write failure never stops the daemon (journald-only degradation).
     """
 
     if interval_seconds < 0:
@@ -657,6 +663,16 @@ def run_daemon_loop(
     ticks: list[DaemonLoopTick] = []
     approval_settle_seen: set[str] = set()
     approval_settle_ready_at: dict[str, float] = {}
+
+    # Resolve liveness state path: explicit arg wins, then env var.
+    _liveness_path: Path | None = None
+    if liveness_state_path is not None:
+        _liveness_path = Path(liveness_state_path)
+    else:
+        _env_liveness = os.environ.get("CE_DAEMON_LIVENESS_STATE_PATH")
+        if _env_liveness:
+            _liveness_path = Path(_env_liveness)
+
     index = 1
     while True:
         _log(log_sink, "daemon_pass_start", index=index, repo=repo, org=org, dry_run=dry_run)
@@ -700,12 +716,44 @@ def run_daemon_loop(
             defer_count=result.defer_count,
             failed_count=result.failed_count,
         )
+        _write_liveness_state(_liveness_path, index=index, failed_count=result.failed_count)
         if once:
             break
         if interval_seconds:
             sleep(interval_seconds)
         index += 1
     return DaemonLoopResult(ticks=tuple(ticks))
+
+
+def _write_liveness_state(
+    path: "Path | None",
+    *,
+    index: int,
+    failed_count: int,
+) -> None:
+    """Atomically refresh the liveness state file after a completed pass.
+
+    Failure is non-fatal: a warning is printed to stderr (journald) and the
+    daemon continues.  The file is written via a sibling ``.tmp`` rename so
+    readers never see a partial write.
+    """
+    if path is None:
+        return
+    state: dict[str, Any] = {
+        "last_pass_timestamp": datetime.now(timezone.utc).isoformat(),
+        "pass_index": index,
+        "failed_count": failed_count,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except Exception as exc:  # pragma: no cover - I/O errors degrade gracefully
+        print(
+            f"WARNING: daemon liveness state write failed ({path}): {exc}",
+            file=sys.stderr,
+        )
 
 
 def run_daemon_pass(

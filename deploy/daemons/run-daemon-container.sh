@@ -29,7 +29,7 @@ Optional container variables:
   CE_DAEMON_CACERT_FILE            optional host CA cert mounted read-only for BAO_CACERT
   CE_DAEMON_TOKEN_FILE             optional host token file mounted read-only
   CE_DAEMON_TOKEN_CONTAINER_PATH   default /run/creator-engine/daemon-token
-  CE_DAEMON_LOG_DIR                host log directory; default $HOME
+  CE_DAEMON_LOG_DIR                host log directory; default from LOGS_DIRECTORY (systemd) or journald-only if both unset
   CE_CONVEYOR_DAEMON_*             conveyor-daemon config forwarded when present
 
 No secret values are baked into the image or this script. Host bootstrap must
@@ -144,17 +144,35 @@ prepare_state_root_dir() {
 }
 
 setup_attempt_log() {
+  # Resolve the log directory.  Fallback order (first non-empty wins):
+  #   1. CE_DAEMON_LOG_DIR  — explicit operator override
+  #   2. LOGS_DIRECTORY     — systemd LogsDirectory= injection (set by the unit)
+  #   3. (empty)            — fall through to journald-only degradation
+  #
+  # The daemon MUST NOT exit if a log file cannot be created; every failure
+  # path below emits a warning to stderr (journald) and returns successfully.
   local daemon="$1"
-  local root="$2"
-  local log_dir="${CE_DAEMON_LOG_DIR:-${HOME:-$root}}"
   local timestamp
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  install -d -m 0700 "$log_dir" || die "cannot create CE_DAEMON_LOG_DIR: $log_dir"
+
+  local log_dir="${CE_DAEMON_LOG_DIR:-${LOGS_DIRECTORY:-}}"
+  if [[ -z "$log_dir" ]]; then
+    printf 'WARNING: CE_DAEMON_LOG_DIR and LOGS_DIRECTORY are unset; daemon attempt log disabled (journald only)\n' >&2
+    return 0
+  fi
+
+  if ! install -d -m 0700 "$log_dir" 2>/dev/null; then
+    printf 'WARNING: cannot create daemon log directory %s; daemon attempt log disabled (journald only)\n' "$log_dir" >&2
+    return 0
+  fi
 
   local log_path="$log_dir/ce-wall-daemon-container-$daemon-$timestamp-$$.log"
   local latest_path="$log_dir/ce-wall-daemon-container.log"
-  : >"$log_path" || die "cannot create daemon attempt log: $log_path"
-  chmod 0600 "$log_path" || die "cannot chmod daemon attempt log: $log_path"
+  if ! : >"$log_path" 2>/dev/null; then
+    printf 'WARNING: cannot create daemon attempt log %s; continuing with journald only\n' "$log_path" >&2
+    return 0
+  fi
+  chmod 0600 "$log_path" 2>/dev/null || true
   ln -sfn "$(basename -- "$log_path")" "$latest_path" 2>/dev/null || true
 
   exec > >(tee -a "$log_path") 2> >(tee -a "$log_path" >&2)
