@@ -224,6 +224,27 @@ def _events(sentinel):
     ]
 
 
+def _wait_for_event(sentinel, event_name):
+    def read_events_when_present():
+        if not sentinel.events_path.is_file():
+            return False
+        events = []
+        try:
+            lines = sentinel.events_path.read_text().splitlines()
+        except FileNotFoundError:
+            return False
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                return False
+        return events if any(e.get("event") == event_name for e in events) else False
+
+    return _poll_until(read_events_when_present)
+
+
 def test_wrapper_exit_code_two_lines(tmp_path):
     sentinel = _materialize(
         tmp_path, ["/bin/sh", "-c", "exit 7"], python_exe="/nonexistent/python"
@@ -269,7 +290,8 @@ def test_wrapper_trapped_signal_writes_exit(tmp_path, sig, code):
     # bound the wait by the same generous ceiling: a genuinely hung process still
     # fails, but a slow loaded runner is tolerated.
     proc.wait(timeout=_WRAPPER_CEILING_S)
-    events = _events(sentinel)
+    events = _wait_for_event(sentinel, seat_sentinel.EVENT_EXITED)
+    assert events, "wrapper never wrote its trapped-signal exit line within the ceiling"
     assert events[-1]["event"] == "exited"
     assert events[-1]["exit_code"] == code
 
