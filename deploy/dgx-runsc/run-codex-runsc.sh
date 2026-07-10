@@ -21,6 +21,9 @@ Detached mode:
 Environment:
   CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.142.4-aarch64)
   CE_DGX_RUNTIME            Docker runtime (default: runsc-gvproxy-ptrace)
+  CE_DGX_MEMORY_LIMIT       Docker --memory cgroup cap for this seat. Use docker units
+                            (e.g. 8g, 12g, 16g). Set to empty string to disable.
+                            Default: 8g  (runsc seats; prevents host OOM from unbounded sentry).
   CE_DGX_DOCKER_NETWORK     Optional Docker --network value (default: unset)
   CE_DGX_NETWORK            Deprecated alias for CE_DGX_DOCKER_NETWORK
   CE_DGX_REPO               Host repo path (default: current directory)
@@ -114,6 +117,7 @@ fi
 
 CE_DGX_IMAGE="${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.142.4-aarch64}"
 CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy-ptrace}"
+CE_DGX_MEMORY_LIMIT="${CE_DGX_MEMORY_LIMIT-8g}"
 CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
 CE_DGX_CODEX_HOME="${CE_DGX_CODEX_HOME:-/home/cedev4/.codex}"
@@ -451,6 +455,11 @@ fi
 docker_cmd=(
   docker run "${lifecycle_flags[@]}"
   "--runtime=${CE_DGX_RUNTIME}"
+)
+if [[ -n "$CE_DGX_MEMORY_LIMIT" ]]; then
+  docker_cmd+=(--memory "$CE_DGX_MEMORY_LIMIT")
+fi
+docker_cmd+=(
   --security-opt=no-new-privileges
   --cap-drop=ALL
   --user "${CE_DGX_UID}:${CE_DGX_GID}"
