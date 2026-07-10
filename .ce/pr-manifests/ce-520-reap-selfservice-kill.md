@@ -1,6 +1,6 @@
 # PR path manifest - ce-520-reap-selfservice-kill
 
-Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, ce-ops#21 convention).
+Per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`, path-manifest convention).
 This is the closed path set for the `ce reap once` stale tmux self-service kill
 guidance slice.
 
