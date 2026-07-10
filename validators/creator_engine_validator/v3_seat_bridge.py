@@ -115,7 +115,7 @@ READINESS_POLL_INTERVAL_S = 0.5
 #: harness has not yet written its ``~/.codex/sessions/**/*.jsonl`` when the locator's
 #: first poll fires immediately after ``seed_brief`` — the poll sees zero hits and, on a
 #: short budget, fail-closes with a spurious ``SpawnRefused`` (live-reproduced 2026-06-13,
-#: codex v0.139.0 / gpt-5.5 xhigh). A bounded settle precedes the FIRST poll iteration so
+#: codex v0.139.0 / gpt-5.6-terra high). A bounded settle precedes the FIRST poll iteration so
 #: the session file exists by the time we look; it is capped at the locator deadline (it
 #: spends from the same timeout budget, never extends it).
 CODEX_TRANSCRIPT_SETTLE_S = 2.5
