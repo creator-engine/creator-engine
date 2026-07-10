@@ -13,6 +13,9 @@ import time
 import pytest
 
 from creator_engine_validator.forge.scoped_token import ScopedToken
+from creator_engine_validator.forge.change_push import PushRefused
+from creator_engine_validator.forge.github_repo_config import ForgeConfigError
+from egress_broker import host_broker
 from egress_broker.config import load_broker_config
 from egress_broker.host_broker import (
     handle_self_push_json_line,
@@ -21,6 +24,7 @@ from egress_broker.host_broker import (
     systemd_activated_unix_socket,
 )
 from egress_broker.policy import CommitFacts
+from egress_broker.orchestrator import contained_seat_self_push
 
 
 def _connect_when_ready(socket_path, *, timeout=5.0):
@@ -73,6 +77,30 @@ def _start_once_socket_server(socket_path, tmp_path, *, courier_fn, **kwargs):
                 host_repo_path="/host/workspaces/creator-engine",
                 apply_default=True,
                 once=True,
+                courier_fn=courier_fn,
+                allow_credential_requests=False,
+                **kwargs,
+            )
+        except Exception as exc:  # pragma: no cover - asserted through server_exceptions
+            server_exceptions.append(exc)
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    return server_thread, server_exceptions
+
+
+def _start_looping_socket_server(socket_path, tmp_path, *, courier_fn, **kwargs):
+    server_exceptions = []
+
+    def run_server():
+        try:
+            serve_self_push_unix_socket(
+                socket_path,
+                config=_config(tmp_path),
+                broker_seat_id="dev-4",
+                host_repo_path="/host/workspaces/creator-engine",
+                apply_default=True,
+                once=False,
                 courier_fn=courier_fn,
                 allow_credential_requests=False,
                 **kwargs,
@@ -655,6 +683,184 @@ def test_serve_unix_socket_activation_keeps_existing_inode(tmp_path):
     assert server_exceptions == []
     assert not server_thread.is_alive()
     assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
+
+
+def test_serve_unix_socket_empty_connection_continues(tmp_path):
+    socket_path = tmp_path / "empty-connection.sock"
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    server_thread, server_exceptions = _start_looping_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=fake_courier,
+    )
+
+    with _connect_when_ready(socket_path):
+        pass
+    response = _send_socket_request(socket_path)
+
+    assert response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+    assert server_exceptions == []
+    assert server_thread.is_alive()
+
+
+def test_serve_unix_socket_mid_recv_disconnect_continues(tmp_path):
+    socket_path = tmp_path / "mid-recv-disconnect.sock"
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    server_thread, server_exceptions = _start_looping_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=fake_courier,
+    )
+
+    with _connect_when_ready(socket_path) as client:
+        client.sendall(b'{"seat_id":"dev-4"')
+    response = _send_socket_request(socket_path)
+
+    assert response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+    assert server_exceptions == []
+    assert server_thread.is_alive()
+
+
+@pytest.mark.parametrize("disconnect_error", [ConnectionResetError, OSError])
+def test_serve_unix_socket_recv_disconnect_exception_continues(tmp_path, monkeypatch, disconnect_error):
+    class StopServing(Exception):
+        pass
+
+    class FakeConnection:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+            self.responses = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def recv(self, _size):
+            next_chunk = self.chunks.pop(0)
+            if isinstance(next_chunk, BaseException):
+                raise next_chunk
+            return next_chunk
+
+        def sendall(self, response):
+            self.responses.append(response)
+
+    class FakeServer:
+        def __init__(self, connections):
+            self.connections = list(connections)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def accept(self):
+            if not self.connections:
+                raise StopServing
+            return self.connections.pop(0), None
+
+    failed_connection = FakeConnection([disconnect_error("client vanished")])
+    valid_connection = FakeConnection([(json.dumps(_request()) + "\n").encode("utf-8")])
+    listener = FakeServer([failed_connection, valid_connection])
+    courier_calls = []
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    monkeypatch.setattr(
+        host_broker,
+        "_audit_self_push_peercred",
+        lambda *args, **kwargs: {"decision": "allow"},
+    )
+
+    with pytest.raises(StopServing):
+        serve_self_push_unix_socket(
+            tmp_path / "fake-recv.sock",
+            config=_config(tmp_path),
+            broker_seat_id="dev-4",
+            host_repo_path="/host/workspaces/creator-engine",
+            once=False,
+            allow_credential_requests=False,
+            activated_socket=listener,
+            courier_fn=fake_courier,
+        )
+
+    assert failed_connection.responses == []
+    assert json.loads(valid_connection.responses[0])["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+
+
+def test_serve_unix_socket_push_refused_returns_403(tmp_path):
+    socket_path = tmp_path / "push-refused.sock"
+    spy = _HostSpy()
+
+    def refuse_push(token):
+        raise PushRefused("non-fast-forward")
+
+    server_thread, server_exceptions = _start_looping_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=contained_seat_self_push,
+        read_facts_fn=lambda: _GOOD_FACTS,
+        resolve_id_fn=spy.resolve_id,
+        mint_fn=spy.mint,
+        push_fn=refuse_push,
+        open_pr_fn=spy.open_pr,
+        revoke_fn=spy.revoke,
+        declared_work_class="story",
+    )
+
+    response = _send_socket_request(socket_path)
+    second_response = _send_socket_request(socket_path)
+
+    assert response["status"] == 403
+    assert response["reason"] == "egress_refused"
+    assert second_response["status"] == 403
+    assert [call[0] for call in spy.calls] == [
+        "resolve_id", "mint", "revoke", "resolve_id", "mint", "revoke",
+    ]
+    assert server_exceptions == []
+    assert server_thread.is_alive()
+
+
+def test_serve_unix_socket_forge_config_error_returns_500(tmp_path):
+    socket_path = tmp_path / "forge-config-error.sock"
+
+    def mint_failure(*args, **kwargs):
+        raise ForgeConfigError("mint failed")
+
+    server_thread, server_exceptions = _start_looping_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=mint_failure,
+    )
+
+    response = _send_socket_request(socket_path)
+    second_response = _send_socket_request(socket_path)
+
+    assert response == {
+        "status": 500,
+        "reason": "broker_internal_error",
+        "error_class": "ForgeConfigError",
+    }
+    assert second_response["status"] == 500
+    assert server_exceptions == []
+    assert server_thread.is_alive()
 
 
 def test_serve_unix_socket_half_closed_client(tmp_path):

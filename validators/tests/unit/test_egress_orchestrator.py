@@ -17,6 +17,7 @@ import subprocess
 import pytest
 
 from creator_engine_validator.forge.scoped_token import ScopedToken
+from creator_engine_validator.forge.change_push import PushRefused
 from creator_engine_validator.pr_preflight import DECLARED_WORK_CLASS_PATTERN
 from egress_broker.config import load_broker_config
 from egress_broker.orchestrator import (
@@ -636,6 +637,26 @@ def test_token_is_revoked_even_if_pr_step_raises(tmp_path):
         _courier(tmp_path, "ce-egress-broker", _GOOD_FACTS, spy, apply=True)
     # the token must still be revoked despite the push failure (no leaked live credential)
     assert ("revoke", "ghs_minted_value") in spy.calls
+
+
+def test_push_refusal_is_audited_and_wrapped_as_egress_refused(tmp_path):
+    spy = _Spy()
+
+    def refuse_push(token):
+        spy.calls.append(("push", token.value))
+        raise PushRefused("non-fast-forward")
+
+    spy.push = refuse_push
+    with pytest.raises(EgressRefused, match="non-fast-forward") as exc_info:
+        _courier(tmp_path, "ce-egress-broker", _GOOD_FACTS, spy, apply=True)
+
+    assert isinstance(exc_info.value.__cause__, PushRefused)
+    assert [call[0] for call in spy.calls] == ["resolve_id", "mint", "push", "revoke"]
+    record = _audit_lines(tmp_path)[-1]
+    assert record["decision"] == "deny"
+    assert record["applied"] is False
+    assert record["pushed"] is False
+    assert record["transport_refusal"] == "non-fast-forward"
 
 
 def test_audit_record_is_secret_free_even_on_apply(tmp_path):

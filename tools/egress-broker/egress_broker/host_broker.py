@@ -29,6 +29,7 @@ from egress_broker.orchestrator import (
     EgressRefused,
     contained_seat_self_push,
 )
+from creator_engine_validator.forge.github_repo_config import ForgeConfigError
 
 _TOKEN_VALUE_RE = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9_.\-]{8,}|github_pat_[A-Za-z0-9_.\-]{8,}|"
@@ -248,6 +249,13 @@ def handle_self_push_request(
             "audit_record": dict(exc.audit_record),
         }
         return _assert_response_secret_free(response)
+    except ForgeConfigError as exc:
+        response = {
+            "status": 500,
+            "reason": "broker_internal_error",
+            "error_class": type(exc).__name__,
+        }
+        return _assert_response_secret_free(response)
 
     response = {
         "status": 200,
@@ -368,24 +376,49 @@ def serve_self_push_unix_socket(
                     if once:
                         break
                     continue
-                data = b""
-                while True:
-                    chunk = conn.recv(65536)
-                    if not chunk:
+                try:
+                    data = b""
+                    while True:
+                        chunk = conn.recv(65536)
+                        if not chunk:
+                            break
+                        data += chunk
+                        if b"\n" in data:
+                            break
+                    line = data.decode("utf-8", errors="replace").splitlines()[0] if data else ""
+                    response = handle_self_push_json_line(
+                        line,
+                        config=config,
+                        broker_seat_id=broker_seat_id,
+                        host_repo_path=host_repo_path,
+                        apply_default=apply_default,
+                        courier_fn=courier_fn,
+                        **host_courier_options,
+                    )
+                except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                    print(
+                        f"[ce-egress-self-push] client disconnect during recv: {type(exc).__name__}; "
+                        "dropping connection",
+                        file=sys.stderr,
+                    )
+                    if once:
                         break
-                    data += chunk
-                    if b"\n" in data:
-                        break
-                line = data.decode("utf-8", errors="replace").splitlines()[0] if data else ""
-                response = handle_self_push_json_line(
-                    line,
-                    config=config,
-                    broker_seat_id=broker_seat_id,
-                    host_repo_path=host_repo_path,
-                    apply_default=apply_default,
-                    courier_fn=courier_fn,
-                    **host_courier_options,
-                )
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"[ce-egress-self-push] unhandled request error: {type(exc).__name__}; "
+                        "answering 500 and continuing",
+                        file=sys.stderr,
+                    )
+                    response = json.dumps(
+                        {
+                            "status": 500,
+                            "reason": "broker_internal_error",
+                            "error_class": type(exc).__name__,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ) + "\n"
                 try:
                     conn.sendall(response.encode("utf-8"))
                 except (BrokenPipeError, OSError):
