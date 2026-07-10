@@ -296,6 +296,16 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_signed_artifact_pins.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
     verify_signed_artifact_pins.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_dual_format_sync = sub.add_parser(
+        "verify-dual-format-sync",
+        help=(
+            "dual-format sync PR-diff gate (fails when <base>..HEAD touches one tracked "
+            ".md/.html sibling without the other)"
+        ),
+    )
+    verify_dual_format_sync.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
+    verify_dual_format_sync.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     verify_version_drift = sub.add_parser(
         "verify-version-drift",
         help="version_drift current-version surface gate (compares unsigned docs/deploy defaults against version.py)",
@@ -931,6 +941,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .checks.signed_artifact_pins import run_with_base as _run_signed_artifact_pins
 
         result = _run_signed_artifact_pins([Path(p) for p in args.paths], args.base)
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-dual-format-sync":
+        from .checks.dual_format_sync import run_with_base as _run_dual_format_sync
+
+        result = _run_dual_format_sync([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
     if subcommand == "verify-version-drift":
         from .checks.version_drift import run as _run_version_drift

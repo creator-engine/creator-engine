@@ -1113,11 +1113,23 @@ def run_preflight(
         return "passed"
 
     def dual_format_sync_gate() -> str:
-        from .checks import dual_format_sync
-
-        result = dual_format_sync.run_with_base([config.repo_root], comparison_base["value"])
-        if not result.ok:
-            raise RuntimeError("\n".join(error.format() for error in result.errors))
+        _run_checked(
+            "Creator Engine validator - dual-format sync PR-diff gate",
+            [
+                py,
+                "-m",
+                "creator_engine_validator",
+                "verify-dual-format-sync",
+                "--base",
+                comparison_base["value"],
+                ".",
+            ],
+            config.repo_root,
+            runner=runner,
+            env=py_env,
+            out=out,
+            err=err,
+        )
         return "passed"
 
     def brain_drift_gate() -> str:
