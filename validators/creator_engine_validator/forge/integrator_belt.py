@@ -321,10 +321,10 @@ class DaemonPassResult:
 class DaemonAlarmState:
     """In-memory detection state scoped to one supervised daemon loop."""
 
-    skip_key: tuple[str, tuple[str, ...]] | None = None
-    skip_pass_count: int = 0
-    approved_ages: dict[tuple[str, int], int] = field(default_factory=dict)
-    alerted_approved_prs: set[tuple[str, int]] = field(default_factory=set)
+    skip_pass_counts: dict[tuple[str, int, str, str], int] = field(default_factory=dict)
+    alerted_skip_keys: set[tuple[str, int, str, str]] = field(default_factory=set)
+    approved_ages: dict[tuple[str, int, str], int] = field(default_factory=dict)
+    alerted_approved_prs: set[tuple[str, int, str]] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -800,6 +800,37 @@ def _positive_env_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _alarm_identity(repo: Any, pr_number: Any, head_sha: Any) -> tuple[str, int, str] | None:
+    """Return a validated, exact PR/head identity for detection-only state."""
+
+    if not isinstance(repo, str) or not repo.strip():
+        return None
+    if isinstance(pr_number, bool) or not isinstance(pr_number, int) or pr_number <= 0:
+        return None
+    if not isinstance(head_sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}", head_sha) is None:
+        return None
+    return (repo.strip(), pr_number, head_sha.lower())
+
+
+def _current_approved_alarm_identity(pr: DaemonPullRequest) -> tuple[str, int, str] | None:
+    """Require a well-formed approval witness for this candidate's exact head."""
+
+    identity = _alarm_identity(pr.repo, pr.pr_number, pr.head_sha)
+    if identity is None or pr.review_decision != "APPROVED":
+        return None
+    for witness in pr.approval_witnesses:
+        if (
+            witness.approved
+            and isinstance(witness.reviewer_login, str)
+            and witness.reviewer_login.strip()
+            and isinstance(witness.commit_oid, str)
+            and re.fullmatch(r"[0-9a-fA-F]{40}", witness.commit_oid)
+            and witness.commit_oid.lower() == identity[2]
+        ):
+            return identity
+    return None
+
+
 def _observe_daemon_alarms(
     *,
     state: DaemonAlarmState,
@@ -812,39 +843,44 @@ def _observe_daemon_alarms(
     timestamp = datetime.now(timezone.utc).isoformat()
     records: list[dict[str, Any]] = []
     skip_threshold = _positive_env_int("CE_SKIP_ANOMALY_K", DEFAULT_SKIP_ANOMALY_K)
-    skipped = tuple(decision for decision in decisions if decision.status == "skip")
-    reasons = {decision.reason for decision in skipped}
-    if skipped and len(skipped) == len(decisions) and len(reasons) == 1:
-        reason = next(iter(reasons))
-        signature = tuple(sorted(f"{item.repo}#{item.pr_number}" for item in skipped))
-        key = (reason, signature)
-        if state.skip_key == key:
-            state.skip_pass_count += 1
-        else:
-            state.skip_key = key
-            state.skip_pass_count = 1
-        if state.skip_pass_count == skip_threshold:
+    observed_skip_keys: set[tuple[str, int, str, str]] = set()
+    for decision in decisions:
+        identity = _alarm_identity(decision.repo, decision.pr_number, decision.head_sha)
+        if (
+            decision.status == "skip"
+            and identity is not None
+            and isinstance(decision.reason, str)
+            and decision.reason
+        ):
+            observed_skip_keys.add((*identity, decision.reason))
+    for key in tuple(state.skip_pass_counts):
+        if key not in observed_skip_keys:
+            state.skip_pass_counts.pop(key)
+            state.alerted_skip_keys.discard(key)
+    for key in sorted(observed_skip_keys):
+        state.skip_pass_counts[key] = state.skip_pass_counts.get(key, 0) + 1
+        if state.skip_pass_counts[key] == skip_threshold and key not in state.alerted_skip_keys:
+            state.alerted_skip_keys.add(key)
             records.append(
                 _daemon_alarm_record(
                     timestamp=timestamp,
                     pass_number=pass_number,
                     alarm_class="skip_anomaly_recurrence",
                     details={
-                        "reason": reason,
-                        "pr_count": len(signature),
-                        "pass_count": state.skip_pass_count,
+                        "repo": key[0],
+                        "pr_number": key[1],
+                        "head_sha": key[2],
+                        "reason": key[3],
+                        "pass_count": state.skip_pass_counts[key],
                         "threshold": skip_threshold,
                     },
                 )
             )
-    else:
-        state.skip_key = None
-        state.skip_pass_count = 0
 
     approved = {
-        (candidate.repo, candidate.pr_number)
+        identity
         for candidate in candidates
-        if candidate.review_decision == "APPROVED"
+        if (identity := _current_approved_alarm_identity(candidate)) is not None
     }
     for key in tuple(state.approved_ages):
         if key not in approved:
@@ -869,7 +905,9 @@ def _observe_daemon_alarms(
                 pass_number=pass_number,
                 alarm_class="approved_pr_age_exceeded",
                 details={
+                    "repo": oldest_unalerted[0],
                     "pr_number": oldest_unalerted[1],
+                    "head_sha": oldest_unalerted[2],
                     "age": age,
                     "threshold": age_threshold,
                 },
