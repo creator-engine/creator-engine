@@ -11,7 +11,7 @@ import pytest
 
 from creator_engine_validator import work_claims
 import creator_engine_validator.conveyor_seat_pull as seat_pull
-from creator_engine_validator.conveyor_intake_queue import IntakeQueue, IntakeUnit
+from creator_engine_validator.conveyor_intake_queue import IntakeQueue, IntakeTransitionError, IntakeUnit
 from creator_engine_validator.conveyor_seat_pull import SeatPullAdapter, VerifiedLaneLaunch
 
 
@@ -324,3 +324,68 @@ def test_snapshot_replacement_between_fence_and_launcher_consumption_fails_close
     assert outcome.state == "blocked_retained"
     assert outcome.claim_state == "launching"
     assert "launcher_outcome_unknown:ValueError" == outcome.detail
+
+
+def test_snapshot_publish_never_exposes_partial_final_and_recovers_crash_residue(monkeypatch, tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    snapshots = root / ".verified-snapshots"
+    snapshots.mkdir(parents=True)
+    final = snapshots / f"{brief_sha}.brief"
+    final.write_bytes(b"partial old publisher output")
+    residue = snapshots / f".{brief_sha}.snapshot-dead-process.tmp"
+    residue.write_bytes(b"partial private output")
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    real_link = seat_pull.os.link
+    observed: list[bytes | None] = []
+
+    def observe_publish(source, destination, *args, **kwargs):
+        observed.append(final.read_bytes() if final.exists() else None)
+        return real_link(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(seat_pull.os, "link", observe_publish)
+    launched: list[bytes] = []
+
+    outcome = _adapter(queue, root, lambda launch: launched.append(launch.brief_snapshot.read_bytes()) or True).pull_one("seat-a")
+
+    assert outcome.state == "launched"
+    # The first link loses to the simulated old crash residue; after recovery,
+    # the publishing link sees no final name rather than our private bytes.
+    assert observed == [b"partial old publisher output", None]
+    assert launched == [b"controller-declared brief\n"]
+    assert final.read_bytes() == b"controller-declared brief\n"
+    assert not residue.exists()
+
+
+def test_fence_transition_failure_closes_snapshot_and_returns_structured_refusal(monkeypatch, tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    adapter = _adapter(queue, root)
+    captured: list[seat_pull.VerifiedBriefSnapshot] = []
+    original_verified_launch = adapter._verified_launch
+
+    def capture_snapshot(*args, **kwargs):
+        launch = original_verified_launch(*args, **kwargs)
+        captured.append(launch.brief_snapshot)
+        return launch
+
+    monkeypatch.setattr(adapter, "_verified_launch", capture_snapshot)
+    monkeypatch.setattr(
+        queue, "fence_launch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(IntakeTransitionError("launch_fence", OSError("disk fault"))),
+    )
+
+    outcome = adapter.pull_one("seat-a")
+
+    assert outcome.state == "blocked_released"
+    assert outcome.detail == "launch_fence_refused:IntakeTransitionError"
+    assert captured and captured[0]._closed
+    with pytest.raises(OSError):
+        os.fstat(captured[0].directory_fd)

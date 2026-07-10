@@ -7,10 +7,12 @@ before invoking the already-governed launch seam.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -19,7 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 from creator_engine_validator import work_claims
-from creator_engine_validator.conveyor_intake_queue import IntakeQueue, IntakeUnit
+from creator_engine_validator.conveyor_intake_queue import IntakeQueue, IntakeTransitionError, IntakeUnit
 from creator_engine_validator.work_sizing import WORK_CLASSES
 
 
@@ -147,10 +149,12 @@ class SeatPullAdapter:
             return self._release(unit, seat_id, f"verification_refused:{type(exc).__name__}", clock)
         try:
             fenced = self.queue.fence_launch(unit.unit_id, seat_id, _claim_token(unit), clock=clock)
-        except (OSError, ValueError, PermissionError) as exc:
-            launch.brief_snapshot.close()
-            return self._release(unit, seat_id, f"launch_fence_refused:{type(exc).__name__}", clock)
-        launch = _with_generation(launch, fenced.claim_generation)
+            launch = _with_generation(launch, fenced.claim_generation)
+        except (OSError, ValueError, PermissionError, IntakeTransitionError) as exc:
+            try:
+                launch.brief_snapshot.close()
+            finally:
+                return self._release(unit, seat_id, f"launch_fence_refused:{type(exc).__name__}", clock)
         try:
             accepted = self.governed_lane_launcher(launch)
         except Exception as exc:
@@ -356,31 +360,8 @@ def _write_snapshot(root: Path, digest: str, content: bytes) -> VerifiedBriefSna
             pass
         snapshots_fd = _open_child_directory_nofollow(root_fd, ".verified-snapshots", "verified snapshot root")
         try:
-            filename = f"{digest}.brief"
-            try:
-                fd = os.open(
-                    filename,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                    0o400,
-                    dir_fd=snapshots_fd,
-                )
-            except FileExistsError:
-                existing = _read_regular_bytes_at(snapshots_fd, filename, "verified snapshot")
-                if hashlib.sha256(existing).hexdigest() != digest:
-                    raise ValueError("content-addressed snapshot digest collision")
-                return _verified_snapshot_handle(snapshots_fd, filename, digest)
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(content)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-            except BaseException:
-                try:
-                    os.unlink(filename, dir_fd=snapshots_fd)
-                except OSError:
-                    pass
-                raise
-            return _verified_snapshot_handle(snapshots_fd, filename, digest)
+            with _snapshot_publish_guard(snapshots_fd, digest):
+                return _publish_snapshot(snapshots_fd, digest, content)
         except BaseException:
             os.close(snapshots_fd)
             raise
@@ -398,6 +379,69 @@ def _open_directory_nofollow(path: Path, label: str) -> int:
     except BaseException:
         os.close(fd)
         raise
+
+
+class _snapshot_publish_guard:
+    """Serialize publishers of one digest while repairing old crash residue."""
+
+    def __init__(self, snapshots_fd: int, digest: str) -> None:
+        self._snapshots_fd = snapshots_fd
+        self._name = f".{digest}.snapshot.lock"
+        self._fd: int | None = None
+
+    def __enter__(self) -> "_snapshot_publish_guard":
+        self._fd = os.open(self._name, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=self._snapshots_fd)
+        fcntl.flock(self._fd, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        if self._fd is not None:
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
+            os.close(self._fd)
+            self._fd = None
+
+
+def _publish_snapshot(snapshots_fd: int, digest: str, content: bytes) -> VerifiedBriefSnapshot:
+    filename = f"{digest}.brief"
+    _recover_snapshot_temps(snapshots_fd, digest)
+    tmp_name = f".{digest}.snapshot-{secrets.token_hex(16)}.tmp"
+    fd = os.open(
+        tmp_name,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+        dir_fd=snapshots_fd,
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        # A hard link creates the final name atomically without ever replacing
+        # a concurrently verified publisher's file.
+        while True:
+            try:
+                os.link(
+                    tmp_name, filename, src_dir_fd=snapshots_fd,
+                    dst_dir_fd=snapshots_fd, follow_symlinks=False,
+                )
+            except FileExistsError:
+                if _snapshot_matches_digest(snapshots_fd, filename, digest):
+                    break
+                _remove_corrupt_snapshot(snapshots_fd, filename, digest)
+                continue
+            else:
+                os.fsync(snapshots_fd)
+                break
+        os.unlink(tmp_name, dir_fd=snapshots_fd)
+        os.fsync(snapshots_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name, dir_fd=snapshots_fd)
+            os.fsync(snapshots_fd)
+        except OSError:
+            pass
+        raise
+    return _verified_snapshot_handle(snapshots_fd, filename, digest)
 
 
 def _open_child_directory_nofollow(parent_fd: int, name: str, label: str) -> int:
@@ -468,6 +512,46 @@ def _verified_snapshot_handle(snapshots_fd: int, filename: str, digest: str) -> 
         if hashlib.sha256(content).hexdigest() != digest:
             raise ValueError("content-addressed snapshot digest collision")
         return VerifiedBriefSnapshot(snapshots_fd, filename, info.st_dev, info.st_ino, digest)
+    finally:
+        os.close(fd)
+
+
+def _recover_snapshot_temps(snapshots_fd: int, digest: str) -> None:
+    """Remove only our private, unlinked-publish residues after a crash."""
+    prefix = f".{digest}.snapshot-"
+    removed = False
+    for name in os.listdir(snapshots_fd):
+        if not name.startswith(prefix) or not name.endswith(".tmp"):
+            continue
+        info = os.stat(name, dir_fd=snapshots_fd, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("verified snapshot crash residue is unsafe")
+        os.unlink(name, dir_fd=snapshots_fd)
+        removed = True
+    if removed:
+        os.fsync(snapshots_fd)
+
+
+def _snapshot_matches_digest(snapshots_fd: int, filename: str, digest: str) -> bool:
+    return hashlib.sha256(_read_regular_bytes_at(snapshots_fd, filename, "verified snapshot")).hexdigest() == digest
+
+
+def _remove_corrupt_snapshot(snapshots_fd: int, filename: str, digest: str) -> bool:
+    """Discard a pre-atomic partial final only when identity stays stable."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(filename, flags, dir_fd=snapshots_fd)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("verified snapshot crash residue is unsafe")
+        if hashlib.sha256(_read_fd_bytes(fd)).hexdigest() == digest:
+            return False
+        current = os.stat(filename, dir_fd=snapshots_fd, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+            return False
+        os.unlink(filename, dir_fd=snapshots_fd)
+        os.fsync(snapshots_fd)
+        return True
     finally:
         os.close(fd)
 

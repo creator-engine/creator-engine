@@ -13,6 +13,7 @@ from creator_engine_validator.conveyor_intake_queue import (
     IntakeQueueReader,
     IntakeUnit,
 )
+import creator_engine_validator.conveyor_intake_queue as intake
 
 
 class FakeLease:
@@ -323,6 +324,36 @@ def test_claim_write_failure_rolls_back_to_pending_and_ledger_failure_is_bounded
     claimed = queue.claim_entry("seat-a")
     assert claimed is not None
     assert "ledger append failed" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("status, destination", [("pending", "pending"), ("done", "done")])
+def test_process_death_between_state_write_and_rename_is_recovered(tmp_path: Path, status: str, destination: str):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
+    claimed_path = queue._claimed_path_for_unit("unit-a")
+    assert claimed_path is not None
+
+    # This is the durable on-disk fixture a process death leaves after the
+    # state write and before its location rename; no rollback mock is involved.
+    stranded = dataclasses.replace(
+        claimed,
+        status=status,  # type: ignore[arg-type]
+        claimed_by=None if status == "pending" else claimed.claimed_by,
+        claimed_at=None if status == "pending" else claimed.claimed_at,
+        claim_expires_at=None if status == "pending" else claimed.claim_expires_at,
+        claim_token=None if status == "pending" else claimed.claim_token,
+        launch_fenced_at=None if status == "pending" else claimed.launch_fenced_at,
+    )
+    intake._write_unit_atomic(claimed_path, stranded)
+
+    queue._ensure_dirs()
+
+    recovered = queue.root / destination / claimed_path.name
+    assert recovered.exists()
+    assert not claimed_path.exists()
+    assert intake._read_unit(recovered).status == status
 
 
 def test_stale_claim_is_reclaimed_and_recorded(tmp_path: Path):

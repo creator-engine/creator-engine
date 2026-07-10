@@ -122,30 +122,31 @@ class IntakeQueue:
         self._reclaim_stale(now)
         for path in self._ordered_pending_paths():
             claimed_path = self.claimed_dir / path.name
-            try:
-                os.replace(path, claimed_path)
-            except FileNotFoundError:
-                continue
-            try:
-                original = _read_unit(claimed_path)
-                if original.status != "pending":
-                    raise ValueError("pending queue path did not contain a pending unit")
-                unit = dataclasses.replace(
-                    original,
-                    status="claimed",
-                    claimed_by=clean_claimer,
-                    claimed_at=now,
-                    claim_expires_at=expires_at,
-                    claim_token=secrets.token_hex(32),
-                    claim_generation=original.claim_generation + 1,
-                    launch_fenced_at=None,
-                )
-                _write_unit_atomic(claimed_path, unit)
-            except (OSError, ValueError) as exc:
-                rollback_error = _restore_rename(claimed_path, path)
-                if isinstance(exc, ValueError) and rollback_error is None:
+            with _claim_transition_guard(self.root / f".{path.name}.transition-lock"):
+                try:
+                    _replace_durable(path, claimed_path)
+                except FileNotFoundError:
                     continue
-                raise IntakeTransitionError("claim", exc, rollback_error) from exc
+                try:
+                    original = _read_unit(claimed_path)
+                    if original.status != "pending":
+                        raise ValueError("pending queue path did not contain a pending unit")
+                    unit = dataclasses.replace(
+                        original,
+                        status="claimed",
+                        claimed_by=clean_claimer,
+                        claimed_at=now,
+                        claim_expires_at=expires_at,
+                        claim_token=secrets.token_hex(32),
+                        claim_generation=original.claim_generation + 1,
+                        launch_fenced_at=None,
+                    )
+                    _write_unit_atomic(claimed_path, unit)
+                except (OSError, ValueError) as exc:
+                    rollback_error = _restore_rename(claimed_path, path)
+                    if isinstance(exc, ValueError) and rollback_error is None:
+                        continue
+                    raise IntakeTransitionError("claim", exc, rollback_error) from exc
             self._append_ledger("claimed", unit, clean_claimer, now)
             return unit
         return None
@@ -234,7 +235,7 @@ class IntakeQueue:
             except OSError as exc:
                 raise IntakeTransitionError("release", exc) from exc
             try:
-                os.replace(claimed_path, pending_path)
+                _replace_durable(claimed_path, pending_path)
             except OSError as exc:
                 rollback_error: BaseException | None = None
                 try:
@@ -314,7 +315,7 @@ class IntakeQueue:
             except OSError as exc:
                 raise IntakeTransitionError("complete", exc) from exc
             try:
-                os.replace(claimed_path, done_path)
+                _replace_durable(claimed_path, done_path)
             except OSError as exc:
                 rollback_error: BaseException | None = None
                 try:
@@ -351,7 +352,7 @@ class IntakeQueue:
                     )
                     try:
                         _write_unit_atomic(claimed_path, reclaimed)
-                        os.replace(claimed_path, pending_path)
+                        _replace_durable(claimed_path, pending_path)
                     except OSError as exc:
                         rollback_error: BaseException | None = None
                         try:
@@ -380,6 +381,46 @@ class IntakeQueue:
     def _ensure_dirs(self) -> None:
         for path in (self.pending_dir, self.claimed_dir, self.done_dir):
             path.mkdir(parents=True, exist_ok=True)
+        self._recover_stranded_locations()
+
+    def _recover_stranded_locations(self) -> None:
+        """Finish queue-owned rename/state windows left by a dead process.
+
+        A transition deliberately writes its new record *at the old location*
+        before moving it.  A process death can therefore leave a ``pending``
+        or ``done`` record in ``claimed/``.  Recover those two unambiguous
+        states before any selection/reclaim scan so a pending unit never becomes
+        invisible.  Other location/status combinations were not emitted by a
+        queue transition and are refused rather than guessed at.
+        """
+        for path in sorted(self.claimed_dir.iterdir()):
+            if not path.is_file() or path.suffix not in _SUPPORTED_SUFFIXES:
+                continue
+            unit = _read_unit(path)
+            if unit.status in {"claimed", "launching"}:
+                continue
+            if unit.status not in {"pending", "done"}:
+                raise IntakeTransitionError(
+                    "recovery", ValueError(f"claimed record has incompatible {unit.status!r} state")
+                )
+            destination = (self.pending_dir if unit.status == "pending" else self.done_dir) / path.name
+            with _claim_transition_guard(self.root / f".{path.name}.transition-lock"):
+                # Another recovery/transition may have completed while the
+                # lock was acquired; only move the exact stranded state.
+                try:
+                    current = _read_unit(path)
+                except FileNotFoundError:
+                    continue
+                if current.status != unit.status:
+                    continue
+                if destination.exists():
+                    raise IntakeTransitionError(
+                        "recovery", FileExistsError(f"refusing duplicate recovery destination: {destination}")
+                    )
+                try:
+                    _replace_durable(path, destination)
+                except OSError as exc:
+                    raise IntakeTransitionError("recovery", exc) from exc
 
     def _claimed_path_for_unit(self, unit_id: str) -> Path | None:
         for path in sorted(self.claimed_dir.iterdir()):
@@ -456,6 +497,7 @@ def _write_unit_atomic(path: Path, unit: IntakeUnit) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
+        _fsync_directory(path.parent)
     finally:
         try:
             os.unlink(tmp_name)
@@ -602,10 +644,26 @@ def _require_claim_generation(unit: IntakeUnit, provided: int | None) -> None:
 
 def _restore_rename(source: Path, destination: Path) -> BaseException | None:
     try:
-        os.replace(source, destination)
+        _replace_durable(source, destination)
     except OSError as exc:
         return exc
     return None
+
+
+def _replace_durable(source: Path, destination: Path) -> None:
+    """Rename and persist the containing directories before reporting success."""
+    os.replace(source, destination)
+    _fsync_directory(destination.parent)
+    if source.parent != destination.parent:
+        _fsync_directory(source.parent)
+
+
+def _fsync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _clock_now(clock: IntakeClock | None) -> str:
