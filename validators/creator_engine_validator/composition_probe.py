@@ -542,12 +542,13 @@ def _default_validator(repo_path: str, tree_ref: str) -> ValidationAttempt:
     """Validate the committed composition against its exact first parent."""
 
     expected = _immutable_sha(tree_ref, "tree_ref")
+    validator_argv = _trusted_validator_argv()
     actual = _git(repo_path, "rev-parse", "HEAD").stdout.strip().lower()
     if actual != expected:
         raise RuntimeError("composition worktree HEAD does not match the prepared commit")
     base = _git(repo_path, "rev-parse", f"{expected}^1").stdout.strip().lower()
     base = _immutable_sha(base, "composition base")
-    argv = ["ce", "validate-pr", "--base", base]
+    argv = [*validator_argv, "validate-pr", "--base", base]
     carrier = _single_carrier_slug(repo_path, base)
     if carrier is not None:
         argv.extend(["--head-ref", carrier])
@@ -556,6 +557,27 @@ def _default_validator(repo_path: str, tree_ref: str) -> ValidationAttempt:
     if after != expected:
         raise RuntimeError("validator mutated the prepared composition commit")
     return verdict
+
+
+def _trusted_validator_argv() -> list[str]:
+    """Return the current installed validator's isolated absolute module command.
+
+    ``sys.executable`` belongs to the already-running validator process, so this
+    avoids resolving a console script through either the composed checkout or a
+    scrubbed child's PATH. Isolated mode also prevents the composed checkout and
+    environment Python-path settings from shadowing the installed module.
+    """
+
+    executable = Path(sys.executable)
+    if not executable.is_absolute():
+        raise RuntimeError("validator interpreter is not an absolute path")
+    try:
+        executable = executable.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("validator interpreter cannot be resolved") from exc
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise RuntimeError("validator interpreter is not executable")
+    return [str(executable), "-I", "-m", "creator_engine_validator.ce_cli"]
 
 
 def _single_carrier_slug(repo_path: str, base: str) -> str | None:

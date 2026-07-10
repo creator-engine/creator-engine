@@ -338,7 +338,9 @@ def test_production_default_validates_real_composed_commit_against_exact_main(
     assert observed["status"] == ""
     assert observed["feature"] == "feature\n"
     argv = observed["argv"]
-    assert argv[:4] == ["ce", "validate-pr", "--base", main_sha]
+    assert argv[0] == str(Path(probe.sys.executable).resolve())
+    assert argv[1:5] == ["-I", "-m", "creator_engine_validator.ce_cli", "validate-pr"]
+    assert argv[5:7] == ["--base", main_sha]
     assert list(parent.iterdir()) == []
 
 
@@ -427,11 +429,11 @@ def test_production_validator_subprocess_ignores_hostile_git_environment_and_hoo
     for key, value in hostile.items():
         monkeypatch.setenv(key, value)
 
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
     git = shutil.which("git")
     assert git is not None
-    validator = bin_dir / "ce"
+    interpreter = venv_bin / "python"
     absent = (
         "GIT_DIR",
         "GIT_WORK_TREE",
@@ -440,27 +442,38 @@ def test_production_validator_subprocess_ignores_hostile_git_environment_and_hoo
         "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     )
     absence_checks = "\n".join(f'[ -z "${{{key}+x}}" ] || exit 17' for key in absent)
-    validator_body = (
+    interpreter_body = (
         "#!/bin/sh\n"
         f"{absence_checks}\n"
+        '[ "$1" = "-I" ] || exit 18\n'
+        '[ "$2" = "-m" ] || exit 19\n'
+        '[ "$3" = "creator_engine_validator.ce_cli" ] || exit 20\n'
+        '[ "$4" = "validate-pr" ] || exit 21\n'
         f"printf '%s\\n' \"PATH=$PATH\" \"GIT_CONFIG_NOSYSTEM=$GIT_CONFIG_NOSYSTEM\" \"GIT_CONFIG_GLOBAL=$GIT_CONFIG_GLOBAL\" > {shlex.quote(str(observed))}\n"
         f"printf '%s\\n' \"GIT_CONFIG_KEY_0=$GIT_CONFIG_KEY_0\" \"GIT_CONFIG_VALUE_0=$GIT_CONFIG_VALUE_0\" >> {shlex.quote(str(observed))}\n"
         f"{shlex.quote(git)} checkout --detach HEAD\n"
     )
-    validator.write_text(validator_body, encoding="utf-8")
-    validator.chmod(0o755)
-    monkeypatch.setitem(probe._VALIDATOR_ENVIRONMENT, "PATH", str(bin_dir))
+    interpreter.write_text(interpreter_body, encoding="utf-8")
+    interpreter.chmod(0o755)
+    monkeypatch.setattr(probe.sys, "executable", str(interpreter))
 
     result = probe._default_validator(str(repo), main_sha)
 
     assert result.green
     assert not marker.exists()
     received = dict(line.split("=", 1) for line in observed.read_text(encoding="utf-8").splitlines())
-    assert received["PATH"] == str(bin_dir)
+    assert received["PATH"] == os.defpath
     assert received["GIT_CONFIG_NOSYSTEM"] == "1"
     assert received["GIT_CONFIG_GLOBAL"] == os.devnull
     assert received["GIT_CONFIG_KEY_0"] == "core.hooksPath"
     assert received["GIT_CONFIG_VALUE_0"] == os.devnull
+
+
+def test_validator_entrypoint_fails_closed_without_absolute_executable(monkeypatch):
+    monkeypatch.setattr(probe.sys, "executable", "python")
+
+    with pytest.raises(RuntimeError, match="not an absolute path"):
+        probe._trusted_validator_argv()
 
 
 def test_production_retry_has_independent_common_repo_config_refs_index_and_hooks(
