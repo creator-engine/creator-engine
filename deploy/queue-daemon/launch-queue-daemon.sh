@@ -41,6 +41,7 @@ Optional environment:
   CE_QUEUE_DAEMON_DRY_RUN                   set to 1 only for controlled dry-run tests
   CE_QUEUE_DAEMON_CANARY                    set to 1 for dry-run canary with dormant wall
   CE_DAEMON_UNCONTAINED                     set to 1 for the legacy direct-launch escape hatch
+  CE_DAEMON_DISK_HEADROOM_GB                minimum free GiB required on state-root filesystem; default 5; exit 75 if below
   CE_CONTAINER_ENGINE                       docker or podman for contained launch; default docker
   CE_DAEMON_IMAGE                           canonical runtime image for contained launch
   CE_DAEMON_STATE_ROOT                      host state root mounted into the container
@@ -150,6 +151,62 @@ queue_daemon_lease_root() {
     printf '%s\n' "$(dirname -- "$CE_QUEUE_DAEMON_ROOT")/daemon-leases"
   else
     printf '%s\n' "$root/.ce/state/daemon-leases"
+  fi
+}
+
+# Resolve the nearest existing ancestor of $path (itself if it exists).
+_nearest_existing_path() {
+  local path="$1"
+  while [[ -n "$path" && "$path" != "/" ]]; do
+    if [[ -e "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+    path="$(dirname -- "$path")"
+  done
+  printf '/\n'
+}
+
+check_disk_headroom() {
+  # Refuse to start if the filesystem hosting the daemon state root has less
+  # than CE_DAEMON_DISK_HEADROOM_GB (default 5) GiB of free space.
+  # Fail-closed BEFORE the singleton lease is acquired.
+  # Exit code 75 with a message naming "disk_headroom" distinguishes this
+  # failure from lease conflicts (73/74) and other startup errors.
+  local root="$1"
+
+  # Resolve the state root path to check (walk up to nearest existing ancestor).
+  local state_root="${CE_DAEMON_STATE_ROOT:-}"
+  if [[ -z "$state_root" ]]; then
+    if [[ -n "${CE_QUEUE_DAEMON_ROOT:-}" ]]; then
+      state_root="$(dirname -- "$CE_QUEUE_DAEMON_ROOT")"
+    else
+      state_root="$root"
+    fi
+  fi
+  local check_path
+  check_path="$(_nearest_existing_path "$state_root")"
+
+  if ! command -v df >/dev/null 2>&1; then
+    printf 'WARNING: df not found; disk headroom check skipped\n' >&2
+    return 0
+  fi
+
+  local avail_kb
+  avail_kb="$(df -Pk -- "$check_path" 2>/dev/null | awk 'NR==2{print $4}')"
+  if [[ -z "$avail_kb" ]]; then
+    printf 'WARNING: disk headroom check could not read available space for %s; skipping\n' "$check_path" >&2
+    return 0
+  fi
+
+  local threshold_gb="${CE_DAEMON_DISK_HEADROOM_GB:-5}"
+  local threshold_kb
+  threshold_kb="$(( threshold_gb * 1024 * 1024 ))"
+
+  if [[ "$avail_kb" -lt "$threshold_kb" ]]; then
+    printf 'ERROR: disk_headroom: only %s kB free on filesystem containing %s, need %s GiB (%s kB). Free disk space and retry.\n' \
+      "$avail_kb" "$check_path" "$threshold_gb" "$threshold_kb" >&2
+    exit 75
   fi
 }
 
@@ -337,6 +394,7 @@ main_uncontained() {
   cd -- "$root"
 
   validate_required_env
+  check_disk_headroom "$root"
   local canary_mode=0
   if is_canary_mode; then
     canary_mode=1
