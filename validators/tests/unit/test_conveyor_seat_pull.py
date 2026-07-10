@@ -352,7 +352,12 @@ def test_snapshot_directory_swap_to_symlink_is_refused(monkeypatch, tmp_path: Pa
 
     assert swapped
     assert outcome.state == "blocked_released"
-    assert "verification_refused:ValueError" in (outcome.detail or "")
+    # The no-follow reopen can refuse this directory-to-symlink swap before
+    # or during descriptor acquisition, yielding either vetted refusal type.
+    assert outcome.detail in {
+        "verification_refused:ValueError",
+        "verification_refused:NotADirectoryError",
+    }
 
 
 def test_source_replacement_after_preflight_does_not_change_launched_snapshot(tmp_path: Path):
