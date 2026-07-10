@@ -4523,6 +4523,16 @@ def _build_parser() -> argparse.ArgumentParser:
                                  help="seconds between --loop passes (must be > 0)")
     p_review_pickup.add_argument("--dry-run", action="store_true", dest="dry_run",
                                  help="log planned routing decisions without requesting reviewers")
+    p_review_pickup.add_argument(
+        "--acting",
+        action="store_true",
+        help="arm acting mode — spawn reviewer and post verdict as a PR comment; default OFF",
+    )
+    p_review_pickup.add_argument(
+        "--acting-ledger-path",
+        default=None,
+        help="required with --acting: durable NDJSON ledger path for posted PR comments",
+    )
     p_review_pickup.add_argument("--no-stale-apply", action="store_true", dest="no_stale_apply",
                                  help="with --apply, do not auto-dismiss stale superseded reviews")
     p_review_pickup.add_argument(
@@ -5843,9 +5853,38 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     applied = bool(getattr(args, "apply", False) and not dry_run)
     logger = review_pickup.JsonLineLogger(sys.stderr)
     inbox_path = getattr(args, "inbox_path", None) or str(review_pickup.DEFAULT_AWAITING_REVIEW_INBOX_PATH)
+    acting = bool(getattr(args, "acting", False))
+    acting_callback = None
+    if acting:
+        from .forge import review_acting
+
+        acting_ledger_path = getattr(args, "acting_ledger_path", None)
+        if dry_run or not applied:
+            return _emit(
+                args, 2, [f"{_BRAND} · review-pickup REFUSED (input): --acting requires --apply without --dry-run"],
+                {"error": "review_pickup_acting_input", "detail": "--acting requires --apply without --dry-run"},
+            )
+        if not acting_ledger_path:
+            return _emit(
+                args, 2, [f"{_BRAND} · review-pickup REFUSED (input): --acting requires --acting-ledger-path"],
+                {"error": "review_pickup_acting_input", "detail": "--acting requires --acting-ledger-path"},
+            )
+        if not review_acting.is_acting_enabled():
+            return _emit(
+                args, 2, [f"{_BRAND} · review-pickup REFUSED (gate): CE_REVIEW_ACTING_ENABLED=1 is required"],
+                {"error": "review_pickup_acting_disabled", "detail": "CE_REVIEW_ACTING_ENABLED=1 is required"},
+            )
+
+        def acting_callback(items, pass_gh_runner):
+            review_acting.run_acting_pass(
+                items=items,
+                gh_runner=pass_gh_runner,
+                acting_ledger_path=acting_ledger_path,
+                log_sink=logger,
+            )
 
     try:
-        loop_result = review_pickup.run_review_pickup_loop(
+        loop_kwargs = dict(
             token=token,
             reviewer_seats=getattr(args, "reviewer_seats", ()) or (),
             gh_runner=gh_runner,
@@ -5867,6 +5906,9 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
                 review_pickup.DEFAULT_REVIEW_PICKUP_MAX_CONSECUTIVE_FAILURES,
             ),
         )
+        if acting_callback is not None:
+            loop_kwargs["on_pass_items"] = acting_callback
+        loop_result = review_pickup.run_review_pickup_loop(**loop_kwargs)
         result = loop_result.passes[-1] if loop_result.passes else review_pickup.ReviewPickupResult()
     except KeyboardInterrupt:
         return _emit(args, 0, [f"{_BRAND} · review-pickup loop stopped"],
@@ -5900,6 +5942,8 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
         "awaiting_decision_count": len(result.awaiting_decisions),
         "skipped_count": len(result.skipped),
     }
+    if acting:
+        payload["acting"] = True
     return _emit(args, 0, lines, payload)
 
 

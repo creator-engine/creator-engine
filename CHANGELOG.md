@@ -8,6 +8,8 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ### Added
 
+- Default-OFF review-pickup acting chain: an explicitly armed, durable
+  comment-only reviewer verdict path with an Operator-provided spawn template.
 - Review-pickup dry-run daemon slice 1: `forge.review_dry_run` module adds
   `run_dry_run_pass` / `run_dry_run_loop` (wrapping `forge.review_pickup` with
   `dry_run=True`), the Operator-held gate (label + held-list file), and a named
