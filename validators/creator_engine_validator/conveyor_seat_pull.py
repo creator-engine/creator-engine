@@ -140,7 +140,16 @@ class SeatPullAdapter:
         launch outcome is unknown, so retrying could duplicate a seat.
         """
         _validate_identity(seat_id, "seat_id")
-        unit = self.queue.claim_entry(seat_id, ttl_seconds=ttl_seconds, clock=clock)
+        try:
+            unit = self.queue.claim_entry(seat_id, ttl_seconds=ttl_seconds, clock=clock)
+        except IntakeTransitionError as exc:
+            # Claim placement has already been reconciled to a single pending
+            # record.  Surface a bounded outcome rather than leaking a storage
+            # exception from the seat-facing seam.
+            return SeatPullOutcome(
+                state="blocked_released", claim_state="empty", seat_id=seat_id,
+                detail=f"claim_refused:{type(exc).__name__}",
+            )
         if unit is None:
             return SeatPullOutcome(state="empty", claim_state="empty", seat_id=seat_id)
         try:
@@ -252,16 +261,16 @@ def _canonical_territory_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
     for path in paths:
         if not isinstance(path, str) or not path or len(path) > _MAX_TERRITORY_PATH:
             raise ValueError("territory path must be a bounded non-empty string")
-        candidate = path.rstrip("/")
-        pure = Path(candidate)
+        # Reject aliases lexically before pathlib can normalize them.  Proof
+        # and metadata bind the one canonical spelling, not an equivalent path.
+        pure = Path(path)
         if (
-            not candidate or pure.is_absolute() or ".." in pure.parts or "." in pure.parts
-            or "" in pure.parts or "//" in path or "\\" in path
+            pure.is_absolute() or path.endswith("/") or path.startswith("./")
+            or "/./" in path or "//" in path or "\\" in path
+            or any(component in {"", ".", ".."} for component in path.split("/"))
         ):
             raise ValueError("territory path must be normalized and relative")
-        if candidate != path and not path.endswith("/"):
-            raise ValueError("territory path must be normalized")
-        normalized.append(candidate)
+        normalized.append(path)
     if len(set(normalized)) != len(normalized):
         raise ValueError("territory paths must not contain duplicates")
     return tuple(sorted(normalized))

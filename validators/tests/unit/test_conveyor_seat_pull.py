@@ -27,14 +27,14 @@ def _unit(brief_ref: str, brief_sha: str, **overrides: object) -> IntakeUnit:
         "unit_id": "n11-canary", "brief_ref": brief_ref, "branch": "ce-n11-canary",
         "worktree": "/tmp/worktrees/ce-n11-canary", "priority": 10, "work_class": "M",
         "status": "pending", "created_at": "2026-07-10T00:00:00Z", "brief_sha": brief_sha,
-        "territory_paths": ("docs/", "validators/"),
+        "territory_paths": ("docs", "validators"),
     }
     data.update(overrides)
     return IntakeUnit(**data)  # type: ignore[arg-type]
 
 
 def _evidence(queue: IntakeQueue, unit: IntakeUnit, seat_id: str = "seat-a", *, collision_free: bool = True) -> None:
-    paths = tuple(sorted(path.rstrip("/") for path in unit.territory_paths))
+    paths = tuple(sorted(unit.territory_paths))
     digest = hashlib.sha256(("\n".join(paths) + "\n").encode()).hexdigest()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     record = {
@@ -90,6 +90,64 @@ def test_good_pull_uses_concrete_normal_claim_evidence_and_immutable_snapshot(tm
 def test_empty_queue_is_a_deterministic_noop(tmp_path: Path):
     outcome = _adapter(IntakeQueue(tmp_path / "queue"), tmp_path).pull_one("seat-a")
     assert (outcome.state, outcome.claim_state) == ("empty", "empty")
+
+
+@pytest.mark.parametrize("window", ["destination", "source"])
+def test_initial_claim_post_rename_fsync_failure_is_reconciled_to_a_structured_outcome(
+    monkeypatch, tmp_path: Path, window: str,
+):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    source = next(queue.pending_dir.iterdir())
+    target = queue.claimed_dir / source.name
+    import creator_engine_validator.conveyor_intake_queue as intake
+
+    real_replace = intake.os.replace
+    real_fsync_directory = intake._fsync_directory
+    renamed = False
+    failed = False
+
+    def arm_after_rename(from_path, to_path):
+        nonlocal renamed
+        result = real_replace(from_path, to_path)
+        if Path(from_path) == source and Path(to_path) == target:
+            renamed = True
+        return result
+
+    def fail_one_window(path):
+        nonlocal failed
+        if renamed and not failed and Path(path) == (target.parent if window == "destination" else source.parent):
+            failed = True
+            raise OSError(f"injected {window} directory fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(intake.os, "replace", arm_after_rename)
+    monkeypatch.setattr(intake, "_fsync_directory", fail_one_window)
+
+    outcome = _adapter(queue, root).pull_one("seat-a")
+
+    assert failed
+    assert (outcome.state, outcome.claim_state, outcome.detail) == (
+        "blocked_released", "empty", "claim_refused:IntakeTransitionError",
+    )
+    assert source.exists()
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("path", ["docs/", "./docs", "docs/./api", "docs//api"])
+def test_territory_aliases_are_refused_before_evidence_or_launch(tmp_path: Path, path: str):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    queue.stock(_unit(brief_ref, brief_sha, territory_paths=(path, "validators")))
+
+    outcome = _adapter(queue, root, lambda _launch: pytest.fail("launcher must not run")).pull_one("seat-a")
+
+    assert outcome.state == "blocked_released"
+    assert outcome.detail == "verification_refused:ValueError"
 
 
 @pytest.mark.parametrize("ref", ["../brief.md", "linked.md"])

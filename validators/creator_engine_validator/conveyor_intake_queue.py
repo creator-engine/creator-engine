@@ -70,6 +70,12 @@ class IntakeTransitionError(RuntimeError):
         self.rollback = rollback
 
 
+class _RenameDurabilityError(OSError):
+    """A rename completed, but its directory durability confirmation failed."""
+
+    destination_authoritative = True
+
+
 @dataclass(frozen=True)
 class IntakeDispatchPlan:
     seat_id: str
@@ -127,6 +133,15 @@ class IntakeQueue:
                     _replace_durable(path, claimed_path)
                 except FileNotFoundError:
                     continue
+                except OSError as exc:
+                    # A failed post-rename fsync means the claimed location is
+                    # authoritative.  Put its still-pending record back before
+                    # reporting the bounded claim failure; never manufacture a
+                    # second source record beside it.
+                    rollback_error = _restore_rename(claimed_path, path) if _destination_is_authoritative(
+                        path, claimed_path, exc
+                    ) else None
+                    raise IntakeTransitionError("claim", exc, rollback_error) from exc
                 try:
                     original = _read_unit(claimed_path)
                     if original.status != "pending":
@@ -237,12 +252,18 @@ class IntakeQueue:
             try:
                 _replace_durable(claimed_path, pending_path)
             except OSError as exc:
-                rollback_error: BaseException | None = None
-                try:
-                    _write_unit_atomic(claimed_path, claimed)
-                except OSError as rollback_exc:
-                    rollback_error = rollback_exc
-                raise IntakeTransitionError("release", exc, rollback_error) from exc
+                if _destination_is_authoritative(claimed_path, pending_path, exc):
+                    # The pending record won the rename despite a failed
+                    # directory fsync.  It is authoritative; recreating the
+                    # claimed source here would split the queue.
+                    pass
+                else:
+                    rollback_error: BaseException | None = None
+                    try:
+                        _write_unit_atomic(claimed_path, claimed)
+                    except OSError as rollback_exc:
+                        rollback_error = rollback_exc
+                    raise IntakeTransitionError("release", exc, rollback_error) from exc
         self._append_ledger("released", unit, clean_claimer, _clock_now(clock))
 
     def fence_launch(
@@ -317,12 +338,13 @@ class IntakeQueue:
             try:
                 _replace_durable(claimed_path, done_path)
             except OSError as exc:
-                rollback_error: BaseException | None = None
-                try:
-                    _write_unit_atomic(claimed_path, claimed)
-                except OSError as rollback_exc:
-                    rollback_error = rollback_exc
-                raise IntakeTransitionError("complete", exc, rollback_error) from exc
+                if not _destination_is_authoritative(claimed_path, done_path, exc):
+                    rollback_error: BaseException | None = None
+                    try:
+                        _write_unit_atomic(claimed_path, claimed)
+                    except OSError as rollback_exc:
+                        rollback_error = rollback_exc
+                    raise IntakeTransitionError("complete", exc, rollback_error) from exc
         self._append_ledger("completed", unit, claimer or unit.claimed_by or "controller", _clock_now(clock))
 
     def _reclaim_stale(self, now: str) -> None:
@@ -354,12 +376,13 @@ class IntakeQueue:
                         _write_unit_atomic(claimed_path, reclaimed)
                         _replace_durable(claimed_path, pending_path)
                     except OSError as exc:
-                        rollback_error: BaseException | None = None
-                        try:
-                            _write_unit_atomic(claimed_path, unit)
-                        except OSError as rollback_exc:
-                            rollback_error = rollback_exc
-                        raise IntakeTransitionError("stale_reclaim", exc, rollback_error) from exc
+                        if not _destination_is_authoritative(claimed_path, pending_path, exc):
+                            rollback_error: BaseException | None = None
+                            try:
+                                _write_unit_atomic(claimed_path, unit)
+                            except OSError as rollback_exc:
+                                rollback_error = rollback_exc
+                            raise IntakeTransitionError("stale_reclaim", exc, rollback_error) from exc
             except (FileExistsError, FileNotFoundError):
                 continue
             self._append_ledger("stale_reclaim", reclaimed, unit.claimed_by or "unknown", now)
@@ -420,7 +443,8 @@ class IntakeQueue:
                 try:
                     _replace_durable(path, destination)
                 except OSError as exc:
-                    raise IntakeTransitionError("recovery", exc) from exc
+                    if not _destination_is_authoritative(path, destination, exc):
+                        raise IntakeTransitionError("recovery", exc) from exc
 
     def _claimed_path_for_unit(self, unit_id: str) -> Path | None:
         for path in sorted(self.claimed_dir.iterdir()):
@@ -650,12 +674,25 @@ def _restore_rename(source: Path, destination: Path) -> BaseException | None:
     return None
 
 
+def _destination_is_authoritative(source: Path, destination: Path, exc: BaseException) -> bool:
+    """Return whether a failed durable rename already published ``destination``."""
+    return (
+        isinstance(exc, _RenameDurabilityError)
+        and exc.destination_authoritative
+        and not source.exists()
+        and destination.exists()
+    )
+
+
 def _replace_durable(source: Path, destination: Path) -> None:
     """Rename and persist the containing directories before reporting success."""
     os.replace(source, destination)
-    _fsync_directory(destination.parent)
-    if source.parent != destination.parent:
-        _fsync_directory(source.parent)
+    try:
+        _fsync_directory(destination.parent)
+        if source.parent != destination.parent:
+            _fsync_directory(source.parent)
+    except OSError as exc:
+        raise _RenameDurabilityError(*exc.args) from exc
 
 
 def _fsync_directory(path: Path) -> None:

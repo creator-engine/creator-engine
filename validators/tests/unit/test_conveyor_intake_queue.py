@@ -326,6 +326,59 @@ def test_claim_write_failure_rolls_back_to_pending_and_ledger_failure_is_bounded
     assert "ledger append failed" not in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("window", ["destination", "source"])
+@pytest.mark.parametrize("transition, destination", [
+    ("release", "pending"),
+    ("complete", "done"),
+    ("reclaim", "pending"),
+])
+def test_post_rename_directory_fsync_failure_keeps_one_authoritative_record(
+    monkeypatch, tmp_path: Path, transition: str, destination: str, window: str,
+):
+    """A post-rename fsync error must never recreate the old claimed record."""
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None and claimed.claim_token is not None
+    source = queue._claimed_path_for_unit("unit-a")
+    assert source is not None
+    target = queue.root / destination / source.name
+    real_replace = intake.os.replace
+    real_fsync_directory = intake._fsync_directory
+    renamed = False
+    failed = False
+
+    def arm_after_rename(from_path, to_path):
+        nonlocal renamed
+        result = real_replace(from_path, to_path)
+        if Path(from_path) == source and Path(to_path) == target:
+            renamed = True
+        return result
+
+    def fail_one_window(path):
+        nonlocal failed
+        if renamed and not failed and Path(path) == (target.parent if window == "destination" else source.parent):
+            failed = True
+            raise OSError(f"injected {window} directory fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(intake.os, "replace", arm_after_rename)
+    monkeypatch.setattr(intake, "_fsync_directory", fail_one_window)
+    if transition == "release":
+        queue.release_entry("unit-a", "seat-a", claim_token=claimed.claim_token)
+    elif transition == "complete":
+        queue.complete_entry(
+            "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        )
+    else:
+        queue._reclaim_stale("2026-07-10T12:00:02Z")
+
+    assert failed
+    assert not source.exists()
+    assert target.exists()
+    assert intake._read_unit(target).status == ("done" if transition == "complete" else "pending")
+
+
 @pytest.mark.parametrize("status, destination", [("pending", "pending"), ("done", "done")])
 def test_process_death_between_state_write_and_rename_is_recovered(tmp_path: Path, status: str, destination: str):
     queue = IntakeQueue(tmp_path / "intake-queue")
@@ -354,6 +407,57 @@ def test_process_death_between_state_write_and_rename_is_recovered(tmp_path: Pat
     assert recovered.exists()
     assert not claimed_path.exists()
     assert intake._read_unit(recovered).status == status
+
+
+@pytest.mark.parametrize("status, destination", [("pending", "pending"), ("done", "done")])
+@pytest.mark.parametrize("window", ["destination", "source"])
+def test_recovery_post_rename_directory_fsync_failure_has_no_split_brain(
+    monkeypatch, tmp_path: Path, status: str, destination: str, window: str,
+):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
+    source = queue._claimed_path_for_unit("unit-a")
+    assert source is not None
+    stranded = dataclasses.replace(
+        claimed,
+        status=status,  # type: ignore[arg-type]
+        claimed_by=None if status == "pending" else claimed.claimed_by,
+        claimed_at=None if status == "pending" else claimed.claimed_at,
+        claim_expires_at=None if status == "pending" else claimed.claim_expires_at,
+        claim_token=None if status == "pending" else claimed.claim_token,
+        launch_fenced_at=None if status == "pending" else claimed.launch_fenced_at,
+    )
+    intake._write_unit_atomic(source, stranded)
+    target = queue.root / destination / source.name
+    real_replace = intake.os.replace
+    real_fsync_directory = intake._fsync_directory
+    renamed = False
+    failed = False
+
+    def arm_after_rename(from_path, to_path):
+        nonlocal renamed
+        result = real_replace(from_path, to_path)
+        if Path(from_path) == source and Path(to_path) == target:
+            renamed = True
+        return result
+
+    def fail_one_window(path):
+        nonlocal failed
+        if renamed and not failed and Path(path) == (target.parent if window == "destination" else source.parent):
+            failed = True
+            raise OSError(f"injected {window} directory fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(intake.os, "replace", arm_after_rename)
+    monkeypatch.setattr(intake, "_fsync_directory", fail_one_window)
+    queue._recover_stranded_locations()
+
+    assert failed
+    assert not source.exists()
+    assert target.exists()
+    assert intake._read_unit(target).status == status
 
 
 def test_stale_claim_is_reclaimed_and_recorded(tmp_path: Path):
