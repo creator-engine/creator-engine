@@ -9,7 +9,7 @@ issue: ce-ops#239
 Record the Round 2 approval-wall-adjacent OpenBao supplier gate for
 controller review-pickup token handling.
 
-review-pickup can source the ce-dev-2 GitHub token through the generic
+review-pickup can source the reviewer GitHub token through the generic
 SecretIdentity/OpenBao supplier path instead of resolving one static token for
 the daemon lifetime.
 
@@ -22,6 +22,6 @@ the daemon lifetime.
 - Preserved the existing static review-pickup token resolution path when the
   pickup token secret flag family is unconfigured.
 - Normalized the review-pickup default OpenBao path constant to the literal
-  `forge/ce-dev-2/gh-token`.
+  `forge/reviewer/gh-token`.
 - Left deployment files, approval-wall runtime behavior, signed artifacts, and
   queue-daemon lease code untouched.

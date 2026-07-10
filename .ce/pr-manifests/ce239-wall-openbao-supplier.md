@@ -1,4 +1,4 @@
-# PR path manifest - ce-ops#239 - review-pickup OpenBao supplier gate
+# PR path manifest — review-pickup OpenBao supplier gate
 
 - **Declared work class:** S
 
