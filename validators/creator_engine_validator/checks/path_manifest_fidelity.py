@@ -161,6 +161,20 @@ def _find_first_fence_after(text: str, offset: int) -> tuple[int, int] | None:
     return start, close_idx
 
 
+def _is_under_malformed_examples(path: Path) -> bool:
+    """Return True when *path* lives under an ``examples/malformed`` tree.
+
+    Negative-fixture files (intentionally malformed examples asserted by the
+    "malformed examples rejected" test) must not be scanned during repo-wide
+    fidelity sweeps — they are designed to produce errors and would otherwise
+    appear as false offenses in the PR-diff gate.  They are still checked
+    directly by the integration-test harness, which passes each file as an
+    explicit path (``root.is_file()`` branch — never filtered here).
+    """
+    parts = path.parts
+    return "examples" in parts and "malformed" in parts
+
+
 def _iter_documents(paths: Iterable[Path]) -> list[Path]:
     seen: set[Path] = set()
     out: list[Path] = []
@@ -174,6 +188,8 @@ def _iter_documents(paths: Iterable[Path]) -> list[Path]:
             for candidate in sorted(root.rglob("*")):
                 if any(part in SKIP_DIR_NAMES for part in candidate.parts):
                     continue
+                if _is_under_malformed_examples(candidate):
+                    continue  # negative-fixture files: scanned only when targeted explicitly
                 if candidate.is_file():
                     candidates.append(candidate)
         for candidate in candidates:
