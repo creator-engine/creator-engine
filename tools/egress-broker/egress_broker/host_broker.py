@@ -352,82 +352,92 @@ def serve_self_push_unix_socket(
         while True:
             conn, _addr = server.accept()
             with conn:
-                peer_record = _audit_self_push_peercred(
-                    conn,
-                    config=config,
-                    broker_seat_id=broker_seat_id,
-                    expected_peer_uids=expected_peer_uids,
-                    expected_peer_gids=expected_peer_gids,
-                    reject_unexpected_peer=reject_unexpected_peer,
-                )
-                if peer_record["decision"] == "reject":
+                try:
+                    peer_record = _audit_self_push_peercred(
+                        conn,
+                        config=config,
+                        broker_seat_id=broker_seat_id,
+                        expected_peer_uids=expected_peer_uids,
+                        expected_peer_gids=expected_peer_gids,
+                        reject_unexpected_peer=reject_unexpected_peer,
+                    )
+                except Exception:  # noqa: BLE001
+                    print(
+                        "[ce-egress-self-push] peer credential audit error; "
+                        "answering 500 and continuing",
+                        file=sys.stderr,
+                    )
+                    response = _broker_internal_error_json_line()
+                else:
+                    response = None
+
+                if response is None and peer_record["decision"] == "reject":
                     response = json.dumps(
                         {"status": 403, "reason": "peer_credential_unexpected"},
                         sort_keys=True,
                         separators=(",", ":"),
                     ) + "\n"
+
+                if response is None:
+                    data = b""
                     try:
-                        conn.sendall(response.encode("utf-8"))
-                    except (BrokenPipeError, OSError):
+                        while True:
+                            chunk = conn.recv(65536)
+                            if not chunk:
+                                break
+                            data += chunk
+                            if b"\n" in data:
+                                break
+                    except OSError as exc:
                         print(
-                            "[ce-egress-self-push] client disconnected before response; dropping connection",
+                            f"[ce-egress-self-push] client disconnect during recv: "
+                            f"{type(exc).__name__}; dropping connection",
                             file=sys.stderr,
                         )
-                    if once:
-                        break
-                    continue
-                try:
-                    data = b""
-                    while True:
-                        chunk = conn.recv(65536)
-                        if not chunk:
+                        if once:
                             break
-                        data += chunk
-                        if b"\n" in data:
-                            break
-                    line = data.decode("utf-8", errors="replace").splitlines()[0] if data else ""
-                    response = handle_self_push_json_line(
-                        line,
-                        config=config,
-                        broker_seat_id=broker_seat_id,
-                        host_repo_path=host_repo_path,
-                        apply_default=apply_default,
-                        courier_fn=courier_fn,
-                        **host_courier_options,
-                    )
-                except (BrokenPipeError, ConnectionResetError, OSError) as exc:
-                    print(
-                        f"[ce-egress-self-push] client disconnect during recv: {type(exc).__name__}; "
-                        "dropping connection",
-                        file=sys.stderr,
-                    )
-                    if once:
-                        break
-                    continue
-                except Exception as exc:  # noqa: BLE001
-                    print(
-                        f"[ce-egress-self-push] unhandled request error: {type(exc).__name__}; "
-                        "answering 500 and continuing",
-                        file=sys.stderr,
-                    )
-                    response = json.dumps(
-                        {
-                            "status": 500,
-                            "reason": "broker_internal_error",
-                            "error_class": type(exc).__name__,
-                        },
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ) + "\n"
+                        continue
+
+                    try:
+                        line = (
+                            data.decode("utf-8", errors="replace").splitlines()[0]
+                            if data
+                            else ""
+                        )
+                        response = handle_self_push_json_line(
+                            line,
+                            config=config,
+                            broker_seat_id=broker_seat_id,
+                            host_repo_path=host_repo_path,
+                            apply_default=apply_default,
+                            courier_fn=courier_fn,
+                            **host_courier_options,
+                        )
+                    except Exception:  # noqa: BLE001
+                        print(
+                            "[ce-egress-self-push] broker request handling error; "
+                            "answering 500 and continuing",
+                            file=sys.stderr,
+                        )
+                        response = _broker_internal_error_json_line()
                 try:
                     conn.sendall(response.encode("utf-8"))
-                except (BrokenPipeError, OSError):
+                except OSError:
                     print(
                         "[ce-egress-self-push] client disconnected before response; dropping connection",
                         file=sys.stderr,
                     )
             if once:
                 break
+
+
+def _broker_internal_error_json_line() -> str:
+    """Return the bounded generic response for failures in host-owned broker work."""
+    return json.dumps(
+        {"status": 500, "reason": "broker_internal_error"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
 
 
 def _audit_self_push_peercred(

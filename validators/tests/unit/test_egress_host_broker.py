@@ -805,6 +805,77 @@ def test_serve_unix_socket_recv_disconnect_exception_continues(tmp_path, monkeyp
     assert courier_calls == ["ce242-live-self-push"]
 
 
+def test_serve_unix_socket_courier_oserror_returns_generic_500_and_continues(
+    tmp_path, capsys
+):
+    socket_path = tmp_path / "courier-oserror.sock"
+    courier_calls = []
+
+    def flaky_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        if len(courier_calls) == 1:
+            raise OSError(f"courier persistence failed: {_SENTINEL}")
+        return _success_result(request, apply=apply)
+
+    server_thread, server_exceptions = _start_looping_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=flaky_courier,
+    )
+
+    first_response = _send_socket_request(socket_path)
+    second_response = _send_socket_request(socket_path)
+
+    assert first_response == {"status": 500, "reason": "broker_internal_error"}
+    assert second_response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push", "ce242-live-self-push"]
+    assert server_exceptions == []
+    assert server_thread.is_alive()
+    stderr = capsys.readouterr().err
+    assert "broker request handling error" in stderr
+    assert "client disconnect during recv" not in stderr
+    _assert_sentinel_absent(first_response, second_response, stderr)
+
+
+def test_serve_unix_socket_peer_audit_persistence_oserror_fails_closed_and_continues(
+    tmp_path, monkeypatch, capsys
+):
+    socket_path = tmp_path / "peer-audit-oserror.sock"
+    real_append_audit = host_broker.append_audit
+    audit_calls = []
+    courier_calls = []
+
+    def flaky_append_audit(*args, **kwargs):
+        audit_calls.append(True)
+        if len(audit_calls) == 1:
+            raise OSError(f"audit persistence failed: {_SENTINEL}")
+        return real_append_audit(*args, **kwargs)
+
+    def fake_courier(request, *, config, apply, **kw):
+        courier_calls.append(request.branch)
+        return _success_result(request, apply=apply)
+
+    monkeypatch.setattr(host_broker, "append_audit", flaky_append_audit)
+    server_thread, server_exceptions = _start_looping_socket_server(
+        socket_path,
+        tmp_path,
+        courier_fn=fake_courier,
+    )
+
+    first_response = _send_socket_request(socket_path, send_request=False)
+    second_response = _send_socket_request(socket_path)
+
+    assert first_response == {"status": 500, "reason": "broker_internal_error"}
+    assert second_response["status"] == 200
+    assert courier_calls == ["ce242-live-self-push"]
+    assert server_exceptions == []
+    assert server_thread.is_alive()
+    stderr = capsys.readouterr().err
+    assert "peer credential audit error" in stderr
+    assert "client disconnect during recv" not in stderr
+    _assert_sentinel_absent(first_response, second_response, stderr)
+
+
 def test_serve_unix_socket_push_refused_returns_403(tmp_path):
     socket_path = tmp_path / "push-refused.sock"
     spy = _HostSpy()

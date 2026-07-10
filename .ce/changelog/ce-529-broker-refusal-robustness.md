@@ -10,3 +10,4 @@ scope: egress broker
 - Convert normal push guard denials into audited broker refusals.
 - Return structured internal-error responses for forge failures and keep accepting later requests.
 - Tolerate clients that disconnect while a request is being received.
+- Classify host audit, persistence, and courier failures separately from client disconnects.
