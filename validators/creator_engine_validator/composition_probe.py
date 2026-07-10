@@ -45,6 +45,7 @@ _GIT_ENVIRONMENT = {
     "GIT_CONFIG_KEY_0": "core.hooksPath",
     "GIT_CONFIG_VALUE_0": _GIT_HOOKS_PATH,
 }
+_VALIDATOR_ENVIRONMENT = dict(_GIT_ENVIRONMENT)
 _GIT_IDENTITY_KEYS = frozenset(
     {
         "GIT_AUTHOR_NAME",
@@ -251,13 +252,18 @@ def probe_composition(
                 first_red.output if first_red else ""
             )
             primary_error = planned.error if planned is not None else None
+            validation_attempts = (
+                planned.validation_attempt_count
+                if planned is not None
+                else 1 if first_red is not None else 0
+            )
             return _result(
                 CLEANUP_ABORT,
                 main_sha,
                 pr_number,
                 head_sha,
                 simulation,
-                attempt_number,
+                validation_attempts,
                 output,
                 error=primary_error,
                 primary_outcome=primary,
@@ -568,6 +574,7 @@ def _run_validator_bounded(argv: Sequence[str], repo_path: str) -> ValidationAtt
         cwd=repo_path,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        env=dict(_VALIDATOR_ENVIRONMENT),
     )
     chunks = bytearray()
     assert process.stdout is not None

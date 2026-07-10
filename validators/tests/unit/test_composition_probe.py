@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -392,6 +394,75 @@ def test_production_git_commands_ignore_hostile_environment_and_hooks(monkeypatc
         assert not (set(hostile) - set(probe._GIT_ENVIRONMENT)) & set(environment)
 
 
+def test_production_validator_subprocess_ignores_hostile_git_environment_and_hooks(
+    monkeypatch, tmp_path
+):
+    repo, _parent, main_sha, _head_sha = _two_commit_repo(tmp_path)
+    (repo / "main-second.txt").write_text("main second\n", encoding="utf-8")
+    _git(repo, "add", "main-second.txt")
+    _git(repo, "commit", "-m", "second main")
+    main_sha = _git(repo, "rev-parse", "HEAD")
+    marker = tmp_path / "hostile-hook-ran"
+    observed = tmp_path / "validator-environment"
+    hook_dir = tmp_path / "hostile-hooks"
+    hook_dir.mkdir()
+    hook = hook_dir / "post-checkout"
+    hook.write_text(f"#!/bin/sh\nprintf ran > {marker}\n", encoding="utf-8")
+    hook.chmod(0o755)
+    global_config = tmp_path / "hostile-gitconfig"
+    global_config.write_text(f"[core]\n\thooksPath = {hook_dir}\n", encoding="utf-8")
+    redirected = tmp_path / "redirected-git-dir"
+    redirected.mkdir()
+    hostile = {
+        "GIT_DIR": str(redirected),
+        "GIT_WORK_TREE": str(tmp_path / "redirected-work-tree"),
+        "GIT_INDEX_FILE": str(tmp_path / "redirected-index"),
+        "GIT_OBJECT_DIRECTORY": str(tmp_path / "redirected-objects"),
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(tmp_path / "redirected-alternates"),
+        "GIT_CONFIG_GLOBAL": str(global_config),
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.hooksPath",
+        "GIT_CONFIG_VALUE_0": str(hook_dir),
+    }
+    for key, value in hostile.items():
+        monkeypatch.setenv(key, value)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    git = shutil.which("git")
+    assert git is not None
+    validator = bin_dir / "ce"
+    absent = (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    )
+    absence_checks = "\n".join(f'[ -z "${{{key}+x}}" ] || exit 17' for key in absent)
+    validator_body = (
+        "#!/bin/sh\n"
+        f"{absence_checks}\n"
+        f"printf '%s\\n' \"PATH=$PATH\" \"GIT_CONFIG_NOSYSTEM=$GIT_CONFIG_NOSYSTEM\" \"GIT_CONFIG_GLOBAL=$GIT_CONFIG_GLOBAL\" > {shlex.quote(str(observed))}\n"
+        f"printf '%s\\n' \"GIT_CONFIG_KEY_0=$GIT_CONFIG_KEY_0\" \"GIT_CONFIG_VALUE_0=$GIT_CONFIG_VALUE_0\" >> {shlex.quote(str(observed))}\n"
+        f"{shlex.quote(git)} checkout --detach HEAD\n"
+    )
+    validator.write_text(validator_body, encoding="utf-8")
+    validator.chmod(0o755)
+    monkeypatch.setitem(probe._VALIDATOR_ENVIRONMENT, "PATH", str(bin_dir))
+
+    result = probe._default_validator(str(repo), main_sha)
+
+    assert result.green
+    assert not marker.exists()
+    received = dict(line.split("=", 1) for line in observed.read_text(encoding="utf-8").splitlines())
+    assert received["PATH"] == str(bin_dir)
+    assert received["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert received["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert received["GIT_CONFIG_KEY_0"] == "core.hooksPath"
+    assert received["GIT_CONFIG_VALUE_0"] == os.devnull
+
+
 def test_production_retry_has_independent_common_repo_config_refs_index_and_hooks(
     monkeypatch, tmp_path
 ):
@@ -568,6 +639,35 @@ def test_filesystem_deletion_failure_blocks_retry_and_incident(monkeypatch, tmp_
     assert result.incident_record is None
     assert incidents == []
     assert "delete-secret" not in (result.cleanup_error or "")
+    for path in tmp_path.iterdir():
+        real_rmtree(path)
+
+
+@pytest.mark.parametrize(
+    ("status", "primary_outcome"),
+    [("abort", MERGE_ABORT), ("conflict", MERGE_CONFLICT)],
+)
+def test_cleanup_failure_preserves_pre_validation_attempt_count(
+    monkeypatch, tmp_path, status, primary_outcome
+):
+    real_rmtree = probe.shutil.rmtree
+
+    def broken_rmtree(_path):
+        raise OSError("secret=pre-validation-cleanup")
+
+    monkeypatch.setattr(probe.shutil, "rmtree", broken_rmtree)
+    result = probe_composition(
+        MAIN,
+        PR,
+        merge_strategy=lambda *_: MergeSimulation(status, merge_base=BASE),
+        validator_fn=lambda *_: pytest.fail("validation must not run"),
+        tmp_dir=tmp_path,
+    )
+
+    assert result.outcome == CLEANUP_ABORT
+    assert result.primary_outcome == primary_outcome
+    assert result.validation_attempt_count == 0
+    assert "pre-validation-cleanup" not in (result.cleanup_error or "")
     for path in tmp_path.iterdir():
         real_rmtree(path)
 
