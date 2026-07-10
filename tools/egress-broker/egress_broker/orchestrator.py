@@ -33,6 +33,7 @@ from urllib.parse import urlencode
 
 from creator_engine_validator.checks.path_manifest_fidelity import branch_slug
 from creator_engine_validator.forge._redact import redact_gh_stderr
+from creator_engine_validator.forge.change_push import PushRefused
 from creator_engine_validator.forge.credential_runner import authenticated_gh_runner
 from creator_engine_validator.forge.scoped_token import ScopedToken, revoke_scoped_token
 from creator_engine_validator.pr_preflight import DECLARED_WORK_CLASS_PATTERN, WORK_CLASSES
@@ -481,6 +482,20 @@ def courier(
         pushed = bool(push_result.get("pushed", True)) if isinstance(push_result, dict) else True
         pr_result = _open_pr(token)
         pr_number = pr_result.get("pr_number") if isinstance(pr_result, dict) else None
+    except PushRefused as exc:
+        rec = append_audit(
+            audit_log,
+            {
+                **base,
+                "decision": "deny",
+                "applied": False,
+                "pushed": False,
+                "installation_id": installation_id,
+                "transport_refusal": str(exc),
+            },
+            now=audit_now,
+        )
+        raise EgressRefused(str(exc), decision=decision, audit_record=rec) from exc
     finally:
         # Defense-in-depth: release the credential the instant we're done — even on failure.
         try:
