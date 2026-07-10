@@ -9,6 +9,7 @@ import pytest
 
 from creator_engine_validator import composition_probe as probe
 from creator_engine_validator.composition_probe import (
+    CLEANUP_ABORT,
     GREEN,
     MERGE_ABORT,
     MERGE_CONFLICT,
@@ -280,9 +281,7 @@ def _git(cwd: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def test_production_default_validates_real_composed_commit_against_exact_main(
-    monkeypatch, tmp_path
-):
+def _two_commit_repo(tmp_path: Path) -> tuple[Path, Path, str, str]:
     repo = tmp_path / "source"
     parent = tmp_path / "attempts"
     repo.mkdir()
@@ -300,6 +299,13 @@ def test_production_default_validates_real_composed_commit_against_exact_main(
     _git(repo, "commit", "-m", "feature")
     head_sha = _git(repo, "rev-parse", "HEAD")
     _git(repo, "switch", "main")
+    return repo, parent, main_sha, head_sha
+
+
+def test_production_default_validates_real_composed_commit_against_exact_main(
+    monkeypatch, tmp_path
+):
+    repo, parent, main_sha, head_sha = _two_commit_repo(tmp_path)
     observed: dict[str, object] = {}
 
     def fake_run(argv, cwd):
@@ -331,3 +337,239 @@ def test_production_default_validates_real_composed_commit_against_exact_main(
     argv = observed["argv"]
     assert argv[:4] == ["ce", "validate-pr", "--base", main_sha]
     assert list(parent.iterdir()) == []
+
+
+def test_production_retry_has_independent_common_repo_config_refs_index_and_hooks(
+    monkeypatch, tmp_path
+):
+    repo, parent, main_sha, head_sha = _two_commit_repo(tmp_path)
+    common_dirs: list[Path] = []
+    calls = 0
+
+    def fake_run(_argv, cwd):
+        nonlocal calls
+        calls += 1
+        clone = Path(cwd)
+        common = (clone / _git(clone, "rev-parse", "--git-common-dir")).resolve()
+        common_dirs.append(common)
+        if calls == 1:
+            _git(clone, "config", "composition-probe.contaminated", "yes")
+            _git(clone, "update-ref", "refs/heads/attempt-one-only", "HEAD")
+            hooks = common / "hooks"
+            hooks.mkdir(exist_ok=True)
+            (hooks / "pre-commit").write_text("attempt one\n", encoding="utf-8")
+            metadata = common / "worktrees" / "attempt-one-only"
+            metadata.mkdir(parents=True)
+            (metadata / "gitdir").write_text("/nonexistent\n", encoding="utf-8")
+            _git(clone, "rm", "--cached", "feature.txt")
+            return ValidationAttempt(False, "first red")
+
+        config = subprocess.run(
+            ["git", "config", "--get", "composition-probe.contaminated"],
+            cwd=clone,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        ref = subprocess.run(
+            ["git", "show-ref", "--verify", "refs/heads/attempt-one-only"],
+            cwd=clone,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert config.returncode != 0
+        assert ref.returncode != 0
+        assert not (common / "hooks" / "pre-commit").exists()
+        assert not (common / "worktrees" / "attempt-one-only").exists()
+        assert _git(clone, "status", "--porcelain") == ""
+        return ValidationAttempt(True, "retry green")
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(probe, "_run_validator_bounded", fake_run)
+    result = probe_composition(
+        main_sha, {"number": 7, "head_sha": head_sha}, tmp_dir=parent
+    )
+
+    assert result.outcome == RED_FLAKE
+    assert result.validation_attempt_count == 2
+    assert len(common_dirs) == 2
+    assert common_dirs[0] != common_dirs[1]
+    assert all(repo / ".git" != common for common in common_dirs)
+    assert list(parent.iterdir()) == []
+
+
+def test_production_retry_merge_conflict_remains_distinct(monkeypatch, tmp_path):
+    repo, parent, main_sha, head_sha = _two_commit_repo(tmp_path)
+    real_merge = probe._default_merge_strategy
+    calls = 0
+
+    def conflict_on_retry(source, main, head, target):
+        nonlocal calls
+        calls += 1
+        simulation = real_merge(source, main, head, target)
+        if calls == 2:
+            return MergeSimulation("conflict", merge_base=simulation.merge_base)
+        return simulation
+
+    monkeypatch.chdir(repo)
+    result = probe_composition(
+        main_sha,
+        {"number": 7, "head_sha": head_sha},
+        merge_strategy=conflict_on_retry,
+        validator_fn=lambda *_: ValidationAttempt(False, "first red"),
+        tmp_dir=parent,
+    )
+
+    assert calls == 2
+    assert result.outcome == MERGE_CONFLICT
+    assert result.validation_attempt_count == 1
+    assert result.validation_output == "first red"
+    assert result.error is None
+    assert list(parent.iterdir()) == []
+
+
+def _custom_clone_merge(_repo, _main, _head, target):
+    clone = Path(target)
+    (clone / ".git").mkdir(parents=True)
+    return MergeSimulation("clean", merge_base=BASE, tree_ref=TREE)
+
+
+def test_nonzero_git_cleanup_fails_closed_after_green(monkeypatch, tmp_path):
+    real_git = probe._git
+
+    def failing_git(repo_path, *args, **kwargs):
+        if args[:2] == ("worktree", "prune"):
+            return subprocess.CompletedProcess(
+                ["git", *args], 9, "", "token=cleanup-secret " + "x" * 6000
+            )
+        return real_git(repo_path, *args, **kwargs)
+
+    monkeypatch.setattr(probe, "_git", failing_git)
+    result = probe_composition(
+        MAIN,
+        PR,
+        merge_strategy=_custom_clone_merge,
+        validator_fn=lambda *_: True,
+        tmp_dir=tmp_path,
+    )
+
+    assert result.outcome == CLEANUP_ABORT
+    assert result.primary_outcome == GREEN
+    assert "cleanup-secret" not in (result.cleanup_error or "")
+    assert len(result.cleanup_error or "") <= probe._MAX_OUTPUT + len("[truncated]\n")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_raising_git_cleanup_continues_deletion_and_verification(monkeypatch, tmp_path):
+    real_git = probe._git
+    verified: list[Path] = []
+    real_verify = probe._verify_owned_root_removed
+
+    def raising_git(repo_path, *args, **kwargs):
+        if args[:2] == ("worktree", "prune"):
+            raise OSError("secret=git-cleanup")
+        return real_git(repo_path, *args, **kwargs)
+
+    def verify(path):
+        verified.append(path)
+        real_verify(path)
+
+    monkeypatch.setattr(probe, "_git", raising_git)
+    monkeypatch.setattr(probe, "_verify_owned_root_removed", verify)
+    result = probe_composition(
+        MAIN,
+        PR,
+        merge_strategy=_custom_clone_merge,
+        validator_fn=lambda *_: True,
+        tmp_dir=tmp_path,
+    )
+
+    assert result.outcome == CLEANUP_ABORT
+    assert result.primary_outcome == GREEN
+    assert verified
+    assert not verified[0].exists()
+    assert "git-cleanup" not in (result.cleanup_error or "")
+
+
+def test_filesystem_deletion_failure_blocks_retry_and_incident(monkeypatch, tmp_path):
+    real_rmtree = probe.shutil.rmtree
+    incidents: list[object] = []
+
+    def broken_rmtree(_path):
+        raise OSError("password=delete-secret")
+
+    monkeypatch.setattr(probe.shutil, "rmtree", broken_rmtree)
+    result = probe_composition(
+        MAIN,
+        PR,
+        merge_strategy=_custom_clone_merge,
+        validator_fn=lambda *_: False,
+        tmp_dir=tmp_path,
+        incident_sink=incidents.append,
+    )
+
+    assert result.outcome == CLEANUP_ABORT
+    assert result.primary_outcome == "RETRY_PENDING"
+    assert result.validation_attempt_count == 1
+    assert result.incident_record is None
+    assert incidents == []
+    assert "delete-secret" not in (result.cleanup_error or "")
+    for path in tmp_path.iterdir():
+        real_rmtree(path)
+
+
+def test_second_red_cleanup_failure_suppresses_deterministic_incident(monkeypatch, tmp_path):
+    real_rmtree = probe.shutil.rmtree
+    deletions = 0
+    incidents: list[object] = []
+
+    def fail_second_deletion(path):
+        nonlocal deletions
+        deletions += 1
+        if deletions == 2:
+            raise OSError("secret=second-cleanup")
+        real_rmtree(path)
+
+    monkeypatch.setattr(probe.shutil, "rmtree", fail_second_deletion)
+
+    def clean_merge(_repo, _main, _head, target):
+        Path(target).mkdir()
+        return MergeSimulation("clean", merge_base=BASE, tree_ref=TREE)
+
+    result = probe_composition(
+        MAIN,
+        PR,
+        merge_strategy=clean_merge,
+        validator_fn=lambda *_: ValidationAttempt(False, "red"),
+        tmp_dir=tmp_path,
+        incident_sink=incidents.append,
+    )
+
+    assert result.outcome == CLEANUP_ABORT
+    assert result.primary_outcome == RED_DETERMINISTIC
+    assert result.validation_attempt_count == 2
+    assert result.incident_record is None
+    assert incidents == []
+    assert "second-cleanup" not in (result.cleanup_error or "")
+    for path in tmp_path.iterdir():
+        real_rmtree(path)
+
+
+def test_filesystem_verification_failure_overrides_green(monkeypatch, tmp_path):
+    def broken_verify(_path):
+        raise RuntimeError("api_key=verification-secret")
+
+    monkeypatch.setattr(probe, "_verify_owned_root_removed", broken_verify)
+    result = probe_composition(
+        MAIN,
+        PR,
+        merge_strategy=_custom_clone_merge,
+        validator_fn=lambda *_: True,
+        tmp_dir=tmp_path,
+    )
+
+    assert result.outcome == CLEANUP_ABORT
+    assert result.primary_outcome == GREEN
+    assert "verification-secret" not in (result.cleanup_error or "")
+    assert list(tmp_path.iterdir()) == []

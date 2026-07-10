@@ -9,7 +9,9 @@ issue: N-15b
 **Add a detection-only composition probe for representative changes against the current main tip.**
 
 - Validate a real hook-free, unsigned composed commit against its exact immutable main parent.
-- Retry from a separately owned worktree so validator state cannot contaminate classification.
+- Retry from a standalone no-hardlink local clone so Git common state cannot contaminate classification.
+- Fail closed with bounded primary and cleanup evidence unless Git and filesystem cleanup verifies.
+- Preserve merge-conflict classification on retries and suppress incidents whenever cleanup fails.
 - Validate request shape before side effects and bound/redact validator and incident evidence.
 - Return validator and optional incident-sink failures without misclassifying them as merge aborts.
 - **Declared work class:** S

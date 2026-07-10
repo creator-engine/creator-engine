@@ -1,6 +1,6 @@
 """Detection-only validation of a representative change composed with main.
 
-Every validation attempt is made from a newly-created, owned worktree.  The
+Every validation attempt is made from a newly-created, standalone local clone.  The
 default strategy creates a real, deterministic merge commit from the two
 immutable input commits, then runs ``ce validate-pr`` against that exact
 committed pairing.
@@ -29,6 +29,7 @@ RED_FLAKE = "RED_FIRST_TRY_THEN_GREEN"
 MERGE_CONFLICT = "MERGE_CONFLICT"
 MERGE_ABORT = "MERGE_ABORT"
 VALIDATOR_ABORT = "VALIDATOR_ABORT"
+CLEANUP_ABORT = "CLEANUP_ABORT"
 
 _SHA_RE = re.compile(r"[0-9a-fA-F]{40}\Z")
 _MAX_OUTPUT = 4096
@@ -72,6 +73,8 @@ class CompositionProbeResult:
     incident_record: dict[str, object] | None = None
     error: str | None = None
     incident_sink_error: str | None = None
+    primary_outcome: str | None = None
+    cleanup_error: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return dataclasses.asdict(self)
@@ -93,7 +96,7 @@ def probe_composition(
 ) -> CompositionProbeResult:
     """Classify one immutable PR head composed with one immutable main tip.
 
-    A red result is retried once from a separately owned worktree.  The
+    A red result is retried once from a separately owned repository.  The
     optional incident sink is an injected capability: JSON input cannot choose
     a path, and sink failure never changes a deterministic-red verdict.
     """
@@ -109,16 +112,31 @@ def probe_composition(
     first_red: ValidationAttempt | None = None
 
     for attempt_number in (1, 2):
-        owned_root = Path(tempfile.mkdtemp(prefix="ce-composition-probe-", dir=temp_parent))
+        try:
+            owned_root = Path(tempfile.mkdtemp(prefix="ce-composition-probe-", dir=temp_parent))
+        except Exception as exc:
+            return _result(
+                MERGE_ABORT,
+                main_sha,
+                pr_number,
+                head_sha,
+                MergeSimulation("abort"),
+                attempt_number - 1,
+                first_red.output if first_red else "",
+                error=_safe_error("attempt allocation failed", exc),
+            )
         attempt_repo = owned_root / "repo"
         simulation = MergeSimulation("abort")
+        planned: CompositionProbeResult | None = None
+        retry = False
+        pending_incident: dict[str, object] | None = None
         try:
             try:
                 simulation = _coerce_merge_result(
                     merge(repo_path, main_sha, head_sha, str(attempt_repo))
                 )
             except Exception as exc:
-                return _result(
+                planned = _result(
                     MERGE_ABORT,
                     main_sha,
                     pr_number,
@@ -129,20 +147,19 @@ def probe_composition(
                     error=_safe_error("merge setup failed", exc),
                 )
 
-            if simulation.status == "conflict":
-                outcome = MERGE_CONFLICT if attempt_number == 1 else MERGE_ABORT
-                return _result(
-                    outcome,
+            if planned is None and simulation.status == "conflict":
+                planned = _result(
+                    MERGE_CONFLICT,
                     main_sha,
                     pr_number,
                     head_sha,
                     simulation,
                     attempt_number - 1,
                     first_red.output if first_red else "",
-                    error=None if attempt_number == 1 else "retry composition conflicted",
+                    error=None,
                 )
-            if simulation.status != "clean" or not simulation.tree_ref:
-                return _result(
+            elif planned is None and (simulation.status != "clean" or not simulation.tree_ref):
+                planned = _result(
                     MERGE_ABORT,
                     main_sha,
                     pr_number,
@@ -153,60 +170,90 @@ def probe_composition(
                     error="composition setup aborted",
                 )
 
-            try:
-                verdict = _coerce_validation_result(validate(str(attempt_repo), simulation.tree_ref))
-            except Exception as exc:
-                return _result(
-                    VALIDATOR_ABORT,
-                    main_sha,
-                    pr_number,
-                    head_sha,
-                    simulation,
-                    attempt_number,
-                    first_red.output if first_red else "",
-                    error=_safe_error("validator failed", exc),
-                )
-
-            if verdict.green:
-                return _result(
-                    GREEN if attempt_number == 1 else RED_FLAKE,
-                    main_sha,
-                    pr_number,
-                    head_sha,
-                    simulation,
-                    attempt_number,
-                    verdict.output,
-                )
-            if attempt_number == 1:
-                first_red = verdict
-                continue
-
-            record = _incident_record(
-                main_sha, pr_number, head_sha, simulation.merge_base, verdict.output
-            )
-            sink_error = None
-            if incident_sink is not None:
+            if planned is None:
                 try:
-                    incident_sink(record)
+                    verdict = _coerce_validation_result(
+                        validate(str(attempt_repo), simulation.tree_ref or "")
+                    )
                 except Exception as exc:
-                    sink_error = _safe_error("incident sink failed", exc)
+                    planned = _result(
+                        VALIDATOR_ABORT,
+                        main_sha,
+                        pr_number,
+                        head_sha,
+                        simulation,
+                        attempt_number,
+                        first_red.output if first_red else "",
+                        error=_safe_error("validator failed", exc),
+                    )
+                else:
+                    if verdict.green:
+                        planned = _result(
+                            GREEN if attempt_number == 1 else RED_FLAKE,
+                            main_sha,
+                            pr_number,
+                            head_sha,
+                            simulation,
+                            attempt_number,
+                            verdict.output,
+                        )
+                    elif attempt_number == 1:
+                        first_red = verdict
+                        retry = True
+                    else:
+                        pending_incident = _incident_record(
+                            main_sha,
+                            pr_number,
+                            head_sha,
+                            simulation.merge_base,
+                            verdict.output,
+                        )
+                        planned = _result(
+                            RED_DETERMINISTIC,
+                            main_sha,
+                            pr_number,
+                            head_sha,
+                            simulation,
+                            2,
+                            verdict.output,
+                            incident=pending_incident,
+                        )
+        finally:
+            try:
+                cleanup_error = _cleanup_attempt(repo_path, attempt_repo, owned_root)
+            except Exception as exc:  # defensive fail-closed boundary
+                cleanup_error = _safe_error("cleanup failed unexpectedly", exc)
+
+        if cleanup_error is not None:
+            primary = planned.outcome if planned is not None else "RETRY_PENDING"
+            output = planned.validation_output if planned is not None else (
+                first_red.output if first_red else ""
+            )
+            primary_error = planned.error if planned is not None else None
             return _result(
-                RED_DETERMINISTIC,
+                CLEANUP_ABORT,
                 main_sha,
                 pr_number,
                 head_sha,
                 simulation,
-                2,
-                verdict.output,
-                incident=record,
-                incident_sink_error=sink_error,
+                attempt_number,
+                output,
+                error=primary_error,
+                primary_outcome=primary,
+                cleanup_error=cleanup_error,
             )
-        finally:
-            # Remove only the child allocated by this attempt.  Never register
-            # or delete a caller-provided temporary parent or a strategy-
-            # supplied path.
-            _git(repo_path, "worktree", "remove", "--force", str(attempt_repo), check=False)
-            shutil.rmtree(owned_root, ignore_errors=True)
+        if retry:
+            continue
+        if planned is None:
+            raise AssertionError("attempt completed without a result")
+        if pending_incident is not None and incident_sink is not None:
+            try:
+                incident_sink(pending_incident)
+            except Exception as exc:
+                planned = dataclasses.replace(
+                    planned, incident_sink_error=_safe_error("incident sink failed", exc)
+                )
+        return planned
 
     raise AssertionError("unreachable")
 
@@ -223,6 +270,8 @@ def _result(
     *,
     error: str | None = None,
     incident_sink_error: str | None = None,
+    primary_outcome: str | None = None,
+    cleanup_error: str | None = None,
 ) -> CompositionProbeResult:
     return CompositionProbeResult(
         outcome=outcome,
@@ -235,6 +284,8 @@ def _result(
         incident_record=incident,
         error=_sanitize_output(error) if error else None,
         incident_sink_error=_sanitize_output(incident_sink_error) if incident_sink_error else None,
+        primary_outcome=primary_outcome,
+        cleanup_error=_sanitize_output(cleanup_error) if cleanup_error else None,
     )
 
 
@@ -335,11 +386,26 @@ def _optional_sha(value: object) -> str | None:
 def _default_merge_strategy(
     repo_path: str, main_tip_sha: str, head_sha: str, tmp_dir: str
 ) -> MergeSimulation:
-    """Create a hook-free, unsigned merge commit from the exact input SHAs."""
+    """Clone locally, then create a hook-free merge from the exact input SHAs."""
 
     merge_base = _git(repo_path, "merge-base", main_tip_sha, head_sha).stdout.strip()
-    add = _git(repo_path, "worktree", "add", "--detach", tmp_dir, main_tip_sha, check=False)
-    if add.returncode != 0:
+    cloned = _git(
+        repo_path,
+        "-c",
+        "protocol.file.allow=always",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "--",
+        repo_path,
+        tmp_dir,
+        check=False,
+    )
+    if cloned.returncode != 0:
+        return MergeSimulation("abort", merge_base=merge_base)
+    checked_out = _git(tmp_dir, "checkout", "--detach", main_tip_sha, check=False)
+    if checked_out.returncode != 0:
         return MergeSimulation("abort", merge_base=merge_base)
     identity = {
         **os.environ,
@@ -374,6 +440,54 @@ def _default_merge_strategy(
     if parents != [main_tip_sha, head_sha]:
         return MergeSimulation("abort", merge_base=merge_base)
     return MergeSimulation("clean", merge_base=merge_base, tree_ref=commit_sha)
+
+
+def _cleanup_attempt(source_repo: str, attempt_repo: Path, owned_root: Path) -> str | None:
+    """Remove one owned clone and verify cleanup, collecting every failure."""
+
+    errors: list[str] = []
+    try:
+        has_git_dir = (attempt_repo / ".git").exists()
+    except Exception as exc:
+        has_git_dir = False
+        errors.append(_safe_error("attempt repository inspection failed", exc))
+    if has_git_dir:
+        try:
+            pruned = _git(
+                str(attempt_repo), "worktree", "prune", "--expire", "now", check=False
+            )
+            if pruned.returncode != 0:
+                detail = pruned.stderr or pruned.stdout or "nonzero exit"
+                errors.append(_sanitize_output(f"git worktree prune failed: {detail}"))
+        except Exception as exc:
+            errors.append(_safe_error("git worktree prune failed", exc))
+
+    try:
+        shutil.rmtree(owned_root)
+    except Exception as exc:
+        errors.append(_safe_error("owned-root deletion failed", exc))
+
+    try:
+        _verify_owned_root_removed(owned_root)
+    except Exception as exc:
+        errors.append(_safe_error("owned-root verification failed", exc))
+
+    try:
+        listed = _git(source_repo, "worktree", "list", "--porcelain", check=False)
+        if listed.returncode != 0:
+            detail = listed.stderr or listed.stdout or "nonzero exit"
+            errors.append(_sanitize_output(f"source worktree verification failed: {detail}"))
+        elif str(owned_root) in listed.stdout or str(attempt_repo) in listed.stdout:
+            errors.append("source worktree verification found registered attempt metadata")
+    except Exception as exc:
+        errors.append(_safe_error("source worktree verification failed", exc))
+
+    return _sanitize_output("; ".join(errors)) if errors else None
+
+
+def _verify_owned_root_removed(owned_root: Path) -> None:
+    if owned_root.exists():
+        raise RuntimeError("owned attempt root remains after deletion")
 
 
 def _git(
