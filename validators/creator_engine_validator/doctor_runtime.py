@@ -327,18 +327,17 @@ def run_doctor(
         }
     )
     harness_check = launch_runtime.harness_binary_check(harness, which=which)
-    if not require_visible_launch:
+    if not require_visible_launch and not harness_check["ok"]:
         harness_check = {
             **harness_check,
-            "applicable": False,
-            "ok": True,
+            "severity": "warning",
             "detail": (
-                f"configured {harness} harness binary check skipped "
-                "because visible launch was not requested"
+                f"{harness_check['detail']}; advisory in default doctor mode "
+                "and required when --require-visible-launch is set"
             ),
         }
     payload["checks"].append(harness_check)
-    if harness_check["applicable"] and not harness_check["ok"]:
+    if require_visible_launch and harness_check["applicable"] and not harness_check["ok"]:
         payload["refused_clauses"].append(harness_check["clause"])
         payload["ok"] = False
     # ce-ops#25: surface the derived CE version identity beside the packaging
@@ -433,7 +432,10 @@ def render_human(report: DoctorReport) -> str:
             mark = "skip"
         elif check["ok"]:
             mark = "ok"
-        elif check.get("clause") == "CE-BRAIN-RECALL":
+        elif (
+            check.get("clause") == "CE-BRAIN-RECALL"
+            or check.get("clause") not in report.payload["refused_clauses"]
+        ):
             mark = "WARN"
         else:
             mark = "FAIL"

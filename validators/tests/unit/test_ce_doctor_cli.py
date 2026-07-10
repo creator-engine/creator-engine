@@ -145,6 +145,53 @@ def test_doctor_harness_binary_check_refuses_when_missing(inject_facts, monkeypa
     assert "RED-G-HARNESS-PATH" in payload["refused_clauses"]
 
 
+def test_doctor_default_harness_binary_check_reports_missing_without_refusing(
+    inject_facts, monkeypatch, capsys
+):
+    inject_facts()
+    monkeypatch.delenv(
+        doctor_runtime.launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV, raising=False
+    )
+    monkeypatch.setattr(doctor_runtime.launch_runtime.shutil, "which", lambda *a, **k: None)
+
+    ret = ce_cli.main(["doctor", "--json", "--repo-root", "."])
+
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert "RED-G-HARNESS-PATH" not in payload["refused_clauses"]
+    check = next(c for c in payload["checks"] if c["clause"] == "RED-G-HARNESS-PATH")
+    assert check["applicable"] is True
+    assert check["ok"] is False
+    assert check["severity"] == "warning"
+    assert check["resolved"] is None
+    assert "advisory in default doctor mode" in check["detail"]
+    assert payload["prerequisites"]["configured_harness_binary"] == (
+        doctor_runtime.launch_runtime.configured_harness_binary(
+            doctor_runtime.launch_runtime.DEFAULT_HARNESS
+        )
+    )
+    assert payload["prerequisites"]["configured_harness_binary_resolved"] is None
+
+
+def test_doctor_human_marks_default_missing_harness_as_warning(
+    inject_facts, monkeypatch, capsys
+):
+    inject_facts()
+    monkeypatch.delenv(
+        doctor_runtime.launch_runtime.codex_launch_spec.CODEX_HARNESS_ENV, raising=False
+    )
+    monkeypatch.setattr(doctor_runtime.launch_runtime.shutil, "which", lambda *a, **k: None)
+
+    ret = ce_cli.main(["doctor", "--repo-root", "."])
+
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "ce doctor: PASS" in out
+    assert "[WARN] RED-G-HARNESS-PATH configured harness binary on PATH" in out
+    assert "[FAIL] RED-G-HARNESS-PATH configured harness binary on PATH" not in out
+
+
 def test_doctor_codex_harness_check_honors_override_env_exclusively(
     inject_facts, monkeypatch, tmp_path, capsys
 ):
