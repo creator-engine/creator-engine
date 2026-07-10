@@ -1,0 +1,21 @@
+# Example mint-broker config. Values are placeholders; install-time config may
+# use equivalent JSON for the current loader.
+app_client_id: "Iv1.placeholder-client-id"
+
+# The App private key must live on tmpfs, for example under /dev/shm or /run.
+pem_path: "/dev/shm/ce-mint-broker/placeholder-app-private-key.pem"
+
+audit_log: "/var/log/ce/mint-broker-audit.jsonl"
+
+permission_ceiling:
+  metadata: "read"
+  contents: "write"
+  pull_requests: "write"
+
+declared_minimum_grant:
+  metadata: "read"
+  contents: "write"
+  pull_requests: "write"
+
+per_user_rate_cap: 30
+rate_window_seconds: 3600
