@@ -1112,6 +1112,14 @@ def run_preflight(
             )
         return "passed"
 
+    def dual_format_sync_gate() -> str:
+        from .checks import dual_format_sync
+
+        result = dual_format_sync.run_with_base([config.repo_root], comparison_base["value"])
+        if not result.ok:
+            raise RuntimeError("\n".join(error.format() for error in result.errors))
+        return "passed"
+
     def brain_drift_gate() -> str:
         reconcile_detail = _reconcile_local_brain_state_if_safe(config, comparison_base["value"], runner)
         try:
@@ -1574,6 +1582,14 @@ def run_preflight(
         _run_check(
             "Creator Engine validator - test-coupling PR-diff gate",
             test_coupling_gate,
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
+            "Creator Engine validator - dual-format sync PR-diff gate",
+            dual_format_sync_gate,
             out,
             err,
         )
