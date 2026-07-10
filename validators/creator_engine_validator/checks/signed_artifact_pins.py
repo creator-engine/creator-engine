@@ -64,7 +64,70 @@ def _normalize_repo_path(path: str) -> str:
     return PurePosixPath(path.replace("\\", "/").strip("/")).as_posix()
 
 
+# Matches a bare top-level YAML mapping key at the start of a line, e.g.
+# ``signature:`` or ``artifact_manifest:``.  Used to locate where the YAML
+# section begins inside an HTML comment block that may open with prose.
+_YAML_TOP_LEVEL_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s*:(\s|$)")
+
+# Matches an inline mapping value that starts with a YAML block-scalar indicator
+# (``>`` or ``|``).  Used to sanitize values like ``python_requires: >=3.14``
+# that YAML would reject as malformed block-scalar headers.
+_BLOCK_SCALAR_VALUE_RE = re.compile(
+    r"^(?P<key_part> *[A-Za-z_][A-Za-z0-9_]* *: *)(?P<value>[>|][^\n]*)$",
+    re.MULTILINE,
+)
+
+# A valid YAML block-scalar header is ``[>|][-+]?[0-9]?`` followed only by
+# optional whitespace before end-of-line.  Anything else is an unquoted value
+# that starts with a block-scalar indicator by accident (e.g. ``>=3.14``).
+_VALID_BLOCK_SCALAR_HEADER_RE = re.compile(r"^[>|][-+]?[0-9]?\s*$")
+
+
+def _sanitize_yaml_block_scalar_values(yaml_text: str) -> str:
+    """Quote inline mapping values that start with ``>`` or ``|`` but are NOT
+    valid YAML block-scalar headers.
+
+    The signed artifact may contain values like ``python_requires: >=3.14``
+    where ``>`` is a Python version-specifier prefix, not a YAML block-scalar
+    indicator.  PyYAML rejects such lines because ``=`` is not a valid chomping
+    or indentation indicator after ``>``.  Quoting the value (``">=3.14"``)
+    makes the YAML valid without changing the parsed string value.
+
+    Genuine block scalars (``> `` / ``>-`` / ``>+`` / ``| `` etc. followed only
+    by optional whitespace) are left untouched.
+    """
+    def _quote_if_needed(m: re.Match) -> str:  # type: ignore[type-arg]
+        key_part = m.group("key_part")
+        value = m.group("value")
+        if _VALID_BLOCK_SCALAR_HEADER_RE.match(value):
+            return m.group(0)  # genuine block scalar — leave as-is
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'{key_part}"{escaped}"'
+
+    return _BLOCK_SCALAR_VALUE_RE.sub(_quote_if_needed, yaml_text)
+
+
 def _extract_signed_yaml(text: str) -> dict[str, object]:
+    """Extract and parse the YAML block from the signed artifact's HTML comment.
+
+    ``docs/llms-install.md`` opens with an HTML comment (``<!-- ... -->``) that
+    contains both human-readable prose AND the machine-readable YAML block
+    (``signature:`` / ``artifact_manifest:``).  The prose is separated from the
+    YAML by a blank line and may itself contain colon-bearing text (URLs, inline
+    code) that YAML would reject as malformed mappings if the whole comment were
+    parsed naively.  Additionally, the YAML block itself may contain values that
+    start with a YAML block-scalar indicator ``>`` for semantic reasons (e.g.
+    ``python_requires: >=3.14``); these are sanitized before parsing.
+
+    This function locates the YAML section by:
+    1. Extracting the raw HTML comment body.
+    2. Skipping any leading blank lines.
+    3. If the first non-blank line does NOT look like a bare top-level YAML key
+       (i.e. it is prose), skip the entire prose paragraph (non-blank lines)
+       and any blank separator lines that follow.
+    4. Sanitizing block-scalar-indicator values that are not genuine block scalars.
+    5. Parsing only the remaining content as YAML.
+    """
     start = text.find("<!--")
     end = text.find("-->", start + 4)
     if start == -1 or end == -1:
@@ -73,8 +136,25 @@ def _extract_signed_yaml(text: str) -> dict[str, object]:
             "(no '<!--' ... '-->' found); the signed-artifact hash-pin guard "
             "cannot establish protection and is failing closed"
         )
+    comment_body = text[start + 4:end]
+    lines = comment_body.splitlines()
+
+    i = 0
+    # Skip leading blank lines (the newline immediately after ``<!--``).
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    # If the first non-blank content is not a bare top-level YAML key, it is
+    # human-readable prose.  Skip the prose paragraph (non-blank lines) and
+    # any blank separator between prose and the YAML block.
+    if i < len(lines) and not _YAML_TOP_LEVEL_KEY_RE.match(lines[i]):
+        while i < len(lines) and lines[i].strip():
+            i += 1
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+
+    yaml_text = _sanitize_yaml_block_scalar_values("\n".join(lines[i:]))
     try:
-        parsed = yaml.safe_load(text[start + 4:end])
+        parsed = yaml.safe_load(yaml_text)
     except yaml.YAMLError as exc:
         raise SignedArtifactCorruption(
             f"{SIGNED_ARTIFACT.as_posix()} frontmatter is not valid YAML ({exc}); "

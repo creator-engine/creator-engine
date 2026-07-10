@@ -833,3 +833,53 @@ def test_cli_verify_path_manifest_dir_requires_head_ref(capsys, tmp_path: Path):
     )
     assert exit_code == 2
     assert "requires --head-ref" in capsys.readouterr().err
+
+
+# --- Regression: examples/malformed/** excluded from directory scan ----------
+#
+# Negative-fixture files under examples/malformed/ are INTENTIONALLY malformed
+# and asserted to fail by the "malformed examples rejected" integration test.
+# The repo-wide fidelity scan (``run([Path(".")])``) must exclude them so they
+# do not appear as false offenses in the PR-diff gate.  They must still be
+# checkable when passed as an explicit file path (as the integration test does).
+
+
+def test_run_directory_scan_excludes_malformed_examples(tmp_path: Path):
+    """Malformed fixture files in examples/malformed/** must be silently skipped
+    during directory scans; they must NOT produce errors in the repo-wide sweep."""
+    repo = tmp_path
+    (repo / ".git").mkdir()
+
+    # Plant a legitimately malformed count-mismatch doc under examples/malformed/.
+    malformed_dir = repo / "examples" / "malformed" / "handoffs"
+    malformed_dir.mkdir(parents=True)
+    bad_doc = _build_doc(["docs/a.md", "docs/b.md"], declared_count=99)
+    (malformed_dir / "count-mismatch.md").write_text(bad_doc)
+
+    # Also plant a well-formed doc elsewhere to confirm the scan still works.
+    good_dir = repo / "handoffs"
+    good_dir.mkdir()
+    (good_dir / "handoff.md").write_text(_build_doc(["docs/a.md"]))
+
+    result = run([repo])
+    assert result.ok, (
+        "repo-wide scan should be GREEN despite malformed fixtures in examples/malformed/; "
+        "errors: " + ", ".join(e.format() for e in result.errors)
+    )
+    # No error should reference the malformed file.
+    for e in result.errors:
+        assert "malformed" not in e.path, f"malformed fixture leaked into scan: {e.format()}"
+
+
+def test_run_explicit_file_path_still_checks_malformed_examples(tmp_path: Path):
+    """When a malformed fixture is passed as an explicit file path it must still
+    be scanned and produce its expected error.  Only the directory sweep skips
+    examples/malformed/**."""
+    bad_doc = _build_doc(["docs/a.md", "docs/b.md"], declared_count=99)
+    malformed_file = tmp_path / "count-mismatch.md"
+    malformed_file.write_text(bad_doc)
+
+    result = run([malformed_file])
+    assert not result.ok, "explicitly-targeted malformed file must still produce errors"
+    codes = {e.code for e in result.errors}
+    assert "path_manifest_count_mismatch" in codes, [e.format() for e in result.errors]
