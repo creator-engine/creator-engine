@@ -4,13 +4,14 @@ record_type: adr
 schema_version: "1"
 id: ADR-0015-materializer-arming-credential-lease
 title: "Materializer arming authority, credential custody, and lease topology"
-status: proposed
+status: accepted
 date: "2026-07-10"
 decision_makers: ["ce-dev-2"]
-# ratification:             # REQUIRED once status: accepted; ratifier = Operator (independent of decision_makers per security mutation_class)
-#   ratified_by: "<operator-handle>"
-#   ratified_at: "YYYY-MM-DD"
-#   ratification_prompt_sha: "<64-hex>"
+ratification:
+  ratified_by: "chmod735"
+  ratified_at: "2026-07-10"
+  ratification_prompt_sha: "264f06321f62d007dc387edcfc0c9199658903a75a7fcebb101b3602212f2b2c"
+  quorum: n1_solo
 consulted: []
 informed: []
 review_by: "2026-10-10"
