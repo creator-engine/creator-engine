@@ -168,11 +168,27 @@ def _validate_metadata(unit: IntakeUnit, trusted_worktree_root: Path) -> None:
     worktree = Path(unit.worktree)
     if not worktree.is_absolute() or ".." in worktree.parts:
         raise ValueError("worktree must be an absolute canonical owned path")
+    if trusted_worktree_root.is_symlink():
+        raise ValueError("owned worktree root must not be a symlink")
     root = trusted_worktree_root.resolve(strict=True)
     try:
         worktree.relative_to(root)
     except ValueError as exc:
         raise ValueError("worktree is outside the owned worktree root") from exc
+    candidate = root
+    for component in worktree.relative_to(root).parts:
+        candidate /= component
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            break
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError("worktree path must not contain a symlink")
+    try:
+        resolved_worktree = worktree.resolve(strict=False)
+        resolved_worktree.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise ValueError("worktree resolves outside the owned worktree root") from exc
     _canonical_territory_paths(unit.territory_paths)
 
 
@@ -283,30 +299,74 @@ def _safe_relative_parts(value: str, field: str) -> tuple[str, ...]:
 
 
 def _write_snapshot(root: Path, digest: str, content: bytes) -> Path:
-    snapshots = root / ".verified-snapshots"
-    snapshots.mkdir(mode=0o700, exist_ok=True)
-    if snapshots.is_symlink() or not snapshots.is_dir():
-        raise ValueError("verified snapshot root is unsafe")
-    destination = snapshots / f"{digest}.brief"
+    root_fd = _open_directory_nofollow(root, "trusted brief root")
     try:
-        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o400)
-    except FileExistsError:
-        existing = _read_regular_bytes(destination, "verified snapshot")
-        if hashlib.sha256(existing).hexdigest() != digest:
-            raise ValueError("content-addressed snapshot digest collision")
-        return destination
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except BaseException:
         try:
-            destination.unlink()
-        except OSError:
+            os.mkdir(".verified-snapshots", mode=0o700, dir_fd=root_fd)
+        except FileExistsError:
             pass
+        snapshots_fd = _open_child_directory_nofollow(root_fd, ".verified-snapshots", "verified snapshot root")
+        try:
+            filename = f"{digest}.brief"
+            try:
+                fd = os.open(
+                    filename,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o400,
+                    dir_fd=snapshots_fd,
+                )
+            except FileExistsError:
+                existing = _read_regular_bytes_at(snapshots_fd, filename, "verified snapshot")
+                if hashlib.sha256(existing).hexdigest() != digest:
+                    raise ValueError("content-addressed snapshot digest collision")
+                return root / ".verified-snapshots" / filename
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except BaseException:
+                try:
+                    os.unlink(filename, dir_fd=snapshots_fd)
+                except OSError:
+                    pass
+                raise
+            return root / ".verified-snapshots" / filename
+        finally:
+            os.close(snapshots_fd)
+    finally:
+        os.close(root_fd)
+
+
+def _open_directory_nofollow(path: Path, label: str) -> int:
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise ValueError(f"{label} is unsafe")
+        return fd
+    except BaseException:
+        os.close(fd)
         raise
-    return destination
+
+
+def _open_child_directory_nofollow(parent_fd: int, name: str, label: str) -> int:
+    info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if not stat.S_ISDIR(info.st_mode):
+        raise ValueError(f"{label} is unsafe")
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(name, flags, dir_fd=parent_fd)
+    try:
+        opened = os.fstat(fd)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+        ):
+            raise ValueError(f"{label} is unsafe")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def _read_json_regular(path: Path) -> object:
@@ -316,6 +376,23 @@ def _read_json_regular(path: Path) -> object:
 def _read_regular_bytes(path: Path, label: str) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(f"{label} is not a regular file")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _read_regular_bytes_at(parent_fd: int, name: str, label: str) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(name, flags, dir_fd=parent_fd)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise ValueError(f"{label} is not a regular file")

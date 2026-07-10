@@ -163,6 +163,65 @@ def test_metadata_refusal_happens_before_evidence_or_launcher(tmp_path: Path):
     assert "verification_refused" in (outcome.detail or "")
 
 
+def test_in_root_symlinked_worktree_is_refused_before_evidence_or_launcher(tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    owned_worktrees = tmp_path / "worktrees"
+    owned_worktrees.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (owned_worktrees / "linked").symlink_to(outside, target_is_directory=True)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha, worktree=str(owned_worktrees / "linked"))
+    queue.stock(unit)
+    adapter = SeatPullAdapter(
+        queue, trusted_brief_root=root, trusted_worktree_root=owned_worktrees,
+        governed_lane_launcher=lambda _launch: pytest.fail("launcher must not run"),
+    )
+
+    outcome = adapter.pull_one("seat-a")
+
+    assert outcome.state == "blocked_released"
+    assert "verification_refused:ValueError" in (outcome.detail or "")
+
+
+def test_snapshot_directory_swap_to_symlink_is_refused(monkeypatch, tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    snapshots = root / ".verified-snapshots"
+    snapshots.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    original_stat = seat_pull.os.stat
+    swapped = False
+
+    def swap_after_snapshot_check(path, *args, **kwargs):
+        nonlocal swapped
+        result = original_stat(path, *args, **kwargs)
+        if (
+            path == ".verified-snapshots"
+            and kwargs.get("follow_symlinks") is False
+            and kwargs.get("dir_fd") is not None
+            and not swapped
+        ):
+            swapped = True
+            snapshots.rename(root / ".verified-snapshots-original")
+            snapshots.symlink_to(outside, target_is_directory=True)
+        return result
+
+    monkeypatch.setattr(seat_pull.os, "stat", swap_after_snapshot_check)
+
+    outcome = _adapter(queue, root).pull_one("seat-a")
+
+    assert swapped
+    assert outcome.state == "blocked_released"
+    assert "verification_refused:ValueError" in (outcome.detail or "")
+
+
 def test_source_replacement_after_preflight_does_not_change_launched_snapshot(tmp_path: Path):
     root = tmp_path / "briefs"
     brief_ref, brief_sha = _brief(root)
