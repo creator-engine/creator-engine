@@ -1,85 +1,59 @@
 # Materializer App-Key Custody Runbook
 
-## Purpose And Scope
+## Status: Future Governed Procedure Only
 
-This runbook governs the lifecycle of the GitHub App private key that the armed
-materializer uses to mint short-lived installation tokens for direct pushes to
-`main`. It applies the credential-delivery and lease-topology decisions in
-`docs/decisions/ADR-0015-materializer-arming-credential-lease.md`.
+This document records a future procedure; it is not an operating runbook.
+`ARMING_ENABLED=False`: materializer signing and pushing are not live, and this
+document does not authorize arming, signing, pushing, releasing, or any
+credential action. No step below may be executed unless an Operator has first
+ratified the applicable change and accepted the associated credential-custody
+authority.
 
-## Credential Lifecycle
+The currently landed materializer work is pre-arming and dry-run only. The
+#958 pre-arming slice retains the disabled arming guard, and the #959 deploy
+unit is a dry-run unit that refuses attempts to enable arming. Neither slice
+installs a live signing or push procedure.
 
-Storage is OpenBao KV v2 at the path declared by the daemon environment file
-through `CE_MATERIALIZER_KEY_VAULT_PATH`. The environment file holds the vault
-address and mount/path reference, never the key value. `MaterializerConfig`
-carries `private_key_env` only as an environment-variable name that resolves to
-the vault-path reference.
+## Present Boundary
 
-The daemon performs a per-call fetch at signing time. It does not write the key
-to a file, log it, expose it to workers, or retain it between calls. On
-rotation, `ce-operator` replaces the key in OpenBao; the daemon reads the new
-value on its next signing call and requires no restart. On revocation,
-`ce-operator` revokes the App installation token and the OpenBao secret version;
-the daemon enters HELD on the next signing attempt and pages.
+No vault-path behavior is implemented or asserted by this runbook. In
+particular, it does not specify a secret-store location, lookup mechanism,
+delivery channel, retention behavior, rotation mechanism, or recovery action.
+It also does not grant any role access to materializer key material or a
+reference that resolves to it.
 
-Only `ce-operator` may use break-glass through the approved secret channel in
-`docs/devops/openbao-operator-bringup.md`. No agent or worker role may access a
-raw PEM.
+The landed dry-run boundary permits only governed planning and validation. It
+does not create a live materializer credential, an active signer, or a release
+path. Any statement elsewhere that suggests otherwise must be treated as a
+future prerequisite, not as current enforcement.
 
-## Authority Matrix
+## Future Prerequisites
 
-| Role | Authority |
-| --- | --- |
-| `ce-operator` | Store, rotate, revoke, and perform break-glass recovery. |
-| `ce-materializer-architect` | Design and review lease and credential changes. |
-| `ce-release-signer` | Provide the required release-signing authority artifact; this role has no private-key custody. |
-| Materializer daemon role | Read the vault-path reference from its environment and request a per-call fetch only. |
+Before any future arming proposal can be considered, an Operator must ratify a
+separate, implemented design that defines and verifies all of the following:
 
-Worker roles, including `ce-implementer` and `ce-reviewer`, never hold, touch,
-or reference the App private key or its vault-path value. The key never appears
-in pull requests, transcripts, prompts, or changelog fragments.
+- Credential custody and narrowly scoped authority, without exposing material
+  to workers, tracked files, prompts, logs, command arguments, or evidence.
+- A reviewed delivery and rotation design with explicit failure handling and
+  audit evidence.
+- A tested authorization boundary for signing and pushing, including a
+  fail-closed disabled state.
+- The deployment, recovery, and multi-host ownership model appropriate to the
+  ratified topology.
 
-## Non-Authorities
+These are future requirements only. This runbook does not claim that any of
+them is implemented, deployed, configured, or enforced.
 
-Workers never sign. The daemon never holds the key across calls. No tracked
-file contains a seat identity, host name, or key value. `private_key_env`
-carries an environment-variable name only, never a resolved value.
+## Roles and Non-Authorities
 
-## Failure And Recovery
+Only a future ratified Operator procedure may assign custody or recovery
+authority. Worker roles, including implementers and reviewers, have no
+credential-custody, arming, signing, push, release, or break-glass authority.
+The materializer remains dry-run only while `ARMING_ENABLED=False`.
 
-A vault read error becomes a signer error and HELD state for the affected
-intent, with a 30-minute closeout window before hard failure. Follow
-`docs/design/ce-491-optiona-merge-intent.md` for that lifecycle. To recover,
-`ce-operator` resolves vault access and clears HELD through the materializer's
-documented recovery path.
+## Review Boundary
 
-For a `DaemonLeaseStale` or `DaemonLeaseHeld` conflict, follow the canonical
-procedure in `playbooks/controller/runbooks/conveyor-daemon-stuck-lease.md`.
-A broken ledger hash chain is an Operator-only recovery. The local lease is
-authoritative only for the current single-host deployment; revisit the topology
-before any second host or materializer instance gains brain-append capability.
-
-## ADR-0015 Decision References
-
-Source: `docs/decisions/ADR-0015-materializer-arming-credential-lease.md`
-
-> Decision: use OpenBao-backed short-TTL issuance for the dedicated materializer
-> App credential. The App private key must never be written to worker disk or
-> placed in worker-visible logs, prompts, argv, repository files, comments, or
-> evidence artifacts. The delivery mechanism is per-call fetch via the
-> vault_signer pattern already shipped for the egress broker ([vault-signer-impl]):
-> per-call OpenBao KV v2 read at the per-app private-key path → /dev/fd pipe to
-> openssl signing subprocess → JWT; the PEM is zeroed from memory after signing
-> and never written to disk or passed through any worker-visible env var or argv.
-> The materializer App private-key path follows the per-app family established in
-> the OpenBao secret-path map ([openbao-path-map]):
-> `ce-kv/forge/github-apps/<app-name>/private-key`; the concrete materializer-app
-> path is specified in the arming runbook (slice (c)), not in this ADR.
-
-> Decision: for the current single-host, strict singleton merge-gate daemon
-> topology, use MaterializerLease wrapping daemon_lease.acquire("brain-append",
-> ...) in `validators/creator_engine_validator/brain_intent_materializer.py`
-> ([materializer-impl]) as the active exclusion mechanism for the `brain-append`
-> component. This local file lease is authoritative for the current single-host
-> topology. The revisit trigger is any second host or instance gaining
-> brain-append capability.
+Any proposal to replace this future-only document requires a separately
+reviewed implementation and explicit Operator ratification. Until then, use
+the landed #958/#959 dry-run and pre-arming behavior as the sole current
+materializer boundary.
