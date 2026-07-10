@@ -193,6 +193,39 @@ def test_transition_entry_evidence_refs_are_bound_to_record_fields() -> None:
     assert closed.record["closure_ref"] == ".ce/evidence/closure.json"
 
 
+def test_legal_transitions_match_design_specification() -> None:
+    """Pins every pair stated in docs/design/release-acceptance-stage.md § "State Machine"."""
+    design_legal_pairs = [
+        # Main promotion path
+        (ra.NONE, ra.RC_MARKED),
+        (ra.RC_MARKED, ra.REHEARSAL_REQUIRED),
+        (ra.REHEARSAL_REQUIRED, ra.REHEARSAL_PASSED),
+        (ra.REHEARSAL_PASSED, ra.PROMOTION_RATIFIED),
+        (ra.PROMOTION_RATIFIED, ra.PROMOTED),
+        (ra.PROMOTED, ra.DOGFOOD_RING_CONSUMED),
+        (ra.DOGFOOD_RING_CONSUMED, ra.CLOSURE_READY),
+        (ra.CLOSURE_READY, ra.CLOSED),
+        # Failure and replacement states (from design: rehearsal_required|rehearsal_passed -> held)
+        (ra.REHEARSAL_REQUIRED, ra.HELD),
+        (ra.REHEARSAL_PASSED, ra.HELD),
+        (ra.HELD, ra.REHEARSAL_REQUIRED),
+        # design: rc_marked|rehearsal_required|held -> superseded
+        (ra.RC_MARKED, ra.SUPERSEDED),
+        (ra.REHEARSAL_REQUIRED, ra.SUPERSEDED),
+        (ra.HELD, ra.SUPERSEDED),
+        # design: promoted|ring0_consumed|closure_ready|closed -> reopened
+        (ra.PROMOTED, ra.REOPENED),
+        (ra.DOGFOOD_RING_CONSUMED, ra.REOPENED),
+        (ra.CLOSURE_READY, ra.REOPENED),
+        (ra.CLOSED, ra.REOPENED),
+    ]
+    for old, new in design_legal_pairs:
+        assert ra.is_legal_transition(old, new), (
+            f"design requires {old!r} -> {new!r} to be legal "
+            "(docs/design/release-acceptance-stage.md § State Machine)"
+        )
+
+
 def test_every_illegal_transition_is_refused() -> None:
     for old_state in ra.LEGAL_TRANSITIONS:
         for new_state in ra.STATES:
@@ -324,6 +357,31 @@ def test_closure_integrity_refuses_deploy_claim_without_persistent_probe() -> No
         release_ticket_ref="ticket-510",
         evidence_registry=registry,
         deploy_class_claims=["deployed"],
+    )
+
+    assert not decision.allowed
+    assert decision.reason == "persistent_state_probe_missing"
+
+
+def test_string_deploy_claims_refused_even_when_probe_refs_present() -> None:
+    """Non-Mapping claims must be fail-closed; a populated probe_ref_set must not bypass the check."""
+    record = _record_in_state(ra.CLOSURE_READY)
+    record["promotion_evidence"]["persistent_state_probe_refs"] = [".ce/evidence/probe.json"]
+    registry = {
+        ".ce/evidence/rehearsal.json": {"accepted": True},
+        ".ce/evidence/dogfood.json": {
+            "accepted": True,
+            "rc_id": "v1.2.3-rc1",
+            "source_commit": SOURCE_COMMIT,
+            "artifact_manifest_sha256": ARTIFACT_DIGEST,
+        },
+    }
+
+    decision = ra.check_closure_integrity(
+        record,
+        release_ticket_ref="ticket-510",
+        evidence_registry=registry,
+        deploy_class_claims=["deployed"],  # string claim, not a Mapping; must be refused
     )
 
     assert not decision.allowed

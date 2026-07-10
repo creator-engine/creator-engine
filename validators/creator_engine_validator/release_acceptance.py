@@ -50,6 +50,8 @@ STATES = (
     REOPENED,
 )
 
+# Transition table and entry evidence mirror the design specification.
+# Authoritative source: docs/design/release-acceptance-stage.md § "State Machine"
 ENTRY_EVIDENCE: dict[str, tuple[str, ...]] = {
     RC_MARKED: (
         "RC tag/ref",
@@ -97,12 +99,12 @@ LEGAL_TRANSITIONS: dict[str, frozenset[str]] = {
     DOGFOOD_RING_CONSUMED: frozenset({CLOSURE_READY, REOPENED}),
     CLOSURE_READY: frozenset({CLOSED, REOPENED}),
     CLOSED: frozenset({REOPENED}),
-    HELD: frozenset({REHEARSAL_REQUIRED}),
+    HELD: frozenset({REHEARSAL_REQUIRED, SUPERSEDED}),
     SUPERSEDED: frozenset(),
     REOPENED: frozenset(),
 }
 
-SUPPORTED_REHEARSAL_SCHEMA_VERSIONS = frozenset({SCHEMA_VERSION, 1})
+SUPPORTED_REHEARSAL_SCHEMA_VERSIONS = frozenset({SCHEMA_VERSION})
 _HEX40_RE = re.compile(r"[0-9a-fA-F]{40}\Z")
 _HEX64_RE = re.compile(r"[0-9a-fA-F]{64}\Z")
 _RC_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -170,7 +172,7 @@ def new_rc_record(
         "state_updated_at": transitioned_at,
         "promotion_evidence": {
             "fresh_tenant_rehearsal_ref": None,
-            "dogfood_ring_ref": None,
+            "dogfood_ring_ref": None,  # design schema uses ring0_dogfood_ref; renamed here to avoid collision with enforcement_ring
             "persistent_state_probe_refs": [],
         },
         "ratification_ref": None,
@@ -257,7 +259,7 @@ def check_rehearsal_promotion_evidence(
             tuple(f"missing {key}" for key in missing),
         )
 
-    if str(rehearsal_bundle.get("schema_version")) not in {"1"}:
+    if str(rehearsal_bundle.get("schema_version")) not in SUPPORTED_REHEARSAL_SCHEMA_VERSIONS:
         return GateDecision(False, "unsupported_rehearsal_schema_version")
     if not rehearsal_bundle.get("harness_version"):
         return GateDecision(False, "missing_harness_version")
@@ -488,4 +490,7 @@ def _deploy_claims_have_persistent_probes(
             probe_ref = claim.get("persistent_state_probe_ref")
             if str(probe_ref) not in probe_ref_set:
                 return False
+        else:
+            # Fail-closed: non-Mapping claims cannot name a probe_ref; refuse immediately.
+            return False
     return True
