@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -337,6 +338,58 @@ def test_production_default_validates_real_composed_commit_against_exact_main(
     argv = observed["argv"]
     assert argv[:4] == ["ce", "validate-pr", "--base", main_sha]
     assert list(parent.iterdir()) == []
+
+
+def test_production_git_commands_ignore_hostile_environment_and_hooks(monkeypatch, tmp_path):
+    repo, parent, main_sha, head_sha = _two_commit_repo(tmp_path)
+    marker = tmp_path / "hostile-hook-ran"
+    hook_dir = tmp_path / "hostile-hooks"
+    hook_dir.mkdir()
+    hook = hook_dir / "post-checkout"
+    hook.write_text(f"#!/bin/sh\nprintf ran > {marker}\n", encoding="utf-8")
+    hook.chmod(0o755)
+    global_config = tmp_path / "hostile-gitconfig"
+    global_config.write_text(f"[core]\n\thooksPath = {hook_dir}\n", encoding="utf-8")
+    redirected = tmp_path / "redirected-git-dir"
+    redirected.mkdir()
+    hostile = {
+        "GIT_DIR": str(redirected),
+        "GIT_WORK_TREE": str(tmp_path / "redirected-work-tree"),
+        "GIT_INDEX_FILE": str(tmp_path / "redirected-index"),
+        "GIT_OBJECT_DIRECTORY": str(tmp_path / "redirected-objects"),
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(tmp_path / "redirected-alternates"),
+        "GIT_CONFIG_GLOBAL": str(global_config),
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.hooksPath",
+        "GIT_CONFIG_VALUE_0": str(hook_dir),
+    }
+    for key, value in hostile.items():
+        monkeypatch.setenv(key, value)
+
+    real_run = probe.subprocess.run
+    git_environments: list[dict[str, str]] = []
+
+    def observe_run(argv, *args, **kwargs):
+        if argv[0] == "git":
+            git_environments.append(dict(kwargs["env"]))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(probe.subprocess, "run", observe_run)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(probe, "_run_validator_bounded", lambda *_: ValidationAttempt(True))
+    result = probe_composition(main_sha, {"number": 7, "head_sha": head_sha}, tmp_dir=parent)
+
+    assert result.outcome == GREEN
+    assert not marker.exists()
+    assert git_environments
+    for environment in git_environments:
+        assert environment["PATH"] == os.defpath
+        assert environment["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert environment["GIT_CONFIG_KEY_0"] == "core.hooksPath"
+        assert environment["GIT_CONFIG_VALUE_0"] == os.devnull
+        assert set(environment).issubset(set(probe._GIT_ENVIRONMENT) | probe._GIT_IDENTITY_KEYS)
+        assert not (set(hostile) - set(probe._GIT_ENVIRONMENT)) & set(environment)
 
 
 def test_production_retry_has_independent_common_repo_config_refs_index_and_hooks(

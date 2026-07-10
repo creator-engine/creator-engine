@@ -34,6 +34,27 @@ CLEANUP_ABORT = "CLEANUP_ABORT"
 _SHA_RE = re.compile(r"[0-9a-fA-F]{40}\Z")
 _MAX_OUTPUT = 4096
 _MAX_PATH = 4096
+_GIT_HOOKS_PATH = os.devnull
+_GIT_ENVIRONMENT = {
+    "PATH": os.defpath,
+    "LC_ALL": "C",
+    "TZ": "UTC",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.hooksPath",
+    "GIT_CONFIG_VALUE_0": _GIT_HOOKS_PATH,
+}
+_GIT_IDENTITY_KEYS = frozenset(
+    {
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_AUTHOR_DATE",
+        "GIT_COMMITTER_DATE",
+    }
+)
 _ALLOWED_REQUEST_KEYS = frozenset({"main_tip_sha", "representative_pr"})
 _ALLOWED_PR_KEYS = frozenset({"number", "head_sha"})
 _REDACTIONS = (
@@ -408,7 +429,6 @@ def _default_merge_strategy(
     if checked_out.returncode != 0:
         return MergeSimulation("abort", merge_base=merge_base)
     identity = {
-        **os.environ,
         "GIT_AUTHOR_NAME": "Creator Engine Composition Probe",
         "GIT_AUTHOR_EMAIL": "composition-probe@creator-engine.invalid",
         "GIT_COMMITTER_NAME": "Creator Engine Composition Probe",
@@ -496,13 +516,19 @@ def _git(
     check: bool = True,
     env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    git_env = dict(_GIT_ENVIRONMENT)
+    if env is not None:
+        unexpected = set(env) - _GIT_IDENTITY_KEYS
+        if unexpected:
+            raise ValueError("git environment contains unsupported keys")
+        git_env.update(env)
     return subprocess.run(
         ["git", *args],
         cwd=repo_path,
         check=check,
         text=True,
         capture_output=True,
-        env=env,
+        env=git_env,
     )
 
 
