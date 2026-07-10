@@ -187,14 +187,13 @@ def test_access_logging_never_receives_request_or_response_body_content(tmp_path
     assert "owner/repo" not in logged
 
 
-def test_group_writable_config_file_is_refused(tmp_path):
-    config_path = tmp_path / "mint-broker.json"
-    config_path.write_text(
+def _write_config_json(path):
+    path.write_text(
         json.dumps(
             {
                 "app_client_id": "Iv1.shared0000",
-                "pem_path": str(tmp_path / "shared.pem"),
-                "audit_log": str(tmp_path / "audit.jsonl"),
+                "pem_path": str(path.parent / "shared.pem"),
+                "audit_log": str(path.parent / "audit.jsonl"),
                 "permission_ceiling": {"contents": "write"},
                 "declared_minimum_grant": {"contents": "write"},
                 "per_user_rate_cap": 30,
@@ -203,7 +202,29 @@ def test_group_writable_config_file_is_refused(tmp_path):
         ),
         encoding="utf-8",
     )
+
+
+def test_group_writable_config_file_is_refused(tmp_path):
+    config_path = tmp_path / "mint-broker.json"
+    _write_config_json(config_path)
     config_path.chmod(0o660)
 
     with pytest.raises(server.MintBrokerServerError, match="group/world writable"):
         server.load_server_config(config_path)
+
+
+def test_world_writable_config_file_is_refused(tmp_path):
+    config_path = tmp_path / "mint-broker-world.json"
+    _write_config_json(config_path)
+    config_path.chmod(0o646)
+
+    with pytest.raises(server.MintBrokerServerError, match="group/world writable"):
+        server.load_server_config(config_path)
+
+
+def test_post_healthz_is_405(mint_http):
+    status, headers, body = _open("POST", f"{mint_http}/healthz")
+
+    assert status == 405
+    assert headers["Allow"] == "GET"
+    assert json.loads(body.decode("utf-8"))["reason"] == "method_not_allowed"

@@ -72,11 +72,17 @@ def openssl_signer(pem_path: str | Path, *, runner: Callable[..., Any] = subproc
     pem = str(pem_path)
 
     def sign(signing_input: bytes) -> bytes:
-        proc = runner(
-            ["openssl", "dgst", "-sha256", "-sign", pem],
-            input=signing_input,
-            capture_output=True,
-        )
+        try:
+            proc = runner(
+                ["openssl", "dgst", "-sha256", "-sign", pem],
+                input=signing_input,
+                capture_output=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            raise MintBrokerServerError(
+                "openssl RS256 signing timed out; refusing to mint"
+            )
         if getattr(proc, "returncode", 1) != 0:
             raise MintBrokerServerError(
                 "openssl RS256 signing failed; refusing to mint"

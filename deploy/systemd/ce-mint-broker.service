@@ -22,7 +22,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/log/ce /run/ce /dev/shm
+ReadWritePaths=/var/log/ce /dev/shm/ce-mint-broker
 
 [Install]
 WantedBy=multi-user.target
