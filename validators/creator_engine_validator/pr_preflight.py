@@ -1245,6 +1245,25 @@ def run_preflight(
     )
     checks.append(
         _run_check(
+            "Documented ce verbs registry gate",
+            lambda: (
+                _run_checked(
+                    "Documented ce verbs registry gate",
+                    [py, "-m", "creator_engine_validator", "scan-documented-verbs", "."],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "no new docs teach unshipped ce verbs",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Control-plane portability guard",
             portability_guard,
             out,

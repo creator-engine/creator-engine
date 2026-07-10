@@ -142,6 +142,13 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_public_docs_confidentiality.add_argument(
         "path", nargs="?", default=".", help="repo root to scan (default: .)"
     )
+    scan_documented_verbs = sub.add_parser(
+        "scan-documented-verbs",
+        help="fail if docs teach a top-level ce verb not shipped by the parser registry",
+    )
+    scan_documented_verbs.add_argument(
+        "path", nargs="?", default=".", help="repo root or docs path to scan (default: .)"
+    )
     guard_public_docs_confidentiality_push = sub.add_parser(
         "guard-public-docs-confidentiality-push",
         help=(
@@ -843,6 +850,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand == "scan-public-docs-confidentiality":
         from .public_docs_confidentiality import run as _run_public_docs_confidentiality
         result = _run_public_docs_confidentiality([Path(args.path)])
+        return _emit_results([result], args.json_output)
+    if subcommand == "scan-documented-verbs":
+        from .checks.documented_verbs import run as _run_documented_verbs
+        result = _run_documented_verbs([Path(args.path)])
         return _emit_results([result], args.json_output)
     if subcommand == "guard-public-docs-confidentiality-push":
         from .public_docs_confidentiality import run_push_guard
