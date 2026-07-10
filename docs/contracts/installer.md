@@ -86,6 +86,13 @@ non-obviously during trust verification or Python acquisition.
    <venv>/bin/ce install --spec <verified-spec> --trust-root <verified-trust-root> --trust-anchor <source>=<verified-trust-anchor> --answers-schema <verified-schema> --inventory
    ```
 
+Install-root selection is explicit and user-local. Passing `--install-root
+PATH` to the bootstrap script sets the CE bootstrap root for that run. Setting
+`CE_INSTALL_ROOT=PATH` provides the same non-default root through the
+environment, including for validator install-provenance surfaces that default
+from the environment. When neither is supplied, the installer uses
+`${CE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/creator-engine}/bootstrap`.
+
 This is the E1 stopping point. The inventory output is the handoff artifact for
 the later governed-seat path: prepare/confirm the host and GitHub answers, run
 `ce onboard --plan`, have the operator review the plan, and only then run the
