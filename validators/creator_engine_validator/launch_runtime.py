@@ -140,6 +140,37 @@ class RuntimePolicyRefused(LaunchError):
     code = "G6-LAUNCH-RUNTIME-POLICY-REFUSED"
 
 
+class ContainedLaunchPreflightRefused(LaunchError):
+    """Raised when contained-launch plan validation fails before spawn.
+
+    This fires before any docker/runtime side effect. Its error code is distinct
+    from the post-spawn runtime policy refusal so operators get the actionable
+    plan-time cause instead of a launch-probe timeout.
+    """
+
+    code = "G6-LAUNCH-POLICY-INVALID"
+
+
+class ContainedLaunchPlanUnverifiable(ContainedLaunchPreflightRefused):
+    """A subset of ``ContainedLaunchPreflightRefused``: host-environment-dependent
+    plan facts (does a bind source exist on THIS host; is the sentinel wrapper
+    under a surviving mount) could not be verified.
+
+    Unlike the placeholder-digest case (a policy-content defect, refused
+    unconditionally), these two checks read the real filesystem of whatever
+    host happens to be running ``ce launch`` and cannot be evaluated against a
+    runtime-policy-record's ``mount_manifest`` without assuming it encodes real,
+    resolvable host paths — the v3 runner backends (``gvisor-proxy``/``docker``)
+    deliberately keep their plan-translation step pure/I-O-free (see
+    ``runner/gvisor_proxy_backend.py``'s "translate-vs-execute split"), so
+    launch-time callers may legitimately supply symbolic or not-yet-materialized
+    mount sources. ``launch()`` therefore treats this subclass as a *warning*
+    (logged, non-fatal) rather than a hard refusal, while direct callers of
+    ``_validate_contained_launch_plan`` (this module's own fast unit tests) keep
+    exercising it as the strict, fail-closed check it is.
+    """
+
+
 class GovernedControllerLaunchRefused(LaunchError):
     """Raw controller-role launch refused until takeover evidence is supplied."""
 
@@ -228,6 +259,70 @@ def _missing_default_runtime_policy_message(path: Path) -> str:
 
 def _quote_command(tokens: Sequence[str]) -> str:
     return " ".join(shlex.quote(str(token)) for token in tokens)
+
+
+_OPTIONAL_AGENT_DOTFILE_SUFFIXES: tuple[str, ...] = (
+    "/.claude",
+    "/.config/claude",
+    "/.codex",
+    "/.config/codex",
+)
+_ZERO_IMAGE_DIGEST = "sha256:" + "0" * 64
+
+
+def _validate_contained_launch_plan(
+    policy_record: dict[str, Any],
+    sentinel_wrapper_path: Path,
+) -> tuple[dict[str, Any], list[str]]:
+    """Pre-spawn policy validation for runtime-policy-backed launch.
+
+    Returns an updated policy record plus warning strings. The updated policy
+    omits absent optional agent dotfile mounts so the runtime backend receives a
+    manifest that Docker can create.
+    """
+    image_ref = policy_record.get("image_ref") or {}
+    if isinstance(image_ref, Mapping) and image_ref.get("sha") == _ZERO_IMAGE_DIGEST:
+        raise ContainedLaunchPreflightRefused(
+            "image digest is a placeholder (sha256:000...000); re-run ce onboard "
+            "after runtime_posture resolves"
+        )
+
+    warnings: list[str] = []
+    surviving_mounts: list[Any] = []
+    mount_manifest = policy_record.get("mount_manifest") or []
+    for entry in mount_manifest:
+        if not isinstance(entry, dict):
+            surviving_mounts.append(entry)
+            continue
+        source_path = str(entry.get("path") or "")
+        if source_path and not Path(source_path).exists():
+            if any(
+                source_path.endswith(suffix)
+                for suffix in _OPTIONAL_AGENT_DOTFILE_SUFFIXES
+            ):
+                warnings.append(
+                    f"optional agent-config dir absent; skipping mount: {source_path}"
+                )
+                continue
+            raise ContainedLaunchPlanUnverifiable(
+                f"bind source path does not exist: {source_path}"
+            )
+        surviving_mounts.append(entry)
+
+    wrapper = Path(sentinel_wrapper_path)
+    mounted_sources = [
+        Path(entry["path"])
+        for entry in surviving_mounts
+        if isinstance(entry, dict) and entry.get("path")
+    ]
+    if not any(wrapper == source or wrapper.is_relative_to(source) for source in mounted_sources):
+        raise ContainedLaunchPlanUnverifiable(
+            f"container command path {str(wrapper)!r} is not under any mounted source"
+        )
+
+    updated_policy = dict(policy_record)
+    updated_policy["mount_manifest"] = surviving_mounts
+    return updated_policy, warnings
 
 
 def takeover_evidence_host_id() -> str:
@@ -1950,6 +2045,27 @@ def launch(
         run_id=seat_run_id,
         exports=brain_env,
     )
+    if plan.runtime_policy is not None and runtime_policy_record is not None:
+        # The placeholder-digest defect is a policy-content fact, verifiable
+        # from the record alone, so it stays a hard pre-spawn refusal
+        # regardless of host. The mount-existence and sentinel-coverage facts
+        # depend on THIS host's filesystem matching the record's
+        # (potentially symbolic, not-yet-materialized) mount_manifest; when
+        # they cannot be verified, refusing outright would fail closed on
+        # every launch whose runtime-policy-record predates real bind-source
+        # materialization, so we warn and fall back to running the
+        # unfiltered manifest through the runtime backend the same way a
+        # launch without this preflight would.
+        try:
+            runtime_policy_record, preflight_warnings = _validate_contained_launch_plan(
+                runtime_policy_record,
+                sentinel.wrapper_path,
+            )
+        except ContainedLaunchPlanUnverifiable as exc:
+            LOGGER.warning("contained-launch preflight: %s", exc)
+        else:
+            for warning in preflight_warnings:
+                LOGGER.warning("contained-launch preflight: %s", warning)
 
     ensure_kwargs = {"session": session, "window": window, "command": sentinel.pane_command}
     if launch_cwd is not None:
