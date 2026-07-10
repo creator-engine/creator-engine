@@ -155,7 +155,7 @@ class SeatPullAdapter:
             return SeatPullOutcome(state="empty", claim_state="empty", seat_id=seat_id)
         try:
             launch = self._verified_launch(unit, seat_id)
-        except (OSError, ValueError, PermissionError) as exc:
+        except (OSError, ValueError, PermissionError, TypeError, work_claims.WorkClaimError) as exc:
             return self._release(unit, seat_id, f"verification_refused:{type(exc).__name__}", clock)
         try:
             fenced = self.queue.fence_launch(unit.unit_id, seat_id, _claim_token(unit), clock=clock)

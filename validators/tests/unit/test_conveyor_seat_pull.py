@@ -146,7 +146,24 @@ def test_malformed_yaml_in_pending_queue_is_a_structured_claim_refusal(tmp_path:
     outcome = _adapter(queue, tmp_path).pull_one("seat-a")
 
     assert (outcome.state, outcome.claim_state) == ("blocked_released", "empty")
-    assert outcome.detail.startswith("claim_refused:")
+    assert outcome.detail == "claim_refused:IntakeQueueRecordError"
+
+
+@pytest.mark.parametrize("failure", [work_claims.WorkClaimError("bad controller claim"), TypeError("bad controller claim")])
+def test_controller_evidence_parse_failure_releases_claim_as_structured_refusal(monkeypatch, tmp_path: Path, failure: Exception):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+
+    monkeypatch.setattr(work_claims, "parse_ticket", lambda *_args, **_kwargs: (_ for _ in ()).throw(failure))
+    outcome = _adapter(queue, root, lambda _launch: pytest.fail("launcher must not run")).pull_one("seat-a")
+
+    assert (outcome.state, outcome.claim_state) == ("blocked_released", "claimed")
+    assert outcome.detail == f"verification_refused:{type(failure).__name__}"
+    assert queue.list_pending()[0].unit_id == unit.unit_id
 
 
 @pytest.mark.parametrize("window", ["destination", "source"])

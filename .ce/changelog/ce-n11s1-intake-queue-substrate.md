@@ -14,3 +14,4 @@ issue: N-11 slice 1
 - Fence finite-TTL queue ownership with opaque claim tokens and generations, serialize stale-reclaim/launch transitions, and hand launchers a descriptor-anchored snapshot that fails closed on replacement.
 - Recover or refuse queue crash windows deterministically, durably publish snapshots without partial final bytes, and close retained descriptors on fence-transition refusal.
 - Bind publication and lifecycle lookup to stable unit identity across priority and JSON/YAML filename variants; refuse malformed queue input and invalid bounded claim TTLs as structured seat-pull outcomes.
+- Treat malformed or schema-invalid pending records as structured queue-state refusals rather than empty work, normalize controller-evidence parser failures through owned-claim release, and preserve fractional TTL precision through launch fencing.

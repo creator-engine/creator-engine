@@ -83,6 +83,27 @@ def test_claim_next_returns_none_when_empty(tmp_path: Path):
     assert queue.claim_next() is None
 
 
+@pytest.mark.parametrize(
+    ("name", "contents"),
+    [
+        ("00000-bad.yaml", "unit_id: [\n"),
+        ("00000-bad.json", "{not-json"),
+        ("00000-schema.yaml", "unit_id: malformed-only\n"),
+    ],
+)
+def test_claim_refuses_malformed_or_schema_invalid_pending_record(name: str, contents: str, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("valid", priority=1))
+    (queue.pending_dir / name).write_text(contents, encoding="utf-8")
+
+    with pytest.raises(intake.IntakeQueueRecordError) as raised:
+        queue.claim_entry("seat-a")
+
+    assert raised.value.path_name == name
+    assert (queue.pending_dir / "00001-valid.yaml").exists()
+    assert not any(queue.claimed_dir.iterdir())
+
+
 def test_mark_done_moves_to_done(tmp_path: Path):
     queue = IntakeQueue(tmp_path / "intake-queue")
     queue.stock(_unit("unit-a", priority=3))
@@ -617,6 +638,38 @@ def test_stale_claim_is_reclaimed_and_recorded(tmp_path: Path):
     assert claimed.unit_id == "expired"
     assert claimed.claimed_by == "seat-b"
     assert _ledger_actions(queue) == ["claimed", "stale_reclaim", "claimed"]
+
+
+def test_fractional_ttl_preserves_precision_and_fence_boundary(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=0.5, clock=lambda: "2026-07-10T12:00:00Z")
+
+    assert claimed is not None
+    assert claimed.claim_expires_at == "2026-07-10T12:00:00.5Z"
+    assert claimed.claim_token is not None
+    fenced = queue.fence_launch(
+        "unit-a", "seat-a", claimed.claim_token, clock=lambda: "2026-07-10T12:00:00.499999Z",
+    )
+    assert fenced.status == "launching"
+
+    expired_queue = IntakeQueue(tmp_path / "expired-intake-queue")
+    expired_queue.stock(_unit("unit-b"))
+    expired = expired_queue.claim_entry("seat-a", ttl_seconds=0.5, clock=lambda: "2026-07-10T12:00:00Z")
+    assert expired is not None and expired.claim_token is not None
+    with pytest.raises(PermissionError, match="expired"):
+        expired_queue.fence_launch(
+            "unit-b", "seat-a", expired.claim_token, clock=lambda: "2026-07-10T12:00:00.5Z",
+        )
+
+
+@pytest.mark.parametrize("ttl", [0.0000001, 0.0000009])
+def test_ttl_below_serialized_microsecond_resolution_is_refused(ttl: float, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+
+    with pytest.raises(ValueError, match="ttl_seconds"):
+        queue.claim_entry("seat-a", ttl_seconds=ttl, clock=lambda: "2026-07-10T12:00:00Z")
 
 
 def test_complete_rejects_wrong_claimer_and_ledger_tracks_lifecycle(tmp_path: Path):

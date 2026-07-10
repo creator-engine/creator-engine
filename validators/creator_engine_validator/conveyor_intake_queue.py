@@ -34,6 +34,7 @@ IntakeStatus = Literal["pending", "claimed", "launching", "done"]
 INTAKE_ACTION = "WOULD_DISPATCH"
 _UNIT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _BRIEF_SHA_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_RFC3339_Z_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$")
 IntakeReadErrorSink = Callable[[Path, Exception], None]
 IntakeClock = Callable[[], str]
 
@@ -69,6 +70,20 @@ class IntakeTransitionError(RuntimeError):
         self.action = action
         self.primary = primary
         self.rollback = rollback
+
+
+class IntakeQueueRecordError(ValueError):
+    """A pending record could not be safely considered for a claim.
+
+    The path name and underlying exception class are retained as bounded local
+    evidence without reflecting record contents or parser error text through
+    the seat-facing refusal seam.
+    """
+
+    def __init__(self, path: Path, cause: Exception) -> None:
+        super().__init__("intake pending record is malformed")
+        self.path_name = path.name
+        self.cause_type = type(cause).__name__
 
 
 class _RenameDurabilityError(OSError):
@@ -557,22 +572,25 @@ class IntakeQueue:
         return records[0] if records else None
 
     def _ordered_pending_paths(self) -> list[Path]:
-        """Return only valid pending entries in numeric priority order.
+        """Return pending entries in numeric priority order or refuse the scan.
 
         Queue filenames historically used a minimum-width decimal prefix.  Keep
         accepting those files, but do not let lexical filename ordering invert
-        priorities at six digits.  Invalid priority values are deliberately not
-        candidates for claim; reading them through ``list_pending`` still makes
-        their validation error observable to callers with an error sink.
+        priorities at six digits.  A malformed or schema-invalid pending record
+        is controller queue state, not an absent unit: silently skipping it
+        could make a seat report an empty queue while work needs reconciliation.
+        Refuse the bounded claim attempt instead.
         """
         candidates: list[tuple[int, str, Path]] = []
-        for path in self.pending_dir.iterdir():
+        for path in sorted(self.pending_dir.iterdir()):
             if not path.is_file() or path.suffix not in _SUPPORTED_SUFFIXES:
                 continue
             try:
                 priority = _read_unit(path).priority
-            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            except FileNotFoundError:
                 continue
+            except Exception as exc:
+                raise IntakeQueueRecordError(path, exc) from exc
             candidates.append((priority, path.name, path))
         return [path for _priority, _name, path in sorted(candidates)]
 
@@ -811,7 +829,7 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _clock_now(clock: IntakeClock | None) -> str:
-    value = clock() if clock is not None else datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    value = clock() if clock is not None else _format_rfc3339_z(datetime.now(UTC))
     if not isinstance(value, str):
         raise ValueError("intake queue clock must return an RFC 3339 UTC Z string")
     _parse_rfc3339_z(value, "clock")
@@ -819,10 +837,22 @@ def _clock_now(clock: IntakeClock | None) -> str:
 
 
 def _parse_rfc3339_z(value: str, field: str) -> datetime:
+    if not isinstance(value, str) or not _RFC3339_Z_PATTERN.fullmatch(value):
+        raise ValueError(f"intake unit {field} must be RFC 3339 UTC with Z suffix")
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        format_string = "%Y-%m-%dT%H:%M:%S.%fZ" if "." in value else "%Y-%m-%dT%H:%M:%SZ"
+        return datetime.strptime(value, format_string).replace(tzinfo=UTC)
     except ValueError as exc:
         raise ValueError(f"intake unit {field} must be RFC 3339 UTC with Z suffix") from exc
+
+
+def _format_rfc3339_z(value: datetime) -> str:
+    """Serialize UTC timestamps without discarding representable precision."""
+    value = value.astimezone(UTC)
+    whole_seconds = value.strftime("%Y-%m-%dT%H:%M:%S")
+    if value.microsecond:
+        return f"{whole_seconds}.{value.microsecond:06d}".rstrip("0") + "Z"
+    return whole_seconds + "Z"
 
 
 def _claim_expiry(now: str, ttl_seconds: float | int | None) -> str | None:
@@ -831,13 +861,13 @@ def _claim_expiry(now: str, ttl_seconds: float | int | None) -> str | None:
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)):
         raise ValueError("claim ttl_seconds must be a finite number")
     seconds = float(ttl_seconds)
-    if not math.isfinite(seconds) or not 0 < seconds <= _MAX_CLAIM_TTL_SECONDS:
+    if not math.isfinite(seconds) or not _MIN_CLAIM_TTL_SECONDS <= seconds <= _MAX_CLAIM_TTL_SECONDS:
         raise ValueError(f"claim ttl_seconds must be finite and in 0 < t <= {_MAX_CLAIM_TTL_SECONDS}")
     try:
         expires_at = _parse_rfc3339_z(now, "clock") + timedelta(seconds=seconds)
     except OverflowError as exc:
         raise ValueError("claim ttl_seconds overflows the clock") from exc
-    return expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _format_rfc3339_z(expires_at)
 
 
 class _claim_transition_guard:
@@ -862,3 +892,4 @@ class _claim_transition_guard:
 _SERIALIZATION_SUFFIX = ".yaml" if yaml is not None else ".json"
 _SUPPORTED_SUFFIXES = (".yaml", ".json")
 _MAX_CLAIM_TTL_SECONDS = 3600
+_MIN_CLAIM_TTL_SECONDS = 0.000001
