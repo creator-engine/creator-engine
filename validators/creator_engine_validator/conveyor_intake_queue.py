@@ -99,9 +99,7 @@ class IntakeQueue:
         clean_claimer = _required_str({"claimer": claimer}, "claimer")
         now = _clock_now(clock)
         self._reclaim_stale(now)
-        for path in sorted(self.pending_dir.iterdir()):
-            if not path.is_file() or path.suffix not in _SUPPORTED_SUFFIXES:
-                continue
+        for path in self._ordered_pending_paths():
             claimed_path = self.claimed_dir / path.name
             try:
                 os.replace(path, claimed_path)
@@ -126,15 +124,15 @@ class IntakeQueue:
         read_error_sink: IntakeReadErrorSink | None = None,
     ) -> list[IntakeUnit]:
         self._ensure_dirs()
-        units: list[IntakeUnit] = []
-        for path in sorted(self.pending_dir.iterdir()):
+        units: list[tuple[IntakeUnit, str]] = []
+        for path in self.pending_dir.iterdir():
             if path.is_file() and path.suffix in _SUPPORTED_SUFFIXES:
                 try:
-                    units.append(_read_unit(path))
+                    units.append((_read_unit(path), path.name))
                 except Exception as exc:
                     if read_error_sink is not None:
                         read_error_sink(path, exc)
-        return units
+        return [unit for unit, _name in sorted(units, key=lambda item: (item[0].priority, item[1]))]
 
     def list_open(
         self,
@@ -258,6 +256,26 @@ class IntakeQueue:
                 return path
         return None
 
+    def _ordered_pending_paths(self) -> list[Path]:
+        """Return only valid pending entries in numeric priority order.
+
+        Queue filenames historically used a minimum-width decimal prefix.  Keep
+        accepting those files, but do not let lexical filename ordering invert
+        priorities at six digits.  Invalid priority values are deliberately not
+        candidates for claim; reading them through ``list_pending`` still makes
+        their validation error observable to callers with an error sink.
+        """
+        candidates: list[tuple[int, str, Path]] = []
+        for path in self.pending_dir.iterdir():
+            if not path.is_file() or path.suffix not in _SUPPORTED_SUFFIXES:
+                continue
+            try:
+                priority = _read_unit(path).priority
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            candidates.append((priority, path.name, path))
+        return [path for _priority, _name, path in sorted(candidates)]
+
 
 class IntakeQueueReader:
     """Produce dry-run dispatch plans without claiming queue entries."""
@@ -286,11 +304,10 @@ class IntakeQueueReader:
 
 
 def _unit_filename(unit: IntakeUnit) -> str:
-    if unit.priority < 0:
-        raise ValueError("intake unit priority must be non-negative")
+    priority = _required_priority(unit.priority)
     if not _UNIT_ID_PATTERN.fullmatch(unit.unit_id):
         raise ValueError("intake unit_id must contain only letters, digits, '.', '_', or '-'")
-    return f"{unit.priority:05d}-{unit.unit_id}{_SERIALIZATION_SUFFIX}"
+    return f"{priority:05d}-{unit.unit_id}{_SERIALIZATION_SUFFIX}"
 
 
 def _write_unit_atomic(path: Path, unit: IntakeUnit) -> None:
@@ -330,7 +347,7 @@ def _read_unit(path: Path) -> IntakeUnit:
         brief_ref=_required_str(data, "brief_ref"),
         branch=_required_str(data, "branch"),
         worktree=_required_str(data, "worktree"),
-        priority=int(data["priority"]),
+        priority=_required_priority(data.get("priority")),
         work_class=_required_str(data, "work_class"),
         status=_required_status(data),
         created_at=_required_str(data, "created_at"),
@@ -345,6 +362,7 @@ def _read_unit(path: Path) -> IntakeUnit:
 def _dump_unit(unit: IntakeUnit) -> str:
     if not _BRIEF_SHA_PATTERN.fullmatch(unit.brief_sha):
         raise ValueError("intake unit brief_sha must be a lowercase 40- or 64-hex SHA")
+    _required_priority(unit.priority)
     if any(not isinstance(path, str) for path in unit.territory_paths):
         raise ValueError("intake unit territory_paths must be a sequence of strings")
     for name, value in (
@@ -376,6 +394,13 @@ def _required_status(data: Mapping[str, object]) -> IntakeStatus:
     if status not in {"pending", "claimed", "done"}:
         raise ValueError(f"invalid intake unit status: {status}")
     return status  # type: ignore[return-value]
+
+
+def _required_priority(value: object) -> int:
+    """Accept only non-negative integer priorities (never bools or floats)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("intake unit priority must be a non-negative integer")
+    return value
 
 
 def _required_brief_sha(data: Mapping[str, object]) -> str:

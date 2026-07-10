@@ -10,3 +10,4 @@ issue: N-11 slice 1
 
 - Pin queued briefs by SHA, declare controller path territory, and retain legacy queue APIs.
 - Add atomic claim/release/complete transitions, TTL stale reclaim, and a best-effort append-only NDJSON claim ledger.
+- Add a verified, injected seat-pull handoff adapter and numeric six-digit-safe priority ordering.

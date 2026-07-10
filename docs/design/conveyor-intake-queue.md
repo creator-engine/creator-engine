@@ -8,6 +8,10 @@ Each unit pins its dispatch brief with `brief_ref` and a 40- or 64-hex lowercase
 
 Before claiming pending work, the queue scans `claimed/` for expired claims. It clears their claim fields, atomically returns them to `pending/`, and records a stale reclaim. The move from `pending/` to `claimed/` uses POSIX `os.replace`, so concurrent claimers have exactly one winner; a losing rename observes `FileNotFoundError` and continues scanning.
 
+Priorities are non-negative integers and claim/list selection is numeric with filename tie-breaking. The legacy minimum-width filename remains readable, including six-digit priorities.
+
 Every claim, release, completion, and stale reclaim best-effort appends an NDJSON record to `intake-claims.jsonl` at the queue root. Records include `action`, `unit_id`, `claimer`, `brief_sha`, and `ts`. Ledger I/O failure is reported to stderr but never aborts the associated lifecycle operation; the ledger is append-only and is never truncated.
+
+`conveyor_seat_pull.SeatPullAdapter` is the library-level seat handoff seam. It atomically claims one unit, accepts only a 64-hex SHA-256 pin for launch, resolves a relative brief below a supplied trusted root without symlinks or escape, then invokes injected normal territory/work-claim preflight and governed lane-launch adapters. It passes a verified path and digest plus declared lane metadata, never brief contents, credentials, or process arguments. A verification, preflight, or launcher refusal releases the owned queue claim; a successful launcher retains it as evidence of the live governed seat.
 
 The feature remains gated by `CE_CONVEYOR_INTAKE_ENABLED=1`; absent that flag, daemon behavior is unchanged. This queue substrate does not send pane text, write sockets, launch seat subprocesses, or grant any new authority.

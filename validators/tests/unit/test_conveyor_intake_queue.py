@@ -101,6 +101,31 @@ def test_list_pending_returns_sorted_order(tmp_path: Path):
     assert [unit.unit_id for unit in queue.list_pending()] == ["first", "middle", "last"]
 
 
+def test_numeric_priority_ordering_handles_six_digits_and_tie_breaks_by_filename(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("one-hundred-thousand", priority=100000))
+    queue.stock(_unit("ninety-nine-thousand", priority=99999))
+    queue.stock(_unit("same-priority-b", priority=5))
+    queue.stock(_unit("same-priority-a", priority=5))
+
+    assert [unit.unit_id for unit in queue.list_pending()] == [
+        "same-priority-a",
+        "same-priority-b",
+        "ninety-nine-thousand",
+        "one-hundred-thousand",
+    ]
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None and claimed.unit_id == "same-priority-a"
+
+
+@pytest.mark.parametrize("priority", [True, 1.0, -1])
+def test_non_integer_or_negative_priority_is_rejected(priority, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+
+    with pytest.raises(ValueError, match="priority"):
+        queue.stock(_unit("invalid-priority", priority=priority))
+
+
 def test_intake_queue_reader_plans_idle_seats(tmp_path: Path):
     queue = IntakeQueue(tmp_path / "intake-queue")
     queue.stock(_unit("unit-a", priority=1))
