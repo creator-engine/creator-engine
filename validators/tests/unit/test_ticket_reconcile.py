@@ -102,6 +102,37 @@ def test_json_mode_is_machine_readable_and_deterministic():
     }
 
 
+def test_branch_slug_boundary_ticket_51_does_not_match_ce_518_branch():
+    """Trailing-hyphen anchor (ticket_reconcile.py:260): ticket 51 must not produce a
+    STALE-OPEN match against a PR whose head branch is ce-518-foo."""
+    matches = tr.reconcile_stale_tickets(
+        [{"number": 51, "title": "boundary safety"}],
+        [{"number": 80, "title": "unrelated", "head_branch": "ce-518-foo"}],
+        ticket_repo=_EXAMPLE_REPO,
+    )
+
+    assert matches == []
+
+
+def test_ref_lookahead_ticket_518_does_not_match_reference_to_5180():
+    """(?!\\d) lookahead (ticket_reconcile.py:272-273): reconciling ticket 518 must not
+    match a PR whose body contains the qualified reference example-ops#5180."""
+    matches = tr.reconcile_stale_tickets(
+        [{"number": 518, "title": "lookahead check"}],
+        [
+            {
+                "number": 81,
+                "title": "unrelated",
+                "head_branch": "fix/no-slug",
+                "body": "Implements example/example-ops#5180 as a separate concern.",
+            }
+        ],
+        ticket_repo=_EXAMPLE_REPO,
+    )
+
+    assert matches == []
+
+
 def test_cli_reads_json_files_and_emits_json(tmp_path, capsys):
     tickets_path = tmp_path / "tickets.json"
     prs_path = tmp_path / "prs.json"

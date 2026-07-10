@@ -259,6 +259,7 @@ def _branch_matches(ticket: OpenTicket, head_branch: str) -> bool:
         return False
     if f"ce-{ticket.number}-" in branch:
         return True
+    # WARNING: hints are matched as substrings, not anchored patterns.
     return any(_normalise_branch(hint) in branch for hint in ticket.branch_slug_hints)
 
 
