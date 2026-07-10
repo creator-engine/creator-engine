@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
 from creator_engine_validator.conveyor_discovery import SeatProbeSpec
 from creator_engine_validator.seat_watch_daemon import SeatWatchDaemon
-from creator_engine_validator.seat_watch_runner import ConfigError, load_config
+from creator_engine_validator.seat_watch_runner import EXIT_CONFIG, ConfigError, load_config, main
 
 SHA = "a" * 40
 
@@ -45,8 +47,13 @@ def _base_env(tmp_path) -> dict[str, str]:
             [{"seat_id": "seat-a", "argv": ["probe", "seat-a"]}]
         ),
         "CE_SEAT_WATCH_FEED_PATH": str(tmp_path / "seat-watch.jsonl"),
+        "CE_DAEMON_STATE_ROOT": str(tmp_path / "state"),
         "CE_DAEMON_LEASE_ROOT": str(tmp_path / "leases"),
     }
+
+
+def _jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 def test_ready_signal_emitted():
@@ -200,6 +207,98 @@ def test_dispatch_ack_case_insensitive():
     events = daemon.run_once(1)
 
     assert [event.event_type for event in events] == ["dispatch_delivery_ack"]
+
+
+def test_dispatch_undelivered_emitted_after_missing_ack_threshold():
+    daemon = _daemon(
+        ["nothing yet"],
+        idle_threshold_polls=2,
+        dispatch_patterns=["DISPATCH POINTER"],
+    )
+
+    events = [event for poll in range(2) for event in daemon.run_once(poll)]
+
+    assert [event.event_type for event in events] == [
+        "idle_without_signal",
+        "dispatch_undelivered",
+    ]
+    dispatch_event = events[1]
+    assert dispatch_event.detail["pattern_expected"] == "DISPATCH POINTER"
+    assert dispatch_event.detail["polls_without_ack"] == 2
+
+
+def test_runner_writes_detector_records_under_state_root(tmp_path):
+    env = _base_env(tmp_path)
+    env.update(
+        {
+            "CE_SEAT_WATCH_SEAT_PROBES": json.dumps(
+                [
+                    {
+                        "seat_id": "seat-a",
+                        "argv": [
+                            sys.executable,
+                            "-c",
+                            "print('waiting for dispatch')",
+                        ],
+                    }
+                ]
+            ),
+            "CE_SEAT_WATCH_IDLE_THRESHOLD_POLLS": "1",
+            "CE_SEAT_WATCH_DISPATCH_PATTERNS": json.dumps(["DISPATCH POINTER"]),
+            "CE_SEAT_WATCH_ITERATIONS": "1",
+        }
+    )
+
+    assert main(env) == 0
+
+    feed_records = _jsonl(Path(env["CE_SEAT_WATCH_FEED_PATH"]))
+    assert [record["event_type"] for record in feed_records] == [
+        "idle_without_signal",
+        "dispatch_undelivered",
+    ]
+
+    detector_path = Path(env["CE_DAEMON_STATE_ROOT"]) / "seat-watch" / "detector-events.jsonl"
+    records = _jsonl(detector_path)
+    assert records == [
+        {
+            "schema_version": "1",
+            "seat_id": "seat-a",
+            "class": "idle-without-signal",
+            "timestamp": feed_records[0]["ts"],
+            "evidence": {
+                "poll_index": 0,
+                "polls_unchanged": 1,
+                "pane_hash": feed_records[0]["detail"]["pane_hash"],
+            },
+        },
+        {
+            "schema_version": "1",
+            "seat_id": "seat-a",
+            "class": "dispatch-undelivered",
+            "timestamp": feed_records[1]["ts"],
+            "evidence": {
+                "poll_index": 0,
+                "pattern_expected": "DISPATCH POINTER",
+                "polls_without_ack": 1,
+                "pane_hash": feed_records[1]["detail"]["pane_hash"],
+            },
+        },
+    ]
+
+
+def test_runner_config_error_uses_supervisor_exit_code():
+    assert main({}) == EXIT_CONFIG
+
+
+def test_supervised_systemd_example_has_restart_posture():
+    unit = Path("deploy/seat-watch/ce-seat-watch-supervised.example.service").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Restart=on-failure" in unit
+    assert "RestartPreventExitStatus=2 73" in unit
+    assert "SuccessExitStatus=0" in unit
+    assert "Environment=CE_DAEMON_STATE_ROOT=/var/lib/ce-seat-watch" in unit
 
 
 def test_config_load_happy_path(tmp_path):
