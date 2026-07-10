@@ -70,6 +70,7 @@ CONTAINED_SEAT_CARRIER_NOTICE = (
 )
 BRAIN_LEDGER_PATH = ".ce/brain/assertions.yaml"
 DISK_HEADROOM_CHECK_NAME = "disk_headroom (suite pre-flight)"
+DISK_HEADROOM_GATE_DISABLED_ENV = "CE_SUITE_HEADROOM_GATE_DISABLED"
 BRAIN_LEDGER_RECHAIN_TOOL_HINT = (
     "rebase onto the current base and re-run the brain re-chain tool "
     "(`ce brain assert` for appends, or `ce brain correct` for supersede/re-pin cascades)"
@@ -334,6 +335,12 @@ def _python_env(repo_root: Path, *, pytest: bool = False, tmpdir: str | None = N
     if pytest:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["TMPDIR"] = tmpdir or "/var/tmp"
+        # Disable the disk-headroom gate for the inner test subprocess spawned by the
+        # top-level preflight run.  The gate must fire on the real (outer) suite-launch
+        # path; nested invocations (unit tests, baseline-diff subprocess, seat-ready
+        # subprocess) must not re-gate on headroom — the check was already done before
+        # the subprocess was spawned.
+        env[DISK_HEADROOM_GATE_DISABLED_ENV] = "1"
         for key in TOKEN_ENV_VARS:
             env.pop(key, None)
     return env
@@ -1162,7 +1169,20 @@ def run_preflight(
 
         Fail-closed before any test process is spawned; never mid-write.
         Threshold: CE_SUITE_MIN_FREE_GB env var, default 30 GiB.
+
+        Scoping: the gate is bypassed when CE_SUITE_HEADROOM_GATE_DISABLED=1 is
+        set in the environment.  The top-level _python_env(pytest=True) call sets
+        this flag in every inner subprocess the preflight spawns so that nested
+        unit-test invocations of run_preflight() never re-gate on headroom (the
+        check already happened in the outer, real suite-launch context).  Fail-closed
+        semantics are preserved for genuine top-level invocations where the flag is
+        absent.
         """
+        if os.environ.get(DISK_HEADROOM_GATE_DISABLED_ENV):
+            return (
+                "disk_headroom: gate skipped "
+                "(nested test harness context; headroom enforced only at top-level suite launch)"
+            )
         threshold = effective_min_free_gb()
         measured = check_headroom(config.repo_root, threshold)
         return (

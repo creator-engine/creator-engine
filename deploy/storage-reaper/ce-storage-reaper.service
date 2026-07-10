@@ -9,9 +9,10 @@ ConditionPathExists=/var/tmp
 Type=oneshot
 # Run as root so it can remove /var/tmp entries from multiple users.
 User=root
-# Path to the script; adjust CE_REPO_ROOT if the repo is installed elsewhere.
-# Operators can override by dropping a systemd override file.
-Environment=CE_REPO_ROOT=/home/ce-dev-2/creator-engine
+# Path to the script; adjust CE_REPO_ROOT to match the installation root.
+# Default assumes a standard /opt installation; Operators can override by
+# dropping a systemd override file in /etc/systemd/system/ce-storage-reaper.service.d/.
+Environment=CE_REPO_ROOT=/opt/creator-engine
 ExecStart=/bin/bash ${CE_REPO_ROOT}/deploy/storage-reaper/reap-scratch.sh
 # Log to journald only; no writable filesystem path dependency.
 StandardOutput=journal

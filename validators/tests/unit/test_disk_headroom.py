@@ -247,3 +247,40 @@ def test_disk_headroom_error_is_distinct_runtime_error(tmp_path: Path) -> None:
         with pytest.raises(dh.DiskHeadroomError) as exc_info:
             dh.check_headroom(tmp_path, min_free_gb=30.0)
     assert isinstance(exc_info.value, RuntimeError)
+
+
+# ---------------------------------------------------------------------------
+# Env-seam tests: gate must skip in nested/unit-test contexts
+# ---------------------------------------------------------------------------
+
+
+def test_headroom_gate_skips_when_disabled_env_set(tmp_path: Path, monkeypatch) -> None:
+    """When CE_SUITE_HEADROOM_GATE_DISABLED=1 the gate must pass without touching statvfs.
+
+    This is the fail-safe that prevents the gate from firing inside unit tests
+    or any nested pytest subprocess spawned by the outer top-level preflight.
+    """
+    monkeypatch.setenv(pr_preflight.DISK_HEADROOM_GATE_DISABLED_ENV, "1")
+    _stub_all_heavy_gates(monkeypatch)
+    runner = _MinimalFakeRunner(tmp_path)
+    config = _config_for_headroom(tmp_path)
+    out = io.StringIO()
+    err = io.StringIO()
+
+    # Patch free_gb to blow up: the gate must not reach statvfs when the env var is set.
+    with patch.object(dh, "free_gb", side_effect=AssertionError("disk_headroom gate must not call statvfs in a nested test context")):
+        rc = pr_preflight.run_preflight(config, runner=runner, out=out, err=err)
+
+    output = out.getvalue()
+    assert f"[PASS] {pr_preflight.DISK_HEADROOM_CHECK_NAME}" in output
+    assert "skipped" in output
+
+
+def test_pytest_subprocess_env_disables_headroom_gate() -> None:
+    """_python_env(pytest=True) must inject CE_SUITE_HEADROOM_GATE_DISABLED=1.
+
+    This is the mechanism by which the outer preflight disables the gate inside
+    every inner pytest subprocess it spawns (baseline-diff runs, seat-ready runs).
+    """
+    env = pr_preflight._python_env(Path("/tmp"), pytest=True)
+    assert env.get(pr_preflight.DISK_HEADROOM_GATE_DISABLED_ENV) == "1"
