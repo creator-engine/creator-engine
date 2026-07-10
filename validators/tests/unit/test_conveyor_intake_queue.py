@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -340,20 +341,91 @@ def test_stale_claim_is_reclaimed_and_recorded(tmp_path: Path):
 def test_complete_rejects_wrong_claimer_and_ledger_tracks_lifecycle(tmp_path: Path):
     queue = IntakeQueue(tmp_path / "intake-queue")
     queue.stock(_unit("unit-a"))
-    assert queue.claim_entry("seat-a", clock=lambda: "2026-07-10T12:00:00Z") is not None
+    claimed = queue.claim_entry("seat-a", clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None
 
     try:
-        queue.complete_entry("unit-a", "seat-b")
+        queue.complete_entry(
+            "unit-a", "seat-b", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        )
     except PermissionError:
         pass
     else:
         raise AssertionError("wrong claimer must be refused")
-    queue.complete_entry("unit-a", "seat-a", clock=lambda: "2026-07-10T12:01:00Z")
+    queue.complete_entry(
+        "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        clock=lambda: "2026-07-10T12:01:00Z",
+    )
 
     ledger = _ledger_records(queue)
     assert [entry["action"] for entry in ledger] == ["claimed", "completed"]
     assert all(entry["unit_id"] == "unit-a" for entry in ledger)
     assert all(entry["brief_sha"] == "a" * 40 for entry in ledger)
+
+
+def test_complete_refuses_stale_same_seat_claim_after_reclaim(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    first = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert first is not None
+
+    successor = queue.claim_entry("seat-a", ttl_seconds=60, clock=lambda: "2026-07-10T12:00:02Z")
+    assert successor is not None and successor.claim_generation == first.claim_generation + 1
+
+    with pytest.raises(PermissionError, match="token|generation"):
+        queue.complete_entry(
+            "unit-a", "seat-a", claim_token=first.claim_token, claim_generation=first.claim_generation,
+        )
+    queue.complete_entry(
+        "unit-a", "seat-a", claim_token=successor.claim_token, claim_generation=successor.claim_generation,
+    )
+
+
+def test_stale_reclaim_and_launch_fence_serialize_one_claim_transition(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None and claimed.claim_token is not None
+    import creator_engine_validator.conveyor_intake_queue as intake
+
+    real_write = intake._write_unit_atomic
+    reclaim_read = threading.Event()
+    release_reclaim = threading.Event()
+    fence_finished = threading.Event()
+    fence_errors: list[BaseException] = []
+
+    def pause_reclaim(path, unit):
+        if path.parent == queue.claimed_dir and unit.status == "pending" and not reclaim_read.is_set():
+            reclaim_read.set()
+            assert release_reclaim.wait(2)
+        return real_write(path, unit)
+
+    monkeypatch.setattr(intake, "_write_unit_atomic", pause_reclaim)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        reclaimer = executor.submit(
+            queue.claim_entry, "seat-b", ttl_seconds=60, clock=lambda: "2026-07-10T12:00:02Z",
+        )
+        assert reclaim_read.wait(2)
+
+        def fence() -> None:
+            try:
+                queue.fence_launch("unit-a", "seat-a", claimed.claim_token, clock=lambda: "2026-07-10T12:00:00Z")
+            except BaseException as exc:
+                fence_errors.append(exc)
+            finally:
+                fence_finished.set()
+
+        executor.submit(fence)
+        assert not fence_finished.wait(0.05)
+        release_reclaim.set()
+        successor = reclaimer.result()
+        assert successor is not None and successor.claimed_by == "seat-b"
+        assert fence_finished.wait(2)
+
+    assert len(fence_errors) == 1
+    assert isinstance(fence_errors[0], (FileNotFoundError, PermissionError))
+    current = queue._claimed_path_for_unit("unit-a")
+    assert current is not None and "claimed_by: seat-b" in current.read_text(encoding="utf-8")
 
 
 def test_ledger_failure_does_not_abort_claim(monkeypatch, tmp_path: Path, capsys):

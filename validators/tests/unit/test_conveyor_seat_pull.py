@@ -69,17 +69,18 @@ def test_good_pull_uses_concrete_normal_claim_evidence_and_immutable_snapshot(tm
     queue.stock(unit)
     _evidence(queue, unit)
     received: list[VerifiedLaneLaunch] = []
+    snapshot_bytes: list[bytes] = []
 
     def launcher(launch: VerifiedLaneLaunch) -> bool:
         received.append(launch)
+        snapshot_bytes.append(launch.brief_snapshot.read_bytes())
         return True
 
     outcome = _adapter(queue, root, launcher).pull_one("seat-a", ttl_seconds=60)
 
     assert (outcome.state, outcome.claim_state) == ("launched", "launching")
     assert len(received) == 1
-    assert received[0].brief_path.parent.name == ".verified-snapshots"
-    assert received[0].brief_path.read_bytes() == b"controller-declared brief\n"
+    assert snapshot_bytes == [b"controller-declared brief\n"]
     assert received[0].territory_paths == ("docs", "validators")
     assert received[0].claim_generation == 1
     claimed = queue._claimed_path_for_unit("n11-canary")
@@ -133,7 +134,7 @@ def test_component_symlink_and_post_preflight_source_swap_are_refused_or_snapsho
 
     monkeypatch.setattr(seat_pull, "_validate_controller_evidence", swap_after_preflight)
     received: list[bytes] = []
-    assert _adapter(queue, root, lambda launch: received.append(launch.brief_path.read_bytes()) or True).pull_one("seat-a").state == "launched"
+    assert _adapter(queue, root, lambda launch: received.append(launch.brief_snapshot.read_bytes()) or True).pull_one("seat-a").state == "launched"
     assert received == [b"controller-declared brief\n"]
 
 
@@ -233,7 +234,7 @@ def test_source_replacement_after_preflight_does_not_change_launched_snapshot(tm
 
     def launcher(launch: VerifiedLaneLaunch) -> bool:
         (root / brief_ref).write_text("replaced after verification\n", encoding="utf-8")
-        launched.append(launch.brief_path.read_bytes())
+        launched.append(launch.brief_snapshot.read_bytes())
         return True
 
     assert _adapter(queue, root, launcher).pull_one("seat-a").state == "launched"
@@ -298,6 +299,28 @@ def test_handoff_has_no_inline_brief_or_credential_mutation(tmp_path: Path):
     assert _adapter(queue, root).pull_one("seat-a").state == "launched"
     assert dict(os.environ) == before
     assert {field.name for field in fields(VerifiedLaneLaunch)} == {
-        "unit_id", "brief_path", "brief_sha256", "branch", "worktree", "work_class",
+        "unit_id", "brief_snapshot", "brief_sha256", "branch", "worktree", "work_class",
         "territory_paths", "territory_digest", "claim_generation",
     }
+
+
+def test_snapshot_replacement_between_fence_and_launcher_consumption_fails_closed(tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+
+    def replacing_launcher(launch: VerifiedLaneLaunch) -> bool:
+        snapshot_path = root / ".verified-snapshots" / f"{launch.brief_sha256}.brief"
+        snapshot_path.unlink()
+        snapshot_path.write_bytes(b"replacement")
+        launch.brief_snapshot.read_bytes()
+        return True
+
+    outcome = _adapter(queue, root, replacing_launcher).pull_one("seat-a")
+
+    assert outcome.state == "blocked_retained"
+    assert outcome.claim_state == "launching"
+    assert "launcher_outcome_unknown:ValueError" == outcome.detail

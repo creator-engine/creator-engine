@@ -10,6 +10,7 @@ no authority beyond the authority already held by its seat.
 from __future__ import annotations
 
 import dataclasses
+import fcntl
 import json
 import os
 import re
@@ -182,10 +183,18 @@ class IntakeQueue:
         unit_id: str,
         claimer: str,
         *,
+        claim_token: str,
+        claim_generation: int,
         clock: IntakeClock | None = None,
     ) -> None:
-        """Complete a claimed entry, refusing a claimer other than its owner."""
-        self._complete(unit_id, claimer=_required_str({"claimer": claimer}, "claimer"), clock=clock)
+        """Complete the exact owned claim generation, never a same-seat successor."""
+        self._complete(
+            unit_id,
+            claimer=_required_str({"claimer": claimer}, "claimer"),
+            claim_token=claim_token,
+            claim_generation=claim_generation,
+            clock=clock,
+        )
 
     def release_entry(
         self,
@@ -200,35 +209,39 @@ class IntakeQueue:
         if claimed_path is None:
             raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
         clean_claimer = _required_str({"claimer": claimer}, "claimer")
-        claimed = _read_unit(claimed_path)
-        if claimed.claimed_by != clean_claimer:
-            raise PermissionError(f"intake unit {unit_id!r} is not claimed by {clean_claimer!r}")
-        _require_claim_token(claimed, claim_token)
-        if claimed.status not in {"claimed", "launching"}:
-            raise ValueError(f"intake unit {unit_id!r} is not releasable from {claimed.status!r}")
-        unit = dataclasses.replace(
-            claimed,
-            status="pending",
-            claimed_by=None,
-            claimed_at=None,
-            claim_expires_at=None,
-            claim_token=None,
-            launch_fenced_at=None,
-        )
-        pending_path = self.pending_dir / claimed_path.name
-        try:
-            _write_unit_atomic(claimed_path, unit)
-        except OSError as exc:
-            raise IntakeTransitionError("release", exc) from exc
-        try:
-            os.replace(claimed_path, pending_path)
-        except OSError as exc:
-            rollback_error: BaseException | None = None
+        with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
             try:
-                _write_unit_atomic(claimed_path, claimed)
-            except OSError as rollback_exc:
-                rollback_error = rollback_exc
-            raise IntakeTransitionError("release", exc, rollback_error) from exc
+                claimed = _read_unit(claimed_path)
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(f"claimed intake unit not found: {unit_id}") from exc
+            if claimed.claimed_by != clean_claimer:
+                raise PermissionError(f"intake unit {unit_id!r} is not claimed by {clean_claimer!r}")
+            _require_claim_token(claimed, claim_token)
+            if claimed.status not in {"claimed", "launching"}:
+                raise ValueError(f"intake unit {unit_id!r} is not releasable from {claimed.status!r}")
+            unit = dataclasses.replace(
+                claimed,
+                status="pending",
+                claimed_by=None,
+                claimed_at=None,
+                claim_expires_at=None,
+                claim_token=None,
+                launch_fenced_at=None,
+            )
+            pending_path = self.pending_dir / claimed_path.name
+            try:
+                _write_unit_atomic(claimed_path, unit)
+            except OSError as exc:
+                raise IntakeTransitionError("release", exc) from exc
+            try:
+                os.replace(claimed_path, pending_path)
+            except OSError as exc:
+                rollback_error: BaseException | None = None
+                try:
+                    _write_unit_atomic(claimed_path, claimed)
+                except OSError as rollback_exc:
+                    rollback_error = rollback_exc
+                raise IntakeTransitionError("release", exc, rollback_error) from exc
         self._append_ledger("released", unit, clean_claimer, _clock_now(clock))
 
     def fence_launch(
@@ -250,20 +263,24 @@ class IntakeQueue:
         claimed_path = self._claimed_path_for_unit(unit_id)
         if claimed_path is None:
             raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
-        claimed = _read_unit(claimed_path)
         clean_claimer = _required_str({"claimer": claimer}, "claimer")
-        if claimed.status != "claimed" or claimed.claimed_by != clean_claimer:
-            raise PermissionError(f"intake unit {unit_id!r} is not an active claim of {clean_claimer!r}")
-        _require_claim_token(claimed, claim_token)
-        if claimed.claim_expires_at is None:
-            raise ValueError("seat launch requires a finite claim TTL")
-        if _parse_rfc3339_z(claimed.claim_expires_at, "claim_expires_at") <= _parse_rfc3339_z(now, "clock"):
-            raise PermissionError("intake claim expired before launch fence")
-        fenced = dataclasses.replace(claimed, status="launching", launch_fenced_at=now)
-        try:
-            _write_unit_atomic(claimed_path, fenced)
-        except OSError as exc:
-            raise IntakeTransitionError("launch_fence", exc) from exc
+        with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
+            try:
+                claimed = _read_unit(claimed_path)
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(f"claimed intake unit not found: {unit_id}") from exc
+            if claimed.status != "claimed" or claimed.claimed_by != clean_claimer:
+                raise PermissionError(f"intake unit {unit_id!r} is not an active claim of {clean_claimer!r}")
+            _require_claim_token(claimed, claim_token)
+            if claimed.claim_expires_at is None:
+                raise ValueError("seat launch requires a finite claim TTL")
+            if _parse_rfc3339_z(claimed.claim_expires_at, "claim_expires_at") <= _parse_rfc3339_z(now, "clock"):
+                raise PermissionError("intake claim expired before launch fence")
+            fenced = dataclasses.replace(claimed, status="launching", launch_fenced_at=now)
+            try:
+                _write_unit_atomic(claimed_path, fenced)
+            except OSError as exc:
+                raise IntakeTransitionError("launch_fence", exc) from exc
         self._append_ledger("launch_fenced", fenced, clean_claimer, now)
         return fenced
 
@@ -272,30 +289,39 @@ class IntakeQueue:
         unit_id: str,
         *,
         claimer: str | None,
+        claim_token: str | None = None,
+        claim_generation: int | None = None,
         clock: IntakeClock | None = None,
     ) -> None:
         self._ensure_dirs()
         claimed_path = self._claimed_path_for_unit(unit_id)
         if claimed_path is None:
             raise FileNotFoundError(f"claimed intake unit not found: {unit_id}")
-        claimed = _read_unit(claimed_path)
-        if claimer is not None and claimed.claimed_by != claimer:
-            raise PermissionError(f"intake unit {unit_id!r} is not claimed by {claimer!r}")
-        unit = dataclasses.replace(claimed, status="done")
-        done_path = self.done_dir / claimed_path.name
-        try:
-            _write_unit_atomic(claimed_path, unit)
-        except OSError as exc:
-            raise IntakeTransitionError("complete", exc) from exc
-        try:
-            os.replace(claimed_path, done_path)
-        except OSError as exc:
-            rollback_error: BaseException | None = None
+        with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
             try:
-                _write_unit_atomic(claimed_path, claimed)
-            except OSError as rollback_exc:
-                rollback_error = rollback_exc
-            raise IntakeTransitionError("complete", exc, rollback_error) from exc
+                claimed = _read_unit(claimed_path)
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(f"claimed intake unit not found: {unit_id}") from exc
+            if claimer is not None:
+                if claimed.claimed_by != claimer:
+                    raise PermissionError(f"intake unit {unit_id!r} is not claimed by {claimer!r}")
+                _require_claim_token(claimed, claim_token)
+                _require_claim_generation(claimed, claim_generation)
+            unit = dataclasses.replace(claimed, status="done")
+            done_path = self.done_dir / claimed_path.name
+            try:
+                _write_unit_atomic(claimed_path, unit)
+            except OSError as exc:
+                raise IntakeTransitionError("complete", exc) from exc
+            try:
+                os.replace(claimed_path, done_path)
+            except OSError as exc:
+                rollback_error: BaseException | None = None
+                try:
+                    _write_unit_atomic(claimed_path, claimed)
+                except OSError as rollback_exc:
+                    rollback_error = rollback_exc
+                raise IntakeTransitionError("complete", exc, rollback_error) from exc
         self._append_ledger("completed", unit, claimer or unit.claimed_by or "controller", _clock_now(clock))
 
     def _reclaim_stale(self, now: str) -> None:
@@ -304,7 +330,7 @@ class IntakeQueue:
             if not claimed_path.is_file() or claimed_path.suffix not in _SUPPORTED_SUFFIXES:
                 continue
             try:
-                with _reclaim_guard(self.root / f".{claimed_path.name}.reclaim"):
+                with _claim_transition_guard(self.root / f".{claimed_path.name}.transition-lock"):
                     try:
                         unit = _read_unit(claimed_path)
                     except FileNotFoundError:
@@ -569,6 +595,11 @@ def _require_claim_token(unit: IntakeUnit, provided: str | None) -> None:
         raise PermissionError("intake claim token does not match current ownership")
 
 
+def _require_claim_generation(unit: IntakeUnit, provided: int | None) -> None:
+    if isinstance(provided, bool) or not isinstance(provided, int) or unit.claim_generation != provided:
+        raise PermissionError("intake claim generation does not match current ownership")
+
+
 def _restore_rename(source: Path, destination: Path) -> BaseException | None:
     try:
         os.replace(source, destination)
@@ -601,25 +632,23 @@ def _claim_expiry(now: str, ttl_seconds: float | int | None) -> str | None:
     return (_parse_rfc3339_z(now, "clock") + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-class _reclaim_guard:
-    """Serialize stale reclaim of one claim file using an exclusive local marker."""
+class _claim_transition_guard:
+    """Serialize every transition of one claim file on a stable POSIX lock inode."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._fd: int | None = None
 
-    def __enter__(self) -> "_reclaim_guard":
-        self._fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    def __enter__(self) -> "_claim_transition_guard":
+        self._fd = os.open(self._path, os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(self._fd, fcntl.LOCK_EX)
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         if self._fd is not None:
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
             os.close(self._fd)
             self._fd = None
-        try:
-            self._path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 _SERIALIZATION_SUFFIX = ".yaml" if yaml is not None else ".json"

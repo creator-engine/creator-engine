@@ -37,7 +37,7 @@ class VerifiedLaneLaunch:
     """Metadata for the governed seam, with an adapter-owned brief snapshot."""
 
     unit_id: str
-    brief_path: Path
+    brief_snapshot: "VerifiedBriefSnapshot"
     brief_sha256: str
     branch: str
     worktree: str
@@ -45,6 +45,52 @@ class VerifiedLaneLaunch:
     territory_paths: tuple[str, ...]
     territory_digest: str
     claim_generation: int
+
+
+@dataclass
+class VerifiedBriefSnapshot:
+    """A no-follow, descriptor-anchored snapshot for one launcher invocation."""
+
+    directory_fd: int
+    filename: str
+    device: int
+    inode: int
+    digest: str
+    _closed: bool = False
+
+    def read_bytes(self) -> bytes:
+        """Read the exact snapshot identity, refusing a replacement before use."""
+        if self._closed:
+            raise ValueError("verified snapshot is no longer available")
+        fd = os.open(
+            self.filename,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=self.directory_fd,
+        )
+        try:
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or (info.st_dev, info.st_ino) != (self.device, self.inode)
+            ):
+                raise ValueError("verified snapshot was replaced before launcher consumption")
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            content = b"".join(chunks)
+            if hashlib.sha256(content).hexdigest() != self.digest:
+                raise ValueError("verified snapshot content no longer matches its digest")
+            return content
+        finally:
+            os.close(fd)
+
+    def close(self) -> None:
+        if not self._closed:
+            os.close(self.directory_fd)
+            self._closed = True
 
 
 @dataclass(frozen=True)
@@ -102,6 +148,7 @@ class SeatPullAdapter:
         try:
             fenced = self.queue.fence_launch(unit.unit_id, seat_id, _claim_token(unit), clock=clock)
         except (OSError, ValueError, PermissionError) as exc:
+            launch.brief_snapshot.close()
             return self._release(unit, seat_id, f"launch_fence_refused:{type(exc).__name__}", clock)
         launch = _with_generation(launch, fenced.claim_generation)
         try:
@@ -112,6 +159,8 @@ class SeatPullAdapter:
                 unit_id=unit.unit_id, brief_sha256=unit.brief_sha,
                 detail=f"launcher_outcome_unknown:{type(exc).__name__}",
             )
+        finally:
+            launch.brief_snapshot.close()
         if not accepted:
             return self._release(fenced, seat_id, "launcher_refused", clock)
         return SeatPullOutcome(
@@ -134,7 +183,7 @@ class SeatPullAdapter:
         )
         snapshot = _write_snapshot(self.trusted_brief_root, actual_sha, brief_bytes)
         return VerifiedLaneLaunch(
-            unit_id=unit.unit_id, brief_path=snapshot, brief_sha256=actual_sha,
+            unit_id=unit.unit_id, brief_snapshot=snapshot, brief_sha256=actual_sha,
             branch=unit.branch, worktree=unit.worktree, work_class=unit.work_class,
             territory_paths=territory_paths, territory_digest=territory_digest,
             claim_generation=unit.claim_generation,
@@ -298,7 +347,7 @@ def _safe_relative_parts(value: str, field: str) -> tuple[str, ...]:
     return tuple(path.parts)
 
 
-def _write_snapshot(root: Path, digest: str, content: bytes) -> Path:
+def _write_snapshot(root: Path, digest: str, content: bytes) -> VerifiedBriefSnapshot:
     root_fd = _open_directory_nofollow(root, "trusted brief root")
     try:
         try:
@@ -319,7 +368,7 @@ def _write_snapshot(root: Path, digest: str, content: bytes) -> Path:
                 existing = _read_regular_bytes_at(snapshots_fd, filename, "verified snapshot")
                 if hashlib.sha256(existing).hexdigest() != digest:
                     raise ValueError("content-addressed snapshot digest collision")
-                return root / ".verified-snapshots" / filename
+                return _verified_snapshot_handle(snapshots_fd, filename, digest)
             try:
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(content)
@@ -331,9 +380,10 @@ def _write_snapshot(root: Path, digest: str, content: bytes) -> Path:
                 except OSError:
                     pass
                 raise
-            return root / ".verified-snapshots" / filename
-        finally:
+            return _verified_snapshot_handle(snapshots_fd, filename, digest)
+        except BaseException:
             os.close(snapshots_fd)
+            raise
     finally:
         os.close(root_fd)
 
@@ -407,6 +457,30 @@ def _read_regular_bytes_at(parent_fd: int, name: str, label: str) -> bytes:
         os.close(fd)
 
 
+def _verified_snapshot_handle(snapshots_fd: int, filename: str, digest: str) -> VerifiedBriefSnapshot:
+    """Transfer a verified snapshot directory descriptor to the launch seam."""
+    fd = os.open(filename, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=snapshots_fd)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("verified snapshot is not a regular file")
+        content = _read_fd_bytes(fd)
+        if hashlib.sha256(content).hexdigest() != digest:
+            raise ValueError("content-addressed snapshot digest collision")
+        return VerifiedBriefSnapshot(snapshots_fd, filename, info.st_dev, info.st_ino, digest)
+    finally:
+        os.close(fd)
+
+
+def _read_fd_bytes(fd: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
 def _validate_identity(value: str, field: str) -> None:
     if not isinstance(value, str) or not _IDENTITY.fullmatch(value):
         raise ValueError(f"{field} is not a canonical identity")
@@ -420,7 +494,7 @@ def _claim_token(unit: IntakeUnit) -> str:
 
 def _with_generation(launch: VerifiedLaneLaunch, generation: int) -> VerifiedLaneLaunch:
     return VerifiedLaneLaunch(
-        unit_id=launch.unit_id, brief_path=launch.brief_path, brief_sha256=launch.brief_sha256,
+        unit_id=launch.unit_id, brief_snapshot=launch.brief_snapshot, brief_sha256=launch.brief_sha256,
         branch=launch.branch, worktree=launch.worktree, work_class=launch.work_class,
         territory_paths=launch.territory_paths, territory_digest=launch.territory_digest,
         claim_generation=generation,
