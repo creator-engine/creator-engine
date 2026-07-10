@@ -8,6 +8,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -38,6 +41,7 @@ HELD_REASONS = frozenset(
     }
 )
 DRY_RUN_STATUSES = frozenset({"would_materialize", "held"})
+ARMED_STATUSES = frozenset({"materialized", "cas_failed", "held"})
 MEDIATION_ORDER = (
     "mode",
     "intent_path",
@@ -112,6 +116,34 @@ class RecordBuildResult:
     ledger_tail_before: str
     ledger_tail_after: str
     generated_patch_sha256: str
+
+
+@dataclass(frozen=True)
+class MaterializationCommit:
+    parent_sha: str
+    tree_sha: str
+    commit_sha: str
+    message: str
+    intent_path: str
+    materialization_key: str
+    ledger_tail_after: str
+
+
+@dataclass(frozen=True)
+class ArmedMaterializationOutput:
+    status: str
+    intent_path: str
+    intent_sha256: str | None
+    merge_commit_sha: str
+    materialization_key: str
+    main_parent_sha: str | None
+    materialization_commit_sha: str | None
+    ledger_tail_after: str | None
+    refusal_reason: str | None
+
+    def __post_init__(self) -> None:
+        if self.status not in ARMED_STATUSES:
+            raise ValueError(f"unsupported armed status: {self.status}")
 
 
 @dataclass(frozen=True)
@@ -211,10 +243,159 @@ def _assert_armed_write_target(path: Path | str) -> None:
     raise RuntimeError(f"materializer armed write target is outside authorized paths: {path}")
 
 
-def construct_materialization_commit(*_args: Any, write_paths: Sequence[Path | str] | None = None, **_kwargs: Any) -> None:
-    for target in write_paths or (LEDGER_PATH, ".ce/brain/append-intents/"):
+def _repo_relative_path(repo_root: Path | str, path: Path | str) -> str:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        candidate = candidate.resolve().relative_to(Path(repo_root).resolve())
+    return candidate.as_posix()
+
+
+def _git_plumbing(
+    args: Sequence[str],
+    repo_root: Path,
+    *,
+    input_text: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        text=True,
+        input=input_text,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=merged_env,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed"
+        raise RuntimeError(detail)
+    return result.stdout
+
+
+def _materialization_commit_message(
+    *,
+    intent_path: str,
+    merge_commit_sha: str,
+    materialization_key: str,
+    ledger_tail_after: str,
+) -> str:
+    return (
+        "Materialize brain append intent\n"
+        "\n"
+        f"Intent: {intent_path}\n"
+        f"Merge-Commit: {merge_commit_sha}\n"
+        f"Ledger-Tail: {ledger_tail_after}\n"
+        "\n"
+        f"CE-Materialization-Key: {materialization_key}\n"
+    )
+
+
+def _deterministic_commit_env() -> dict[str, str]:
+    return {
+        "GIT_AUTHOR_NAME": "CE Brain Intent Materializer",
+        "GIT_AUTHOR_EMAIL": "ce-brain-intent-materializer@localhost",
+        "GIT_AUTHOR_DATE": "2026-01-01T00:00:00+0000",
+        "GIT_COMMITTER_NAME": "CE Brain Intent Materializer",
+        "GIT_COMMITTER_EMAIL": "ce-brain-intent-materializer@localhost",
+        "GIT_COMMITTER_DATE": "2026-01-01T00:00:00+0000",
+    }
+
+
+def construct_materialization_commit(
+    *,
+    repo_root: Path | str | None = None,
+    parent_sha: str | None = None,
+    built: RecordBuildResult | None = None,
+    intent_path: Path | str | None = None,
+    merge_commit_sha: str | None = None,
+    materialization_key: str | None = None,
+    commit_env: Mapping[str, str] | None = None,
+    write_paths: Sequence[Path | str] | None = None,
+) -> MaterializationCommit | None:
+    if None in (repo_root, parent_sha, built, intent_path, merge_commit_sha, materialization_key):
+        for target in write_paths or (LEDGER_PATH, ".ce/brain/append-intents/"):
+            _assert_armed_write_target(target)
+        assert_arming_enabled()
+        raise ValueError(
+            "materialization commit construction requires repo_root, parent_sha, built result, "
+            "intent path, merge commit, and materialization key"
+        )
+
+    root = Path(repo_root)
+    intent_rel = _repo_relative_path(root, intent_path)
+    for target in (LEDGER_PATH, intent_rel):
         _assert_armed_write_target(target)
+
+    message = _materialization_commit_message(
+        intent_path=intent_rel,
+        merge_commit_sha=merge_commit_sha,
+        materialization_key=materialization_key,
+        ledger_tail_after=built.ledger_tail_after,
+    )
+    with tempfile.TemporaryDirectory(prefix="ce-materializer-index-") as tmp:
+        env = {**_deterministic_commit_env(), "GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        if commit_env:
+            env.update(commit_env)
+        _git_plumbing(["read-tree", parent_sha], root, env=env)
+        ledger_blob = _git_plumbing(["hash-object", "-w", "--stdin"], root, input_text=built.ledger_text, env=env).strip()
+        _git_plumbing(["update-index", "--add", "--cacheinfo", f"100644,{ledger_blob},{LEDGER_PATH}"], root, env=env)
+        _git_plumbing(["update-index", "--force-remove", intent_rel], root, env=env)
+        tree_sha = _git_plumbing(["write-tree"], root, env=env).strip()
+        commit_sha = _git_plumbing(["commit-tree", tree_sha, "-p", parent_sha], root, input_text=message, env=env).strip()
+    return MaterializationCommit(
+        parent_sha=parent_sha,
+        tree_sha=tree_sha,
+        commit_sha=commit_sha,
+        message=message,
+        intent_path=intent_rel,
+        materialization_key=materialization_key,
+        ledger_tail_after=built.ledger_tail_after,
+    )
+
+
+def _is_cas_push_rejection(stdout: str, stderr: str) -> bool:
+    text = f"{stdout}\n{stderr}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "stale info",
+            "fetch first",
+            "non-fast-forward",
+        )
+    )
+
+
+def push_materialization_commit(
+    *,
+    repo_root: Path | str,
+    commit: MaterializationCommit,
+    git_runner: GitRunner | None = None,
+    remote: str = "origin",
+    branch: str = "main",
+) -> bool:
+    _assert_armed_write_target(LEDGER_PATH)
+    _assert_armed_write_target(commit.intent_path)
     assert_arming_enabled()
+    runner = git_runner or brain_append_worker._default_git_runner
+    code, stdout, stderr = runner(
+        [
+            "push",
+            f"--force-with-lease=refs/heads/{branch}:{commit.parent_sha}",
+            remote,
+            f"{commit.commit_sha}:refs/heads/{branch}",
+        ],
+        Path(repo_root),
+    )
+    if code == 0:
+        return True
+    if _is_cas_push_rejection(stdout, stderr):
+        return False
+    detail = stderr.strip() or stdout.strip() or "materializer push failed"
+    raise RuntimeError(detail)
 
 
 def _utc_now(now: Callable[[], datetime] | None = None) -> datetime:
@@ -300,14 +481,16 @@ def _position_field_present(value: Any) -> str | None:
 
 
 class IntentDiscovery:
-    def discover(
+    def _discover_loaded(
         self,
         *,
         merge_commit_sha: str,
         intent_path: Path | str,
         branch_slug: str,
+        data: dict[str, Any],
+        intent_sha256: str,
     ) -> DiscoveredIntent:
-        source, data = brain_append_worker.load_intent(intent_path)
+        source = Path(intent_path)
         if source.stem != branch_slug:
             raise BrainAppendRefusal(
                 "brain_append_intent_path_binding",
@@ -319,9 +502,52 @@ class IntentDiscovery:
                 "brain_append_contained_boundary",
                 f"append intent must not carry host/position field {position_field!r}",
             )
-        intent_sha256 = _canonical_intent_sha256(source)
         key = MaterializationKey.compute(merge_commit_sha, str(intent_path), intent_sha256)
         return DiscoveredIntent(source, data, intent_sha256, key)
+
+    def discover(
+        self,
+        *,
+        merge_commit_sha: str,
+        intent_path: Path | str,
+        branch_slug: str,
+    ) -> DiscoveredIntent:
+        source, data = brain_append_worker.load_intent(intent_path)
+        intent_sha256 = _canonical_intent_sha256(source)
+        return self._discover_loaded(
+            merge_commit_sha=merge_commit_sha,
+            intent_path=source,
+            branch_slug=branch_slug,
+            data=data,
+            intent_sha256=intent_sha256,
+        )
+
+    def discover_text(
+        self,
+        *,
+        merge_commit_sha: str,
+        intent_path: Path | str,
+        branch_slug: str,
+        text: str,
+    ) -> DiscoveredIntent:
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise BrainAppendRefusal(
+                "brain_append_intent_schema",
+                f"could not read or parse intent file: {exc}",
+            ) from exc
+        errors = brain_append_worker.validate_intent_doc(data, intent_path)
+        if errors:
+            raise BrainAppendRefusal(errors[0].code, errors[0].format())
+        intent_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return self._discover_loaded(
+            merge_commit_sha=merge_commit_sha,
+            intent_path=intent_path,
+            branch_slug=branch_slug,
+            data=data,
+            intent_sha256=intent_sha256,
+        )
 
 
 class HistoryScanner:
@@ -672,6 +898,33 @@ class MaterializerRunLoop:
             )
         return outputs
 
+    def run_armed_until_idle(self, *, pr_number: int | None = None, max_scan_cycles: int = 8) -> list[ArmedMaterializationOutput]:
+        source = self.poll_source or self._default_poll_source
+        outputs: list[ArmedMaterializationOutput] = []
+        for _cycle in range(max_scan_cycles):
+            pending = source()
+            if not pending:
+                return outputs
+            rescan = False
+            for merge_commit_sha, intent_path in pending:
+                path = Path(intent_path)
+                output = Materializer.run_armed(
+                    merge_commit_sha=merge_commit_sha,
+                    intent_path=intent_path,
+                    branch_slug=path.stem,
+                    pr_number=self.pr_number if pr_number is None else pr_number,
+                    config=self.config,
+                    git_runner=self.git_runner,
+                    now=self.now,
+                )
+                outputs.append(output)
+                if output.status == "cas_failed":
+                    rescan = True
+                    break
+            if not rescan:
+                return outputs
+        raise RuntimeError("materializer CAS rescan limit exceeded")
+
 
 def _append_event(
     *,
@@ -708,7 +961,226 @@ def event_sha256_for_line(line: str) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
+def _checked_git(runner: GitRunner, args: Sequence[str], repo_root: Path | str) -> str:
+    code, stdout, stderr = runner(args, Path(repo_root))
+    if code != 0:
+        detail = stderr.strip() or stdout.strip() or f"git {' '.join(args)} failed"
+        raise RuntimeError(detail)
+    return stdout
+
+
+def _show_git_path(runner: GitRunner, repo_root: Path | str, git_ref: str, path: str) -> str:
+    return _checked_git(runner, ["show", f"{git_ref}:{path}"], repo_root)
+
+
+def _fetch_remote_main(runner: GitRunner, repo_root: Path | str, *, remote: str, branch: str) -> None:
+    _checked_git(runner, ["fetch", remote, f"{branch}:refs/remotes/{remote}/{branch}"], repo_root)
+
+
+def _verify_materialization_commit(
+    runner: GitRunner,
+    repo_root: Path | str,
+    *,
+    commit: MaterializationCommit,
+    remote: str,
+    branch: str,
+) -> None:
+    _fetch_remote_main(runner, repo_root, remote=remote, branch=branch)
+    remote_tip = _checked_git(runner, ["rev-parse", f"{remote}/{branch}"], repo_root).strip()
+    if remote_tip != commit.commit_sha:
+        raise RuntimeError("materializer push verification failed: remote main did not resolve to materialization commit")
+    code, _stdout, _stderr = runner(["cat-file", "-e", f"{commit.commit_sha}:{commit.intent_path}"], Path(repo_root))
+    if code == 0:
+        raise RuntimeError("materializer push verification failed: consumed intent remains present")
+    ledger_text = _show_git_path(runner, repo_root, commit.commit_sha, LEDGER_PATH)
+    if commit.ledger_tail_after not in ledger_text:
+        raise RuntimeError("materializer push verification failed: ledger tail was not present in materialization commit")
+
+
 class Materializer:
+    @staticmethod
+    def run_armed(
+        *,
+        merge_commit_sha: str,
+        intent_path: Path | str,
+        branch_slug: str,
+        pr_number: int,
+        config: MaterializerConfig,
+        git_runner: GitRunner | None = None,
+        remote: str = "origin",
+        branch: str = "main",
+        verify_after_push: bool = True,
+        now: Callable[[], datetime] | None = None,
+    ) -> ArmedMaterializationOutput:
+        if not isinstance(config, MaterializerConfig):
+            raise MaterializerConfigError("config must be a MaterializerConfig")
+        runner = git_runner or brain_append_worker._default_git_runner
+        intent_rel = _repo_relative_path(config.repo_root, intent_path)
+        fallback_sha = hashlib.sha256(b"").hexdigest()
+        fallback_key = MaterializationKey.compute(merge_commit_sha, intent_rel, fallback_sha)
+        main_parent_sha: str | None = None
+        intent_text: str | None = None
+        discovered: DiscoveredIntent | None = None
+        with MaterializerLease(config.state_root):
+            try:
+                _fetch_remote_main(runner, config.repo_root, remote=remote, branch=branch)
+                intent_text = _show_git_path(runner, config.repo_root, merge_commit_sha, intent_rel)
+                discovered = IntentDiscovery().discover_text(
+                    merge_commit_sha=merge_commit_sha,
+                    intent_path=intent_rel,
+                    branch_slug=branch_slug,
+                    text=intent_text,
+                )
+                tail = LedgerTailProof(runner).prove(repo_root=config.repo_root, git_ref=f"{remote}/{branch}")
+                main_parent_sha = tail.main_parent_sha
+                live_intent_text = _show_git_path(runner, config.repo_root, main_parent_sha, intent_rel)
+                if hashlib.sha256(live_intent_text.encode("utf-8")).hexdigest() != discovered.intent_sha256:
+                    raise HeldError("brain_intent_partial_materialization", "live intent no longer matches discovered merge intent")
+                built = RecordBuilder().build(
+                    intent_data=discovered.data,
+                    live_records=tail.records,
+                    live_tail_content_hash=tail.content_hash,
+                    repo_root=config.repo_root,
+                    merge_commit_sha=merge_commit_sha,
+                    pr_number=pr_number,
+                    branch_slug=branch_slug,
+                    intent_path=intent_rel,
+                    intent_sha256=discovered.intent_sha256,
+                    materialization_key=discovered.materialization_key.key_hex,
+                )
+                commit = construct_materialization_commit(
+                    repo_root=config.repo_root,
+                    parent_sha=main_parent_sha,
+                    built=built,
+                    intent_path=intent_rel,
+                    merge_commit_sha=merge_commit_sha,
+                    materialization_key=discovered.materialization_key.key_hex,
+                )
+                if not push_materialization_commit(
+                    repo_root=config.repo_root,
+                    commit=commit,
+                    git_runner=runner,
+                    remote=remote,
+                    branch=branch,
+                ):
+                    _append_event(
+                        state_root=config.state_root,
+                        materialization_key=discovered.materialization_key.key_hex,
+                        intent_sha256=discovered.intent_sha256,
+                        merge_commit_sha=merge_commit_sha,
+                        main_parent_sha=main_parent_sha,
+                        result_status="cas_retry",
+                        now=now,
+                    )
+                    return ArmedMaterializationOutput(
+                        status="cas_failed",
+                        intent_path=intent_rel,
+                        intent_sha256=discovered.intent_sha256,
+                        merge_commit_sha=merge_commit_sha,
+                        materialization_key=discovered.materialization_key.key_hex,
+                        main_parent_sha=main_parent_sha,
+                        materialization_commit_sha=commit.commit_sha,
+                        ledger_tail_after=built.ledger_tail_after,
+                        refusal_reason=None,
+                    )
+                if verify_after_push:
+                    _verify_materialization_commit(runner, config.repo_root, commit=commit, remote=remote, branch=branch)
+                _append_event(
+                    state_root=config.state_root,
+                    materialization_key=discovered.materialization_key.key_hex,
+                    intent_sha256=discovered.intent_sha256,
+                    merge_commit_sha=merge_commit_sha,
+                    main_parent_sha=main_parent_sha,
+                    result_status="materialized",
+                    now=now,
+                )
+                return ArmedMaterializationOutput(
+                    status="materialized",
+                    intent_path=intent_rel,
+                    intent_sha256=discovered.intent_sha256,
+                    merge_commit_sha=merge_commit_sha,
+                    materialization_key=discovered.materialization_key.key_hex,
+                    main_parent_sha=main_parent_sha,
+                    materialization_commit_sha=commit.commit_sha,
+                    ledger_tail_after=built.ledger_tail_after,
+                    refusal_reason=None,
+                )
+            except BrainAppendRefusal as exc:
+                if intent_text is not None:
+                    fallback_sha = hashlib.sha256(intent_text.encode("utf-8")).hexdigest()
+                else:
+                    fallback_sha = _safe_intent_sha256(Path(config.repo_root) / intent_rel)
+                key = MaterializationKey.compute(merge_commit_sha, intent_rel, fallback_sha)
+                reason = "brain_intent_materialization_failed"
+                detail = f"{exc.invariant}: {exc.detail}"
+                QuarantineWriter(config.quarantine_root, now=now).write(
+                    materialization_key=key.key_hex,
+                    intent_path=intent_rel,
+                    intent_sha256=fallback_sha,
+                    merge_commit_sha=merge_commit_sha,
+                    validation_error=detail,
+                )
+                HeldStateStore(config.state_root, now=now).write(
+                    held_reason=reason,
+                    materialization_key=key.key_hex,
+                    intent_path=intent_rel,
+                    intent_sha256=fallback_sha,
+                    merge_commit_sha=merge_commit_sha,
+                )
+                _append_event(
+                    state_root=config.state_root,
+                    materialization_key=key.key_hex,
+                    intent_sha256=fallback_sha,
+                    merge_commit_sha=merge_commit_sha,
+                    main_parent_sha=main_parent_sha,
+                    result_status="held",
+                    now=now,
+                )
+                return ArmedMaterializationOutput(
+                    status="held",
+                    intent_path=intent_rel,
+                    intent_sha256=fallback_sha,
+                    merge_commit_sha=merge_commit_sha,
+                    materialization_key=key.key_hex,
+                    main_parent_sha=main_parent_sha,
+                    materialization_commit_sha=None,
+                    ledger_tail_after=None,
+                    refusal_reason=detail,
+                )
+            except HeldError as exc:
+                if discovered is not None:
+                    fallback_sha = discovered.intent_sha256
+                    key = discovered.materialization_key
+                else:
+                    key = fallback_key
+                HeldStateStore(config.state_root, now=now).write(
+                    held_reason=exc.reason,
+                    materialization_key=key.key_hex,
+                    intent_path=intent_rel,
+                    intent_sha256=fallback_sha,
+                    merge_commit_sha=merge_commit_sha,
+                )
+                _append_event(
+                    state_root=config.state_root,
+                    materialization_key=key.key_hex,
+                    intent_sha256=fallback_sha,
+                    merge_commit_sha=merge_commit_sha,
+                    main_parent_sha=main_parent_sha,
+                    result_status="held",
+                    now=now,
+                )
+                return ArmedMaterializationOutput(
+                    status="held",
+                    intent_path=intent_rel,
+                    intent_sha256=fallback_sha,
+                    merge_commit_sha=merge_commit_sha,
+                    materialization_key=key.key_hex,
+                    main_parent_sha=main_parent_sha,
+                    materialization_commit_sha=None,
+                    ledger_tail_after=None,
+                    refusal_reason=exc.reason,
+                )
+
     @staticmethod
     def run_dry(
         *,

@@ -14,8 +14,9 @@ from creator_engine_validator.brain_intent_materializer import (
     Materializer,
     MaterializerConfig,
     RecordBuilder,
-    construct_materialization_commit,
+    MaterializationCommit,
     event_sha256_for_line,
+    push_materialization_commit,
 )
 
 
@@ -190,10 +191,21 @@ def test_tail_unprovable_is_held_with_event(tmp_path: Path):
     assert json.loads(lines[0])["result_status"] == "held"
 
 
-def test_arming_is_disabled_and_commit_path_raises():
+def test_arming_is_disabled_and_push_path_raises():
     assert ARMING_ENABLED is False
     with pytest.raises(RuntimeError, match=ARMING_DISABLED_MESSAGE):
-        construct_materialization_commit()
+        push_materialization_commit(
+            repo_root=Path("."),
+            commit=MaterializationCommit(
+                parent_sha="a" * 40,
+                tree_sha="b" * 40,
+                commit_sha="c" * 40,
+                message="Materialize brain append intent\n\nCE-Materialization-Key: " + "d" * 64 + "\n",
+                intent_path=".ce/brain/append-intents/branch.yaml",
+                materialization_key="d" * 64,
+                ledger_tail_after="e" * 64,
+            ),
+        )
 
 
 def test_jsonl_log_is_append_only_between_calls(tmp_path: Path):
