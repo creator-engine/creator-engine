@@ -34,6 +34,8 @@ class FakeRunner:
         ledger_show: dict[tuple[str, str], pr_preflight.CommandResult] | None = None,
         autogen_generator_result: pr_preflight.CommandResult | None = None,
         autogen_artifact_changed: bool = False,
+        git_common_dir: str = ".git",
+        git_dir: str = ".git",
     ):
         self.repo_root = repo_root
         self.dirty = dirty
@@ -53,6 +55,8 @@ class FakeRunner:
         self.ledger_show = ledger_show or {}
         self.autogen_generator_result = autogen_generator_result or pr_preflight.CommandResult(0, "generated\n", "")
         self.autogen_artifact_changed = autogen_artifact_changed
+        self.git_common_dir = git_common_dir
+        self.git_dir = git_dir
         self.calls: list[tuple[list[str], Path, dict[str, str] | None, float | None]] = []
 
     def __call__(self, argv, cwd, env=None, *, timeout=None):
@@ -60,6 +64,10 @@ class FakeRunner:
         self.calls.append((argv, cwd, dict(env) if env is not None else None, timeout))
         if argv == ["git", "rev-parse", "--show-toplevel"]:
             return pr_preflight.CommandResult(0, str(self.repo_root) + "\n", "")
+        if argv == ["git", "rev-parse", "--git-common-dir"]:
+            return pr_preflight.CommandResult(0, self.git_common_dir + "\n", "")
+        if argv == ["git", "rev-parse", "--git-dir"]:
+            return pr_preflight.CommandResult(0, self.git_dir + "\n", "")
         if argv == ["git", "status", "--porcelain"]:
             return pr_preflight.CommandResult(0, self.dirty, "")
         if argv == ["git", "branch", "--show-current"]:
@@ -80,9 +88,9 @@ class FakeRunner:
             return pr_preflight.CommandResult(0, "", "")
         if argv[:4] == ["git", "worktree", "remove", "--force"]:
             return pr_preflight.CommandResult(0, "", "")
-        if argv in (
-            pr_preflight._test_command_argv(pr_preflight.DEFAULT_TEST_COMMAND),
-            pr_preflight._test_command_argv(pr_preflight.SEAT_READY_TEST_COMMAND),
+        if argv[1:] in (
+            pr_preflight._test_command_argv(pr_preflight.DEFAULT_TEST_COMMAND)[1:],
+            pr_preflight._test_command_argv(pr_preflight.SEAT_READY_TEST_COMMAND)[1:],
         ):
             if str(cwd).endswith("/base"):
                 return self.baseline_test_result
@@ -100,17 +108,17 @@ class FakeRunner:
             return pr_preflight.CommandResult(0, "", "")
         if argv[:2] == ["git", "commit"]:
             return pr_preflight.CommandResult(0, "[ce-499 test] refresh\n", "")
-        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "examples/malformed/" in argv:
+        if argv[1:3] == ["-m", "creator_engine_validator"] and "examples/malformed/" in argv:
             return pr_preflight.CommandResult(self.malformed_returncode, "malformed rejected\n", "")
-        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "scan-install-spec-signature" in argv:
+        if argv[1:3] == ["-m", "creator_engine_validator"] and "scan-install-spec-signature" in argv:
             return pr_preflight.CommandResult(self.install_spec_signature_returncode, self.install_spec_signature_stdout, "")
-        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "scan-portability-plane" in argv:
+        if argv[1:3] == ["-m", "creator_engine_validator"] and "scan-portability-plane" in argv:
             return pr_preflight.CommandResult(
                 self.portability_returncode,
                 self.portability_stdout,
                 self.portability_stderr,
             )
-        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "verify-test-coupling" in argv:
+        if argv[1:3] == ["-m", "creator_engine_validator"] and "verify-test-coupling" in argv:
             if not self.test_coupling_requires_marker:
                 return pr_preflight.CommandResult(0, "ok\n", "")
             pr_body = ""
@@ -124,9 +132,9 @@ class FakeRunner:
                 f"FAIL {coupling_chk.CHECK_NAME} {coupling_chk.CODE_MISSING_TEST}\n",
                 "",
             )
-        if argv[:3] == [sys.executable, "-m", "creator_engine_validator"] and "verify-path-manifest" in argv:
+        if argv[1:3] == ["-m", "creator_engine_validator"] and "verify-path-manifest" in argv:
             return pr_preflight.CommandResult(self.path_manifest_returncode, self.path_manifest_stdout, "")
-        if argv[:3] == [sys.executable, "-m", "creator_engine_validator.ce_cli"] and argv[3:7] == [
+        if argv[1:3] == ["-m", "creator_engine_validator.ce_cli"] and argv[3:7] == [
             "brain",
             "verify",
             "--drift",
@@ -771,6 +779,35 @@ def test_seat_ready_pytest_env_uses_home_tmpdir(tmp_path: Path, monkeypatch):
     env = pytest_call[2]
     assert env is not None
     assert env["TMPDIR"] == str(tmp_path / "home" / "tmp")
+
+
+def test_linked_worktree_default_test_command_uses_shared_main_venv_python(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    monkeypatch.delenv(pr_preflight.CE_VALIDATOR_PYTHON_ENV, raising=False)
+    worktree = tmp_path / "worktree"
+    main_repo = tmp_path / "main"
+    worktree.mkdir()
+    main_repo.mkdir()
+    shared_python = str(main_repo / ".venv" / "bin" / "python")
+    resolved: list[tuple[Path, Path]] = []
+
+    def fake_ensure_worktree_python(worktree_root: Path, main_repo_root: Path) -> str:
+        resolved.append((Path(worktree_root), Path(main_repo_root)))
+        return shared_python
+
+    monkeypatch.setattr(pr_preflight, "ensure_worktree_python", fake_ensure_worktree_python)
+    runner = FakeRunner(
+        worktree,
+        git_common_dir=str(main_repo / ".git"),
+        git_dir=str(main_repo / ".git" / "worktrees" / "worktree"),
+    )
+
+    rc = pr_preflight.run_preflight(_config(worktree), runner=runner, out=io.StringIO(), err=io.StringIO())
+
+    assert rc == 0
+    assert resolved == [(worktree.resolve(), main_repo.resolve())]
+    pytest_call = next(call for call in runner.calls if call[0][1:3] == ["-m", "pytest"])
+    assert pytest_call[0][0] == shared_python
 
 
 def test_seat_ready_profile_skips_portability_guard_failure(tmp_path: Path, monkeypatch):
