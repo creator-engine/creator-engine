@@ -102,6 +102,12 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce harness-matrix` | Emit the probed harness-support capability matrix. |
 | `ce surfaces` | Inspect surface metadata, including update checks and fleet rollout planning. |
 
+Environment variables recognized by this install/update surface:
+
+| Variable | Use it for |
+| --- | --- |
+| `CE_INSTALL_ROOT` | Override the CE bootstrap install root used by the one-liner bootstrap and by validator install-provenance commands when `--install-root` is not supplied. If unset, the default root is `${CE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/creator-engine}/bootstrap`. |
+
 ## Fleet And Orchestration
 
 | Command | Use it for |
