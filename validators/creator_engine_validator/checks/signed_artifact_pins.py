@@ -29,10 +29,27 @@ PIN_KEY_SOURCE_ALIASES: dict[str, tuple[str, ...]] = {
     "answers_schema_sha256": (
         "validators/creator_engine_validator/schemas/install-answers.schema.yaml",
     ),
+    # sha256s_sha256 pins the whole SHA256SUMS file, which is itself the
+    # release-op hash manifest for install.sh (both the repo-root script and
+    # its published docs/ mirror). A diff touching either byte-for-byte copy
+    # without a matching SHA256SUMS/pin-line change must be caught by the
+    # same guard that protects the wheelhouse copy.
     "sha256s_sha256": (
         "validators/wheelhouse/SHA256SUMS",
+        "install.sh",
+        "docs/install.sh",
     ),
 }
+
+
+class SignedArtifactCorruption(ValueError):
+    """Raised when the signed artifact's frontmatter cannot be trusted.
+
+    The guard must fail CLOSED on this condition: a signed doc that exists
+    but whose protection cannot be established (corrupt YAML, missing
+    artifact manifest, or zero discoverable pins) must never be silently
+    treated as "nothing to protect".
+    """
 
 
 @dataclass(frozen=True)
@@ -51,12 +68,26 @@ def _extract_signed_yaml(text: str) -> dict[str, object]:
     start = text.find("<!--")
     end = text.find("-->", start + 4)
     if start == -1 or end == -1:
-        return {}
+        raise SignedArtifactCorruption(
+            f"{SIGNED_ARTIFACT.as_posix()} has no HTML-comment frontmatter block "
+            "(no '<!--' ... '-->' found); the signed-artifact hash-pin guard "
+            "cannot establish protection and is failing closed"
+        )
     try:
         parsed = yaml.safe_load(text[start + 4:end])
-    except yaml.YAMLError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+    except yaml.YAMLError as exc:
+        raise SignedArtifactCorruption(
+            f"{SIGNED_ARTIFACT.as_posix()} frontmatter is not valid YAML ({exc}); "
+            "the signed-artifact hash-pin guard cannot establish protection and "
+            "is failing closed"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise SignedArtifactCorruption(
+            f"{SIGNED_ARTIFACT.as_posix()} frontmatter did not parse to a mapping; "
+            "the signed-artifact hash-pin guard cannot establish protection and "
+            "is failing closed"
+        )
+    return parsed
 
 
 def _repo_paths_for_url(url: object) -> tuple[str, ...]:
@@ -70,8 +101,20 @@ def _repo_paths_for_url(url: object) -> tuple[str, ...]:
 
 
 def _artifact_manifest(data: dict[str, object]) -> dict[str, object]:
-    manifest = data.get("artifact_manifest")
-    return manifest if isinstance(manifest, dict) else {}
+    if "artifact_manifest" not in data:
+        raise SignedArtifactCorruption(
+            f"{SIGNED_ARTIFACT.as_posix()} frontmatter has no 'artifact_manifest' "
+            "section; the signed-artifact hash-pin guard cannot establish "
+            "protection and is failing closed"
+        )
+    manifest = data["artifact_manifest"]
+    if not isinstance(manifest, dict):
+        raise SignedArtifactCorruption(
+            f"{SIGNED_ARTIFACT.as_posix()} frontmatter 'artifact_manifest' section "
+            "is not a mapping; the signed-artifact hash-pin guard cannot establish "
+            "protection and is failing closed"
+        )
+    return manifest
 
 
 def _protected_paths_for_key(key: str, manifest: dict[str, object]) -> tuple[str, ...]:
@@ -83,7 +126,14 @@ def _protected_paths_for_key(key: str, manifest: dict[str, object]) -> tuple[str
 
 
 def discover_pins(text: str, *, artifact_path: str = SIGNED_ARTIFACT.as_posix()) -> tuple[ArtifactPin, ...]:
-    """Return signed-artifact ``*_sha256`` pins with best-effort repo path mappings."""
+    """Return signed-artifact ``*_sha256`` pins with best-effort repo path mappings.
+
+    Raises ``SignedArtifactCorruption`` (fail-closed) if the frontmatter
+    cannot be parsed, the artifact manifest section is missing/malformed, or
+    zero pins are discoverable in the document — any of these means the
+    guard's protection has silently degraded to zero and must be reported
+    loudly rather than treated as "nothing to check".
+    """
     data = _extract_signed_yaml(text)
     manifest = _artifact_manifest(data)
     pins: list[ArtifactPin] = []
@@ -99,6 +149,11 @@ def discover_pins(text: str, *, artifact_path: str = SIGNED_ARTIFACT.as_posix())
                 line=line_number,
                 protected_paths=_protected_paths_for_key(key, manifest),
             )
+        )
+    if not pins:
+        raise SignedArtifactCorruption(
+            f"{artifact_path} yielded zero *_sha256 pins; the signed-artifact "
+            "hash-pin guard cannot establish protection and is failing closed"
         )
     return tuple(pins)
 
@@ -173,8 +228,28 @@ def evaluate_pins(
             noticed_keys.add(pin.key)
 
     if SIGNED_ARTIFACT.as_posix() in changed:
-        known_keys = {pin.key for pin in pins}
+        pins_by_key = {pin.key: pin for pin in pins}
+        known_keys = set(pins_by_key)
         for key in sorted(changed_keys & known_keys - noticed_keys):
+            # A pin with no protected paths doesn't map to any specific
+            # pinned file — it self-references the whole signed document
+            # (e.g. content_sha256). The generic "missing pinned-file
+            # change" wording is misleading there: any doc edit trips it,
+            # even though there is no separate file to have changed.
+            if not pins_by_key[key].protected_paths:
+                notices.append(
+                    make_error(
+                        CODE_NOTICE,
+                        SIGNED_ARTIFACT,
+                        key,
+                        "NOTICE: whole-document content pin changed; a full "
+                        "signed-artifact re-sign is required before release "
+                        "(this is a whole-document re-sign, not a missing "
+                        "pinned-file update)",
+                        CONTRACT,
+                    )
+                )
+                continue
             notices.append(
                 make_error(
                     CODE_NOTICE,
@@ -232,8 +307,17 @@ def run_with_base(paths: Iterable[Path], base: str) -> CheckResult:
             name=CHECK_NAME,
             errors=(make_error(CODE_INVALID, "PR_DIFF", "", "git diff signed artifact failed", CONTRACT),),
         )
+
+    try:
+        pins = discover_pins(text)
+    except SignedArtifactCorruption as exc:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(make_error(CODE_INVALID, SIGNED_ARTIFACT, "", str(exc), CONTRACT),),
+        )
+
     return evaluate_pins(
-        discover_pins(text),
+        pins,
         changed_paths=changed_paths,
         changed_pin_keys=changed_pin_keys_from_diff(doc_diff),
     )
