@@ -1,0 +1,57 @@
+# ce-install.answers.yaml — D1b onboarding, Arad / chmod735-dor/mythos (2026-07-03)
+# Schema: schemas/install-answers.schema.yaml (SSOT). Secrets ONLY as env:// file:// prompt:// refs.
+# Controller-held prep copy; transfer to her machine at session as CE_ANSWERS target.
+
+answers_version: 1
+
+# solo-pilot resolves isolation backend to os-native -> NO sudo ever planned
+# (v3_installer.py PROFILE_DEFAULT_BACKEND + BACKEND_DEPS: git/python/uv all user-space).
+profile: solo-pilot
+
+host:
+  sudo_grant: []                   # explicit empty grant — os-native path needs none
+  userspace_install: true
+
+cost:
+  profile: default                 # spend_cap_enforcement: enforce
+
+provider:
+  harness: claude-code             # Operator-confirmed 2026-07-03: single agent, Claude Code
+  # Auth mode Operator-confirmed 2026-07-03: SUBSCRIPTION OAuth — provider.*_api_key
+  # keys deliberately OMITTED (subscription sessions are detected via credential file;
+  # no answers-file key exists or is needed).
+
+github:
+  mode: existing                   # chmod735-dor/mythos already exists
+  repo: chmod735-dor/mythos        # ORG owner — not aradSmith personal
+  # Bootstrap token: identity-only for existing mode (no scopes verified); must
+  # authenticate as a login DISTINCT from the App bot. Plaintext file delivery
+  # per prior-attempt lesson. TODO-AT-SESSION: confirm final path before apply.
+  bootstrap_token: file:///home/aradsky/.ce-secrets/github-bootstrap-token.txt
+  app:
+    # Operator decision 2026-07-03: kind OWN with HER seat's App (mythos-arad) —
+    # coherent custody (org-owned App scoped admin:read, key on her machine only).
+    # Migrate to shared+broker once ce-ops#419 ships.
+    kind: own
+    app_id: "4159494"
+    client_id: Iv23liYX7gwrsQb01c2f
+    installation_id: 142925881          # verified live on chmod735-dor, 2026-07-03
+    pem: file:///home/aradsky/.ce-secrets/mythos-arad.private-key.pem  # staged at session, chmod 600
+  protections: reference
+  reviewer: aradSmith              # no-self-approval floor
+
+brownfield:
+  enabled: true
+  project_root: "."                # onboard must run FROM WITHIN her local mythos clone
+                                   # (adoption legs resolve project_root vs cwd; no
+                                   # workspace_checkout leg runs for brownfield)
+  inventory_depth: bounded
+  ci:
+    adopt_existing_workflows: true
+    required_checks_strategy: preserve-and-add
+  secrets:
+    preflight: required            # scanner pins auto-resolve for linux/x86_64
+  # tests/history/conventions left ABSENT — detected from the real mythos repo
+
+pilot:
+  target_repo: chmod735-dor/mythos

@@ -1,0 +1,5 @@
+# BATCH ADDENDUM — dev-1 — queue after your current review-analysis of #858
+Work these CONCURRENTLY where safe (you are a foreman — fan out workers per unit, one worktree per unit, no shared-worktree races). Standing rules apply per unit: fresh origin/main base, FULL ce validate-pr GREEN one pass, carrier via write_carriers (stem==branch slug), changelog fragment, G5 line, self-push+PR, report PR#+head per unit.
+UNIT B1 — ce-ops#459 (SHA256SUMS chain hardening): read the ticket and implement. ⛔ If the honest fix touches install.sh, llms-install.md, or ANY sha256-pinned/signed-chain file → STOP that unit and report "release-class, defer to 0.3.4 build" instead of pushing.
+UNIT B2 — ce-ops#457 ceremony wiring: wire the merged prose-lint into the release ceremony playbook path per the ticket's remaining scope (docs/playbook class). Skip with a one-line report if the ticket shows it already fully landed.
+Territory: do NOT touch surfaces/manifest.yaml (dev-4 pinning digests), README/deploy-script version refs or new validator checks (dev-3's #467), brain_append_*, onboard_apply.py template区 (your own #859 pending — rebase B-units if it merges under you).

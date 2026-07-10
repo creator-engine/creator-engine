@@ -1,0 +1,67 @@
+◆ CE · fetching signed install spec from https://creator-engine.dev/llms-install.md
+◆ CE · fetching trust root from https://creator-engine.dev/keys/ce-root-v1
+◆ CE · signed spec verified: canonical sha256 535a2650a9621931201531147cf52424287d3b3b0e41612f090e59757880fc8c
+◆ CE · fetching out-of-band trust anchor from https://dns.google/resolve?name=_ce-root-v1.creator-engine.dev&type=TXT
+◆ CE · out-of-band trust anchor accepted from dns-txt:_ce-root-v1.creator-engine.dev
+◆ CE · using Python: /home/aradsky/.local/bin/python3.14
+◆ CE · building verified venv target: /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.4-71e82840f2693ad341e328bfeff2aa8d980d7d88f9e79dd24967a1589f9ee160
+◆ CE · installed verified venv: /home/aradsky/.local/share/creator-engine/bootstrap/venv
+◆ CE · exposed CLI shims: /home/aradsky/.local/bin/cev3 and /home/aradsky/.local/bin/ce
+◆ CE · shell profile PATH block already current: /home/aradsky/.profile
+◆ CE · PATH block is marked '# >>> creator-engine PATH >>>'; delete that block to undo
+◆ CE · running authenticated onboard inventory
+◆ CE · onboard inventory — 40 inputs (spec verified against pinned key 'ce-root-v1'; trust anchors dns-txt:_ce-root-v1.creator-engine.dev)
+    step 1 · host.state_root [plain · F · optional] → default:.ce/state
+    step 1 · host.sudo_grant [consent · F/I · optional] → needed (would ask at step 1)
+    step 1 · host.userspace_install [consent · F/I] → default:True
+    step 1 · host.workspace_root [plain · F/I/D] → default:~/ce-workspaces
+    step 1 · profile [plain · F/I · optional] → needed (would ask at step 1)
+    step 2 · cost.optout [ratification · F/I] → not-applicable
+    step 2 · cost.profile [plain · F/I] → default:default
+    step 3 · provider.anthropic_api_key [secret · D/R/I · optional] → secret (ref required)
+    step 3 · provider.codex_token [secret · D/R/I · optional] → secret (ref required)
+    step 3 · provider.harness [plain · D/F/I] → needed (would ask at step 3)
+    step 3 · provider.openai_api_key [secret · D/R/I · optional] → secret (ref required)
+    step 3 · provider.transport [plain · D/F · optional] → needed (would ask at step 3)
+    step 4 · github.actions.install_validate_workflow [plain · D/F/I] → default:True
+    step 4 · github.app.app_id [plain · F/I] → not-applicable
+    step 4 · github.app.client_id [plain · F/I] → not-applicable
+    step 4 · github.app.installation_id [plain · D/F · optional] → needed (would ask at step 4)
+    step 4 · github.app.kind [plain · F/I] → default:shared
+    step 4 · github.app.pem [secret · R/I] → not-applicable
+    step 4 · github.bootstrap_token [secret · D/R/I] → secret (ref required)
+    step 4 · github.mode [plain · D/F/I] → needed (would ask at step 4)
+    step 4 · github.new_repo.default_branch [plain · F/I] → not-applicable
+    step 4 · github.new_repo.description [plain · F/I · optional] → not-applicable
+    step 4 · github.new_repo.visibility [plain · F/I] → not-applicable
+    step 4 · github.protections [plain · D/F/I] → default:reference
+    step 4 · github.repo [plain · D/F/I] → needed (would ask at step 4)
+    step 4 · github.reviewer [plain · D/F/I] → needed (would ask at step 4)
+    step 5 · brownfield.ci.adopt_existing_workflows [plain · F/I] → default:True
+    step 5 · brownfield.ci.required_checks_strategy [plain · F/I] → default:preserve-and-add
+    step 5 · brownfield.conventions.branch_pattern [plain · D/F/I · optional] → needed (would ask at step 5)
+    step 5 · brownfield.conventions.commit_style [plain · D/F/I · optional] → needed (would ask at step 5)
+    step 5 · brownfield.enabled [plain · D/F/I] → detected:False
+    step 5 · brownfield.history.mode [plain · D/F/I] → detected:absent
+    step 5 · brownfield.inventory_depth [plain · F/I] → default:bounded
+    step 5 · brownfield.project_root [plain · D/F/I] → detected:.
+    step 5 · brownfield.secrets.preflight [plain · D/F/I] → detected:required
+    step 5 · brownfield.secrets.waivers [ratification · F/I] → default:[]
+    step 5 · brownfield.tests.required_commands [plain · D/F/I] → default:[]
+    step 5 · pilot.target_repo [plain · F/I · optional] → needed (would ask at step 5)
+    step 5 · project.name [plain · F/I · optional] → not-applicable
+    step 5 · project.scaffold.kind [plain · F/I] → not-applicable
+◆ CE · prepare ce-install.answers.yaml from this (secrets ONLY as env:// file:// prompt:// keychain:// refs), then: ce install --spec <spec> --answers <file> --plan
+◆ CE · brownfield inventory — 0 workflow(s), 0 test command(s), history absent, scrub not_run
+WARNING: cev3 is deprecated; use ce instead.
+◆ CE · state file: /home/aradsky/.local/share/creator-engine/bootstrap/install-state
+◆ CE · summary: downloaded=13 reused=0 verified=12 installed=1 skipped_already_current=0 failed=0
+◆ CE · next: reload PATH in this shell with '. ~/.profile && hash -r', or open a new shell, so ce/cev3 are available
+◆ CE · note: git is required for first-value and is checked in inventory
+◆ CE · next: prepare ce-install.answers.yaml, then run '/home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/cev3' onboard --spec '/home/aradsky/.local/share/creator-engine/bootstrap/verified-inputs/535a2650a9621931201531147cf52424287d3b3b0e41612f090e59757880fc8c/llms-install.md' --trust-root '/home/aradsky/.local/share/creator-engine/bootstrap/verified-inputs/535a2650a9621931201531147cf52424287d3b3b0e41612f090e59757880fc8c/ce-root-v1' --trust-anchor 'dns-txt:_ce-root-v1.creator-engine.dev=/home/aradsky/.local/share/creator-engine/bootstrap/verified-inputs/535a2650a9621931201531147cf52424287d3b3b0e41612f090e59757880fc8c/trust-anchor.txt' --answers-schema '/home/aradsky/.local/share/creator-engine/bootstrap/verified-inputs/535a2650a9621931201531147cf52424287d3b3b0e41612f090e59757880fc8c/install-answers.schema.yaml' --answers <file> --plan
+0.3.4+010ef3de
+WARNING: cev3 is deprecated; use ce instead.
+0.3.4+010ef3de
+lrwxrwxrwx 1 aradsky aradsky 63 Jul  9 17:52 /home/aradsky/.local/bin/ce -> /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/ce
+lrwxrwxrwx 1 aradsky aradsky 65 Jul  9 17:52 /home/aradsky/.local/bin/cev3 -> /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/cev3
+/home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.4-71e82840f2693ad341e328bfeff2aa8d980d7d88f9e79dd24967a1589f9ee160/bin/ce

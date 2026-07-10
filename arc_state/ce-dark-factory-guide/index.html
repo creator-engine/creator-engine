@@ -1,0 +1,1418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CE Dark-Factory Guide — Operator Reference</title>
+<style>
+:root {
+  --bg: #f8f9fa;
+  --fg: #1a1a2e;
+  --muted: #5a5a7a;
+  --accent: #2563eb;
+  --accent2: #7c3aed;
+  --green: #16a34a;
+  --yellow: #ca8a04;
+  --red: #dc2626;
+  --border: #d1d5db;
+  --card: #ffffff;
+  --code-bg: #f1f5f9;
+  --nav-bg: #1e293b;
+  --nav-fg: #e2e8f0;
+  --today-bg: #fef3c7;
+  --today-border: #f59e0b;
+  --target-bg: #ecfdf5;
+  --target-border: #10b981;
+  --pill-human: #dbeafe;
+  --pill-human-fg: #1e40af;
+  --pill-ctrl: #f3e8ff;
+  --pill-ctrl-fg: #6b21a8;
+  --pill-daemon: #dcfce7;
+  --pill-daemon-fg: #15803d;
+  --pill-forge: #fff7ed;
+  --pill-forge-fg: #9a3412;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #60a5fa;
+    --accent2: #c084fc;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --border: #334155;
+    --card: #1e293b;
+    --code-bg: #0f172a;
+    --nav-bg: #020617;
+    --nav-fg: #cbd5e1;
+    --today-bg: #292218;
+    --today-border: #b45309;
+    --target-bg: #052e16;
+    --target-border: #059669;
+    --pill-human: #1e3a5f;
+    --pill-human-fg: #93c5fd;
+    --pill-ctrl: #2d1b69;
+    --pill-ctrl-fg: #d8b4fe;
+    --pill-daemon: #052e16;
+    --pill-daemon-fg: #86efac;
+    --pill-forge: #431407;
+    --pill-forge-fg: #fdba74;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 1.65;
+}
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--nav-bg);
+  color: var(--nav-fg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0 1rem;
+  border-bottom: 2px solid var(--accent);
+  min-height: 44px;
+  align-items: center;
+}
+nav a {
+  color: var(--nav-fg);
+  text-decoration: none;
+  font-size: 12px;
+  padding: 0.6rem 0.75rem;
+  white-space: nowrap;
+  transition: background 0.15s;
+  border-radius: 4px;
+}
+nav a:hover { background: rgba(255,255,255,0.12); }
+nav .logo {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent);
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+}
+.container { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+h1 { font-size: 1.9rem; font-weight: 800; margin-bottom: 0.3rem; }
+h2 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 2rem 0 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--accent);
+  color: var(--fg);
+}
+h3 { font-size: 1.05rem; font-weight: 700; margin: 1.5rem 0 0.5rem; color: var(--accent2); }
+h4 { font-size: 0.95rem; font-weight: 700; margin: 1.2rem 0 0.4rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+p { margin-bottom: 0.75rem; }
+ul, ol { margin: 0.5rem 0 0.75rem 1.5rem; }
+li { margin-bottom: 0.25rem; }
+code {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  font-size: 0.82em;
+  line-height: 1.55;
+  margin: 0.75rem 0;
+}
+pre code { background: none; border: none; padding: 0; font-size: inherit; }
+table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1rem; font-size: 0.87em; }
+th {
+  background: var(--nav-bg);
+  color: var(--nav-fg);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+}
+td { padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--code-bg); }
+.meta { color: var(--muted); font-size: 0.88em; margin-bottom: 1.5rem; }
+.section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.2rem;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+.section-header:hover { background: var(--code-bg); }
+.section-header h2 { margin: 0; border: none; padding: 0; font-size: 1.1rem; }
+.toggle-btn {
+  font-size: 1.2rem;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+  color: var(--muted);
+}
+.toggle-btn.open { transform: rotate(180deg); }
+.section-body { padding: 1.2rem 1.5rem; }
+.section-body.collapsed { display: none; }
+.today-box {
+  background: var(--today-bg);
+  border-left: 4px solid var(--today-border);
+  border-radius: 0 6px 6px 0;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  font-size: 0.92em;
+}
+.today-box strong { color: var(--today-border); }
+.target-box {
+  background: var(--target-bg);
+  border-left: 4px solid var(--target-border);
+  border-radius: 0 6px 6px 0;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  font-size: 0.92em;
+}
+.target-box strong { color: var(--target-border); }
+.answer-box {
+  background: var(--code-bg);
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  margin: 0.75rem 0;
+}
+.answer-box h4 { margin-top: 0; color: var(--accent); }
+.pill {
+  display: inline-block;
+  font-size: 0.75em;
+  font-weight: 600;
+  padding: 0.1em 0.6em;
+  border-radius: 20px;
+  margin: 0 0.2em;
+  vertical-align: middle;
+}
+.pill-human { background: var(--pill-human); color: var(--pill-human-fg); }
+.pill-ctrl { background: var(--pill-ctrl); color: var(--pill-ctrl-fg); }
+.pill-daemon { background: var(--pill-daemon); color: var(--pill-daemon-fg); }
+.pill-forge { background: var(--pill-forge); color: var(--pill-forge-fg); }
+.rung {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0.75rem 0;
+  overflow: hidden;
+}
+.rung-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  background: var(--code-bg);
+  cursor: pointer;
+  user-select: none;
+}
+.rung-header:hover { background: var(--border); }
+.rung-num {
+  font-weight: 800;
+  font-size: 1.1em;
+  color: var(--accent);
+  min-width: 1.8em;
+}
+.rung-title { font-weight: 600; }
+.rung-when { font-size: 0.8em; color: var(--muted); margin-left: auto; }
+.rung-body { padding: 0.75rem 1rem; }
+.rung-body.collapsed { display: none; }
+.status-green { color: var(--green); font-weight: 700; }
+.status-yellow { color: var(--yellow); font-weight: 700; }
+.status-red { color: var(--red); font-weight: 700; }
+.svg-container { overflow-x: auto; padding: 1rem 0; }
+svg { max-width: 100%; height: auto; }
+.glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+.glossary-item {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+}
+.glossary-term { font-weight: 700; color: var(--accent); font-size: 0.9em; }
+.glossary-def { font-size: 0.86em; color: var(--fg); margin-top: 0.2em; }
+.ref-table td:first-child code { font-size: 0.8em; word-break: break-all; }
+@media (max-width: 700px) {
+  nav { gap: 0; padding: 0 0.5rem; }
+  nav a { padding: 0.5rem 0.5rem; font-size: 11px; }
+  .container { padding: 1rem 0.75rem; }
+  h1 { font-size: 1.4rem; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">CE Dark Factory</span>
+  <a href="#exec">Overview</a>
+  <a href="#layer1">L1 Frame/Shape</a>
+  <a href="#layer2">L2 Intake</a>
+  <a href="#layer3">L3 Build</a>
+  <a href="#layer4">L4 Gate</a>
+  <a href="#layer5">L5 Substrate</a>
+  <a href="#master-diagram">Master Diagram</a>
+  <a href="#answers">Q&amp;A</a>
+  <a href="#ladder">Ladder</a>
+  <a href="#authority">Authority</a>
+  <a href="#glossary">Glossary</a>
+  <a href="#references">References</a>
+</nav>
+
+<div class="container">
+
+<h1>CE Dark-Factory Guide</h1>
+<p class="meta">Operator-facing internal reference &mdash; 2026-07-08 &mdash; anchored to verified TODAY facts</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="exec">
+<div class="section-header" onclick="toggle(this)">
+  <h2>1. Executive Summary</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<p>The CE dark factory is the end-state in which Creator Engine builds its own software
+autonomously. The Operator and controller co-frame ideas in natural language; the controller
+produces a ratified arc and tickets; governed seats pick up work units autonomously;
+local and forge-level automation handles PR mechanics and review assignment;
+the merge gate materializes committed intents — all without manual git operations by the Operator.</p>
+
+<p><strong>Operator's role at endgame:</strong> CEO-mode — ratify arcs, arm new
+authorities, handle escalations, hold root-key custody, manage external relationships.
+Every other delivery action is either autonomous (predicates hold) or queued
+in forge-visible <code>AWAITING-OPERATOR</code> state.</p>
+
+<div class="target-box">
+<strong>TARGET endgame picture:</strong>
+<ul>
+<li>Forge events spawn ephemeral NanoClaw controllers from content-addressed mandate pointers</li>
+<li>Pickup conveyor feeds seats with ready tickets from the ratified arc</li>
+<li>Containerized review daemon assigns reviewers and spawns review lanes automatically</li>
+<li>Triage daemon processes seat-filed tickets via belt-feed polling</li>
+<li><code>ce-queue-daemon</code> (containerized singleton) is the merge gate AND Option A materializer</li>
+<li>Host-ops broker mediates all host-level operations from contained contexts</li>
+<li>Controllers themselves are contained and IaC-reprovisioned (T1 Aug 11 / T2 Aug 31)</li>
+</ul>
+</div>
+
+<div class="today-box">
+<strong>TODAY (2026-07-08):</strong> Controller hand-dispatches briefs, harvests via exec-cat bundle,
+manually spawns reviewer subagents, submits approvals. C5 (containerized queue daemon) promoted.
+Option A materializer in dry-run only. #896 seat-ready merged. #898 broker slice 1 merged.
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="layer1">
+<div class="section-header" onclick="toggle(this)">
+  <h2>L1 &mdash; Operator + Controller Framing and Shaping Loop</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<!-- L1 Diagram -->
+<div class="svg-container">
+<svg viewBox="0 0 700 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layer 1: Frame and Shape loop">
+  <defs>
+    <marker id="arr1" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="1" y="1" width="698" height="208" rx="8" fill="none" stroke="#60a5fa" stroke-width="1.5"/>
+  <!-- Operator box -->
+  <rect x="20" y="30" width="170" height="150" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="105" y="50" text-anchor="middle" font-weight="700" font-size="12" fill="#1e40af">OPERATOR</text>
+  <text x="105" y="66" text-anchor="middle" font-size="10" fill="#1e40af">human</text>
+  <text x="35" y="88" font-size="10" fill="#1e3a5f">• Natural-language framing</text>
+  <text x="35" y="103" font-size="10" fill="#1e3a5f">• Arc ratification</text>
+  <text x="35" y="118" font-size="10" fill="#1e3a5f">• Authority arming</text>
+  <text x="35" y="133" font-size="10" fill="#1e3a5f">• Root-key custody</text>
+  <text x="35" y="148" font-size="10" fill="#1e3a5f">• Escalation handling</text>
+  <text x="35" y="163" font-size="10" fill="#1e3a5f">• External comms</text>
+  <!-- Arrow right -->
+  <path d="M192,105 L240,105" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="216" y="99" text-anchor="middle" font-size="9" fill="#64748b">frame</text>
+  <!-- Arrow left (ratification) -->
+  <path d="M240,115 L192,115" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="216" y="129" text-anchor="middle" font-size="9" fill="#64748b">ratify</text>
+  <!-- Controller box -->
+  <rect x="242" y="30" width="200" height="150" rx="6" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="342" y="50" text-anchor="middle" font-weight="700" font-size="12" fill="#6b21a8">CONTROLLER</text>
+  <text x="342" y="66" text-anchor="middle" font-size="10" fill="#6b21a8">CE-DEV-2, persistent</text>
+  <text x="255" y="88" font-size="10" fill="#2d1b69">Frame: classify + territory-check</text>
+  <text x="255" y="103" font-size="10" fill="#2d1b69">Shape: arc + tickets + carriers</text>
+  <text x="255" y="118" font-size="10" fill="#2d1b69">Dispatch: brief→pointer+SHA</text>
+  <text x="255" y="133" font-size="10" fill="#2d1b69">Watch: herdr + CI + stop-lines</text>
+  <text x="255" y="148" font-size="10" fill="#2d1b69">Harvest: exec-cat (contained)</text>
+  <text x="255" y="163" font-size="10" fill="#2d1b69">Gate: approve → merge trigger</text>
+  <!-- Arrow right -->
+  <path d="M444,105 L492,105" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="468" y="99" text-anchor="middle" font-size="9" fill="#64748b">dispatch</text>
+  <!-- Arc/Tickets box -->
+  <rect x="494" y="55" width="185" height="100" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="586" y="75" text-anchor="middle" font-weight="700" font-size="12" fill="#15803d">ARC + TICKETS</text>
+  <text x="510" y="95" font-size="10" fill="#052e16">ce-ops GitHub issues</text>
+  <text x="510" y="110" font-size="10" fill="#052e16">work-class XS/S/M/L labels</text>
+  <text x="510" y="125" font-size="10" fill="#052e16">carrier manifests per PR</text>
+  <text x="510" y="140" font-size="10" fill="#052e16">changelog fragments</text>
+  <!-- Harness note -->
+  <rect x="242" y="188" width="200" height="16" rx="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="342" y="199" text-anchor="middle" font-size="9" fill="#92400e">Governance: harness seam (Ring 0/1/2)</text>
+</svg>
+</div>
+
+<h3>Frame Stage</h3>
+<p>The Operator describes objectives in natural language. The controller classifies the request,
+maps it to CE governance vocabulary (arc, lane, ticket, work class), checks against active
+claims and in-flight work, and proposes a Frame artifact.</p>
+
+<h3>Shape Stage</h3>
+<p>The controller produces: a short-term arc (ordered lanes), roadmap update candidates,
+tickets in ce-ops with work-class labels, carrier manifests, and per-PR changelog fragments.</p>
+
+<div class="today-box">
+<strong>TODAY:</strong> Controller hand-authors briefs, maintains arc in resume state files
+(<code>.ce/state/research/RESUME_STATE_CE_DEV2_*</code>). Decisions in
+<code>.ce/state/decisions/DECISIONS_20260708.md</code>. Dispatch is manual: controller
+creates brief file, dispatches via pointer+SHA.
+</div>
+
+<div class="target-box">
+<strong>TARGET:</strong> Orchestrator agent (<code>docs/design/ce-orchestrator-agent.md</code>)
+is a shipped product artifact running the full lifecycle. Controller bootstrap SSOT
+(<code>docs/design/controller-bootstrap-ssot.json</code>) is the live injection source.
+</div>
+
+<h3 id="framing-guarantee">Framing Guarantee: Governed Framing Without Explicit Verb</h3>
+
+<div class="answer-box">
+<h4>How CE guarantees governed framing without <code>/ce frame</code></h4>
+<p>CE does not require users to type <code>/ce frame</code>. Governance attaches at the
+<strong>harness seam</strong>, not at a command parser.</p>
+<ul>
+<li><strong>Ring 0</strong> (<code>ce launch</code>): scrubs ambient credentials, controlled environment</li>
+<li><strong>Ring 1</strong> (<code>ce launch</code>): PreToolUse hook (<code>.claude/hooks/ce-pretooluse.sh</code>) registered BEFORE the harness starts</li>
+<li><strong>Ring 2</strong>: Stop hook for closeout evidence (Claude Code)</li>
+</ul>
+<p>The PreToolUse hook fires on <em>every tool call</em>, validating path scope, work claim,
+reviewer authority, and role-shaped tool set. A seat receiving a brief cannot bypass this
+by omitting a command prefix.</p>
+<p>For the persistent controller, <code>ce takeover</code> is the succession entry verb:
+it ingests evidence packets and reconstructs governance context, making framing a natural
+precondition of any subsequent action.</p>
+<p><strong>Doctrine:</strong> "Grader-outside-the-agent" (<code>docs/architecture/stage-vocabulary.md</code>).
+Intent recognition is soft (model-level). Enforcement is hard (harness boundary).</p>
+<p>References: <code>docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md</code>,
+<code>docs/operations/HARNESS_SUPPORT_CAPABILITY_MATRIX.md</code>,
+<code>validators/creator_engine_validator/hook_check.py</code></p>
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="layer2">
+<div class="section-header" onclick="toggle(this)">
+  <h2>L2 &mdash; Intake Conveyor: Arc &#8594; Tickets &#8594; Pickup Queue &#8594; Seats</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<div class="svg-container">
+<svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layer 2: Intake conveyor">
+  <defs>
+    <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect x="10" y="20" width="110" height="90" rx="6" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="65" y="42" text-anchor="middle" font-weight="700" font-size="11" fill="#6b21a8">ARC</text>
+  <text x="65" y="57" text-anchor="middle" font-size="9" fill="#2d1b69">ratified by Operator</text>
+  <text x="65" y="72" text-anchor="middle" font-size="9" fill="#2d1b69">ordered lanes</text>
+  <text x="65" y="87" text-anchor="middle" font-size="9" fill="#2d1b69">evidence gates</text>
+  <text x="65" y="102" text-anchor="middle" font-size="9" fill="#2d1b69">rollback story</text>
+  <path d="M122,65 L162,65" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="164" y="20" width="120" height="90" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="224" y="42" text-anchor="middle" font-weight="700" font-size="11" fill="#15803d">TICKETS</text>
+  <text x="224" y="57" text-anchor="middle" font-size="9" fill="#052e16">ce-ops issues</text>
+  <text x="224" y="72" text-anchor="middle" font-size="9" fill="#052e16">work-class XS/S/M/L</text>
+  <text x="224" y="87" text-anchor="middle" font-size="9" fill="#052e16">carrier + changelog</text>
+  <text x="224" y="102" text-anchor="middle" font-size="9" fill="#052e16">per bounded PR</text>
+  <path d="M286,65 L326,65" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="328" y="20" width="130" height="90" rx="6" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="393" y="42" text-anchor="middle" font-weight="700" font-size="11" fill="#9a3412">PICKUP QUEUE</text>
+  <text x="393" y="57" text-anchor="middle" font-size="9" fill="#431407">TARGET: auto pickup</text>
+  <text x="393" y="72" text-anchor="middle" font-size="9" fill="#431407">TODAY: manual dispatch</text>
+  <text x="393" y="87" text-anchor="middle" font-size="9" fill="#431407">work claim lock</text>
+  <text x="393" y="102" text-anchor="middle" font-size="9" fill="#431407">brief pointer+SHA</text>
+  <path d="M460,65 L500,65" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="502" y="20" width="180" height="90" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="592" y="42" text-anchor="middle" font-weight="700" font-size="11" fill="#1e40af">SEATS</text>
+  <text x="592" y="57" text-anchor="middle" font-size="9" fill="#1e3a5f">dev-1 VPS non-contained</text>
+  <text x="592" y="72" text-anchor="middle" font-size="9" fill="#1e3a5f">dev-3 VPS gVisor (rebuilding)</text>
+  <text x="592" y="87" text-anchor="middle" font-size="9" fill="#1e3a5f">dev-4 DGX gVisor (strongest)</text>
+  <text x="592" y="102" text-anchor="middle" font-size="9" fill="#1e3a5f">Ring 0/1 green per matrix</text>
+</svg>
+</div>
+
+<h3>Arc</h3>
+<p>A short-term plan (ordered lanes A-1..A-N) with dependencies, evidence gates, and rollback stories.
+Ratified by the Operator (e.g. DAY-ARC 2026-07-08 in <code>DECISIONS_20260708.md</code> decision 8).</p>
+
+<h3>Tickets</h3>
+<p>Filed in ce-ops GitHub repository with work-class labels. Each ticket maps to one or more
+bounded PRs. Carrier manifests declare the path set and work class.</p>
+
+<h3>Work Sizing Discipline</h3>
+<p>XS/S/M/L classes with PR body line <code>- <strong>Declared work class:</strong> tiny|story|feature|epic</code>.
+G5 gate in CI enforces exactly one such line per governed PR.</p>
+
+<h3>Fleet (TODAY 2026-07-08)</h3>
+<table>
+<tr><th>Seat</th><th>Host</th><th>Containment</th><th>Push Method</th><th>Status</th></tr>
+<tr><td>dev-1</td><td>VPS Hetzner 100.72.252.20</td><td>Non-contained</td><td>ssh git push</td><td class="status-green">OPERATIONAL</td></tr>
+<tr><td>dev-3</td><td>VPS gVisor (<code>ce-vps-codex</code>)</td><td>gVisor runsc</td><td>egress broker</td><td class="status-yellow">REBUILDING (new amd64 image)</td></tr>
+<tr><td>dev-4</td><td>DGX gVisor (<code>ce-dgx-codex</code>)</td><td>gVisor runsc</td><td>App-mint helper</td><td class="status-green">OPERATIONAL (strongest)</td></tr>
+</table>
+
+<div class="today-box">
+<strong>TODAY:</strong> Pickup is semi-manual. Controller creates individual briefs, dispatches via
+herdr PTY pointer+SHA, monitors for READY stop-lines. Contained seats work in <code>/var/tmp/</code>
+(in-memory on DGX; harvest early to avoid OOM loss).
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="layer3">
+<div class="section-header" onclick="toggle(this)">
+  <h2>L3 &mdash; Build: Governed Seats, Containment, Self-Verify, Self-Push</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<div class="svg-container">
+<svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layer 3: Build pipeline">
+  <defs>
+    <marker id="arr3" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <!-- Seat -->
+  <rect x="10" y="30" width="160" height="140" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="90" y="52" text-anchor="middle" font-weight="700" font-size="11" fill="#1e40af">SEAT (example: dev-4)</text>
+  <text x="25" y="70" font-size="9" fill="#1e3a5f">gVisor runsc container</text>
+  <text x="25" y="85" font-size="9" fill="#1e3a5f">No raw runtime socket</text>
+  <text x="25" y="100" font-size="9" fill="#1e3a5f">Worktree: /var/tmp/</text>
+  <text x="25" y="115" font-size="9" fill="#1e3a5f">Ring 0: cred scrub</text>
+  <text x="25" y="130" font-size="9" fill="#1e3a5f">Ring 1: PreToolUse hook</text>
+  <text x="25" y="145" font-size="9" fill="#1e3a5f">Path scope enforced</text>
+  <text x="25" y="160" font-size="9" fill="#1e3a5f">Work claim bound</text>
+  <!-- Arrow: seat -> preflight -->
+  <path d="M172,100 L210,100" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <!-- Preflight -->
+  <rect x="212" y="55" width="130" height="90" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="277" y="75" text-anchor="middle" font-weight="700" font-size="11" fill="#15803d">SEAT PREFLIGHT</text>
+  <text x="277" y="90" text-anchor="middle" font-size="9" fill="#052e16">#896 seat-ready</text>
+  <text x="277" y="105" text-anchor="middle" font-size="9" fill="#052e16">ce validate-pr</text>
+  <text x="277" y="120" text-anchor="middle" font-size="9" fill="#052e16">carrier path match</text>
+  <text x="277" y="135" text-anchor="middle" font-size="9" fill="#052e16">changelog fragment</text>
+  <!-- Arrow: preflight -> push -->
+  <path d="M344,100 L382,100" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <!-- Self-push -->
+  <rect x="384" y="55" width="140" height="90" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="454" y="75" text-anchor="middle" font-weight="700" font-size="11" fill="#92400e">SELF-PUSH</text>
+  <text x="454" y="90" text-anchor="middle" font-size="9" fill="#78350f">dev-1: ssh git push</text>
+  <text x="454" y="105" text-anchor="middle" font-size="9" fill="#78350f">dev-3: egress broker</text>
+  <text x="454" y="120" text-anchor="middle" font-size="9" fill="#78350f">dev-4: App-mint helper</text>
+  <text x="454" y="135" text-anchor="middle" font-size="9" fill="#78350f">ce-materializer 4244593</text>
+  <!-- Arrow: push -> PR -->
+  <path d="M526,100 L564,100" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <!-- PR -->
+  <rect x="566" y="55" width="124" height="90" rx="6" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="628" y="75" text-anchor="middle" font-weight="700" font-size="11" fill="#9a3412">PR OPENED</text>
+  <text x="628" y="90" text-anchor="middle" font-size="9" fill="#431407">branch push</text>
+  <text x="628" y="105" text-anchor="middle" font-size="9" fill="#431407">gh pr create</text>
+  <text x="628" y="120" text-anchor="middle" font-size="9" fill="#431407">carrier attached</text>
+  <text x="628" y="135" text-anchor="middle" font-size="9" fill="#431407">changelog attached</text>
+  <!-- Host-ops broker note -->
+  <rect x="10" y="178" width="245" height="16" rx="3" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1"/>
+  <text x="132" y="189" text-anchor="middle" font-size="9" fill="#6b21a8">Host-ops broker mediates host repair verbs (v1 slice 1 merged #898)</text>
+</svg>
+</div>
+
+<h3>Containment Ring</h3>
+<p>gVisor runsc isolation for dev-3 and dev-4. No raw Docker/Podman socket inside containers.
+Egress broker (<code>tools/egress-broker/</code>) mediates network access.
+Host-ops broker (<code>tools/host-ops-broker/</code>) mediates host-level repair operations
+via typed verbs only &mdash; no raw passthrough.</p>
+
+<h3>Identity / Self-Push</h3>
+<table>
+<tr><th>Seat</th><th>Push identity</th><th>Credential location</th></tr>
+<tr><td>dev-1</td><td>personal git + ssh</td><td>host ssh key</td></tr>
+<tr><td>dev-3</td><td>egress broker path</td><td>broker-mediated (rebuilding)</td></tr>
+<tr><td>dev-4</td><td>ce-materializer App 4244593</td><td><code>~/.ce-keys/ce-materializer.2026-07-07.private-key.pem</code></td></tr>
+</table>
+
+<h3>Seat-Ready Profile (#896, merged)</h3>
+<p>Seats run <code>ce validate-pr</code> before READY stop-line.
+<code>docs/design/seat-side-preflight.md</code>: validates generated reference freshness,
+carrier path set vs real diff, changelog fragment presence, declared work class line.
+Catches failures before controller harvest.</p>
+
+<h3>Carrier Discipline</h3>
+<p>Every governed PR carries: one changelog carrier (<code>.ce/changelog/&lt;slug&gt;.md</code>)
+and one path-manifest carrier (generated from committed diff, not hand-edited).
+Carrier slug must match branch slug. CI enforces G5: exactly one declared-work-class line.</p>
+
+<div class="today-box">
+<strong>TODAY harvest:</strong> Controller executes <code>docker exec ce-dgx-codex cat &lt;bundle&gt;</code>
+(exec-cat pattern) to extract committed work from contained seats.
+<code>git bundle create - --all | base64</code> inside container, piped out.
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="layer4">
+<div class="section-header" onclick="toggle(this)">
+  <h2>L4 &mdash; The Gate: Review &#8594; Approval &#8594; Merge Queue &#8594; Gate Daemon &#8594; Materializer</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<div class="svg-container">
+<svg viewBox="0 0 700 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layer 4: Gate pipeline">
+  <defs>
+    <marker id="arr4" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <!-- CI -->
+  <rect x="10" y="30" width="110" height="80" rx="6" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="65" y="50" text-anchor="middle" font-weight="700" font-size="10" fill="#92400e">CI VALIDATE</text>
+  <text x="65" y="65" text-anchor="middle" font-size="9" fill="#78350f">GitHub Actions</text>
+  <text x="65" y="80" text-anchor="middle" font-size="9" fill="#78350f">evidence only</text>
+  <text x="65" y="95" text-anchor="middle" font-size="9" fill="#78350f">no ratification</text>
+  <!-- Review -->
+  <rect x="10" y="125" width="110" height="90" rx="6" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="65" y="145" text-anchor="middle" font-weight="700" font-size="10" fill="#6b21a8">REVIEWER</text>
+  <text x="65" y="160" text-anchor="middle" font-size="9" fill="#2d1b69">local subagent TODAY</text>
+  <text x="65" y="175" text-anchor="middle" font-size="9" fill="#2d1b69">review daemon TARGET</text>
+  <text x="65" y="190" text-anchor="middle" font-size="9" fill="#2d1b69">author &#x2260; reviewer</text>
+  <text x="65" y="205" text-anchor="middle" font-size="9" fill="#2d1b69">reviewer-authority envelope</text>
+  <!-- Arrows to approval wall -->
+  <path d="M122,70 L178,100" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr4)"/>
+  <path d="M122,170 L178,140" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr4)"/>
+  <!-- Approval wall -->
+  <rect x="180" y="80" width="120" height="80" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="240" y="100" text-anchor="middle" font-weight="700" font-size="10" fill="#1e40af">APPROVAL WALL</text>
+  <text x="240" y="116" text-anchor="middle" font-size="9" fill="#1e3a5f">OpenBao wall secret</text>
+  <text x="240" y="131" text-anchor="middle" font-size="9" fill="#1e3a5f">approval + CI green</text>
+  <text x="240" y="146" text-anchor="middle" font-size="9" fill="#1e3a5f">= merge trigger</text>
+  <!-- Arrow -->
+  <path d="M302,120 L342,120" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr4)"/>
+  <!-- Queue daemon -->
+  <rect x="344" y="70" width="140" height="100" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="414" y="90" text-anchor="middle" font-weight="700" font-size="10" fill="#15803d">CE-QUEUE-DAEMON</text>
+  <text x="414" y="106" text-anchor="middle" font-size="9" fill="#052e16">containerized singleton</text>
+  <text x="414" y="121" text-anchor="middle" font-size="9" fill="#052e16">C5 promoted 2026-07-07</text>
+  <text x="414" y="136" text-anchor="middle" font-size="9" fill="#052e16">ce-queue-daemon.service</text>
+  <text x="414" y="151" text-anchor="middle" font-size="9" fill="#052e16">squash merge → main</text>
+  <!-- Arrow -->
+  <path d="M486,120 L526,120" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr4)"/>
+  <!-- Materializer -->
+  <rect x="528" y="70" width="160" height="100" rx="6" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="608" y="90" text-anchor="middle" font-weight="700" font-size="10" fill="#9a3412">OPTION A MATERIALIZER</text>
+  <text x="608" y="106" text-anchor="middle" font-size="9" fill="#431407">TODAY: dry-run only</text>
+  <text x="608" y="121" text-anchor="middle" font-size="9" fill="#431407">reads append-intents/</text>
+  <text x="608" y="136" text-anchor="middle" font-size="9" fill="#431407">appends brain ledger</text>
+  <text x="608" y="151" text-anchor="middle" font-size="9" fill="#431407">ce-materializer App 4244593</text>
+  <!-- Forge label -->
+  <rect x="344" y="185" width="344" height="14" rx="3" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1"/>
+  <text x="516" y="195" text-anchor="middle" font-size="8" fill="#0369a1">merge queue: ce-reference-protection-floor ruleset (GitHub)</text>
+</svg>
+</div>
+
+<h3>4a: Review Assignment</h3>
+<div class="answer-box">
+<h4>Operator's question (c4): Local or forge level?</h4>
+<p><strong>Answer: Hybrid &mdash; forge events trigger; local daemon decides and spawns.</strong></p>
+<ul>
+<li><span class="pill pill-forge">FORGE</span> <strong>Trigger + SSOT</strong>: GitHub PR-opened/PR-synchronized webhooks deliver the canonical event. Forge holds authoritative PR state (head SHA, author identity, required check results, CODEOWNERS).</li>
+<li><span class="pill pill-daemon">DAEMON</span> <strong>Decision + spawn</strong>: Local containerized review daemon applies the author/reviewer matrix, selects from <code>CE_GATE_AUTHORIZED_REVIEWERS</code>, mints a reviewer-authority envelope (single-use, short TTL), and spawns a local reviewer lane.</li>
+</ul>
+<p><strong>Why local, not forge:</strong> Reviewer spawn requires access to CE's internal seat registry, OpenBao-held authority, and reviewer-authority minting. These must not live in GitHub Actions (cannot hold approval-wall secrets there). Author &#x2260; reviewer is a CE hard invariant enforced locally.</p>
+<p>References: <code>playbooks/reviewer/</code>, <code>docs/delivery/REVIEW_GATE.md</code>, <code>docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md</code> &sect;0b</p>
+</div>
+
+<h3>4b: Approval and Merge Queue</h3>
+<p><strong>Approval wall:</strong> Queue daemon reads <code>ce-kv/forge/approval-capability/wall#signing_secret</code>
+from OpenBao to verify approval markers. Approval from authorized reviewer with required checks green
+triggers merge queue enqueue.</p>
+<p><strong>Merge queue:</strong> Ruleset <code>ce-reference-protection-floor</code> on main.
+Required: 1 review + required check (<code>validate</code>) + merge queue. Squash merge.
+Classic protection retired 2026-07-08. ce-materializer App 4244593 = sole always-bypass actor.</p>
+
+<h3>4c: Containerized Gate Daemon (C5 &mdash; current)</h3>
+<table>
+<tr><th>Property</th><th>Value</th></tr>
+<tr><td>Container image</td><td><code>creator-engine/ce-runtime:0.3.2-main</code></td></tr>
+<tr><td>Worktree</td><td><code>ce-daemon-main</code> @ origin/main 14b0c178</td></tr>
+<tr><td>State path</td><td><code>/var/lib/ce-queue-daemon/</code> (host) = <code>/ce/state/</code> (in container)</td></tr>
+<tr><td>Systemd unit</td><td><code>ce-queue-daemon.service</code> (Restart=always, journald)</td></tr>
+<tr><td>Host daemon</td><td>STOPPED, rollback-only</td></tr>
+<tr><td>Rollback</td><td><code>sudo docker stop ce-queue-daemon; bash ~/ce-wall-daemon-launch.sh</code></td></tr>
+<tr><td>Singleton lease</td><td><code>queue-daemon.lease</code> filesystem lock; manual removal required for stale lease</td></tr>
+</table>
+
+<h3>4d: Option A Materializer (dev-4 in-build, dry-run only)</h3>
+<p>Design: <code>docs/design/ce-491-optiona-merge-intent.md</code></p>
+<p>Post-merge: gate daemon detects <code>.ce/brain/append-intents/&lt;slug&gt;.yaml</code>,
+appends to brain ledger, removes intent file, commits to main via ce-materializer App.
+Evidence: PR comment + daemon log + <code>CE-Materialization-Key:</code> commit trailer.</p>
+<p><strong>Arming gates:</strong> #895 IaC redeploy merge + Option A slice 2+ + Operator arming call.</p>
+<p><strong>Failure modes:</strong> HELD state; quarantine in <code>.ce/state/brain-intent-quarantine/&lt;key&gt;.json</code>;
+30-min closeout window before hard gate failure.</p>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="layer5">
+<div class="section-header" onclick="toggle(this)">
+  <h2>L5 &mdash; Host/Ops Substrate: Broker, IaC, OpenBao, Herdr, Egress</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<div class="svg-container">
+<svg viewBox="0 0 700 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layer 5: Host substrate">
+  <defs>
+    <marker id="arr5" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <!-- Host boundary -->
+  <rect x="5" y="5" width="690" height="170" rx="8" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="350" y="20" text-anchor="middle" font-size="10" fill="#94a3b8">HOST LAYER (DGX Spark spark-b824 + VPS CE-DEV-1)</text>
+  <!-- Broker -->
+  <rect x="15" y="30" width="140" height="130" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="85" y="50" text-anchor="middle" font-weight="700" font-size="10" fill="#15803d">HOST-OPS BROKER</text>
+  <text x="85" y="65" text-anchor="middle" font-size="8.5" fill="#052e16">systemd-supervised</text>
+  <text x="85" y="80" text-anchor="middle" font-size="8.5" fill="#052e16">#898 slice 1 merged</text>
+  <text x="30" y="96" font-size="8" fill="#052e16">status / restart-daemon</text>
+  <text x="30" y="109" font-size="8" fill="#052e16">prepare-state-root</text>
+  <text x="30" y="122" font-size="8" fill="#052e16">repair-systemd-unit</text>
+  <text x="30" y="135" font-size="8" fill="#052e16">run-ephemeral-container</text>
+  <text x="30" y="148" font-size="8" fill="#052e16">snapshot/drill-openbao</text>
+  <!-- Arrow from contained agents to broker -->
+  <path d="M157,95 L198,95" stroke="#64748b" stroke-width="1" marker-end="url(#arr5)"/>
+  <text x="177" y="88" text-anchor="middle" font-size="8" fill="#64748b">typed verbs</text>
+  <!-- OpenBao -->
+  <rect x="200" y="30" width="120" height="130" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="260" y="50" text-anchor="middle" font-weight="700" font-size="10" fill="#1e40af">OPENBAO</text>
+  <text x="260" y="65" text-anchor="middle" font-size="8.5" fill="#1e3a5f">100.72.252.20:8200</text>
+  <text x="215" y="82" font-size="8" fill="#1e3a5f">approval-wall secret</text>
+  <text x="215" y="95" font-size="8" fill="#1e3a5f">materializer PEM ref</text>
+  <text x="215" y="108" font-size="8" fill="#1e3a5f">daemon BAO token</text>
+  <text x="215" y="121" font-size="8" fill="#1e3a5f">signing deputy target</text>
+  <text x="215" y="134" font-size="8" fill="#1e3a5f">ce-kv mount</text>
+  <text x="215" y="147" font-size="8" fill="#1e3a5f">controller passphrase</text>
+  <!-- IaC -->
+  <rect x="335" y="30" width="115" height="130" rx="6" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="392" y="50" text-anchor="middle" font-weight="700" font-size="10" fill="#6b21a8">IaC REDEPLOY</text>
+  <text x="392" y="65" text-anchor="middle" font-size="8.5" fill="#2d1b69">#895 (approved)</text>
+  <text x="350" y="82" font-size="8" fill="#2d1b69">decision 1 precond</text>
+  <text x="350" y="95" font-size="8" fill="#2d1b69">one-click redeploy</text>
+  <text x="350" y="108" font-size="8" fill="#2d1b69">singleton + IaC rule</text>
+  <text x="350" y="121" font-size="8" fill="#2d1b69">VPS-redeploysDGX</text>
+  <text x="350" y="134" font-size="8" fill="#2d1b69">required before arming</text>
+  <text x="350" y="147" font-size="8" fill="#2d1b69">any new authority</text>
+  <!-- Herdr -->
+  <rect x="463" y="30" width="110" height="130" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="518" y="50" text-anchor="middle" font-weight="700" font-size="10" fill="#92400e">HERDR PTY</text>
+  <text x="518" y="65" text-anchor="middle" font-size="8.5" fill="#78350f">dispatch socket</text>
+  <text x="478" y="82" font-size="8" fill="#78350f">/run/creator-engine/</text>
+  <text x="478" y="95" font-size="8" fill="#78350f">herdr/herdr.sock</text>
+  <text x="478" y="110" font-size="8" fill="#78350f">herdr agent send</text>
+  <text x="478" y="123" font-size="8" fill="#78350f">herdr pane read</text>
+  <text x="478" y="136" font-size="8" fill="#78350f">send-keys Enter</text>
+  <!-- Egress -->
+  <rect x="585" y="30" width="103" height="130" rx="6" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="636" y="50" text-anchor="middle" font-weight="700" font-size="10" fill="#9a3412">EGRESS BROKER</text>
+  <text x="636" y="65" text-anchor="middle" font-size="8.5" fill="#431407">tools/egress-broker/</text>
+  <text x="600" y="82" font-size="8" fill="#431407">net egress for</text>
+  <text x="600" y="95" font-size="8" fill="#431407">contained seats</text>
+  <text x="600" y="108" font-size="8" fill="#431407">dev-3 push path</text>
+  <text x="600" y="121" font-size="8" fill="#431407">dev-4: App-mint</text>
+  <text x="600" y="134" font-size="8" fill="#431407">credential helper</text>
+</svg>
+</div>
+
+<h3>Host-Ops Broker</h3>
+<p>Systemd-supervised host service (slice 1 merged as PR #898).
+Typed verbs only &mdash; no raw socket passthrough. Every verb call emits a structured audit record
+(<code>ce.host_ops.audit.v1</code>). Kill switches: broker-wide disable and per-verb disable flags
+in root-owned host config dir outside all containers.</p>
+<p>Design: <code>docs/design/host-ops-broker-v1.md</code></p>
+
+<h3>IaC Singleton Redeploy (#895)</h3>
+<p>Policy (decision 1, 2026-07-08): Every singleton authority requires a one-click IaC redeploy
+path as precondition. PR #895 delivers this for the queue daemon. This is the precondition for
+arming the Option A materializer.</p>
+
+<h3>OpenBao</h3>
+<p>At 100.72.252.20:8200 (CE-DEV-1 VPS). Holds: approval-wall secret, materializer PEM reference
+(TODO: migrate from filesystem), daemon BAO tokens (tmpfs in containers, TTL ~24.5d).
+Controller has passphrase custody (decision 9). Admin recovery: controller-executable since
+VPS passwordless sudo confirmed (decision 10).</p>
+<p>SSHSIG signing deputy target: <code>ce-transit/governance/signing/ce-root-v1</code>
+(design: <code>docs/design/sshsig-signing-deputy.md</code>).</p>
+
+<h3>Herdr PTY Dispatch</h3>
+<p><code>HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock herdr agent send w1:p1 "&lt;ptr&gt;"</code>
++ <code>herdr pane send-keys w1:p1 Enter</code>. Read back: <code>herdr pane read w1:p1</code>.</p>
+
+<h3>Egress Brokers</h3>
+<p><code>tools/egress-broker/</code> mediates outbound network access from contained seats.
+Dev-3 uses this path for git push. Dev-4 uses App-mint credential helper
+(ce-materializer App 4244593 with contents:write, single-repo).</p>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="master-diagram">
+<div class="section-header" onclick="toggle(this)">
+  <h2>3. Master Diagram: Natural Language &#8594; Merged &amp; Materialized</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<div class="svg-container">
+<svg viewBox="0 0 780 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Master flow diagram from natural language idea to merged materialized code">
+  <defs>
+    <marker id="marr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#475569"/>
+    </marker>
+    <marker id="marr-b" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <!-- SWIMLANE HEADERS -->
+  <!-- Operator lane -->
+  <rect x="0" y="0" width="150" height="640" rx="0" fill="#dbeafe" opacity="0.35"/>
+  <text x="75" y="22" text-anchor="middle" font-weight="700" font-size="11" fill="#1e40af">OPERATOR</text>
+  <text x="75" y="35" text-anchor="middle" font-size="9" fill="#1e40af">human</text>
+
+  <!-- Controller lane -->
+  <rect x="152" y="0" width="150" height="640" rx="0" fill="#f3e8ff" opacity="0.35"/>
+  <text x="227" y="22" text-anchor="middle" font-weight="700" font-size="11" fill="#6b21a8">CONTROLLER</text>
+  <text x="227" y="35" text-anchor="middle" font-size="9" fill="#6b21a8">CE-DEV-2</text>
+
+  <!-- Seats lane -->
+  <rect x="304" y="0" width="148" height="640" rx="0" fill="#dcfce7" opacity="0.35"/>
+  <text x="378" y="22" text-anchor="middle" font-weight="700" font-size="11" fill="#15803d">SEATS</text>
+  <text x="378" y="35" text-anchor="middle" font-size="9" fill="#15803d">dev-1/3/4</text>
+
+  <!-- Daemons lane -->
+  <rect x="454" y="0" width="152" height="640" rx="0" fill="#fff7ed" opacity="0.45"/>
+  <text x="530" y="22" text-anchor="middle" font-weight="700" font-size="11" fill="#9a3412">LOCAL DAEMONS</text>
+  <text x="530" y="35" text-anchor="middle" font-size="9" fill="#9a3412">queue/review/triage</text>
+
+  <!-- Forge lane -->
+  <rect x="608" y="0" width="172" height="640" rx="0" fill="#e0f2fe" opacity="0.45"/>
+  <text x="694" y="22" text-anchor="middle" font-weight="700" font-size="11" fill="#0369a1">FORGE (GitHub)</text>
+  <text x="694" y="35" text-anchor="middle" font-size="9" fill="#0369a1">rented coordination</text>
+
+  <!-- Dividers -->
+  <line x1="150" y1="0" x2="150" y2="640" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="302" y1="0" x2="302" y2="640" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="452" y1="0" x2="452" y2="640" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="606" y1="0" x2="606" y2="640" stroke="#94a3b8" stroke-width="1"/>
+
+  <!-- ── ROW 1: Idea -->
+  <rect x="10" y="50" width="130" height="38" rx="5" fill="#bfdbfe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="75" y="67" text-anchor="middle" font-size="9" font-weight="700" fill="#1e40af">Natural-language idea</text>
+  <text x="75" y="80" text-anchor="middle" font-size="8" fill="#1e3a5f">objective in any phrasing</text>
+
+  <!-- Arrow: Operator -> Controller (frame) -->
+  <path d="M140,69 L162,69" stroke="#2563eb" stroke-width="1.5" marker-end="url(#marr-b)"/>
+  <text x="151" y="64" text-anchor="middle" font-size="8" fill="#2563eb">frame</text>
+
+  <!-- ── ROW 2: Frame/Shape -->
+  <rect x="162" y="50" width="130" height="38" rx="5" fill="#e9d5ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="227" y="67" text-anchor="middle" font-size="9" font-weight="700" fill="#6b21a8">Frame + Shape</text>
+  <text x="227" y="80" text-anchor="middle" font-size="8" fill="#2d1b69">territory map, arc, tickets</text>
+
+  <!-- Arrow: Controller -> Operator (ratify) -->
+  <path d="M162,78 L140,78" stroke="#475569" stroke-width="1" marker-end="url(#marr)"/>
+  <text x="151" y="90" text-anchor="middle" font-size="8" fill="#475569">ratify</text>
+
+  <!-- Arrow: Operator ratifies -> back to controller -->
+  <rect x="10" y="100" width="130" height="28" rx="5" fill="#bfdbfe" stroke="#2563eb" stroke-width="1"/>
+  <text x="75" y="118" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1e40af">Arc ratification</text>
+
+  <path d="M140,114 L162,114" stroke="#2563eb" stroke-width="1.5" marker-end="url(#marr-b)"/>
+
+  <!-- ── ROW 3: Dispatch -->
+  <rect x="162" y="100" width="130" height="28" rx="5" fill="#e9d5ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="227" y="118" text-anchor="middle" font-size="9" font-weight="700" fill="#6b21a8">Dispatch brief pointer</text>
+
+  <!-- Arrow: Controller -> Seats -->
+  <path d="M292,114 L314,114" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- ── ROW 4: Seat implements -->
+  <rect x="314" y="100" width="128" height="52" rx="5" fill="#bbf7d0" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="378" y="118" text-anchor="middle" font-size="9" font-weight="700" fill="#15803d">Seat implements</text>
+  <text x="378" y="132" text-anchor="middle" font-size="8" fill="#052e16">Ring 0/1/2 harness active</text>
+  <text x="378" y="144" text-anchor="middle" font-size="8" fill="#052e16">PreToolUse enforces scope</text>
+
+  <!-- Arrow: Seat -> Preflight -->
+  <path d="M378,154 L378,174" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- ── ROW 5: Seat preflight -->
+  <rect x="314" y="176" width="128" height="40" rx="5" fill="#bbf7d0" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="378" y="193" text-anchor="middle" font-size="9" font-weight="700" fill="#15803d">Seat preflight</text>
+  <text x="378" y="207" text-anchor="middle" font-size="8" fill="#052e16">ce validate-pr (#896)</text>
+
+  <!-- Arrow: Seat -> Push -->
+  <path d="M378,218 L378,238" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- ── ROW 6: Self-push -->
+  <rect x="314" y="240" width="128" height="40" rx="5" fill="#bbf7d0" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="378" y="257" text-anchor="middle" font-size="9" font-weight="700" fill="#15803d">Self-push + PR open</text>
+  <text x="378" y="271" text-anchor="middle" font-size="8" fill="#052e16">App-mint / egress broker</text>
+
+  <!-- Arrow: Self-push -> Forge -->
+  <path d="M442,260 L628,260" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+  <text x="535" y="254" text-anchor="middle" font-size="8" fill="#475569">git push + gh pr create</text>
+
+  <!-- ── ROW 7: PR on forge -->
+  <rect x="628" y="240" width="140" height="40" rx="5" fill="#bae6fd" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="698" y="257" text-anchor="middle" font-size="9" font-weight="700" fill="#0369a1">PR opened on GitHub</text>
+  <text x="698" y="271" text-anchor="middle" font-size="8" fill="#075985">webhook event</text>
+
+  <!-- Forge -> CI -->
+  <path d="M698,282 L698,302" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- ── ROW 8: CI -->
+  <rect x="628" y="304" width="140" height="36" rx="5" fill="#bae6fd" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="698" y="320" text-anchor="middle" font-size="9" font-weight="700" fill="#0369a1">CI validate</text>
+  <text x="698" y="334" text-anchor="middle" font-size="8" fill="#075985">evidence only (no ratify)</text>
+
+  <!-- Forge -> Review daemon event -->
+  <path d="M628,316 L606,316" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- Review daemon -->
+  <rect x="464" y="295" width="140" height="64" rx="5" fill="#fed7aa" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="534" y="313" text-anchor="middle" font-size="9" font-weight="700" fill="#9a3412">REVIEW DAEMON</text>
+  <text x="534" y="328" text-anchor="middle" font-size="8" fill="#431407">TODAY: controller manual</text>
+  <text x="534" y="341" text-anchor="middle" font-size="8" fill="#431407">TARGET: auto assign</text>
+  <text x="534" y="354" text-anchor="middle" font-size="8" fill="#431407">author &#x2260; reviewer enforced</text>
+
+  <!-- Review daemon -> local reviewer lane spawn -->
+  <path d="M464,326 L302,360" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- Controller: reviewer lane -->
+  <rect x="162" y="350" width="130" height="36" rx="5" fill="#e9d5ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="227" y="367" text-anchor="middle" font-size="9" font-weight="700" fill="#6b21a8">Reviewer lane</text>
+  <text x="227" y="381" text-anchor="middle" font-size="8" fill="#2d1b69">independent evidence</text>
+
+  <!-- Controller approve -->
+  <path d="M227,388 L227,410" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+  <rect x="162" y="412" width="130" height="30" rx="5" fill="#e9d5ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="227" y="431" text-anchor="middle" font-size="9" font-weight="700" fill="#6b21a8">Approval submitted</text>
+
+  <!-- Approval -> forge -->
+  <path d="M292,427 L628,370" stroke="#2563eb" stroke-width="1.5" marker-end="url(#marr-b)"/>
+  <text x="460" y="388" text-anchor="middle" font-size="8" fill="#2563eb">gh pr review --approve</text>
+
+  <!-- ── ROW 9: Approval wall + queue daemon -->
+  <rect x="464" y="400" width="140" height="52" rx="5" fill="#fed7aa" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="534" y="418" text-anchor="middle" font-size="9" font-weight="700" fill="#9a3412">QUEUE DAEMON</text>
+  <text x="534" y="432" text-anchor="middle" font-size="8" fill="#431407">approval wall verify</text>
+  <text x="534" y="446" text-anchor="middle" font-size="8" fill="#431407">enqueue + squash merge</text>
+
+  <!-- Queue daemon -> forge merge -->
+  <path d="M606,426 L628,426" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- Forge: merge -->
+  <rect x="628" y="410" width="140" height="36" rx="5" fill="#bae6fd" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="698" y="427" text-anchor="middle" font-size="9" font-weight="700" fill="#0369a1">Merge queue merge</text>
+  <text x="698" y="441" text-anchor="middle" font-size="8" fill="#075985">squash commit on main</text>
+
+  <!-- Merge -> materializer -->
+  <path d="M698,448 L698,468" stroke="#475569" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- ── ROW 10: Materializer -->
+  <rect x="464" y="470" width="304" height="52" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="616" y="489" text-anchor="middle" font-size="9" font-weight="700" fill="#92400e">OPTION A MATERIALIZER</text>
+  <text x="616" y="504" text-anchor="middle" font-size="8" fill="#78350f">TODAY: dry-run only | TARGET: armed</text>
+  <text x="616" y="517" text-anchor="middle" font-size="8" fill="#78350f">appends brain ledger, removes intent, direct-commits to main</text>
+
+  <!-- ── ROW 11: Done -->
+  <rect x="10" y="560" width="760" height="38" rx="5" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="390" y="578" text-anchor="middle" font-size="10" font-weight="700" fill="#15803d">MERGED + MATERIALIZED CODE</text>
+  <text x="390" y="593" text-anchor="middle" font-size="8.5" fill="#052e16">Release staging &#8594; ce-root-v1 sign (controller persistent only) &#8594; publish</text>
+
+  <!-- Arrow materializer -> done -->
+  <path d="M616,524 L390,558" stroke="#16a34a" stroke-width="1.5" marker-end="url(#marr)"/>
+
+  <!-- Harvest arrow from seat back to controller -->
+  <path d="M302,150 L292,150" stroke="#475569" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#marr)"/>
+  <text x="290" y="142" text-anchor="end" font-size="8" fill="#475569">harvest (exec-cat)</text>
+
+</svg>
+</div>
+
+<p>
+  <span class="pill pill-human">HUMAN</span> Operator ratifies arc, arms authorities, holds root key<br>
+  <span class="pill pill-ctrl">CONTROLLER</span> CE-DEV-2 orchestrates, dispatches, harvests, gates<br>
+  <span class="pill pill-daemon">DAEMON</span> Containerized singletons: queue daemon, review daemon (target), materializer<br>
+  <span class="pill pill-forge">FORGE</span> GitHub: PR state, CI evidence, merge queue (rented coordination plane)
+</p>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="answers">
+<div class="section-header" onclick="toggle(this)">
+  <h2>4. Answers to the Operator's Three Questions</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<div class="answer-box">
+<h4>Q1: How does CE guarantee governed framing without an explicit <code>/ce frame</code> invocation?</h4>
+<p>CE does not require <code>/ce frame</code>. Governance attaches at the <strong>harness seam</strong>:</p>
+<ol>
+<li><code>ce launch --harness codex|claude</code> is the canonical entry verb. The governed command
+builder wraps every seat launch with Ring 0 (credential scrub), Ring 1 (PreToolUse hook), Ring 2 (Stop hook).</li>
+<li>PreToolUse hook (<code>.claude/hooks/ce-pretooluse.sh</code> &rarr; <code>hook_check.py</code>)
+fires on EVERY tool call &mdash; validates path scope, work claim, reviewer-authority, role-shaped tool set.
+Seats cannot bypass this by omitting a prefix.</li>
+<li>For the persistent controller: <code>ce takeover</code> is the succession verb. It ingests
+evidence packets and reconstructs governance context, making framing a natural precondition of any subsequent action.</li>
+</ol>
+<p><strong>Soft intent recognition, hard enforcement</strong>: any phrasing can express intent.
+The harness boundary enforces what is allowed &mdash; grader-outside-the-agent
+(<code>docs/architecture/stage-vocabulary.md</code>).</p>
+</div>
+
+<div class="answer-box">
+<h4>Q2 (c4): Is reviewer assignment local or forge level?</h4>
+<p><strong>Hybrid &mdash; forge events trigger; local daemon decides and spawns.</strong></p>
+<p><span class="pill pill-forge">FORGE</span> GitHub PR-opened/synchronized webhooks = canonical
+event trigger and SSOT for PR state (head SHA, author, check results, CODEOWNERS).</p>
+<p><span class="pill pill-daemon">DAEMON</span> Local containerized review daemon = assignment
+decision + reviewer spawn. Applies author&ne;reviewer matrix, selects from
+<code>CE_GATE_AUTHORIZED_REVIEWERS</code>, mints reviewer-authority envelope, spawns local lane.</p>
+<p><strong>Why local:</strong> Reviewer spawn needs OpenBao-held authority and approval-wall signing
+capability &mdash; cannot live in GitHub Actions. Author&ne;reviewer is a CE hard invariant
+enforced at the harness seam, not a forge ruleset.</p>
+<p>References: <code>playbooks/reviewer/</code>, <code>docs/delivery/REVIEW_GATE.md</code>,
+<code>docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md</code> &sect;0b</p>
+</div>
+
+<div class="answer-box">
+<h4>Q3 (c5): Is seat-filed ticket triage local or forge level?</h4>
+<p><strong>Same hybrid &mdash; forge is SSOT for ticket state; triage decision is local.</strong></p>
+<p><span class="pill pill-forge">FORGE</span> GitHub issues in ce-ops = SSOT for issue state,
+labels, timestamps. CE's belt-feed polls GitHub Search API on schedule (30-min default)
+&mdash; durable default; push webhooks are premium.</p>
+<p><span class="pill pill-daemon">DAEMON</span> Local triage daemon = classification + queuing.
+Applies work-class inference (<code>_infer_work_class</code>, <code>_infer_mutation_class</code>),
+deduplicates against active arc and in-flight claims, queues for controller consideration.</p>
+<p><strong>Advisory only:</strong> Triage result does not ratify, approve, merge, or dispatch.
+Operator/controller ratifies queued items into the next arc.</p>
+<p>References: <code>ce-l3-triage-ready-queue-p0</code> (changelog v0.3.2),
+<code>docs/design/ce-forge-side-automation.md</code> import item 1,
+<code>ce-belt-feed-polling-default-push-premium</code></p>
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="ladder">
+<div class="section-header" onclick="toggle(this)">
+  <h2>5. Autonomy Ladder</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<p>Each rung: what the controller stops doing &mdash; gate evidence &mdash; rollback story.</p>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">0</span>
+  <span class="rung-title">TODAY (2026-07-08)</span>
+  <span class="rung-when">CURRENT</span>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="rung-body">
+<p><strong>Controller does:</strong> Everything except code implementation (no inline implementation per foreman directive).</p>
+<p><strong>Evidence:</strong> Rings 0/1/2 green for claude_code. Codex Ring 0 green. #896 seat-ready merged. C5 (containerized queue daemon) promoted.</p>
+<p><strong>Rollback:</strong> Inherent &mdash; controller manually overrides any step.</p>
+</div>
+</div>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">1</span>
+  <span class="rung-title">Seat Parity</span>
+  <span class="rung-when">~Jul 10-11</span>
+  <span class="toggle-btn">&#9660;</span>
+</div>
+<div class="rung-body collapsed">
+<p><strong>Gate evidence:</strong> dev-3 rebuild complete with ssh-keygen (amd64 image); dev-3 self-push canary re-proven; dev-4 Ring 1 smoke packet accepted (ticket 480).</p>
+<p><strong>Controller stops:</strong> Manual bundle-over-exec-cat harvest for dev-3. Dev-3 self-pushes cleanly.</p>
+<p><strong>Rollback:</strong> Stop new dev-3 container; revert to old image.</p>
+</div>
+</div>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">2</span>
+  <span class="rung-title">IaC Singleton Redeploy Armed</span>
+  <span class="rung-when">~this week</span>
+  <span class="toggle-btn">&#9660;</span>
+</div>
+<div class="rung-body collapsed">
+<p><strong>Gate evidence:</strong> #895 merged; IaC script tested end-to-end.</p>
+<p><strong>Controller stops:</strong> Manual queue-daemon restart on host outage.</p>
+<p><strong>Rollback:</strong> <code>sudo systemctl disable --now ce-queue-daemon.service; bash ~/ce-wall-daemon-launch.sh</code></p>
+</div>
+</div>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">3</span>
+  <span class="rung-title">Daemon Wave (review + triage + broker full)</span>
+  <span class="rung-when">~1 week</span>
+  <span class="toggle-btn">&#9660;</span>
+</div>
+<div class="rung-body collapsed">
+<p><strong>Gate evidence:</strong> Broker slice 2 arming (3 MAJORs from ce-ops#504 resolved); IaC redeploy (rung 2) met; each daemon passes green harness matrix rows.</p>
+<p><strong>Controller stops:</strong> Manually spawning reviewer lanes; manually polling triage.</p>
+<p><strong>Rollback:</strong> <code>sudo docker stop &lt;daemon&gt;; systemctl disable &lt;daemon&gt;.service</code></p>
+</div>
+</div>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">4</span>
+  <span class="rung-title">Conveyor Pickup</span>
+  <span class="rung-when">after daemon wave</span>
+  <span class="toggle-btn">&#9660;</span>
+</div>
+<div class="rung-body collapsed">
+<p><strong>Gate evidence:</strong> Pickup protocol implemented and validated; territory-map deduplication proven against live claims; seat-ready profile green.</p>
+<p><strong>Controller stops:</strong> Authoring individual dispatch briefs. Moves to arc-level direction only.</p>
+<p><strong>Rollback:</strong> Controller reassumes manual dispatch; work claims are forge-visible, no state lost.</p>
+</div>
+</div>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">5</span>
+  <span class="rung-title">Materializer Armed</span>
+  <span class="rung-when">after #895 + Option A slice 2+</span>
+  <span class="toggle-btn">&#9660;</span>
+</div>
+<div class="rung-body collapsed">
+<p><strong>Gate evidence:</strong> Operator arming call (non-delegable); ce-materializer App PEM migrated to OpenBao; slice 1 dry-run evidence clean; Operator ratification in DECISIONS.md.</p>
+<p><strong>Controller stops:</strong> Manual brain ledger entries. Intent PRs self-materialize post-merge.</p>
+<p><strong>Rollback:</strong> Set <code>ARMING_ENABLED=False</code>; direct ledger edits still work via #882 stale-tail gate.</p>
+</div>
+</div>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">6</span>
+  <span class="rung-title">Contained Controllers T1</span>
+  <span class="rung-when">Aug 11 (#496)</span>
+  <span class="toggle-btn">&#9660;</span>
+</div>
+<div class="rung-body collapsed">
+<p><strong>Gate evidence:</strong> #496 deploy lane + #488 hydration + #497 tooling absorption; one governed worker unit end-to-end per harness; NanoClaw T0 rows (2026-07-21); ce-ops#498 milestones.</p>
+<p><strong>Controller stops:</strong> Relying on uncontained host access. Host-ops broker mediates all host operations.</p>
+<p><strong>Rollback:</strong> Revert to non-contained controller launch; broker continues operating.</p>
+</div>
+</div>
+
+<div class="rung">
+<div class="rung-header" onclick="toggleRung(this)">
+  <span class="rung-num">7</span>
+  <span class="rung-title">Ephemeral Controllers / NanoClaw T2</span>
+  <span class="rung-when">Aug 31 (#498 T2)</span>
+  <span class="toggle-btn">&#9660;</span>
+</div>
+<div class="rung-body collapsed">
+<p><strong>Gate evidence:</strong> NanoClaw ephemeral loop proof; mandate-pointer resolver operational; evidence packet schema registered (<code>ce.ephemeral_controller.evidence.v1</code>); #496 parity acceptance test.</p>
+<p><strong>Controller stops:</strong> Session-level dispatch. Persistent controller becomes primarily arc-ratifier and escalation handler.</p>
+<p><strong>What never becomes ephemeral:</strong> Gate singleton, approval-wall signing, ce-root-v1 signing, seat-relaunch authority.</p>
+<p><strong>Rollback:</strong> Disable webhook listener; revert to persistent-controller dispatch; evidence packets are forge-visible and reconstructable.</p>
+</div>
+</div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="authority">
+<div class="section-header" onclick="toggle(this)">
+  <h2>6. Authority &amp; Safety Model</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<h3>What the Operator Always Holds</h3>
+<table>
+<tr><th>Action</th><th>Why non-delegable</th></tr>
+<tr><td>Arc ratification</td><td>Sets delivery direction; wrong arc = wrong product</td></tr>
+<tr><td>Arming new daemon authorities</td><td>Each arming = new attack surface</td></tr>
+<tr><td>ce-root-v1 signing (releases)</td><td>Non-delegable per doctrine; persistent controller has standing grant (decision 9); workers/seats/ephemeral NEVER sign</td></tr>
+<tr><td>OpenBao root/unseal/import</td><td>Credential plane; controller has passphrase custody (decision 9)</td></tr>
+<tr><td>External communications</td><td>Reputation + relationship risk (Arad send, NVIDIA pitch)</td></tr>
+<tr><td>Cell flips (containment promotion)</td><td>Each flip = new attack surface; gate stays singleton</td></tr>
+<tr><td>Reviewer-identity ratification</td><td>Author&ne;reviewer is the moat</td></tr>
+<tr><td>Merge-gate singleton changes</td><td>Policy singleton; second gate-authority holder splits policy</td></tr>
+</table>
+
+<h3>Stop-Lines</h3>
+<table>
+<tr><th>Condition</th><th>Behavior</th></tr>
+<tr><td>Reviewer-authority envelope missing</td><td><code>ce lane launch</code> refuses: <code>G3-REVIEWER-AUTHORITY-INVALID</code></td></tr>
+<tr><td>Gate singleton lease already held</td><td>Queue daemon refuses second instance; stale lease requires manual operator removal</td></tr>
+<tr><td>Broker-wide kill switch</td><td>All broker verbs return <code>disabled</code>; no host mutation</td></tr>
+<tr><td>Option A materializer HELD</td><td>Hard gate failure after 30-min closeout window; no silent drop</td></tr>
+<tr><td>Recursion bottom-out (3 same-structure failures)</td><td><code>AWAITING-OPERATOR</code> circuit breaker (<code>docs/design/recursion-bottom-out-policy.md</code>)</td></tr>
+<tr><td>Ephemeral controller requests gate/sign</td><td>Refused locally + evidence emitted; delegated to singleton path</td></tr>
+</table>
+
+<h3>Fail-Closed Patterns</h3>
+<ul>
+<li><strong>Broker</strong>: missing label / unknown unit / symlink escape / path traversal = <code>refused</code></li>
+<li><strong>Queue daemon</strong>: cannot write pre-mutation audit &rarr; returns <code>failed</code>, no mutation</li>
+<li><strong>Materializer</strong>: unprovable live ledger tail &rarr; <code>HELD</code>, no write</li>
+<li><strong>Gate daemon</strong>: cannot verify approval wall secret &rarr; refuses to process</li>
+<li><strong>PreToolUse hook</strong>: validation error &rarr; tool call blocked before execution</li>
+</ul>
+
+<h3>Kill Switches</h3>
+<ul>
+<li><strong>Automerge</strong>: <code>ce automerge-kill-switch off</code> (v0.3.2)</li>
+<li><strong>Host-ops broker</strong>: broker-wide kill switch file in root-owned host config outside containers; per-verb disable flags</li>
+<li><strong>Materializer</strong>: <code>ARMING_ENABLED=False</code> hard invariant</li>
+<li><strong>Ephemeral listener</strong>: IaC-managed; disable by stopping webhook listener</li>
+</ul>
+
+<h3>Quarantine Paths</h3>
+<ul>
+<li>Materializer: <code>.ce/state/brain-intent-quarantine/&lt;key&gt;.json</code></li>
+<li>Materializer HELD: <code>.ce/state/brain-intent-materializer/held/&lt;key&gt;.json</code></li>
+<li>Recursion bottom-out: <code>AWAITING-OPERATOR</code> in daemon state root</li>
+</ul>
+
+<h3>Audit Trails</h3>
+<ul>
+<li>Every broker call: <code>ce.host_ops.audit.v1</code> JSON record (no secrets)</li>
+<li>Queue daemon: journald + daemon log</li>
+<li>Materializer: JSON Lines + PR closeout comment + <code>CE-Materialization-Key:</code> trailer</li>
+<li>Ephemeral controller: <code>ce.ephemeral_controller.evidence.v1</code> takeover-compatible packet</li>
+<li>Reviewer lane: reviewer-authority envelope stamped with <code>consumed_at</code></li>
+</ul>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="glossary">
+<div class="section-header" onclick="toggle(this)">
+  <h2>7. Glossary</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+<div class="glossary-grid">
+<div class="glossary-item"><div class="glossary-term">Arc</div><div class="glossary-def">Short-term ordered delivery plan (lanes A-1..A-N) ratified by the Operator</div></div>
+<div class="glossary-item"><div class="glossary-term">Lane</div><div class="glossary-def">One work stream in an arc (e.g. A-1 = Arad apply, A-3 = broker v1 slice 1)</div></div>
+<div class="glossary-item"><div class="glossary-term">Ticket</div><div class="glossary-def">GitHub issue in ce-ops with work-class label; maps to one or more bounded PRs</div></div>
+<div class="glossary-item"><div class="glossary-term">Carrier</div><div class="glossary-def">PR artifact: path-manifest carrier (generated from diff) + changelog carrier per governed PR</div></div>
+<div class="glossary-item"><div class="glossary-term">Work class</div><div class="glossary-def">XS/S/M/L sizing declared in PR body as <code>- <strong>Declared work class:</strong> tiny|story|feature|epic</code></div></div>
+<div class="glossary-item"><div class="glossary-term">Harvest</div><div class="glossary-def">Controller extraction of completed seat output: exec-cat bundle (contained) or git push (non-contained)</div></div>
+<div class="glossary-item"><div class="glossary-term">Seat</div><div class="glossary-def">Governed worker running a coding agent (Codex or Claude Code) in a managed environment</div></div>
+<div class="glossary-item"><div class="glossary-term">Foreman</div><div class="glossary-def">Controller operating as a delivery orchestrator; delegates implementation, never inlines</div></div>
+<div class="glossary-item"><div class="glossary-term">Gate</div><div class="glossary-def">ce-queue-daemon singleton: enforces review + CI + merge queue before merge</div></div>
+<div class="glossary-item"><div class="glossary-term">Brain</div><div class="glossary-def">Append-only content-addressed assertion ledger (<code>.ce/brain/assertions.yaml</code>)</div></div>
+<div class="glossary-item"><div class="glossary-term">Intent</div><div class="glossary-def">Data-only append intent file (<code>.ce/brain/append-intents/&lt;slug&gt;.yaml</code>) carried by PR for merge-time materialization</div></div>
+<div class="glossary-item"><div class="glossary-term">Materializer</div><div class="glossary-def">Option A post-merge actor: gate daemon armed with direct-commit authority over brain ledger only</div></div>
+<div class="glossary-item"><div class="glossary-term">Broker</div><div class="glossary-def">Host-ops broker: systemd-supervised host service exposing typed repair verbs to contained agents</div></div>
+<div class="glossary-item"><div class="glossary-term">Containment ring</div><div class="glossary-def">gVisor runsc isolation (DGX/VPS); no raw runtime sockets inside containers</div></div>
+<div class="glossary-item"><div class="glossary-term">Mandate</div><div class="glossary-def">Content-addressed (<code>ce-mandate://sha256/&lt;hex&gt;</code>) work instruction for an ephemeral controller</div></div>
+<div class="glossary-item"><div class="glossary-term">NanoClaw</div><div class="glossary-def">Reference implementation of ephemeral controller: event-spawn &rarr; mandate &rarr; post &rarr; self-retire</div></div>
+<div class="glossary-item"><div class="glossary-term">Egress broker</div><div class="glossary-def">Network egress mediator for contained seats (<code>tools/egress-broker/</code>)</div></div>
+<div class="glossary-item"><div class="glossary-term">AWAITING-OPERATOR</div><div class="glossary-def">Queue discipline: pending Operator input is forge-visible; surfaced first after /clear</div></div>
+<div class="glossary-item"><div class="glossary-term">Approval wall</div><div class="glossary-def">OpenBao-backed signing check that the queue daemon uses to verify reviewer approvals</div></div>
+<div class="glossary-item"><div class="glossary-term">SSHSIG</div><div class="glossary-def">OpenSSH signature format used by <code>docs/install.sh</code> to verify release canonical bytes</div></div>
+<div class="glossary-item"><div class="glossary-term">ce-root-v1</div><div class="glossary-def">Persistent controller's ed25519 signing key at <code>~/.ce-keys/ce-root-v1</code></div></div>
+<div class="glossary-item"><div class="glossary-term">Pickup conveyor</div><div class="glossary-def">TARGET: automated arc-ticket queue from which seats self-select work (today: manual)</div></div>
+<div class="glossary-item"><div class="glossary-term">Belt-feed</div><div class="glossary-def">CE's polling-based forge event ingestion; Search-API polling = durable default</div></div>
+<div class="glossary-item"><div class="glossary-term">Two-plane OS</div><div class="glossary-def">CE architecture: portable control plane + ONE container runtime per host</div></div>
+<div class="glossary-item"><div class="glossary-term">Harness seam</div><div class="glossary-def">The hook/PreToolUse enforcement boundary where governance attaches regardless of invocation</div></div>
+<div class="glossary-item"><div class="glossary-term">Frame&rarr;Shape&rarr;Build&rarr;Review&rarr;Ship</div><div class="glossary-def">Canon stage vocabulary (<code>docs/architecture/stage-vocabulary.md</code>)</div></div>
+<div class="glossary-item"><div class="glossary-term">Grader-outside-the-agent</div><div class="glossary-def">CE moat: harness-enforced checks, not model self-grading, are the authority</div></div>
+</div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="references">
+<div class="section-header" onclick="toggle(this)">
+  <h2>8. Reference Appendix</h2>
+  <span class="toggle-btn open">&#9660;</span>
+</div>
+<div class="section-body">
+
+<p>All paths relative to main worktree: <code>/home/cedev2/creator-engine/.ce/wt-dayarc2-main/</code></p>
+
+<h3>Design Documents</h3>
+<table class="ref-table">
+<tr><th>Document</th><th>Path</th></tr>
+<tr><td>Host-ops broker v1</td><td><code>docs/design/host-ops-broker-v1.md</code></td></tr>
+<tr><td>Option A merge-time materializer</td><td><code>docs/design/ce-491-optiona-merge-intent.md</code></td></tr>
+<tr><td>Option A ledger serialization slice 1</td><td><code>docs/design/ce-491-ledger-append-serialization-slice1.md</code></td></tr>
+<tr><td>Ephemeral controller provider seam</td><td><code>docs/design/ephemeral-controller-provider-seam.md</code></td></tr>
+<tr><td>Orchestrator agent</td><td><code>docs/design/ce-orchestrator-agent.md</code></td></tr>
+<tr><td>CE forge-side automation</td><td><code>docs/design/ce-forge-side-automation.md</code></td></tr>
+<tr><td>CE forge-side automation epic</td><td><code>docs/design/ce-forge-side-automation-epic.md</code></td></tr>
+<tr><td>Brain memory augmentation</td><td><code>docs/design/ce-brain-memory-augmentation.md</code></td></tr>
+<tr><td>SSHSIG signing deputy</td><td><code>docs/design/sshsig-signing-deputy.md</code></td></tr>
+<tr><td>Controller bootstrap injection</td><td><code>docs/design/controller-bootstrap-injection.md</code></td></tr>
+<tr><td>Controller bootstrap SSOT</td><td><code>docs/design/controller-bootstrap-ssot.json</code></td></tr>
+<tr><td>Recursion bottom-out policy</td><td><code>docs/design/recursion-bottom-out-policy.md</code></td></tr>
+<tr><td>Seat-side preflight</td><td><code>docs/design/seat-side-preflight.md</code></td></tr>
+</table>
+
+<h3>Operations Documents</h3>
+<table class="ref-table">
+<tr><th>Document</th><th>Path</th></tr>
+<tr><td>Governed lane launch protocol</td><td><code>docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md</code></td></tr>
+<tr><td>Worker container protocol</td><td><code>docs/operations/WORKER_CONTAINER_PROTOCOL.md</code></td></tr>
+<tr><td>Harness support capability matrix</td><td><code>docs/operations/HARNESS_SUPPORT_CAPABILITY_MATRIX.md</code></td></tr>
+<tr><td>Queue daemon relocation runbook</td><td><code>deploy/queue-daemon/RELOCATION.md</code></td></tr>
+<tr><td>Forge housekeeping runbook</td><td><code>docs/operations/FORGE_HOUSEKEEPING_RUNBOOK.md</code></td></tr>
+<tr><td>GitHub native coordination protocol</td><td><code>docs/operations/GITHUB_NATIVE_COORDINATION_PROTOCOL.md</code></td></tr>
+<tr><td>Contained controller parity acceptance</td><td><code>docs/operations/CONTAINED_CONTROLLER_PARITY_ACCEPTANCE.md</code></td></tr>
+</table>
+
+<h3>Playbooks</h3>
+<table class="ref-table">
+<tr><th>Document</th><th>Path</th></tr>
+<tr><td>Controller duties</td><td><code>playbooks/controller/duties.yaml</code></td></tr>
+<tr><td>Controller workflow</td><td><code>playbooks/controller/workflow.ce.yml</code></td></tr>
+<tr><td>Reviewer playbooks</td><td><code>playbooks/reviewer/</code></td></tr>
+<tr><td>Dispatch brief</td><td><code>playbooks/controller/briefs/dispatch.md</code></td></tr>
+</table>
+
+<h3>Deploy / Infrastructure</h3>
+<table class="ref-table">
+<tr><th>Artifact</th><th>Path</th></tr>
+<tr><td>Queue daemon service + launcher</td><td><code>deploy/queue-daemon/</code></td></tr>
+<tr><td>DGX runsc seat image</td><td><code>deploy/dgx-runsc/</code></td></tr>
+<tr><td>VPS runsc seat image</td><td><code>deploy/vps-runsc/</code></td></tr>
+<tr><td>DGX controller runsc</td><td><code>deploy/dgx-controller-runsc/</code></td></tr>
+<tr><td>Egress broker</td><td><code>tools/egress-broker/</code></td></tr>
+<tr><td>Host-ops broker (slice 1)</td><td><code>tools/host-ops-broker/</code></td></tr>
+<tr><td>Systemd gate daemons install</td><td><code>deploy/systemd/install-gate-daemons-systemd.sh</code></td></tr>
+</table>
+
+<h3>Decision Records (state root)</h3>
+<table class="ref-table">
+<tr><th>File</th><th>Contents</th></tr>
+<tr><td><code>.ce/state/decisions/DECISIONS_20260708.md</code></td><td>11 decisions: singleton+IaC, Option A, C5, Ring-1, Arad, 0.3.4, signing grant, VPS sudo, materializer App</td></tr>
+<tr><td><code>.ce/state/decisions/DECISIONS_20260707.md</code></td><td>7 decisions: night arc, account switch, C5 cutover, NanoClaw T0/T1/T2</td></tr>
+<tr><td><code>.ce/state/research/RESUME_STATE_CE_DEV2_DAYARC2C_20260708.md</code></td><td>Current controller posture (supersedes DAYARC2B)</td></tr>
+<tr><td><code>ce-ops:infra/identity-registry.yaml</code></td><td>SSOT for all seat/App identities (separate repo)</td></tr>
+</table>
+
+</div>
+</div>
+
+<p style="margin-top:2rem; font-size:0.82em; color:var(--muted);">
+  Internal document &mdash; CE Operator reference &mdash; 2026-07-08 &mdash; do not commit to repo
+</p>
+
+</div><!-- /container -->
+
+<script>
+function toggle(header) {
+  var btn = header.querySelector('.toggle-btn');
+  var body = header.nextElementSibling;
+  if (body.classList.contains('collapsed')) {
+    body.classList.remove('collapsed');
+    btn.classList.add('open');
+  } else {
+    body.classList.add('collapsed');
+    btn.classList.remove('open');
+  }
+}
+
+function toggleRung(header) {
+  var btn = header.querySelector('.toggle-btn');
+  var body = header.nextElementSibling;
+  if (body.classList.contains('collapsed')) {
+    body.classList.remove('collapsed');
+    btn.classList.add('open');
+  } else {
+    body.classList.add('collapsed');
+    btn.classList.remove('open');
+  }
+}
+
+// Smooth nav scroll
+document.querySelectorAll('nav a[href^="#"]').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    e.preventDefault();
+    var target = document.querySelector(this.getAttribute('href'));
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>
+</body>
+</html>

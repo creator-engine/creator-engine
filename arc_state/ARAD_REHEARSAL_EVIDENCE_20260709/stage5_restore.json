@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "rehearsal_id": "arad-live-20260709",
+  "run_timestamp_utc": "2026-07-09T16:18:00Z",
+  "harness_version": "ce-p3-rehearsal-s1-live-manual",
+  "container_image": null,
+  "ce_package_version": "0.3.4+010ef3de",
+  "ce_site": "https://creator-engine.dev",
+  "stages": [
+    {
+      "stage": "first-journey-restore",
+      "status": "pass",
+      "started_at": "2026-07-09T16:16:00Z",
+      "completed_at": "2026-07-09T16:18:00Z",
+      "duration_ms": 120000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/restore_crash_20260709T1618Z.txt. CE wrapper had exited cleanly with exit_code 0 at 2026-07-09T16:13:41Z after Claude Code daemonized/forked a resumed session. Relaunched host backend with --claude-arg=--resume --claude-arg=6234095a-b192-4e84-84d7-3977ab1d60f1; pane restored to prior first-journey prompt awaiting Arad inputs."
+    }
+  ],
+  "summary": {
+    "total_stages": 1,
+    "passed": 1,
+    "failed": 0,
+    "stubbed": 0,
+    "skipped": 0
+  },
+  "failures": []
+}

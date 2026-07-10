@@ -1,0 +1,112 @@
+usage: ce onboard [-h] [--repo-root REPO_ROOT] [--state-root STATE_ROOT]
+                  [--ledger-root LEDGER_ROOT]
+                  [--install-mode {agent,guided,hybrid,print,skip}]
+                  [--install-root INSTALL_ROOT] [--harness HARNESS]
+                  [--no-launch] [--no-fix-path] [--offline] [--yes]
+                  [--emit-manifest] [--json]
+
+options:
+  -h, --help            show this help message and exit
+  --repo-root REPO_ROOT
+                        repo root to onboard (default: cwd)
+  --state-root STATE_ROOT
+                        CE local state root for brain-init (default:
+                        .ce/state)
+  --ledger-root LEDGER_ROOT
+                        path to the active-work-ledger for first-launch
+                        lifecycle registration
+  --install-mode {agent,guided,hybrid,print,skip}
+                        install mode (default: auto per §A.5 — hybrid when an
+                        agent is present, else guided; NEVER print). print =
+                        manual fallback; skip = dev override
+  --install-root INSTALL_ROOT
+                        CE bootstrap install root passed to the verify-install
+                        provenance gate
+  --harness HARNESS     first-launch Controller-seat harness (default: claude)
+  --no-launch           do everything up to (not including) the first governed
+                        launch
+  --no-fix-path         opt out of the managed CE-marked profile PATH block
+                        (Decision 4 default-on)
+  --offline             verify provenance against local install-state only (no
+                        live SHA256SUMS)
+  --yes                 non-interactive: refuse with the missing list rather
+                        than silently proceed
+  --emit-manifest       emit the machine-readable phase manifest (consequence-
+                        class + reversibility) and exit
+  --json                emit machine-readable JSON
+ce onboard: INCOMPLETE (install-mode=guided)
+  [refused] doctor: doctor refused: RED-G-4
+    guidance: .hermes/ must be git-ignored before CE writes local governed state. Add a .gitignore line containing `.hermes/`, run `ce init --repo-root .`, then re-run `ce onboard --repo-root .`.
+    next steps:
+      - Add `.hermes/` to .gitignore
+      - Run `ce init --repo-root .`
+      - Re-run `ce onboard --repo-root .`
+  reason: doctor refused (ungoverned host)
+== .gitignore after expected gotcha fix ==
+.hermes/
+ce onboard: OK (install-mode=guided)
+  [ok] doctor: doctor PASS
+  [ok] install: genuine install already present
+  [ok] verify_install: provenance verified
+  [ok] fix_path: profile PATH block ensured (re-source your shell to apply)
+  [ok] bootstrap: workspace bootstrapped (init + brain genesis ledger)
+  [skipped] launch: launch skipped (--no-launch); everything up to launch done
+== workflow files ==
+.github/workflows/ce-validate.yml
+name: Validate governance artifacts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate governance artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Creator Engine validator (signed 0.3.1 release, hash-pinned)
+        run: |
+          cat > /tmp/ce-requirements.txt <<'REQ'
+          creator-engine-validator @ https://creator-engine.dev/downloads/0.3.1/creator_engine_validator-0.3.1-py3-none-any.whl --hash=sha256:19310eda5d1cba44ba7b4a373a07b7e87138a17c7cdf75045d5e75bc2492cdc5
+          attrs @ https://creator-engine.dev/downloads/0.3.1/attrs-26.1.0-py3-none-any.whl --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+          jsonschema @ https://creator-engine.dev/downloads/0.3.1/jsonschema-4.26.0-py3-none-any.whl --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+          jsonschema-specifications @ https://creator-engine.dev/downloads/0.3.1/jsonschema_specifications-2025.9.1-py3-none-any.whl --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+          pyyaml @ https://creator-engine.dev/downloads/0.3.1/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl --hash=sha256:c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
+          referencing @ https://creator-engine.dev/downloads/0.3.1/referencing-0.37.0-py3-none-any.whl --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+          rpds-py @ https://creator-engine.dev/downloads/0.3.1/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl --hash=sha256:47e77dc9822d3ad616c3d5759ea5631a75e5809d5a28707744ef79d7a1bcfcad
+          REQ
+          python -m pip install --require-hashes --only-binary :all: -r /tmp/ce-requirements.txt
+      - name: Validate governance artifacts
+        run: |
+          set -o pipefail
+          ce check .ce/ | tee /tmp/ce-check.out || true
+          # The four checks below assume a Creator Engine source checkout and are
+          # expected to fail on an adopted project repository until the validator
+          # ships its client-repository profile; every other failure is blocking.
+          if grep '^FAIL' /tmp/ce-check.out | grep -vE '^FAIL (mutation_class|surfaces_manifest_complete|surfaces_manifest_consistent|v3_naming_hygiene)$'; then
+            echo 'governance artifact validation FAILED'
+            exit 1
+          fi
+          grep -q '^PASS ce_scope' /tmp/ce-check.out
+== merge_group grep ==
+== status ==
+## main...origin/main
+?? .ce/state/active-work-ledger/
+?? .ce/state/archive/
+?? .ce/state/brain/
+?? .ce/state/dispatches/
+?? .ce/state/launch/
+?? .ce/state/onboard/
+?? .gitignore
+?? CLAUDE.md
+?? ce-install.answers.yaml
+?? ce-root-v1
+?? ce-root-v1-anchor.txt
+?? install-answers.schema.yaml
+?? llms-install.md
+?? tmux-client-17425.log

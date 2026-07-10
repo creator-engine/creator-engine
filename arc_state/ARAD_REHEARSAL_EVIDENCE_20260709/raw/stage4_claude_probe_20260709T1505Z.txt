@@ -1,0 +1,22 @@
+== direct likely claude paths ==
+lrwxrwxrwx 1 aradsky aradsky 60 Jul  9 17:52 /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude -> ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+== npm prefixes ==
+/usr/local
+Unknown command: "bin"
+
+To see a list of supported npm commands, run:
+  npm help
+== wider find selected ==
+/home/aradsky/.vscode/extensions/anthropic.claude-code-2.1.199-linux-x64/resources/native-binary/claude
+/home/aradsky/.vscode/extensions/anthropic.claude-code-2.1.201-linux-x64/resources/native-binary/claude
+/home/aradsky/.vscode/extensions/anthropic.claude-code-2.1.195-linux-x64/resources/native-binary/claude
+/home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+== claude binary ==
+lrwxrwxrwx 1 aradsky aradsky 60 Jul  9 17:52 /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude -> ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+2.1.205 (Claude Code)
+== reap once ==
+◆ CE · reap once — observed 0 · reaped 0 · conserved 0 · escalated 1 · skipped 0 · retired 0 · failed 0
+== post-reap status ==
+◆ CE · reap status — observed 0 · eligible 0 · conserved 0 · would-escalate 1 · retired 0 · active/unknown 0
+== tmux sessions ==
+ce-controller: 1 windows (created Fri Jul  3 14:19:09 2026)

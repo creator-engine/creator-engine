@@ -1,0 +1,270 @@
+usage: ce reap [-h] {once,watch,status} ...
+
+positional arguments:
+  {once,watch,status}
+    once               one fold + one bounded action pass (the cron-able /
+                       testable primitive)
+    watch              repeat `once` at an interval; SIGINT/SIGTERM stop
+                       cleanly after the current pass
+    status             pure-fold classification + counts — writes nothing (no
+                       archive/kill/release)
+
+options:
+  -h, --help           show this help message and exit
+== claude binary ==
+lrwxrwxrwx 1 aradsky aradsky 60 Jul  9 17:52 /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude -> ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+2.1.205 (Claude Code)
+== reap once ==
+◆ CE · reap once — observed 0 · reaped 0 · conserved 0 · escalated 1 · skipped 0 · retired 0 · failed 0
+== post-reap status ==
+◆ CE · reap status — observed 0 · eligible 0 · conserved 0 · would-escalate 1 · retired 0 · active/unknown 0
+== tmux sessions ==
+ce-controller: 1 windows (created Fri Jul  3 14:19:09 2026)
+== reap status json ==
+{
+  "action": "reap_status",
+  "active_or_unknown": 0,
+  "already_retired": 0,
+  "conserved": 0,
+  "eligible": 0,
+  "observed_dispatches": 0,
+  "ok": true,
+  "root": ".ce/state",
+  "seats": [
+    {
+      "classification": "escalate_unclean_stop",
+      "outcome": null,
+      "outcome_source": "unresolved",
+      "reason": "stale-launched",
+      "run_id": "ce-controller--controller",
+      "seat_id": "ce-controller--controller"
+    }
+  ],
+  "would_escalate": 1
+}
+== launch preflight after PATH ==
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: WOULD-REFUSE [G6-LAUNCH-SEAT-SURFACE-REUSE]: seat surface '.ce/state/dispatches/ce-controller--controller' already has a launched sentinel event; refusing to reuse it before spawn because liveness is live tmux session still exists. Supported recovery command: `ce reap once` --repo-root <repo-root> --root <state-root>.
+harness-binary: PASS configured claude harness binary 'claude' resolves on PATH at /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch
+== guided equivalent: terminate stale tmux session ==
+ce-controller: 1 windows (created Fri Jul  3 14:19:09 2026)
+== tmux after kill ==
+== reap once after tmux clear ==
+◆ CE · reap once — observed 0 · reaped 0 · conserved 0 · escalated 1 · skipped 0 · retired 0 · failed 0
+== reap status after clear ==
+{
+  "action": "reap_status",
+  "active_or_unknown": 0,
+  "already_retired": 0,
+  "conserved": 0,
+  "eligible": 0,
+  "observed_dispatches": 0,
+  "ok": true,
+  "root": ".ce/state",
+  "seats": [
+    {
+      "classification": "escalate_unclean_stop",
+      "outcome": null,
+      "outcome_source": "unresolved",
+      "reason": "stale-launched",
+      "run_id": "ce-controller--controller",
+      "seat_id": "ce-controller--controller"
+    }
+  ],
+  "would_escalate": 1
+}
+== launch preflight after clear ==
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: WOULD-REFUSE [G6-LAUNCH-SEAT-SURFACE-REUSE]: seat surface '.ce/state/dispatches/ce-controller--controller' already has a launched sentinel event; refusing to reuse it before spawn because liveness is live pid 44016 still exists. Supported recovery command: `ce reap once` --repo-root <repo-root> --root <state-root>.
+harness-binary: PASS configured claude harness binary 'claude' resolves on PATH at /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch
+== process 44016 ==
+UID          PID    PPID  C STIME TTY          TIME CMD
+aradsky    44016   20232  0 Jul03 ?        00:00:00 /bin/sh /home/aradsky/ce-mythos/mythos/.ce/state/dispatches/ce-controller--controller/sentinel-wrapper.sh
+systemd,1 splash
+  `-systemd,20232 --user
+      `-sh,44016 /home/aradsky/ce-mythos/mythos/.ce/state/dispatches/ce-controller--controller/sentinel-wrapper.sh
+          `-claude,44019 --setting-sources project --strict-mcp-config --mcp-config ...
+              |-{claude},44024
+              |-{claude},44036
+              |-{claude},44037
+              |-{claude},44038
+              |-{claude},44039
+              |-{claude},44040
+              |-{claude},44042
+              |-{claude},44056
+              |-{claude},44076
+              |-{claude},44118
+              |-{claude},73294
+              |-{claude},78368
+              |-{claude},78369
+              |-{claude},78370
+              |-{claude},78371
+              |-{claude},78372
+              |-{claude},78373
+              `-{claude},78374
+== sentinel files around dispatch ==
+-rwx------ .ce/state/dispatches/ce-controller--controller/sentinel-wrapper.sh
+#!/bin/sh
+# generated by creator_engine_validator.seat_sentinel — do not edit
+# ce-ops#26 seat lifecycle sentinel. The launcher's supervisor, NOT the seat's
+# model, writes this file; a silently-dying seat still produces its exit event.
+EV=/home/aradsky/ce-mythos/mythos/.ce/state/dispatches/ce-controller--controller/events.jsonl
+emit() { printf '%s\n' "$1" >> "$EV"; }
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+emit "{\"v\":1,\"event\":\"launched\",\"ts\":\"$(now)\",\"seat_id\":\"ce-controller--controller\",\"run_id\":null,\"writer\":\"launcher_wrapper\",\"pid\":$$,\"command_sha256\":\"89b41a74b31b6fefe289c58b7d6dca1c5295a9037d164ba04cfdd92a574eb89b\"}"
+on_sig() { emit "{\"v\":1,\"event\":\"exited\",\"ts\":\"$(now)\",\"seat_id\":\"ce-controller--controller\",\"run_id\":null,\"writer\":\"launcher_wrapper\",\"exit_code\":$((128+$1))}"; exit $((128+$1)); }
+trap 'on_sig 1' HUP
+trap 'on_sig 15' TERM
+trap 'on_sig 2' INT
+export CE_BRAIN_BOOTSTRAP_REF=.ce/state/dispatches/ce-controller--controller/brain-bootstrap.json
+export CE_BRAIN_BOOTSTRAP_SHA256=427f765cea12354792983ad567b8de86765e84d8dd94d184556695c1bccf4b2c
+
+claude --setting-sources project --strict-mcp-config --mcp-config .ce/state/launch/ce-controller/mcp/ce-mcp.json
+code=$?
+emit "{\"v\":1,\"event\":\"exited\",\"ts\":\"$(now)\",\"seat_id\":\"ce-controller--controller\",\"run_id\":null,\"writer\":\"launcher_wrapper\",\"exit_code\":$code}"
+/home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/bin/python -m creator_engine_validator.seat_sentinel resolve-outcome \
+    --events "$EV" --seat-dir /home/aradsky/ce-mythos/mythos/.ce/state/dispatches/ce-controller--controller >/dev/null 2>&1 || true
+exit $code
+-rw-rw-r-- .ce/state/dispatches/ce-controller--controller/events.jsonl
+{"v":1,"event":"launched","ts":"2026-07-03T11:19:09Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","pid":44016,"command_sha256":"89b41a74b31b6fefe289c58b7d6dca1c5295a9037d164ba04cfdd92a574eb89b"}
+-rw-rw-r-- .ce/state/dispatches/ce-controller--controller/brain-bootstrap.json
+{
+  "context": {
+    "role": "controller",
+    "scope": {
+      "role": "controller",
+      "seat_class": "foreman"
+    },
+    "seat_class": "foreman"
+  },
+  "kind": "brain-bootstrap-context",
+  "knowledge_ssot": {
+    "active_count": 1,
+    "assertions": [
+      {
+        "claim": {
+          "object": "genesis-initialized",
+          "predicate": "is",
+          "subject": "brain-ledger"
+        },
+        "content_hash": "c830f7bade5a4eb09a18a62c6191273590b54cb644cdd3c46259dbc3560bbddf",
+        "evidence_ref": "ce-ops#206:ce-brain-init",
+        "id": "brain-assertion-genesis-0001",
+        "scope": "global",
+        "sequence": 0,
+        "statement": "brain-ledger is genesis-initialized",
+        "type": "decision",
+        "verification_method": {
+          "evidence_ref": "ce-ops#206:ce-brain-init",
+          "type": "static"
+        }
+      }
+    ],
+    "authoritative_ledger_path": ".ce/brain/assertions.yaml",
+    "authoritative_loaded": false,
+    "head_content_hash": "c830f7bade5a4eb09a18a62c6191273590b54cb644cdd3c46259dbc3560bbddf",
+    "ledger_path": ".ce/state/brain/assertions.yaml",
+    "record_count": 1,
+    "scope_relevant_count": 1
+  },
+  "operating_mode": {
+    "capabilities": {
+      "worker_spawn": {
+        "enforcement": "launcher-injected-non-optional",
+        "guarantees": [
+          "bounded-recursion-depth",
+          "credential-scrubbed-child-environment",
+          "value-free-worker-record",
+          "launch-runtime-governed-seat"
+        ],
+        "id": "ce-ops#163-worker-spawn",
+        "mandatory": true,
+        "required_inputs": [
+          "role",
+          "harness",
+          "worktree",
+          "scope-id",
+          "prompt-file-or-brief"
+        ],
+        "roles": [
+          "implementer",
+          "researcher",
+          "reviewer",
+          "verification"
+        ],
+        "surface": {
+          "cli": "ce worker spawn",
+          "entrypoints": [
+            "plan_worker_spawn",
+            "spawn_worker"
+          ],
+          "module": "creator_engine_validator.worker_spawn"
+        }
+      }
+    },
+    "foreman_charter": {
+      "directives": [
+        "plan-dispatch-monitor-triage",
+        "delegate-substantive-implementation-review-and-build-work",
+        "preserve-controller-context",
+        "do-not-self-review-or-self-merge"
+== terminate stale sentinel pid 44016 ==
+UID          PID    PPID  C STIME TTY      STAT   TIME CMD
+== reap once after pid clear ==
+◆ CE · reap once — observed 0 · reaped 0 · conserved 0 · escalated 1 · skipped 0 · retired 0 · failed 1
+== reap status after pid clear ==
+{
+  "action": "reap_status",
+  "active_or_unknown": 0,
+  "already_retired": 0,
+  "conserved": 0,
+  "eligible": 1,
+  "observed_dispatches": 0,
+  "ok": true,
+  "root": ".ce/state",
+  "seats": [
+    {
+      "classification": "eligible",
+      "outcome": null,
+      "outcome_source": "unresolved",
+      "reason": null,
+      "run_id": "ce-controller--controller",
+      "seat_id": "ce-controller--controller"
+    }
+  ],
+  "would_escalate": 0
+}
+== launch preflight after pid clear ==
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: SKIPPED: stale launched surface would be archived during live launch
+harness-binary: PASS configured claude harness binary 'claude' resolves on PATH at /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch

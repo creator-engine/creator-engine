@@ -1,0 +1,11 @@
+ce doctor: PASS (repo_root=., version=0.3.4+010ef3de)
+  [ok] RED-G-1 python-interpreter-contract: interpreter 3.14.5 satisfies floor >=3.14 / target 3.14.x
+  [skip] RED-G-2 visible-terminal-tmux: tmux available for the contract-conformant visible terminal (PCO-049)
+  [skip] RED-G-3 rootless-podman-worker: rootless Podman unavailable for worker execution (PCO-045)
+  [skip] RED-G-4 governed-state-path: .hermes/ is git-ignored; governed state-path posture intact
+  [ok] RED-G-5 no-hidden-continuation: no hidden/dead-pane continuation posture detected
+  [skip] RED-G-6 packaging-contract: packaging contract applies only in CE source-tree developer context
+  [skip] CE-DOGFOOD-1 installed-ce-dogfood-posture: running through installed CE console script
+  [skip] CE-SEAT-ENV controller-seat-app-install: no target controller/seat interpreter requested or discovered
+  [skip] CE-BRAIN-RECALL brain recall endpoint: brain recall: UNCONFIGURED (CE_BRAIN_RECALL_EMBEDDER is not set) - semantic recall disabled for this session; SSOT assertions unaffected
+  [skip] RED-G-HARNESS-PATH configured harness binary on PATH: configured claude harness binary check skipped because visible launch was not requested

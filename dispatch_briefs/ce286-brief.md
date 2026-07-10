@@ -1,0 +1,9 @@
+TICKET ce-ops#286 — Deploy: persist `--host-uds=open` for the gVisor `runsc-gvproxy-ptrace` runtime so the contained-seat broker-socket reach survives host reprovision. WORK CLASS: tiny. SEAT: dev-3 (self-push via broker).
+WORKTREE: `git worktree add ../wt-ce286 -b ce286-host-uds-persist` (work there; never touch main checkout).
+CONTEXT: the contained seat couldn't reach the bind-mounted broker sockets until `--host-uds=open` was added to the `runsc-gvproxy-ptrace` runtime in /etc/docker/daemon.json (then `sudo systemctl reload docker`). That was a manual host edit — NOT captured in repo deploy config, so it's lost on reprovision.
+SCOPE (documentation/config capture, NO new logic):
+- `deploy/vps-runsc/README.md` — add a "Host Docker daemon prerequisites" subsection documenting the `--host-uds=open` requirement under the `runsc-gvproxy-ptrace` runtime stanza in /etc/docker/daemon.json, with the exact JSON fragment and the `sudo systemctl reload docker` step.
+- OPTIONALLY add a one-line comment in `deploy/vps-runsc/run-vps-runsc.sh` cross-referencing the README prereq (README-only is acceptable if cleaner).
+HARD EXCLUSIONS: do NOT touch `docs/architecture/egress-broker.md` (it carries ce-ops# refs and is in the confidentiality _KNOWN_PENDING list — out of scope), `deploy/systemd/**`, `tools/egress-broker/**`, `surfaces/manifest.yaml`, the top-level README.md, AGENTS.md, .github/**.
+GOVERNANCE: carriers `.ce/changelog/ce286-*.md` + `.ce/pr-manifests/ce286-*.md` (front matter incl issue: ce-ops#286); PR BODY must contain the literal line `- **Declared work class:** tiny`.
+PREFLIGHT (FULL, not focused): `PYTHONPATH=validators python3 -m creator_engine_validator.ce_cli validate-pr --base origin/main --declared-work-class tiny`. Self-push via the broker when green; open the PR (Closes ce-ops#286).

@@ -1,0 +1,8 @@
+# BRIEF — dev-4 — ce-ops#464: worktree-debt classified-sweep DESIGN (design only, no execution)
+2026-07-06 ~09:0xZ. Role: architect/design, contained, COMMIT-ONLY → harvest. Branch `ce-464-worktree-sweep-design` off FRESH origin/main. Day-arc D-F item.
+
+Context: ce-ops#464 — the controller repo carries ~354 accumulated worktrees/staging dirs (.ce/wt-*, /var/tmp/ce-*) from months of conveyor work. Naive pruning is dangerous (some hold unpushed commits, claims evidence, canary state). The ticket wants a classified-sweep DESIGN, not deletion.
+
+Scope: a design doc (docs/design/ or the ticket's stated location — check #464 body) covering: (1) classification taxonomy (active-claim / merged-safe / unpushed-work / evidence-hold / unknown) with the DETERMINISTIC signals for each (claim files, git ahead-count vs origin, merge status of branch, mtime); (2) sweep procedure: classify → report → Operator-visible manifest → staged deletion with undo window (git bundle archive before rm); (3) what becomes a `ce` command vs a runbook (bake-gaps-into-CE: recommend the command shape, e.g. `ce worktree sweep --classify/--apply`); (4) safety invariants (never delete unpushed/unknown; kill-switch; dry-run default); (5) rollout: controller repo first, then fleet hosts. Ground every signal in the actual repo state — sample real .ce/wt-* dirs (read-only!) and show classification results for ~10 as an appendix.
+
+Bar: FULL ce validate-pr GREEN one pass; carrier (stem == branch slug); changelog; class story. COMMIT-ONLY; `READY <sha>`. STOP lines standard; touch ONLY the design doc + gate artifacts; DELETE NOTHING.

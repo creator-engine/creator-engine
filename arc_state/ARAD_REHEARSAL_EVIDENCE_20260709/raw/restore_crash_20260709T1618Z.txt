@@ -1,0 +1,71 @@
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: SKIPPED: dead launched surface would be archived during live launch
+harness-binary: PASS configured claude harness binary 'claude' resolves on PATH at /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch
+ce launch: spawned visible Controller seat (session=$0 window=@0 pane=%0)
+== tmux ==
+ce-controller: 1 windows (created Thu Jul  9 19:17:05 2026)
+ce-controller:0.0 pid=85733 cmd=sh active=1
+== pane ==
+ ▐▛███▜▌   Claude Code v2.1.205
+▝▜█████▛▘  Opus 4.8 · Claude Pro
+  ▘▘ ▝▝    ~/ce-mythos/mythos
+
+ ⚠ Your login expires in 3 days · run /login to renew
+
+ ▎ Extended: Fable 5 is included in your weekly limit
+ ▎ Through July 12, you can use up to 50% of your weekly usage limit on Fable 5.
+ ▎ If you hit your limit, you can continue on Fable 5 with usage credits. Fable
+ ▎ 5 draws down usage faster than Opus 4.8. Run /model and select Fable to use
+ ▎ it. Learn more
+
+❯ /model
+  ⎿  Set model to Opus 4.8 and saved as your default for new sessions
+
+❯ We are running the CE 0.3.4 live first-journey rehearsal for Arad. Use
+  CEO-mode language only. Ask Arad for three fields: Goal, Done-when, and
+  Change-type. Then shape the request into a governed plan and wait for Arad
+  natural-language ratification before doing any work.
+
+● Welcome to the CE 0.3.4 first-journey rehearsal, Arad. I'll act as your
+  governed operator: you set direction, I shape and execute against it — nothing
+  moves without your sign-off.
+
+  To open the plan, I need three inputs from you:
+
+  1. Goal — the outcome you want, in one line. What does success look like?
+  2. Done-when — the concrete condition that lets us both declare this finished.
+  How will you know it's complete?
+  3. Change-type — the nature of the work. Pick one: Docs · Config · Code ·
+  Infra · Governance/Process.
+
+  Give me those three, and I'll return a governed plan for your ratification. No
+  work begins until you approve it in your own words.
+
+✻ Cooked for 8s
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents
+  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and re…
+
+== events ==
+--- .ce/state/dispatches/ce-controller--controller.archived-20260709T150345Z/events.jsonl
+{"v":1,"event":"launched","ts":"2026-07-03T11:19:09Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","pid":44016,"command_sha256":"89b41a74b31b6fefe289c58b7d6dca1c5295a9037d164ba04cfdd92a574eb89b"}
+{"v":1,"event":"exited","ts":"2026-07-09T15:03:25Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","exit_code":129}
+--- .ce/state/dispatches/ce-controller--controller.archived-20260709T161705Z/events.jsonl
+{"v":1,"event":"launched","ts":"2026-07-09T15:03:45Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","pid":78714,"command_sha256":"89b41a74b31b6fefe289c58b7d6dca1c5295a9037d164ba04cfdd92a574eb89b"}
+{"v":1,"event":"exited","ts":"2026-07-09T16:13:41Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","exit_code":0}
+{"v":1,"event":"outcome_resolved","ts":"2026-07-09T16:13:41Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","outcome":null,"outcome_source":"unresolved","evidence_ref":null}
+--- .ce/state/dispatches/ce-controller--controller/events.jsonl
+{"v":1,"event":"launched","ts":"2026-07-09T16:17:05Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","pid":85733,"command_sha256":"5bd4f6b77eb5967eaac0879a777a82d078821cb5551f82d6b78b7353c7ab47a8"}

@@ -1,0 +1,163 @@
+== identity ==
+aradsky-Vostro-3400
+2026-07-09T17:51:30+03:00
+Linux aradsky-Vostro-3400 6.8.0-124-generic #124-Ubuntu SMP PREEMPT_DYNAMIC Tue May 26 13:00:45 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+USER=aradsky HOME=/home/aradsky SHELL=/bin/bash
+
+== prereq commands ==
+git: /usr/bin/git
+git version 2.43.0
+curl: /usr/bin/curl
+curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0 OpenSSL/3.0.13 zlib/1.3 brotli/1.1.0 zstd/1.5.5 libidn2/2.3.7 libpsl/0.21.2 (+libidn2/2.3.7) libssh/0.10.6/openssl/zlib nghttp2/1.59.0 librtmp/2.3 OpenLDAP/2.6.10
+ssh-keygen: /usr/bin/ssh-keygen
+option requires an argument -- V
+python3: /usr/bin/python3
+Python 3.12.3
+pipx: MISSING
+uv: MISSING
+ce: MISSING
+cev3: MISSING
+claude: MISSING
+codex: MISSING
+node: /usr/bin/node
+v18.19.1
+npm: /usr/bin/npm
+9.2.0
+gh: MISSING
+
+== CE known paths ==
+lrwxrwxrwx 1 aradsky aradsky 63 Jul  3 10:36 /home/aradsky/.local/bin/ce -> /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/ce
+lrwxrwxrwx 1 aradsky aradsky 65 Jul  3 10:36 /home/aradsky/.local/bin/cev3 -> /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/cev3
+drwxrwxr-x 3 aradsky aradsky 4096 Jun 20 18:32 /home/aradsky/.local/share/creator-engine
+absent: /home/aradsky/.creator-engine
+absent: /home/aradsky/.cache/creator-engine
+absent: /home/aradsky/.config/creator-engine
+drwxrwxr-x 2 aradsky aradsky 4096 Jul  3 10:46 /home/aradsky/ce-welcome
+
+== ce symlink detail ==
+lrwxrwxrwx 1 aradsky aradsky 63 Jul  3 10:36 /home/aradsky/.local/bin/ce -> /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/ce
+/home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/bin/ce
+
+== secret custody check (metadata only) ==
+drwx------ 2 aradsky aradsky 4096 Jul  3 10:35 /home/aradsky/.ce-secrets
+entry: github-bootstrap-token.txt type=f mode=600 owner=aradsky group=aradsky
+entry: mythos-arad.private-key.pem type=f mode=600 owner=aradsky group=aradsky
+
+== mythos checkout candidates ==
+absent: /home/aradsky/mythos
+absent: /home/aradsky/src/mythos
+absent: /home/aradsky/creator-engine/mythos
+absent: /home/aradsky/ce-welcome/mythos
+
+== shallow repo search ==
+found-mythos-like: /home/aradsky/ce-mythos/mythos origin=git@github.com:chmod735-dor/mythos.git
+## main...origin/main
+?? .ce/state/active-work-ledger/
+?? .ce/state/archive/
+?? .ce/state/brain/
+?? .ce/state/dispatches/
+?? .ce/state/launch/
+?? .ce/state/onboard/
+?? .hermes/
+?? CLAUDE.md
+?? ce-install.answers.yaml
+?? ce-root-v1
+?? ce-root-v1-anchor.txt
+?? install-answers.schema.yaml
+?? llms-install.md
+?? tmux-client-17425.log
+found-mythos-like: /home/aradsky/ce-workspaces/mythos origin=https://github.com/chmod735-dor/mythos.git
+## ce/adopt-governance
+
+== CE explicit path/version follow-up ==
+path: /home/aradsky/.local/bin/ce
+lrwxrwxrwx 1 aradsky aradsky 63 Jul  3 10:36 /home/aradsky/.local/bin/ce -> /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/ce
+0.3.1+91d20efc
+path: /home/aradsky/.local/bin/cev3
+lrwxrwxrwx 1 aradsky aradsky 65 Jul  3 10:36 /home/aradsky/.local/bin/cev3 -> /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/cev3
+0.3.1+91d20efc
+path: /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/ce
+-rwxrwxr-x 1 aradsky aradsky 333 Jul  3 10:36 /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/ce
+0.3.1+91d20efc
+path: /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/cev3
+-rwxrwxr-x 1 aradsky aradsky 333 Jul  3 10:36 /home/aradsky/.local/share/creator-engine/bootstrap/venv/bin/cev3
+0.3.1+91d20efc
+
+== CE bootstrap tree shallow ==
+-rw-rw-r-- aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/install-state -> 
+-rw-rw-r-- aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3/.gitignore -> 
+-rw-rw-r-- aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3/pyvenv.cfg -> 
+-rw-rw-r-- aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083/.gitignore -> 
+-rw-rw-r-- aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083/pyvenv.cfg -> 
+-rw-rw-r-- aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/.gitignore -> 
+-rw-rw-r-- aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/pyvenv.cfg -> 
+-rwxr-xr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/bin/uv-0.11.21-linux-x86_64-cp314 -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/artifacts -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/artifacts/449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3 -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/artifacts/ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083 -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/artifacts/da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3 -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/bin -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3 -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3/bin -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3/include -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3/lib -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083 -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083/bin -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083/include -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083/lib -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3 -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/bin -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/include -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/lib -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/verified-inputs -> 
+drwxrwxr-x aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/verified-inputs/b1418f73ca033ea97d6ffb1464cba75aaa8eb473240f3b2faffbb769613efef2 -> 
+lrwxrwxrwx aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/bin/uv -> uv-0.11.21-linux-x86_64-cp314
+lrwxrwxrwx aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv -> venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3
+lrwxrwxrwx aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-449838f93af2c1cb6465e6e0b649677cf30af6e81f248f8dfcde0cc7d957f5e3/lib64 -> lib
+lrwxrwxrwx aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.2.0-ba1c6be427a5c09a6f583294ec53ee24998a276b0ba90c10983cd779cfa07083/lib64 -> lib
+lrwxrwxrwx aradsky aradsky /home/aradsky/.local/share/creator-engine/bootstrap/venv-0.3.1-da44ce6b1bf3cc68e1fad9fedbaae3e67c510465e2f7e03edd58545cfa287cd3/lib64 -> lib
+
+== mythos repo details ==
+
+repo: /home/aradsky/ce-mythos/mythos
+origin	git@github.com:chmod735-dor/mythos.git (fetch)
+origin	git@github.com:chmod735-dor/mythos.git (push)
+## main...origin/main
+?? .ce/state/active-work-ledger/
+?? .ce/state/archive/
+?? .ce/state/brain/
+?? .ce/state/dispatches/
+?? .ce/state/launch/
+?? .ce/state/onboard/
+?? .hermes/
+?? CLAUDE.md
+?? ce-install.answers.yaml
+?? ce-root-v1
+?? ce-root-v1-anchor.txt
+?? install-answers.schema.yaml
+?? llms-install.md
+?? tmux-client-17425.log
+/home/aradsky/ce-mythos/mythos
+main
+main
+recent commits:
+43d92bf (HEAD -> main, origin/main, origin/HEAD) Merge pull request #5 from chmod735-dor/ce/adopt-governance
+2f4137f (origin/ce/adopt-governance) fix: client-repo validation workflow (hash-pinned validator install; repo-profile checks documented pending)
+c177d4e ce: adopt project into CE governance (join PR)
+9f46024 chore(codeowners): onboard @aradSmith as joint required reviewer (#3)
+4ed1cab docs(mythos): align planning docs with PRDv2 architecture
+gitignore relevant entries:
+NO .gitignore
+
+repo: /home/aradsky/ce-workspaces/mythos
+origin	https://github.com/chmod735-dor/mythos.git (fetch)
+origin	https://github.com/chmod735-dor/mythos.git (push)
+## ce/adopt-governance
+/home/aradsky/ce-workspaces/mythos
+ce/adopt-governance
+ce/adopt-governance
+recent commits:
+4ed1cab (grafted, HEAD -> ce/adopt-governance, origin/main, origin/HEAD, main) docs(mythos): align planning docs with PRDv2 architecture
+gitignore relevant entries:
+NO .gitignore

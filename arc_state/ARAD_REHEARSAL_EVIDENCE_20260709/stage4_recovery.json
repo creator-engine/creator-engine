@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "rehearsal_id": "arad-live-20260709",
+  "run_timestamp_utc": "2026-07-09T15:04:10Z",
+  "harness_version": "ce-p3-rehearsal-s1-live-manual",
+  "container_image": null,
+  "ce_package_version": "0.3.4+010ef3de",
+  "ce_site": "https://creator-engine.dev",
+  "stages": [
+    {
+      "stage": "launch-recovery",
+      "status": "pass",
+      "started_at": "2026-07-09T15:00:00Z",
+      "completed_at": "2026-07-09T15:04:10Z",
+      "duration_ms": 250000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage4_reap_20260709T1505Z.txt and raw/stage4_claude_probe_20260709T1505Z.txt. Operator ratified stale-surface clear. Claude Code located at ~/.nvm/versions/node/v20.20.0/bin/claude version 2.1.205. Stale July 3 tmux/sentinel PID cleared and old dispatch archived during successful live launch."
+    }
+  ],
+  "summary": {
+    "total_stages": 1,
+    "passed": 1,
+    "failed": 0,
+    "stubbed": 0,
+    "skipped": 0
+  },
+  "failures": []
+}

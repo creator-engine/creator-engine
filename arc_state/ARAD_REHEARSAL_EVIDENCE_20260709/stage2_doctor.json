@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "rehearsal_id": "arad-live-20260709",
+  "run_timestamp_utc": "2026-07-09T14:54:20Z",
+  "harness_version": "ce-p3-rehearsal-s1-live-manual",
+  "container_image": null,
+  "ce_package_version": "0.3.4+010ef3de",
+  "ce_site": "https://creator-engine.dev",
+  "stages": [
+    {
+      "stage": "doctor",
+      "status": "pass",
+      "started_at": "2026-07-09T14:54:15Z",
+      "completed_at": "2026-07-09T14:54:20Z",
+      "duration_ms": 5000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage2_doctor_20260709T1454Z.txt. ce doctor PASS for 0.3.4+010ef3de."
+    }
+  ],
+  "summary": {
+    "total_stages": 1,
+    "passed": 1,
+    "failed": 0,
+    "stubbed": 0,
+    "skipped": 0
+  },
+  "failures": []
+}

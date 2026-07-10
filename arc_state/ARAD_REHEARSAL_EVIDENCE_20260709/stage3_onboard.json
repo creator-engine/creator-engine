@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "rehearsal_id": "arad-live-20260709",
+  "run_timestamp_utc": "2026-07-09T14:56:35Z",
+  "harness_version": "ce-p3-rehearsal-s1-live-manual",
+  "container_image": null,
+  "ce_package_version": "0.3.4+010ef3de",
+  "ce_site": "https://creator-engine.dev",
+  "stages": [
+    {
+      "stage": "onboard",
+      "status": "pass",
+      "started_at": "2026-07-09T14:55:00Z",
+      "completed_at": "2026-07-09T14:56:35Z",
+      "duration_ms": 95000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage3_onboard_20260709T1455Z.txt. Initial expected RED-G-4 .hermes gitignore refusal; added .hermes/ to .gitignore; rerun passed. Workflow lacks merge_group and still references 0.3.1 artifacts."
+    }
+  ],
+  "summary": {
+    "total_stages": 1,
+    "passed": 1,
+    "failed": 0,
+    "stubbed": 0,
+    "skipped": 0
+  },
+  "failures": []
+}

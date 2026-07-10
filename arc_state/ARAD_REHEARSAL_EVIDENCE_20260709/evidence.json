@@ -1,0 +1,79 @@
+{
+  "schema_version": "1",
+  "rehearsal_id": "arad-live-20260709",
+  "run_timestamp_utc": "2026-07-09T16:18:00Z",
+  "harness_version": "ce-p3-rehearsal-s1-live-manual",
+  "container_image": null,
+  "ce_package_version": "0.3.4+010ef3de",
+  "ce_site": "https://creator-engine.dev",
+  "stages": [
+    {
+      "stage": "inventory",
+      "status": "pass",
+      "started_at": "2026-07-09T14:51:30Z",
+      "completed_at": "2026-07-09T14:51:54Z",
+      "duration_ms": 24000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage0_inventory_20260709T1452Z.txt. Existing CE 0.3.1 found; upgrade-in-place selected. Secret custody checked by metadata only."
+    },
+    {
+      "stage": "install",
+      "status": "pass",
+      "started_at": "2026-07-09T14:53:00Z",
+      "completed_at": "2026-07-09T14:53:36Z",
+      "duration_ms": 36000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage1_install_20260709T1453Z.txt. Signed one-liner installed CE 0.3.4+010ef3de in user-local bootstrap venv."
+    },
+    {
+      "stage": "doctor",
+      "status": "pass",
+      "started_at": "2026-07-09T14:54:15Z",
+      "completed_at": "2026-07-09T14:54:20Z",
+      "duration_ms": 5000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage2_doctor_20260709T1454Z.txt. ce doctor PASS for 0.3.4+010ef3de."
+    },
+    {
+      "stage": "onboard",
+      "status": "pass",
+      "started_at": "2026-07-09T14:55:00Z",
+      "completed_at": "2026-07-09T14:56:35Z",
+      "duration_ms": 95000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage3_onboard_20260709T1455Z.txt. Initial expected RED-G-4 .hermes gitignore refusal; added .hermes/ to .gitignore; rerun passed. Workflow lacks merge_group and still references 0.3.1 artifacts."
+    },
+    {
+      "stage": "launch",
+      "status": "pass",
+      "started_at": "2026-07-09T14:57:00Z",
+      "completed_at": "2026-07-09T15:04:10Z",
+      "duration_ms": 430000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage4_launch_20260709T1457Z.txt; .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage4_reap_20260709T1505Z.txt; .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/stage4_claude_probe_20260709T1505Z.txt. Initial preflight refused on stale launch surface and missing non-login PATH for Claude; Operator ratified stale-surface reap/guided clear; Claude found at nvm path version 2.1.205; stale July 3 surface archived; host backend launch exited 0 and spawned ce-controller tmux session."
+    },
+    {
+      "stage": "first-journey-restore",
+      "status": "pass",
+      "started_at": "2026-07-09T16:16:00Z",
+      "completed_at": "2026-07-09T16:18:00Z",
+      "duration_ms": 120000,
+      "stub_reason": null,
+      "exit_code": 0,
+      "notes": "Raw output: .ce/state/research/ARAD_REHEARSAL_EVIDENCE_20260709/raw/restore_crash_20260709T1618Z.txt. Visible tmux surface disappeared; CE wrapper event log recorded clean exit_code 0 at 2026-07-09T16:13:41Z after Claude Code daemonized/forked a resumed session. Relaunched host backend with --claude-arg=--resume --claude-arg=6234095a-b192-4e84-84d7-3977ab1d60f1; pane restored to prior first-journey prompt awaiting Arad inputs."
+    }
+  ],
+  "summary": {
+    "total_stages": 6,
+    "passed": 6,
+    "failed": 0,
+    "stubbed": 0,
+    "skipped": 0
+  },
+  "failures": []
+}

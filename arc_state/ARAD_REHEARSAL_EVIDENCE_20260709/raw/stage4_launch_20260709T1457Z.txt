@@ -1,0 +1,231 @@
+usage: ce launch [-h] [--harness HARNESS] [--session SESSION]
+                 [--window WINDOW] [--resume] [--dry-run] [--preflight]
+                 [--no-tmux] [--role {controller}]
+                 [--takeover-evidence TAKEOVER_EVIDENCE]
+                 [--claude-arg CLAUDE_ARG] [--codex-arg CODEX_ARG]
+                 [--mcp-config MCP_CONFIG]
+                 [--completion-report-ref COMPLETION_REPORT_REF]
+                 [--closeout-file CLOSEOUT_FILE]
+                 [--runtime-policy RUNTIME_POLICY]
+                 [--backend {gvisor,docker,openshell,local-noop,host}]
+                 [--claim-ticket CLAIM_TICKET] [--repo-root REPO_ROOT]
+                 [--ledger-root LEDGER_ROOT] [--controller-id CONTROLLER_ID]
+                 [--host-id HOST_ID] [--purpose PURPOSE] [--json]
+
+options:
+  -h, --help            show this help message and exit
+  --harness HARNESS     Controller-seat harness
+  --session SESSION     tmux session name
+  --window WINDOW       tmux window name
+  --resume              attach an existing launcher session
+  --dry-run             plan only; no tmux spawn, no provider login
+  --preflight           diagnose launch pre-spawn gates without mutating seat,
+                        tmux, ledger, or runtime state; exit 0 = all evaluable
+                        gates pass and no critical gates skipped; exit 1 = at
+                        least one gate WOULD-REFUSE; exit 3 = all evaluable
+                        gates pass but one or more critical gates (e.g.
+                        containment provisioning) could not be evaluated
+                        without a live launch
+  --no-tmux             refuse-only flag: request a non-visible/headless seat
+                        (always refused)
+  --role {controller}   raw role=controller launch request; refuses until a
+                        governed takeover evidence packet is supplied
+  --takeover-evidence TAKEOVER_EVIDENCE
+                        path to a ce takeover --dry-run --json evidence packet
+                        that authorizes role=controller launch
+  --claude-arg CLAUDE_ARG
+                        repeatable extra arg passed to the claude harness (use
+                        --claude-arg=<value> for dashed values)
+  --codex-arg CODEX_ARG
+                        repeatable allowlisted extra arg passed to the codex
+                        harness (use --codex-arg=<value> for dashed values)
+  --mcp-config MCP_CONFIG
+                        CE-owned MCP config path under .ce/state/launch (pins
+                        --strict-mcp-config)
+  --completion-report-ref COMPLETION_REPORT_REF
+                        deterministic completion-report pointer recorded for
+                        Ring 0 closeout verification
+  --closeout-file CLOSEOUT_FILE
+                        deterministic closeout file pointer recorded for Ring
+                        0 closeout verification
+  --runtime-policy RUNTIME_POLICY
+                        v3.5-F: path to the ratified runtime policy whose
+                        resource_envelopes bound this seat (systemd-run --user
+                        wrap); --dry-run renders the resource_bound block
+                        offline
+  --backend {gvisor,docker,openshell,local-noop,host}
+                        runtime backend selector carried by --runtime-policy
+                        (gvisor aliases to gvisor-proxy); host explicitly opts
+                        out of contained launch
+  --claim-ticket CLAIM_TICKET
+                        ce-ops#38: acquire + verify a work-claim lock on this
+                        ticket (owner/name#N, an issue URL, or N inside the
+                        slug) BEFORE any launch side effect; a foreign active
+                        claim refuses the launch
+  --repo-root REPO_ROOT
+                        repo root for lifecycle registration
+  --ledger-root LEDGER_ROOT
+                        path to .ce/state/active-work-ledger for lifecycle
+                        registration
+  --controller-id CONTROLLER_ID
+                        owner/controller id recorded in the governed seat
+                        lifecycle record
+  --host-id HOST_ID     host id recorded in the governed seat lifecycle record
+  --purpose PURPOSE     operator-readable purpose recorded in the governed
+                        seat lifecycle record
+  --json                emit machine-readable JSON
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: WOULD-REFUSE [G6-LAUNCH-SEAT-SURFACE-REUSE]: seat surface '.ce/state/dispatches/ce-controller--controller' already has a launched sentinel event; refusing to reuse it before spawn because liveness is live tmux session still exists. Supported recovery command: `ce reap once` --repo-root <repo-root> --root <state-root>.
+harness-binary: WOULD-REFUSE [RED-G-HARNESS-PATH]: configured claude harness binary 'claude' is not on PATH; install claude CLI or fix PATH before running `ce launch --harness claude`
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch
+== possible harness binaries ==
+== npm globals ==
+/usr/local/lib
+└── (empty)
+
+== tmux sessions ==
+ce-controller: 1 windows (created Fri Jul  3 14:19:09 2026)
+== ce launched sentinels ==
+/home/aradsky/ce-mythos/mythos/.ce/state/archive/legacy-0.2.0-dispatches-20260703/ce-controller--controller/sentinel-wrapper.sh
+/home/aradsky/ce-mythos/mythos/.ce/state/archive/legacy-0.2.0-dispatches-20260703/ce-controller--controller/brain-bootstrap.json
+/home/aradsky/ce-mythos/mythos/.ce/state/dispatches/ce-controller--controller/sentinel-wrapper.sh
+/home/aradsky/ce-mythos/mythos/.ce/state/dispatches/ce-controller--controller/brain-bootstrap.json
+== reap status json ==
+{
+  "action": "reap_status",
+  "active_or_unknown": 0,
+  "already_retired": 0,
+  "conserved": 0,
+  "eligible": 0,
+  "observed_dispatches": 0,
+  "ok": true,
+  "root": ".ce/state",
+  "seats": [
+    {
+      "classification": "escalate_unclean_stop",
+      "outcome": null,
+      "outcome_source": "unresolved",
+      "reason": "stale-launched",
+      "run_id": "ce-controller--controller",
+      "seat_id": "ce-controller--controller"
+    }
+  ],
+  "would_escalate": 1
+}
+== launch preflight after PATH ==
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: WOULD-REFUSE [G6-LAUNCH-SEAT-SURFACE-REUSE]: seat surface '.ce/state/dispatches/ce-controller--controller' already has a launched sentinel event; refusing to reuse it before spawn because liveness is live tmux session still exists. Supported recovery command: `ce reap once` --repo-root <repo-root> --root <state-root>.
+harness-binary: PASS configured claude harness binary 'claude' resolves on PATH at /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch
+== guided equivalent: terminate stale tmux session ==
+ce-controller: 1 windows (created Fri Jul  3 14:19:09 2026)
+== tmux after kill ==
+== reap once after tmux clear ==
+◆ CE · reap once — observed 0 · reaped 0 · conserved 0 · escalated 1 · skipped 0 · retired 0 · failed 0
+== reap status after clear ==
+{
+  "action": "reap_status",
+  "active_or_unknown": 0,
+  "already_retired": 0,
+  "conserved": 0,
+  "eligible": 0,
+  "observed_dispatches": 0,
+  "ok": true,
+  "root": ".ce/state",
+  "seats": [
+    {
+      "classification": "escalate_unclean_stop",
+      "outcome": null,
+      "outcome_source": "unresolved",
+      "reason": "stale-launched",
+      "run_id": "ce-controller--controller",
+      "seat_id": "ce-controller--controller"
+    }
+  ],
+  "would_escalate": 1
+}
+== launch preflight after clear ==
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: WOULD-REFUSE [G6-LAUNCH-SEAT-SURFACE-REUSE]: seat surface '.ce/state/dispatches/ce-controller--controller' already has a launched sentinel event; refusing to reuse it before spawn because liveness is live pid 44016 still exists. Supported recovery command: `ce reap once` --repo-root <repo-root> --root <state-root>.
+harness-binary: PASS configured claude harness binary 'claude' resolves on PATH at /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch
+== terminate stale sentinel pid 44016 ==
+UID          PID    PPID  C STIME TTY      STAT   TIME CMD
+== reap once after pid clear ==
+◆ CE · reap once — observed 0 · reaped 0 · conserved 0 · escalated 1 · skipped 0 · retired 0 · failed 1
+== reap status after pid clear ==
+{
+  "action": "reap_status",
+  "active_or_unknown": 0,
+  "already_retired": 0,
+  "conserved": 0,
+  "eligible": 1,
+  "observed_dispatches": 0,
+  "ok": true,
+  "root": ".ce/state",
+  "seats": [
+    {
+      "classification": "eligible",
+      "outcome": null,
+      "outcome_source": "unresolved",
+      "reason": null,
+      "run_id": "ce-controller--controller",
+      "seat_id": "ce-controller--controller"
+    }
+  ],
+  "would_escalate": 0
+}
+== launch preflight after pid clear ==
+plan: PASS
+foreman-dispatch-contract: PASS
+harness-governance: PASS
+codex-controller-promotion: SKIPPED: Codex-only promotion packet gate
+visibility: PASS
+runtime-policy: PASS
+tmux-availability: PASS
+seat-surface-reuse: SKIPPED: stale launched surface would be archived during live launch
+harness-binary: PASS configured claude harness binary 'claude' resolves on PATH at /home/aradsky/.nvm/versions/node/v20.20.0/bin/claude
+resource-bounding: PASS
+visible-runtime-backend: PASS not requested
+brain-bootstrap-materialization: SKIPPED: requires live launch to avoid bootstrap sync/hydration and payload writes
+mcp-config-materialization: SKIPPED: requires live launch
+ce launch: spawned visible Controller seat (session=$0 window=@0 pane=%0)
+== tmux sessions ==
+ce-controller: 1 windows (created Thu Jul  9 18:03:45 2026)
+== tmux panes ==
+ce-controller:0.0 pid=78714 cmd=sh active=1
+== dispatch dirs ==
+.ce/state/dispatches/ce-controller--controller/events.jsonl
+{"v":1,"event":"launched","ts":"2026-07-09T15:03:45Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","pid":78714,"command_sha256":"89b41a74b31b6fefe289c58b7d6dca1c5295a9037d164ba04cfdd92a574eb89b"}
+.ce/state/dispatches/ce-controller--controller.archived-20260709T150345Z/events.jsonl
+{"v":1,"event":"launched","ts":"2026-07-03T11:19:09Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","pid":44016,"command_sha256":"89b41a74b31b6fefe289c58b7d6dca1c5295a9037d164ba04cfdd92a574eb89b"}
+{"v":1,"event":"exited","ts":"2026-07-09T15:03:25Z","seat_id":"ce-controller--controller","run_id":null,"writer":"launcher_wrapper","exit_code":129}
+== launch state ==
+.ce/state/launch/ce-controller/mcp/ce-mcp.json
