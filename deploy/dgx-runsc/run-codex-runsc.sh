@@ -315,7 +315,7 @@ prepare_contained_codex_config() {
 # Nested Codex bubblewrap cannot run inside runsc/gVisor; gVisor is the sandbox.
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
-model = "gpt-5.5"
+model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 allow_managed_hooks_only = true
 

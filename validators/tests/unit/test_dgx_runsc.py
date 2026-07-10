@@ -32,7 +32,7 @@ def expected_contained_codex_config() -> str:
         "# Nested Codex bubblewrap cannot run inside runsc/gVisor; gVisor is the sandbox.\n"
         'approval_policy = "never"\n'
         'sandbox_mode = "danger-full-access"\n'
-        'model = "gpt-5.5"\n'
+        'model = "gpt-5.6-terra"\n'
         'model_reasoning_effort = "high"\n'
         "allow_managed_hooks_only = true\n"
         "\n"
