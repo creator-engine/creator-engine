@@ -1227,6 +1227,33 @@ def run_preflight(
     )
     checks.append(
         _run_check(
+            "Creator Engine validator - signed-artifact hash-pin PR-diff gate",
+            lambda: (
+                _run_checked(
+                    "Creator Engine validator - signed-artifact hash-pin PR-diff gate",
+                    [
+                        py,
+                        "-m",
+                        "creator_engine_validator",
+                        "verify-signed-artifact-pins",
+                        "--base",
+                        comparison_base["value"],
+                        ".",
+                    ],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Support-corpus confidentiality intersection (ce ask product-lens allowlist)",
             lambda: (
                 _run_checked(

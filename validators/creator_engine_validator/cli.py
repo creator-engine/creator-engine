@@ -279,6 +279,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_test_coupling.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_signed_artifact_pins = sub.add_parser(
+        "verify-signed-artifact-pins",
+        help=(
+            "signed-artifact hash-pin PR-diff gate (fails when <base>..HEAD touches "
+            "a file pinned by docs/llms-install.md without updating the matching pin)"
+        ),
+    )
+    verify_signed_artifact_pins.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
+    verify_signed_artifact_pins.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     verify_version_drift = sub.add_parser(
         "verify-version-drift",
         help="version_drift current-version surface gate (compares unsigned docs/deploy defaults against version.py)",
@@ -905,6 +915,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.base,
             pr_body=pr_body,
         )
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-signed-artifact-pins":
+        from .checks.signed_artifact_pins import run_with_base as _run_signed_artifact_pins
+
+        result = _run_signed_artifact_pins([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
     if subcommand == "verify-version-drift":
         from .checks.version_drift import run as _run_version_drift
