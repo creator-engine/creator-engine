@@ -139,13 +139,13 @@ class SeatPullAdapter:
         while the launcher runs.  An exception after that point is retained:
         launch outcome is unknown, so retrying could duplicate a seat.
         """
-        _validate_identity(seat_id, "seat_id")
         try:
+            _validate_identity(seat_id, "seat_id")
             unit = self.queue.claim_entry(seat_id, ttl_seconds=ttl_seconds, clock=clock)
-        except IntakeTransitionError as exc:
+        except (OSError, ValueError, IntakeTransitionError) as exc:
             # Claim placement has already been reconciled to a single pending
-            # record.  Surface a bounded outcome rather than leaking a storage
-            # exception from the seat-facing seam.
+            # record where possible.  Initial queue storage, TTL, scan, and
+            # lock failures are all bounded at this seat-facing seam.
             return SeatPullOutcome(
                 state="blocked_released", claim_state="empty", seat_id=seat_id,
                 detail=f"claim_refused:{type(exc).__name__}",

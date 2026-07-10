@@ -76,6 +76,17 @@ class _RenameDurabilityError(OSError):
     destination_authoritative = True
 
 
+class _WriteDurabilityError(OSError):
+    """A record replacement completed, but directory fsync did not confirm it.
+
+    The target pathname is nevertheless the authoritative observed location.
+    Callers which need a definitive outcome must inspect that record rather
+    than treating this like a pre-replace write failure.
+    """
+
+    destination_authoritative = True
+
+
 @dataclass(frozen=True)
 class IntakeDispatchPlan:
     seat_id: str
@@ -104,7 +115,20 @@ class IntakeQueue:
             claim_token=None,
             launch_fenced_at=None,
         )
-        _write_unit_atomic(self.pending_dir / _unit_filename(pending), pending)
+        filename = _unit_filename(pending)
+        with _claim_transition_guard(self.root / f".{filename}.transition-lock"):
+            existing = self._publication_record(filename)
+            if existing is not None:
+                location, current = existing
+                # Replaying the identical controller publication is a no-op.
+                # Any other extant lifecycle record owns this entry; do not
+                # rewrite it back to pending or change its payload.
+                if location == "pending" and current == pending:
+                    return
+                raise FileExistsError(
+                    f"intake publication already exists in {location}: {filename}"
+                )
+            _write_unit_atomic(self.pending_dir / filename, pending)
 
     def publish_entry(self, unit: IntakeUnit) -> None:
         """Publish ``unit`` to pending; compatibility alias for :meth:`stock`."""
@@ -157,6 +181,17 @@ class IntakeQueue:
                         launch_fenced_at=None,
                     )
                     _write_unit_atomic(claimed_path, unit)
+                except _WriteDurabilityError as exc:
+                    # ``os.replace`` already installed the new claimed
+                    # payload.  Never move that payload back to pending just
+                    # because the following directory fsync was uncertain:
+                    # inspect the authoritative path and use it if intact.
+                    try:
+                        published = _read_unit(claimed_path)
+                    except (OSError, ValueError) as read_exc:
+                        raise IntakeTransitionError("claim", exc, read_exc) from exc
+                    if published != unit:
+                        raise IntakeTransitionError("claim", exc) from exc
                 except (OSError, ValueError) as exc:
                     rollback_error = _restore_rename(claimed_path, path)
                     if isinstance(exc, ValueError) and rollback_error is None:
@@ -452,6 +487,30 @@ class IntakeQueue:
                 return path
         return None
 
+    def _publication_record(self, filename: str) -> tuple[str, IntakeUnit] | None:
+        """Return the sole lifecycle record for a publication filename.
+
+        Called under the same stable per-entry lock as claim and lifecycle
+        transitions.  More than one location is a split-brain condition, not
+        an invitation to overwrite an owner.
+        """
+        records: list[tuple[str, IntakeUnit]] = []
+        for location, directory in (
+            ("pending", self.pending_dir),
+            ("claimed", self.claimed_dir),
+            ("done", self.done_dir),
+        ):
+            path = directory / filename
+            try:
+                records.append((location, _read_unit(path)))
+            except FileNotFoundError:
+                continue
+        if len(records) > 1:
+            raise IntakeTransitionError(
+                "publish", ValueError(f"intake publication has duplicate lifecycle records: {filename}")
+            )
+        return records[0] if records else None
+
     def _ordered_pending_paths(self) -> list[Path]:
         """Return only valid pending entries in numeric priority order.
 
@@ -521,7 +580,10 @@ def _write_unit_atomic(path: Path, unit: IntakeUnit) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
-        _fsync_directory(path.parent)
+        try:
+            _fsync_directory(path.parent)
+        except OSError as exc:
+            raise _WriteDurabilityError(*exc.args) from exc
     finally:
         try:
             os.unlink(tmp_name)

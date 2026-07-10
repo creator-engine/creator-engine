@@ -1,6 +1,6 @@
 # PR path manifest — N-11 slice 1 intake queue claim lifecycle
 
-- **Declared work class:** M
+- **Declared work class:** L
 
 Per-file purpose (closed path-set — 7 paths; carrier is self-inclusive):
 

@@ -92,6 +92,29 @@ def test_empty_queue_is_a_deterministic_noop(tmp_path: Path):
     assert (outcome.state, outcome.claim_state) == ("empty", "empty")
 
 
+@pytest.mark.parametrize("failure", [OSError("queue storage unavailable"), ValueError("invalid queue clock")])
+def test_initial_claim_storage_and_ttl_failures_are_structured(monkeypatch, tmp_path: Path, failure: Exception):
+    queue = IntakeQueue(tmp_path / "queue")
+    adapter = _adapter(queue, tmp_path)
+
+    monkeypatch.setattr(queue, "claim_entry", lambda *_args, **_kwargs: (_ for _ in ()).throw(failure))
+
+    outcome = adapter.pull_one("seat-a")
+
+    assert (outcome.state, outcome.claim_state) == ("blocked_released", "empty")
+    assert outcome.detail == f"claim_refused:{type(failure).__name__}"
+
+
+def test_invalid_initial_ttl_is_a_structured_refusal(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "queue")
+
+    outcome = _adapter(queue, tmp_path).pull_one("seat-a", ttl_seconds=0)
+
+    assert (outcome.state, outcome.claim_state, outcome.detail) == (
+        "blocked_released", "empty", "claim_refused:ValueError",
+    )
+
+
 @pytest.mark.parametrize("window", ["destination", "source"])
 def test_initial_claim_post_rename_fsync_failure_is_reconciled_to_a_structured_outcome(
     monkeypatch, tmp_path: Path, window: str,

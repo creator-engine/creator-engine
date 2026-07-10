@@ -229,6 +229,75 @@ def test_territory_paths_round_trip_and_publish_alias(tmp_path: Path):
     assert queue.list_open()[0].territory_paths == ("validators/", "docs/")
 
 
+def test_duplicate_publication_is_idempotent_only_while_pending_and_never_reclaims_ownership(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    unit = _unit("unit-a")
+
+    queue.publish_entry(unit)
+    queue.publish_entry(unit)
+    assert [entry.unit_id for entry in queue.list_pending()] == ["unit-a"]
+
+    claimed = queue.claim_entry("seat-a", ttl_seconds=60)
+    assert claimed is not None and claimed.claim_token is not None
+    with pytest.raises(FileExistsError, match="claimed"):
+        queue.publish_entry(unit)
+    retained = queue._claimed_path_for_unit("unit-a")
+    assert retained is not None
+    assert intake._read_unit(retained) == claimed
+
+    queue.fence_launch("unit-a", "seat-a", claimed.claim_token)
+    with pytest.raises(FileExistsError, match="claimed"):
+        queue.publish_entry(unit)
+    assert intake._read_unit(retained).status == "launching"
+
+    queue.complete_entry(
+        "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+    )
+    with pytest.raises(FileExistsError, match="done"):
+        queue.publish_entry(unit)
+    assert len(list(queue.done_dir.iterdir())) == 1
+
+
+def test_publish_and_claim_share_the_entry_lock_without_overwriting_a_winner(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    unit = _unit("unit-a")
+    queue.stock(unit)
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    claim_finished = threading.Event()
+    real_publication_record = queue._publication_record
+
+    def pause_publication_check(filename):
+        if not entered_write.is_set():
+            entered_write.set()
+            assert release_write.wait(2)
+        return real_publication_record(filename)
+
+    monkeypatch.setattr(queue, "_publication_record", pause_publication_check)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        published = executor.submit(queue.publish_entry, unit)
+        assert entered_write.wait(2)
+
+        def claim():
+            try:
+                return queue.claim_entry("seat-a")
+            finally:
+                claim_finished.set()
+
+        claimant = executor.submit(claim)
+        assert not claim_finished.wait(0.05)
+        release_write.set()
+        published.result()
+        claimed = claimant.result()
+
+    assert claimed is not None and claimed.claimed_by == "seat-a"
+    with pytest.raises(FileExistsError, match="claimed"):
+        queue.publish_entry(unit)
+    assert queue.list_pending() == []
+    retained = queue._claimed_path_for_unit("unit-a")
+    assert retained is not None and intake._read_unit(retained).claimed_by == "seat-a"
+
+
 def test_claim_entry_sets_lifecycle_fields(tmp_path: Path):
     queue = IntakeQueue(tmp_path / "intake-queue")
     queue.stock(_unit("unit-a"))
@@ -324,6 +393,42 @@ def test_claim_write_failure_rolls_back_to_pending_and_ledger_failure_is_bounded
     claimed = queue.claim_entry("seat-a")
     assert claimed is not None
     assert "ledger append failed" not in capsys.readouterr().err
+
+
+def test_claim_write_post_replace_fsync_failure_keeps_the_published_claim(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    source = next(queue.pending_dir.iterdir())
+    target = queue.claimed_dir / source.name
+    real_replace = intake.os.replace
+    real_fsync_directory = intake._fsync_directory
+    claim_payload_installed = False
+    failed = False
+
+    def observe_claim_payload_replace(from_path, to_path):
+        nonlocal claim_payload_installed
+        result = real_replace(from_path, to_path)
+        if Path(to_path) == target and Path(from_path).name.startswith(f".{target.name}."):
+            claim_payload_installed = True
+        return result
+
+    def fail_claim_payload_directory_fsync(path):
+        nonlocal failed
+        if claim_payload_installed and not failed and Path(path) == queue.claimed_dir:
+            failed = True
+            raise OSError("injected claimed payload fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(intake.os, "replace", observe_claim_payload_replace)
+    monkeypatch.setattr(intake, "_fsync_directory", fail_claim_payload_directory_fsync)
+
+    claimed = queue.claim_entry("seat-a")
+
+    assert failed
+    assert claimed is not None and claimed.status == "claimed"
+    assert not source.exists()
+    assert target.exists()
+    assert intake._read_unit(target) == claimed
 
 
 @pytest.mark.parametrize("window", ["destination", "source"])
