@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Protocol, TextIO
 
 from . import brain_intent_xor_gate, brain_runtime
+from .worktree_venv import (
+    CE_VALIDATOR_PYTHON_ENV,
+    ensure_worktree_python,
+    main_repo_root_from_common_dir,
+)
 from .work_sizing import WORK_CLASSES, WORK_CLASS_INPUTS, normalize_work_class
 
 TOKEN_ENV_VARS = ("GH_TOKEN", "BAO_TOKEN", "OPENBAO_TOKEN", "CE_OVERWATCH_PAT")
@@ -233,6 +238,31 @@ def _repo_root(path: Path, runner: Runner) -> Path:
     return Path(result.stdout.strip()).resolve()
 
 
+def _resolve_git_path(repo_root: Path, raw_path: str) -> Path:
+    path = Path(raw_path.strip())
+    if not path.is_absolute():
+        path = repo_root / path
+    return path.resolve()
+
+
+def _shared_main_repo_root_for_linked_worktree(repo_root: Path, runner: Runner) -> Path | None:
+    common_dir = _resolve_git_path(repo_root, _git_capture(["rev-parse", "--git-common-dir"], repo_root, runner))
+    git_dir = _resolve_git_path(repo_root, _git_capture(["rev-parse", "--git-dir"], repo_root, runner))
+    if common_dir == git_dir:
+        return None
+    return main_repo_root_from_common_dir(common_dir)
+
+
+def _validator_python(repo_root: Path, runner: Runner) -> str:
+    explicit = os.environ.get(CE_VALIDATOR_PYTHON_ENV)
+    if explicit:
+        return explicit
+    main_repo_root = _shared_main_repo_root_for_linked_worktree(repo_root, runner)
+    if main_repo_root is not None:
+        return ensure_worktree_python(repo_root, main_repo_root)
+    return sys.executable
+
+
 def _fetch_base(base: str, repo_root: Path, runner: Runner, out: TextIO, err: TextIO) -> None:
     remote_branch = None
     if base.startswith("origin/") and len(base.split("/", 1)[1]) > 0:
@@ -307,9 +337,20 @@ def _python_env(repo_root: Path, *, pytest: bool = False, tmpdir: str | None = N
     return env
 
 
-def _effective_test_command(config: PreflightConfig) -> str:
+def _default_test_command_with_python(command: str, py: str) -> str:
+    if py == sys.executable:
+        return command
+    default_python = shlex.quote(sys.executable)
+    if command.startswith(f"{default_python} "):
+        return f"{shlex.quote(py)}{command[len(default_python):]}"
+    return command
+
+
+def _effective_test_command(config: PreflightConfig, py: str = sys.executable) -> str:
     if config.profile == SEAT_READY_PROFILE and config.test_command == DEFAULT_TEST_COMMAND:
-        return SEAT_READY_TEST_COMMAND
+        return _default_test_command_with_python(SEAT_READY_TEST_COMMAND, py)
+    if config.test_command == DEFAULT_TEST_COMMAND:
+        return _default_test_command_with_python(config.test_command, py)
     return config.test_command
 
 
@@ -999,6 +1040,7 @@ def run_preflight(
     checks: list[CheckDetail] = []
     try:
         repo_root = _repo_root(config.repo_root, runner)
+        py = _validator_python(repo_root, runner)
         config = PreflightConfig(
             repo_root=repo_root,
             base=config.base,
@@ -1007,7 +1049,7 @@ def run_preflight(
             pr_body_file=config.pr_body_file,
             pr_body=config.pr_body,
             allow_dirty=config.allow_dirty,
-            test_command=_effective_test_command(config),
+            test_command=_effective_test_command(config, py),
             profile=config.profile,
         )
         _validate_profile(config.profile)
@@ -1021,7 +1063,6 @@ def run_preflight(
     declared_work_class: dict[str, str] = {}
     skipped_tests: dict[str, int] = {}
     py_env = _python_env(config.repo_root)
-    py = sys.executable
 
     def test_coupling_gate() -> str:
         argv = [
