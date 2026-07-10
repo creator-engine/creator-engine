@@ -10,4 +10,5 @@ issue: N-11 slice 1
 
 - Pin queued briefs by SHA, declare controller path territory, and retain legacy queue APIs.
 - Add atomic claim/release/complete transitions, TTL stale reclaim, and a best-effort append-only NDJSON claim ledger.
-- Add a verified, injected seat-pull handoff adapter and numeric six-digit-safe priority ordering.
+- Add a verified seat-pull handoff adapter with concrete normal work-claim/territory evidence, no-follow brief snapshots, and canonical launch metadata.
+- Fence finite-TTL queue ownership with opaque claim tokens before launch; preserve unknown launcher outcomes for reconciliation and make transition rollback failures structured.

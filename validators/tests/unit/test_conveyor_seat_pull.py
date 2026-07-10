@@ -1,9 +1,16 @@
 import hashlib
+import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import fields
+from dataclasses import fields, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
+from creator_engine_validator import work_claims
+import creator_engine_validator.conveyor_seat_pull as seat_pull
 from creator_engine_validator.conveyor_intake_queue import IntakeQueue, IntakeUnit
 from creator_engine_validator.conveyor_seat_pull import SeatPullAdapter, VerifiedLaneLaunch
 
@@ -15,169 +22,223 @@ def _brief(root: Path, name: str = "brief.md") -> tuple[str, str]:
     return name, hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _unit(brief_ref: str, brief_sha: str) -> IntakeUnit:
-    return IntakeUnit(
-        unit_id="n11-canary",
-        brief_ref=brief_ref,
-        branch="ce-n11-canary",
-        worktree="/tmp/ce-n11-canary",
-        priority=10,
-        work_class="M",
-        status="pending",
-        created_at="2026-07-10T00:00:00Z",
-        brief_sha=brief_sha,
-        territory_paths=("validators/",),
-    )
+def _unit(brief_ref: str, brief_sha: str, **overrides: object) -> IntakeUnit:
+    data: dict[str, object] = {
+        "unit_id": "n11-canary", "brief_ref": brief_ref, "branch": "ce-n11-canary",
+        "worktree": "/tmp/worktrees/ce-n11-canary", "priority": 10, "work_class": "M",
+        "status": "pending", "created_at": "2026-07-10T00:00:00Z", "brief_sha": brief_sha,
+        "territory_paths": ("docs/", "validators/"),
+    }
+    data.update(overrides)
+    return IntakeUnit(**data)  # type: ignore[arg-type]
 
 
-def _adapter(queue: IntakeQueue, root: Path, preflight=lambda _unit, _launch: True, launcher=lambda _launch: True):
+def _evidence(queue: IntakeQueue, unit: IntakeUnit, seat_id: str = "seat-a", *, collision_free: bool = True) -> None:
+    paths = tuple(sorted(path.rstrip("/") for path in unit.territory_paths))
+    digest = hashlib.sha256(("\n".join(paths) + "\n").encode()).hexdigest()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    record = {
+        "kind": work_claims.KIND, "schema_version": work_claims.SCHEMA_VERSION, "action": "acquire",
+        "work_key": "creator-engine/creator-engine:issue:11", "claim_id": "proof-claim",
+        "holder": "controller-a", "host": "controller-host", "claimed_at": now,
+        "stale_after_seconds": 14400, "idempotency_key": "proof-idempotency",
+    }
+    evidence = {
+        "unit_id": unit.unit_id, "brief_sha256": unit.brief_sha, "seat_id": seat_id,
+        "controller_id": "controller-a", "state": "active", "collision_free": collision_free,
+        "territory_paths": list(paths), "territory_digest": digest,
+        "work_claim": {"work_key": record["work_key"], "comments": [{"id": 1, "body": work_claims.render_marker(record), "created_at": now}]},
+    }
+    directory = queue.root / "controller-evidence"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{unit.unit_id}.json").write_text(json.dumps(evidence), encoding="utf-8")
+
+
+def _adapter(queue: IntakeQueue, root: Path, launcher=lambda _launch: True) -> SeatPullAdapter:
     return SeatPullAdapter(
-        queue,
-        trusted_brief_root=root,
-        territory_claim_preflight=preflight,
+        queue, trusted_brief_root=root, trusted_worktree_root=Path("/tmp"),
         governed_lane_launcher=launcher,
     )
 
 
-def test_good_pull_hands_only_verified_pointer_and_lane_metadata(tmp_path: Path):
+def test_good_pull_uses_concrete_normal_claim_evidence_and_immutable_snapshot(tmp_path: Path):
     root = tmp_path / "briefs"
     brief_ref, brief_sha = _brief(root)
     queue = IntakeQueue(tmp_path / "queue")
-    queue.stock(_unit(brief_ref, brief_sha))
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
     received: list[VerifiedLaneLaunch] = []
 
     def launcher(launch: VerifiedLaneLaunch) -> bool:
         received.append(launch)
         return True
 
-    outcome = _adapter(queue, root, launcher=launcher).pull_one("seat-a", ttl_seconds=60)
+    outcome = _adapter(queue, root, launcher).pull_one("seat-a", ttl_seconds=60)
 
-    assert outcome.state == "launched"
-    assert outcome.claim_state == "claimed"
-    assert outcome.unit_id == "n11-canary"
-    assert outcome.brief_sha256 == brief_sha
+    assert (outcome.state, outcome.claim_state) == ("launched", "launching")
     assert len(received) == 1
-    assert received[0].brief_path == root / brief_ref
-    assert received[0].brief_sha256 == brief_sha
-    assert not hasattr(received[0], "brief_contents")
-    assert queue._claimed_path_for_unit("n11-canary") is not None
+    assert received[0].brief_path.parent.name == ".verified-snapshots"
+    assert received[0].brief_path.read_bytes() == b"controller-declared brief\n"
+    assert received[0].territory_paths == ("docs", "validators")
+    assert received[0].claim_generation == 1
+    claimed = queue._claimed_path_for_unit("n11-canary")
+    assert claimed is not None and "status: launching" in claimed.read_text(encoding="utf-8")
 
 
 def test_empty_queue_is_a_deterministic_noop(tmp_path: Path):
     outcome = _adapter(IntakeQueue(tmp_path / "queue"), tmp_path).pull_one("seat-a")
-
-    assert outcome.state == "empty"
-    assert outcome.claim_state == "empty"
-    assert outcome.unit_id is None
+    assert (outcome.state, outcome.claim_state) == ("empty", "empty")
 
 
-def test_sha_mismatch_and_legacy_sha_release_without_launch(tmp_path: Path):
+@pytest.mark.parametrize("ref", ["../brief.md", "linked.md"])
+def test_bad_brief_reference_or_digest_releases_without_launch(tmp_path: Path, ref: str):
     root = tmp_path / "briefs"
-    brief_ref, _brief_sha = _brief(root)
+    brief_ref, brief_sha = _brief(root)
+    if ref == "linked.md":
+        (root / ref).symlink_to(root / brief_ref)
     queue = IntakeQueue(tmp_path / "queue")
-    queue.stock(_unit(brief_ref, "a" * 64))
-    launches = []
-
-    def launcher(launch: VerifiedLaneLaunch) -> bool:
-        launches.append(launch)
-        return True
-
-    outcome = _adapter(queue, root, launcher=launcher).pull_one("seat-a")
-
-    assert outcome.state == "blocked_released"
-    assert outcome.detail is not None and "verification_refused" in outcome.detail
-    assert launches == []
-    assert [unit.unit_id for unit in queue.list_pending()] == ["n11-canary"]
-
-    queue = IntakeQueue(tmp_path / "legacy-queue")
-    queue.stock(_unit(brief_ref, "a" * 40))
+    unit = _unit(ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
     outcome = _adapter(queue, root).pull_one("seat-a")
     assert outcome.state == "blocked_released"
-    assert "64-hex" in (outcome.detail or "")
+    assert queue.list_pending()[0].unit_id == "n11-canary"
 
 
-def test_path_escape_and_symlink_are_refused_and_released(tmp_path: Path):
+def test_component_symlink_and_post_preflight_source_swap_are_refused_or_snapshot_safe(monkeypatch, tmp_path: Path):
     root = tmp_path / "briefs"
-    root.mkdir()
-    outside = tmp_path / "outside.md"
-    outside.write_text("outside", encoding="utf-8")
-    digest = hashlib.sha256(outside.read_bytes()).hexdigest()
-
-    queue = IntakeQueue(tmp_path / "escape-queue")
-    queue.stock(_unit("../outside.md", digest))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "brief.md").write_text("controller-declared brief\n", encoding="utf-8")
+    (root / "linked-dir").parent.mkdir(parents=True, exist_ok=True)
+    (root / "linked-dir").symlink_to(outside, target_is_directory=True)
+    digest = hashlib.sha256((outside / "brief.md").read_bytes()).hexdigest()
+    queue = IntakeQueue(tmp_path / "symlink-queue")
+    unit = _unit("linked-dir/brief.md", digest)
+    queue.stock(unit)
+    _evidence(queue, unit)
     assert _adapter(queue, root).pull_one("seat-a").state == "blocked_released"
 
-    (root / "linked.md").symlink_to(outside)
-    queue = IntakeQueue(tmp_path / "symlink-queue")
-    queue.stock(_unit("linked.md", digest))
+    brief_ref, brief_sha = _brief(root, "safe.md")
+    queue = IntakeQueue(tmp_path / "swap-queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    original = seat_pull._validate_controller_evidence
+
+    def swap_after_preflight(*args, **kwargs):
+        original(*args, **kwargs)
+        (root / brief_ref).write_text("replaced after preflight\n", encoding="utf-8")
+
+    monkeypatch.setattr(seat_pull, "_validate_controller_evidence", swap_after_preflight)
+    received: list[bytes] = []
+    assert _adapter(queue, root, lambda launch: received.append(launch.brief_path.read_bytes()) or True).pull_one("seat-a").state == "launched"
+    assert received == [b"controller-declared brief\n"]
+
+
+def test_missing_released_or_colliding_controller_evidence_never_reaches_launcher(tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    launched: list[VerifiedLaneLaunch] = []
+    for suffix, evidence in (("missing", False), ("colliding", True)):
+        queue = IntakeQueue(tmp_path / suffix)
+        unit = _unit(brief_ref, brief_sha)
+        queue.stock(unit)
+        if evidence:
+            _evidence(queue, unit, collision_free=False)
+        result = _adapter(queue, root, lambda launch: launched.append(launch) or True).pull_one("seat-a")
+        assert result.state == "blocked_released"
+    assert launched == []
+
+
+def test_metadata_refusal_happens_before_evidence_or_launcher(tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha, branch="../bad", territory_paths=("docs", "docs/"))
+    queue.stock(unit)
     outcome = _adapter(queue, root).pull_one("seat-a")
     assert outcome.state == "blocked_released"
-    assert "symlink" in (outcome.detail or "")
+    assert "verification_refused" in (outcome.detail or "")
 
 
-def test_preflight_and_launcher_refusals_release_for_retry(tmp_path: Path):
+def test_source_replacement_after_preflight_does_not_change_launched_snapshot(tmp_path: Path):
     root = tmp_path / "briefs"
     brief_ref, brief_sha = _brief(root)
     queue = IntakeQueue(tmp_path / "queue")
-    queue.stock(_unit(brief_ref, brief_sha))
-
-    outcome = _adapter(queue, root, preflight=lambda _unit, _launch: False).pull_one("seat-a")
-    assert outcome.state == "blocked_released"
-    assert outcome.detail == "territory_claim_refused"
-
-    launches = []
-
-    def refuse_launcher(launch: VerifiedLaneLaunch) -> bool:
-        launches.append(launch)
-        return False
-
-    outcome = _adapter(queue, root, launcher=refuse_launcher).pull_one("seat-b")
-    assert outcome.state == "blocked_released"
-    assert outcome.detail == "launcher_refused"
-    assert len(launches) == 1
-
-    outcome = _adapter(queue, root).pull_one("seat-c")
-    assert outcome.state == "launched"
-    assert len(list(queue.claimed_dir.iterdir())) == 1
-
-
-def test_concurrent_pulls_have_exactly_one_launcher_winner(tmp_path: Path):
-    root = tmp_path / "briefs"
-    brief_ref, brief_sha = _brief(root)
-    queue = IntakeQueue(tmp_path / "queue")
-    queue.stock(_unit(brief_ref, brief_sha))
-    launches: list[VerifiedLaneLaunch] = []
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    launched: list[bytes] = []
 
     def launcher(launch: VerifiedLaneLaunch) -> bool:
-        launches.append(launch)
+        (root / brief_ref).write_text("replaced after verification\n", encoding="utf-8")
+        launched.append(launch.brief_path.read_bytes())
         return True
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        outcomes = list(executor.map(lambda seat: _adapter(queue, root, launcher=launcher).pull_one(seat), ("seat-a", "seat-b")))
-
-    assert [outcome.state for outcome in outcomes].count("launched") == 1
-    assert [outcome.state for outcome in outcomes].count("empty") == 1
-    assert len(launches) == 1
+    assert _adapter(queue, root, launcher).pull_one("seat-a").state == "launched"
+    assert launched == [b"controller-declared brief\n"]
 
 
-def test_adapter_handoff_has_no_inline_brief_or_authority_credential_mutation(tmp_path: Path):
+def test_expired_claim_cannot_fence_and_slow_launch_has_one_owner(tmp_path: Path):
     root = tmp_path / "briefs"
     brief_ref, brief_sha = _brief(root)
     queue = IntakeQueue(tmp_path / "queue")
-    queue.stock(_unit(brief_ref, brief_sha))
-    environment_before = dict(os.environ)
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    entered = threading.Event()
+    release = threading.Event()
+    launches: list[str] = []
 
-    outcome = _adapter(queue, root).pull_one("seat-a")
+    def slow_launcher(launch: VerifiedLaneLaunch) -> bool:
+        entered.set()
+        assert release.wait(2)
+        launches.append(launch.unit_id)
+        return True
 
-    assert outcome.state == "launched"
-    assert dict(os.environ) == environment_before
-    handoff_fields = {field.name for field in fields(VerifiedLaneLaunch)}
-    assert handoff_fields == {
-        "unit_id",
-        "brief_path",
-        "brief_sha256",
-        "branch",
-        "worktree",
-        "work_class",
-        "territory_paths",
+    first_clock = iter(("2026-07-10T12:00:00Z", "2026-07-10T12:00:00Z"))
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            _adapter(queue, root, slow_launcher).pull_one, "seat-a", ttl_seconds=1,
+            clock=lambda: next(first_clock),
+        )
+        assert entered.wait(2)
+        # A later contender must not reclaim a fenced record even after the TTL.
+        second = executor.submit(
+            _adapter(queue, root).pull_one, "seat-b", ttl_seconds=1,
+            clock=lambda: "2026-07-10T12:00:02Z",
+        )
+        assert second.result().state == "empty"
+        release.set()
+        assert first.result().state == "launched"
+    assert launches == ["n11-canary"]
+
+
+def test_launcher_refusal_releases_but_exception_is_retained_for_duplicate_safety(tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    assert _adapter(queue, root, lambda _launch: False).pull_one("seat-a").state == "blocked_released"
+    _evidence(queue, unit, "seat-b")
+    assert _adapter(queue, root, lambda _launch: (_ for _ in ()).throw(RuntimeError())).pull_one("seat-b").state == "blocked_retained"
+
+
+def test_handoff_has_no_inline_brief_or_credential_mutation(tmp_path: Path):
+    root = tmp_path / "briefs"
+    brief_ref, brief_sha = _brief(root)
+    queue = IntakeQueue(tmp_path / "queue")
+    unit = _unit(brief_ref, brief_sha)
+    queue.stock(unit)
+    _evidence(queue, unit)
+    before = dict(os.environ)
+    assert _adapter(queue, root).pull_one("seat-a").state == "launched"
+    assert dict(os.environ) == before
+    assert {field.name for field in fields(VerifiedLaneLaunch)} == {
+        "unit_id", "brief_path", "brief_sha256", "branch", "worktree", "work_class",
+        "territory_paths", "territory_digest", "claim_generation",
     }

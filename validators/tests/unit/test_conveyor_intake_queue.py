@@ -253,7 +253,8 @@ def test_concurrent_claimers_have_exactly_one_winner(tmp_path: Path):
 def test_release_returns_entry_to_pending_and_rejects_wrong_claimer(tmp_path: Path):
     queue = IntakeQueue(tmp_path / "intake-queue")
     queue.stock(_unit("unit-a"))
-    assert queue.claim_entry("seat-a") is not None
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
 
     try:
         queue.release_entry("unit-a", "seat-b")
@@ -261,10 +262,66 @@ def test_release_returns_entry_to_pending_and_rejects_wrong_claimer(tmp_path: Pa
         pass
     else:
         raise AssertionError("wrong claimer must be refused")
-    queue.release_entry("unit-a", "seat-a")
+    queue.release_entry("unit-a", "seat-a", claim_token=claimed.claim_token)
 
     assert [unit.unit_id for unit in queue.list_pending()] == ["unit-a"]
     assert queue.list_pending()[0].claimed_by is None
+
+
+def test_claim_tokens_fence_ownership_and_launching_claims_are_not_reclaimed(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None and claimed.claim_token is not None
+    with pytest.raises(PermissionError, match="token"):
+        queue.fence_launch("unit-a", "seat-a", "0" * 64, clock=lambda: "2026-07-10T12:00:00Z")
+    fenced = queue.fence_launch("unit-a", "seat-a", claimed.claim_token, clock=lambda: "2026-07-10T12:00:00Z")
+    assert fenced.status == "launching"
+    assert queue.claim_entry("seat-b", clock=lambda: "2026-07-10T12:00:02Z") is None
+
+
+def test_release_move_failure_restores_owned_record(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None and claimed.claim_token is not None
+    original_replace = queue.__class__.__module__
+    import creator_engine_validator.conveyor_intake_queue as intake
+    real_replace = intake.os.replace
+
+    def fail_pending(source, destination):
+        if Path(destination).parent == queue.pending_dir:
+            raise OSError("injected move failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(intake.os, "replace", fail_pending)
+    with pytest.raises(intake.IntakeTransitionError, match="release transition failed"):
+        queue.release_entry("unit-a", "seat-a", claim_token=claimed.claim_token)
+    restored = queue._claimed_path_for_unit("unit-a")
+    assert restored is not None
+    assert "status: claimed" in restored.read_text(encoding="utf-8")
+
+
+def test_claim_write_failure_rolls_back_to_pending_and_ledger_failure_is_bounded(monkeypatch, tmp_path: Path, capsys):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    import creator_engine_validator.conveyor_intake_queue as intake
+    real_write = intake._write_unit_atomic
+
+    def fail_claim_write(path, unit):
+        if path.parent == queue.claimed_dir:
+            raise OSError("injected write failure")
+        return real_write(path, unit)
+
+    monkeypatch.setattr(intake, "_write_unit_atomic", fail_claim_write)
+    with pytest.raises(intake.IntakeTransitionError, match="claim transition failed"):
+        queue.claim_entry("seat-a")
+    assert [unit.unit_id for unit in queue.list_pending()] == ["unit-a"]
+    assert list(queue.claimed_dir.iterdir()) == []
+    monkeypatch.setattr(intake, "_write_unit_atomic", real_write)
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
+    assert "ledger append failed" not in capsys.readouterr().err
 
 
 def test_stale_claim_is_reclaimed_and_recorded(tmp_path: Path):
