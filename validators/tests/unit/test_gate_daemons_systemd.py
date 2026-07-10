@@ -19,7 +19,7 @@ def _read_unit(repo_root: Path, name: str) -> configparser.ConfigParser:
 
 
 def _read_unit_path(path: Path) -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
     with path.open(encoding="utf-8") as fh:
         parser.read_file(fh)
     return parser
@@ -121,6 +121,49 @@ def test_review_pickup_unit_execstart(repo_root: Path):
 
 def test_gate_daemon_installer_is_valid_bash(repo_root: Path):
     script = repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"
+    result = subprocess.run(["bash", "-n", str(script)], check=False, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_materializer_unit_supervises_disarmed_dry_run_loop(repo_root: Path):
+    unit_path = repo_root / "deploy" / "materializer" / "ce-materializer.service"
+    unit = _read_unit_path(unit_path)
+    service = unit["Service"]
+    unit_text = unit_path.read_text(encoding="utf-8")
+
+    assert unit.has_section("Unit")
+    assert unit.has_section("Service")
+    assert unit.has_section("Install")
+    assert service["Type"] == "simple"
+    assert service["User"] == "creator-engine"
+    assert service["WorkingDirectory"] == "/workspace/creator-engine"
+    assert service["EnvironmentFile"] == "/etc/creator-engine/ce-materializer.env"
+    assert service["ExecStart"] == (
+        "/bin/bash -lc 'exec /workspace/creator-engine/deploy/materializer/launch-materializer.sh'"
+    )
+    assert service["Restart"] == "always"
+    assert service["RuntimeDirectory"] == "ce-materializer"
+    assert service["StateDirectory"] == "ce-materializer"
+    assert service["LogsDirectory"] == "ce-materializer"
+    assert service["LogsDirectoryMode"] == "0700"
+    assert "Environment=CE_MATERIALIZER_DRY_RUN=1" in unit_text
+    assert "Environment=CE_MATERIALIZER_STATE_ROOT=/workspace/creator-engine/.ce/state/brain-intent-materializer" in unit_text
+    assert "PRIVATE_KEY_FILE" not in unit_text
+    assert "CE_MATERIALIZER_APP_PRIVATE_KEY" not in unit_text
+
+
+def test_materializer_env_template_is_dry_run_only(repo_root: Path):
+    template = repo_root / "deploy" / "materializer" / "ce-materializer.env.example"
+    text = template.read_text(encoding="utf-8")
+
+    assert "CE_MATERIALIZER_DRY_RUN=1" in text
+    assert "CE_GATE_REPO=creator-engine/creator-engine" in text
+    assert "CE_MATERIALIZER_PRIVATE_KEY_FILE" not in text
+    assert "CE_MATERIALIZER_APP_PRIVATE_KEY" not in text
+
+
+def test_materializer_launcher_is_valid_bash(repo_root: Path):
+    script = repo_root / "deploy" / "materializer" / "launch-materializer.sh"
     result = subprocess.run(["bash", "-n", str(script)], check=False, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
