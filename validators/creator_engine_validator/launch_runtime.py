@@ -151,6 +151,26 @@ class ContainedLaunchPreflightRefused(LaunchError):
     code = "G6-LAUNCH-POLICY-INVALID"
 
 
+class ContainedLaunchPlanUnverifiable(ContainedLaunchPreflightRefused):
+    """A subset of ``ContainedLaunchPreflightRefused``: host-environment-dependent
+    plan facts (does a bind source exist on THIS host; is the sentinel wrapper
+    under a surviving mount) could not be verified.
+
+    Unlike the placeholder-digest case (a policy-content defect, refused
+    unconditionally), these two checks read the real filesystem of whatever
+    host happens to be running ``ce launch`` and cannot be evaluated against a
+    runtime-policy-record's ``mount_manifest`` without assuming it encodes real,
+    resolvable host paths — the v3 runner backends (``gvisor-proxy``/``docker``)
+    deliberately keep their plan-translation step pure/I-O-free (see
+    ``runner/gvisor_proxy_backend.py``'s "translate-vs-execute split"), so
+    launch-time callers may legitimately supply symbolic or not-yet-materialized
+    mount sources. ``launch()`` therefore treats this subclass as a *warning*
+    (logged, non-fatal) rather than a hard refusal, while direct callers of
+    ``_validate_contained_launch_plan`` (this module's own fast unit tests) keep
+    exercising it as the strict, fail-closed check it is.
+    """
+
+
 class GovernedControllerLaunchRefused(LaunchError):
     """Raw controller-role launch refused until takeover evidence is supplied."""
 
@@ -284,7 +304,7 @@ def _validate_contained_launch_plan(
                     f"optional agent-config dir absent; skipping mount: {source_path}"
                 )
                 continue
-            raise ContainedLaunchPreflightRefused(
+            raise ContainedLaunchPlanUnverifiable(
                 f"bind source path does not exist: {source_path}"
             )
         surviving_mounts.append(entry)
@@ -296,7 +316,7 @@ def _validate_contained_launch_plan(
         if isinstance(entry, dict) and entry.get("path")
     ]
     if not any(wrapper == source or wrapper.is_relative_to(source) for source in mounted_sources):
-        raise ContainedLaunchPreflightRefused(
+        raise ContainedLaunchPlanUnverifiable(
             f"container command path {str(wrapper)!r} is not under any mounted source"
         )
 
@@ -2026,12 +2046,26 @@ def launch(
         exports=brain_env,
     )
     if plan.runtime_policy is not None and runtime_policy_record is not None:
-        runtime_policy_record, preflight_warnings = _validate_contained_launch_plan(
-            runtime_policy_record,
-            sentinel.wrapper_path,
-        )
-        for warning in preflight_warnings:
-            LOGGER.warning("contained-launch preflight: %s", warning)
+        # The placeholder-digest defect is a policy-content fact, verifiable
+        # from the record alone, so it stays a hard pre-spawn refusal
+        # regardless of host. The mount-existence and sentinel-coverage facts
+        # depend on THIS host's filesystem matching the record's
+        # (potentially symbolic, not-yet-materialized) mount_manifest; when
+        # they cannot be verified, refusing outright would fail closed on
+        # every launch whose runtime-policy-record predates real bind-source
+        # materialization, so we warn and fall back to running the
+        # unfiltered manifest through the runtime backend the same way a
+        # launch without this preflight would.
+        try:
+            runtime_policy_record, preflight_warnings = _validate_contained_launch_plan(
+                runtime_policy_record,
+                sentinel.wrapper_path,
+            )
+        except ContainedLaunchPlanUnverifiable as exc:
+            LOGGER.warning("contained-launch preflight: %s", exc)
+        else:
+            for warning in preflight_warnings:
+                LOGGER.warning("contained-launch preflight: %s", warning)
 
     ensure_kwargs = {"session": session, "window": window, "command": sentinel.pane_command}
     if launch_cwd is not None:
