@@ -6,7 +6,7 @@ id: ADR-0015-materializer-arming-credential-lease
 title: "Materializer arming authority, credential custody, and lease topology"
 status: accepted
 date: "2026-07-10"
-decision_makers: ["ce-dev-2"]
+decision_makers: ["ce-materializer-architect"]
 ratification:
   ratified_by: "chmod735"
   ratified_at: "2026-07-10"
