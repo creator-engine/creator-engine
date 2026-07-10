@@ -1376,11 +1376,12 @@ def test_contained_seat_profile_reports_skips_without_changing_carrier_notice(tm
     assert "PASS: PR preflight (with 1 skipped test -- see report above)" in output
 
 
-def test_pytest_env_scrubs_host_tokens_and_sets_tmpdir(tmp_path: Path, monkeypatch):
+def test_pytest_env_scrubs_host_tokens_and_preserves_caller_tmpdir(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "secret")
     monkeypatch.setenv("BAO_TOKEN", "secret")
     monkeypatch.setenv("OPENBAO_TOKEN", "secret")
     monkeypatch.setenv("CE_OVERWATCH_PAT", "secret")
+    monkeypatch.setenv("TMPDIR", "/custom/path")
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
     monkeypatch.setattr(pr_preflight, "_artifact_yaml_paths", lambda repo_root: [])
@@ -1393,7 +1394,7 @@ def test_pytest_env_scrubs_host_tokens_and_sets_tmpdir(tmp_path: Path, monkeypat
     pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
     env = pytest_call[2]
     assert env is not None
-    assert env["TMPDIR"] == "/var/tmp"
+    assert env["TMPDIR"] == "/custom/path"
     for key in pr_preflight.TOKEN_ENV_VARS:
         assert key not in env
 
