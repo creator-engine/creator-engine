@@ -32,7 +32,7 @@ RUN set -eux; \
     python3.14 -m venv /opt/ce-validator-venv; \
     /opt/ce-validator-venv/bin/pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt; \
     /opt/ce-validator-venv/bin/pip install --no-index --find-links validators/wheelhouse --find-links validators/wheelhouse-dev -r validators/requirements-dev.txt; \
-    /opt/ce-validator-venv/bin/pip install --no-index --no-build-isolation --no-deps .; \
+    /opt/ce-validator-venv/bin/pip install --no-index --no-build-isolation --no-deps validators/; \
     /opt/ce-validator-venv/bin/python -c "import creator_engine_validator, pytest, yaml, jsonschema, xdist"; \
     /opt/ce-validator-venv/bin/ce --help >/dev/null
 

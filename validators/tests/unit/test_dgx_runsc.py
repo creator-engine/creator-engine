@@ -740,3 +740,12 @@ def test_dockerfile_builds_herdr_from_source_and_uses_tini() -> None:
         'ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/ce-herdr-harness-entrypoint"]'
         in text
     )
+
+
+def test_dockerfile_venv_builder_installs_package_from_validators_subdir() -> None:
+    text = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert (
+        "/opt/ce-validator-venv/bin/pip install --no-index --no-build-isolation --no-deps validators/"
+        in text
+    )
