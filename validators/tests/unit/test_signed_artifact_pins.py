@@ -23,7 +23,7 @@ signature:
 
 artifact_manifest:
   artifact_manifest_version: 1
-  sha256s_url: https://creator-engine.dev/downloads/0.3.4/SHA256SUMS
+  sha256s_url: https://creator-engine.dev/downloads/0.3.5/SHA256SUMS
   sha256s_sha256: 1111111111111111111111111111111111111111111111111111111111111111
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
   answers_schema_sha256: 2222222222222222222222222222222222222222222222222222222222222222
@@ -76,7 +76,7 @@ def test_discovers_data_driven_url_paths_and_source_aliases():
         "validators/creator_engine_validator/schemas/install-answers.schema.yaml",
     )
     assert pins["sha256s_sha256"].protected_paths == (
-        "docs/downloads/0.3.4/SHA256SUMS",
+        "docs/downloads/0.3.5/SHA256SUMS",
         "docs/install.sh",
         "install.sh",
         "validators/wheelhouse/SHA256SUMS",
@@ -411,7 +411,7 @@ signature:
 artifact_manifest:
   artifact_manifest_version: 1
   python_requires: >=3.14
-  sha256s_url: https://creator-engine.dev/downloads/0.3.4/SHA256SUMS
+  sha256s_url: https://creator-engine.dev/downloads/0.3.5/SHA256SUMS
   sha256s_sha256: 1111111111111111111111111111111111111111111111111111111111111111
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
   answers_schema_sha256: 2222222222222222222222222222222222222222222222222222222222222222

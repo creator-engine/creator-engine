@@ -119,7 +119,7 @@ def test_release_finalize_docs_copy_passes_release_guards(tmp_path: Path):
     orchestration = orchestrate_release(
         repo_root=repo,
         out=stage,
-        tag="release/v0.3.4",
+        tag="release/v0.3.5",
         force=True,
         validate_pr_runner=lambda _repo: 0,
     )
@@ -140,8 +140,8 @@ def test_release_finalize_docs_copy_passes_release_guards(tmp_path: Path):
         verifier=verifier,
     )
 
-    assert orchestration.version == "0.3.4"
-    assert finalized_result.version == "0.3.4"
+    assert orchestration.version == "0.3.5"
+    assert finalized_result.version == "0.3.5"
     assert finalized_result.canonical_spec_sha256 == orchestration.packet.canonical_spec_sha256
 
     _copy_finalized_release_to_docs(finalized, repo, trust_root=trust_root)
@@ -163,6 +163,6 @@ def test_release_finalize_docs_copy_passes_release_guards(tmp_path: Path):
         machine="x86_64",
     )
 
-    assert resolved.identity.semver == "0.3.4"
+    assert resolved.identity.semver == "0.3.5"
     assert resolved.canonical_spec_sha256 == finalized_result.canonical_spec_sha256
     assert resolved.sha256s_sha256 == orchestration.stage.sha256s_sha256

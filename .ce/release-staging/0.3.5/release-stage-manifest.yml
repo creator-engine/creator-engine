@@ -1,0 +1,70 @@
+kind: ce-release-stage-manifest
+schema_version: "1"
+package_version: 0.3.5
+build_git_sha: 82374144edebd4ad20eeeb78e7a6103383d93ad4
+app_wheel: creator_engine_validator-0.3.5-py3-none-any.whl
+app_wheel_sha256: c69c1b851f074cb6698ac55bb569a2917b634ff3522b8a8bffe1aadb6a2b9ad0
+sha256s_sha256: 0ef29246f9434fc2de92fde5691b52e3215d2fe76358cd4f0052991106806e47
+canonical_spec_sha256: 5d28d3a79a41e528f032fd84acfce3fd583d0e1903f156f90e89291011e96221
+signature_placeholder: <RESIGN-REQUIRED-ce-root-v1>
+signing_key_id: ce-root-v1
+signing_namespace: ce-spec-v1
+signing_command: ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I ce-root-v1 -n ce-spec-v1 - < llms-install.canonical > llms-install.md.sig
+artifacts:
+  - path: SIGNING-INSTRUCTIONS.md
+    sha256: b02f7878a8cfc2ed995bfaae0b50428e08f400358dbbbd967685815b59283c82
+    size: 546
+  - path: downloads/0.3.5/SHA256SUMS
+    sha256: 0ef29246f9434fc2de92fde5691b52e3215d2fe76358cd4f0052991106806e47
+    size: 1503
+  - path: downloads/0.3.5/attrs-26.1.0-py3-none-any.whl
+    sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+    size: 67548
+  - path: downloads/0.3.5/creator_engine_validator-0.3.5-py3-none-any.whl
+    sha256: c69c1b851f074cb6698ac55bb569a2917b634ff3522b8a8bffe1aadb6a2b9ad0
+    size: 1822277
+  - path: downloads/0.3.5/install.sh
+    sha256: 9060c2130137ea22e2cfab6c4814c6ea731664f75d5ec97b2714d47207e1ca8b
+    size: 43947
+  - path: downloads/0.3.5/jsonschema-4.26.0-py3-none-any.whl
+    sha256: d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+    size: 90630
+  - path: downloads/0.3.5/jsonschema_specifications-2025.9.1-py3-none-any.whl
+    sha256: 98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+    size: 18437
+  - path: downloads/0.3.5/pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+    sha256: 501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7
+    size: 766454
+  - path: downloads/0.3.5/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+    sha256: c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
+    size: 794175
+  - path: downloads/0.3.5/referencing-0.37.0-py3-none-any.whl
+    sha256: 381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+    size: 26766
+  - path: downloads/0.3.5/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+    sha256: f251c812357a3fed308d684a5079ddfb9d933860fc6de89f2b7ab00da481e65f
+    size: 384080
+  - path: downloads/0.3.5/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+    sha256: 47e77dc9822d3ad616c3d5759ea5631a75e5809d5a28707744ef79d7a1bcfcad
+    size: 382112
+  - path: downloads/0.3.5/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
+    sha256: 00193e4e077c27ee3d66da356744dbf0b3aa59356dfbd9a9efb1dc8469af8ad7
+    size: 23716032
+  - path: downloads/0.3.5/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+    sha256: b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd
+    size: 25110133
+  - path: install.sh
+    sha256: 9060c2130137ea22e2cfab6c4814c6ea731664f75d5ec97b2714d47207e1ca8b
+    size: 43947
+  - path: keys/ce-root-v1
+    sha256: c89abc4e5ca1b5526e7e7eb6fa30e97e43b9e5cf505d3ef0140f0bcb01601523
+    size: 1402
+  - path: llms-install.canonical
+    sha256: 5d28d3a79a41e528f032fd84acfce3fd583d0e1903f156f90e89291011e96221
+    size: 21019
+  - path: llms-install.md
+    sha256: f97b19727275fc62ac26294330e41c7732b781beafa3d7e887360d45f0aa9aff
+    size: 21059
+  - path: schemas/install-answers.schema.yaml
+    sha256: 621a76f2768c71b48bbf3eac8aa4378aee97c2705dc2b6d82a6a5103cf023f71
+    size: 24947
