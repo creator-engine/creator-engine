@@ -334,7 +334,8 @@ def _python_env(repo_root: Path, *, pytest: bool = False, tmpdir: str | None = N
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     if pytest:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env["TMPDIR"] = tmpdir or "/var/tmp"
+        if tmpdir is not None:
+            env["TMPDIR"] = tmpdir
         # Disable the disk-headroom gate for the inner test subprocess spawned by the
         # top-level preflight run.  The gate must fire on the real (outer) suite-launch
         # path; nested invocations (unit tests, baseline-diff subprocess, seat-ready
