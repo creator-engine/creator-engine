@@ -27,4 +27,4 @@ New section "Execution Routing — No Inlining" inserted between "Dispatch Disci
 `.ce/state/research/SL_DAY_LEDGER_20260711.md`: an inline wait-loop burned ~60 % of
 controller context in a single turn before being caught. The wait-contract diagnosis
 from that incident is now policy-level text so every agent session sees it at bootstrap.
-Operator directive 2026-07-11, ce-ops#531 remedy b.
+Operator directive 2026-07-11, SL-DAY arc remedy b.
