@@ -37,9 +37,15 @@ class ActingContext:
     url: str
     title: str
     assigned_reviewer: str
+    author: str
 
 
 Spawner = Callable[[ActingContext, GhRunner], str]
+
+# A comment POST can succeed after its client loses the response.  Never retry a
+# submission for which that outcome is possible: a later operator pass may
+# inspect the forge, but this actor must not emit a duplicate comment.
+MAX_ATTEMPTS_PER_CLAIM = 3
 
 
 @dataclass(frozen=True)
@@ -131,6 +137,112 @@ def post_pr_comment(repo: str, pr_number: int, body: str, *, gh_runner: GhRunner
     return str(url) if url else None
 
 
+def _live_claim_matches(ctx: ActingContext, gh_runner: GhRunner) -> bool:
+    """Re-read the PR immediately before POST and require its claimed identity.
+
+    The endpoint is target-repository scoped, but validate the response too so a
+    substituted runner or malformed API response cannot redirect an acting pass.
+    """
+    try:
+        proc = gh_runner(["gh", "api", f"repos/{ctx.repo}/pulls/{ctx.pr_number}"])
+    except Exception:
+        return False
+    if getattr(proc, "returncode", 1) != 0:
+        return False
+    try:
+        payload = json.loads((getattr(proc, "stdout", "") or "").strip())
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    base = payload.get("base")
+    base_repo = base.get("repo") if isinstance(base, Mapping) else None
+    return (
+        payload.get("number") == ctx.pr_number
+        and isinstance(base_repo, Mapping)
+        and str(base_repo.get("full_name") or "") == ctx.repo
+        and isinstance(payload.get("head"), Mapping)
+        and str(payload["head"].get("sha") or "") == ctx.head_sha
+    )
+
+
+def _reviewer_verdict(output: str, ctx: ActingContext) -> str | None:
+    """Return a verdict only from reviewer-bound, claim-bound evidence.
+
+    Spawn output is deliberately data, not a free-form comment.  The reviewer
+    must identify itself and supply authority for this exact repository, PR and
+    head.  Anything malformed, stale, or self-assigned fails closed.
+    """
+    try:
+        evidence = json.loads(output)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(evidence, Mapping):
+        return None
+    verdict = evidence.get("verdict")
+    reviewer = str(evidence.get("reviewer") or "")
+    authority = evidence.get("reviewer_authority")
+    if not isinstance(verdict, str) or not verdict.strip() or not isinstance(authority, Mapping):
+        return None
+    if not ctx.assigned_reviewer or not ctx.author or reviewer != ctx.assigned_reviewer:
+        return None
+    if reviewer == ctx.author:
+        return None
+    if str(authority.get("actor") or "") != ctx.assigned_reviewer:
+        return None
+    try:
+        authority_pr = int(authority.get("pr_number"))
+    except (TypeError, ValueError):
+        return None
+    if (
+        str(authority.get("repo") or "") != ctx.repo
+        or authority_pr != ctx.pr_number
+        or str(authority.get("head_sha") or "") != ctx.head_sha
+    ):
+        return None
+    return verdict
+
+
+def _claim_attempts(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> int:
+    """Count only durable claims for the exact immutable PR head."""
+    return sum(
+        1
+        for record in records
+        if record.get("action") == "attempt_claimed"
+        and str(record.get("repo") or "") == ctx.repo
+        and record.get("pr_number") == ctx.pr_number
+        and str(record.get("head_sha") or "") == ctx.head_sha
+    )
+
+
+def _submission_uncertain(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> bool:
+    """A started POST without a recorded URL is never safe to retry automatically."""
+    for record in records:
+        if (
+            record.get("action") == "comment_submission_started"
+            and str(record.get("repo") or "") == ctx.repo
+            and record.get("pr_number") == ctx.pr_number
+            and str(record.get("head_sha") or "") == ctx.head_sha
+        ):
+            return True
+    return False
+
+
+def _claim_record(ctx: ActingContext, attempt: int, *, clock: Callable[[], datetime | str] | None) -> dict[str, Any]:
+    return {
+        "kind": "ce-review-acting",
+        "thread_id": f"review-acting:{ctx.repo}:{ctx.pr_number}",
+        "item_id": f"{ctx.repo}:{ctx.pr_number}",
+        "action": "attempt_claimed",
+        "repo": ctx.repo,
+        "pr_number": ctx.pr_number,
+        "head_sha": ctx.head_sha,
+        "assigned_reviewer": ctx.assigned_reviewer,
+        "attempt": attempt,
+        "ts": _timestamp(clock),
+    }
+
+
 def default_spawner(ctx: ActingContext, gh_runner: GhRunner) -> str:
     """Run the Operator-configured reviewer-spawn template and return stdout.
 
@@ -146,6 +258,8 @@ def default_spawner(ctx: ActingContext, gh_runner: GhRunner) -> str:
         "number": str(ctx.pr_number),
         "head_sha": ctx.head_sha,
         "url": ctx.url,
+        "assigned_reviewer": ctx.assigned_reviewer,
+        "author": ctx.author,
     }
     try:
         argv = [part.format_map(values) for part in shlex.split(template)]
@@ -177,7 +291,8 @@ def run_acting_pass(
     clock: Callable[[], datetime | str] | None = None,
 ) -> ActingPassResult:
     """Spawn reviewers and post their verdicts, continuing after per-item failures."""
-    seen = acting_ledger_keys(load_acting_ledger(acting_ledger_path))
+    records = load_acting_ledger(acting_ledger_path)
+    seen = acting_ledger_keys(records)
     commented: list[dict[str, Any]] = []
     skipped_dedup: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
@@ -190,26 +305,91 @@ def run_acting_pass(
             skipped_dedup.append(dict(item))
             continue
 
+        if _submission_uncertain(records, ctx):
+            record = _failure_record(
+                ctx, "comment_submission_uncertain",
+                RuntimeError("a prior comment submission may have succeeded; refusing duplicate"), clock=clock,
+            )
+            _log(log_sink, "review_acting_comment_submission_uncertain", record)
+            failed.append(record)
+            continue
+
+        attempts = _claim_attempts(records, ctx)
+        if attempts >= MAX_ATTEMPTS_PER_CLAIM:
+            record = _failure_record(
+                ctx, "retry_exhausted",
+                RuntimeError(f"retry limit {MAX_ATTEMPTS_PER_CLAIM} reached"), clock=clock,
+            )
+            _log(log_sink, "review_acting_retry_exhausted", record)
+            if not any(
+                existing.get("action") == "retry_exhausted"
+                and str(existing.get("repo") or "") == ctx.repo
+                and existing.get("pr_number") == ctx.pr_number
+                and str(existing.get("head_sha") or "") == ctx.head_sha
+                for existing in records
+            ):
+                append_acting_ledger(acting_ledger_path, record)
+                records.append(record)
+            failed.append(record)
+            continue
+
+        claim = _claim_record(ctx, attempts + 1, clock=clock)
+        append_acting_ledger(acting_ledger_path, claim)
+        records.append(claim)
+
         try:
-            verdict = spawn(ctx, gh_runner)
+            output = spawn(ctx, gh_runner)
         except SpawnerUnconfigured as exc:
             record = _failure_record(ctx, "spawner_unconfigured", exc, clock=clock)
             _log(log_sink, "review_acting_spawner_unconfigured", record)
             append_acting_ledger(acting_ledger_path, record)
+            records.append(record)
             failed.append(record)
             continue
         except Exception as exc:
             record = _failure_record(ctx, "spawn_failed", exc, clock=clock)
             _log(log_sink, "review_acting_spawn_failed", record)
             append_acting_ledger(acting_ledger_path, record)
+            records.append(record)
             failed.append(record)
             continue
+
+        verdict = _reviewer_verdict(output, ctx)
+        if verdict is None:
+            record = _failure_record(
+                ctx, "reviewer_authority_invalid",
+                RuntimeError("reviewer output lacks valid claim-bound authority"), clock=clock,
+            )
+            _log(log_sink, "review_acting_reviewer_authority_invalid", record)
+            append_acting_ledger(acting_ledger_path, record)
+            records.append(record)
+            failed.append(record)
+            continue
+
+        if not _live_claim_matches(ctx, gh_runner):
+            record = _failure_record(
+                ctx, "live_claim_mismatch",
+                RuntimeError("live PR no longer matches the claimed repo, number, and head"), clock=clock,
+            )
+            _log(log_sink, "review_acting_live_claim_mismatch", record)
+            append_acting_ledger(acting_ledger_path, record)
+            records.append(record)
+            failed.append(record)
+            continue
+
+        submission = _failure_record(
+            ctx, "comment_submission_started", RuntimeError("comment submission in progress"), clock=clock,
+        )
+        submission.pop("error")
+        append_acting_ledger(acting_ledger_path, submission)
+        records.append(submission)
 
         comment_url = post_pr_comment(ctx.repo, ctx.pr_number, verdict, gh_runner=gh_runner)
         if comment_url is None:
             record = _failure_record(ctx, "comment_failed", RuntimeError("comment POST failed"), clock=clock)
             _log(log_sink, "review_acting_comment_failed", record)
             append_acting_ledger(acting_ledger_path, record)
+            records.append(record)
             failed.append(record)
             continue
 
@@ -226,6 +406,7 @@ def run_acting_pass(
             "ts": _timestamp(clock),
         }
         append_acting_ledger(acting_ledger_path, record)
+        records.append(record)
         seen.add(key)
         commented.append(record)
 
@@ -244,6 +425,7 @@ def _context_from_item(item: Mapping[str, Any]) -> ActingContext:
         url=str(item.get("url") or ""),
         title=str(item.get("title") or ""),
         assigned_reviewer=str(item.get("assigned_reviewer") or ""),
+        author=str(item.get("author") or ""),
     )
 
 
