@@ -61,6 +61,17 @@ def _evidence(ctx, verdict="review verdict", **authority_overrides):
     })
 
 
+def _claim(attempt):
+    return {
+        "action": "attempt_claimed",
+        "repo": "owner/repo",
+        "pr_number": 42,
+        "head_sha": "a" * 40,
+        "assigned_reviewer": "ce-dev-3",
+        "attempt": attempt,
+    }
+
+
 def test_is_acting_enabled_defaults_off_and_requires_one():
     assert review_acting.is_acting_enabled({}) is False
     assert review_acting.is_acting_enabled({review_acting.ACTING_ENABLED_ENV: "0"}) is False
@@ -215,6 +226,95 @@ def test_run_acting_pass_caps_durable_spawn_retries(tmp_path):
         record["action"] == "attempt_claimed"
         for record in review_acting.load_acting_ledger(ledger)
     ) == review_acting.MAX_ATTEMPTS_PER_CLAIM
+
+
+def test_run_acting_pass_refuses_lone_cap_claim_without_spawning_or_github(tmp_path):
+    ledger = tmp_path / "ledger.ndjson"
+    ledger.write_text(json.dumps(_claim(review_acting.MAX_ATTEMPTS_PER_CLAIM)) + "\n", encoding="utf-8")
+    runner = _FakeGhRunner()
+    spawned = []
+
+    result = review_acting.run_acting_pass(
+        items=[_item()], gh_runner=runner, acting_ledger_path=ledger,
+        spawner=lambda ctx, _: spawned.append(ctx) or _evidence(ctx), clock=_clock,
+    )
+
+    assert result.failed[0]["action"] == "retry_exhausted"
+    assert spawned == []
+    assert runner.calls == []
+
+
+def test_run_acting_pass_refuses_nonmonotonic_claim_sequence_without_acting(tmp_path):
+    ledger = tmp_path / "ledger.ndjson"
+    ledger.write_text(
+        "\n".join(json.dumps(_claim(attempt)) for attempt in (2, 1)) + "\n",
+        encoding="utf-8",
+    )
+    runner = _FakeGhRunner()
+    spawned = []
+
+    result = review_acting.run_acting_pass(
+        items=[_item()], gh_runner=runner, acting_ledger_path=ledger,
+        spawner=lambda ctx, _: spawned.append(ctx) or _evidence(ctx), clock=_clock,
+    )
+
+    assert result.failed[0]["action"] == "ledger_unreadable"
+    assert spawned == []
+    assert runner.calls == []
+
+
+def test_run_acting_pass_refuses_terminal_retry_evidence_without_acting(tmp_path):
+    ledger = tmp_path / "ledger.ndjson"
+    ledger.write_text(
+        "\n".join((
+            json.dumps(_claim(review_acting.MAX_ATTEMPTS_PER_CLAIM)),
+            json.dumps({
+                "action": "retry_exhausted", "repo": "owner/repo", "pr_number": 42,
+                "head_sha": "a" * 40,
+            }),
+        )) + "\n",
+        encoding="utf-8",
+    )
+    runner = _FakeGhRunner()
+    spawned = []
+
+    result = review_acting.run_acting_pass(
+        items=[_item()], gh_runner=runner, acting_ledger_path=ledger,
+        spawner=lambda ctx, _: spawned.append(ctx) or _evidence(ctx), clock=_clock,
+    )
+
+    assert result.failed[0]["action"] == "retry_exhausted"
+    assert spawned == []
+    assert runner.calls == []
+
+
+def test_run_acting_pass_refuses_action_after_terminal_evidence_without_acting(tmp_path):
+    ledger = tmp_path / "ledger.ndjson"
+    ledger.write_text(
+        "\n".join((
+            json.dumps(_claim(review_acting.MAX_ATTEMPTS_PER_CLAIM)),
+            json.dumps({
+                "action": "retry_exhausted", "repo": "owner/repo", "pr_number": 42,
+                "head_sha": "a" * 40,
+            }),
+            json.dumps({
+                "action": "spawn_failed", "repo": "owner/repo", "pr_number": 42,
+                "head_sha": "a" * 40, "assigned_reviewer": "ce-dev-3",
+            }),
+        )) + "\n",
+        encoding="utf-8",
+    )
+    runner = _FakeGhRunner()
+    spawned = []
+
+    result = review_acting.run_acting_pass(
+        items=[_item()], gh_runner=runner, acting_ledger_path=ledger,
+        spawner=lambda ctx, _: spawned.append(ctx) or _evidence(ctx), clock=_clock,
+    )
+
+    assert result.failed[0]["action"] == "ledger_unreadable"
+    assert spawned == []
+    assert runner.calls == []
 
 
 def test_dedup_is_head_scoped_and_survives_restart(tmp_path):

@@ -74,6 +74,16 @@ class ActingPassResult:
     failed: tuple[dict[str, Any], ...] = ()
 
 
+@dataclass(frozen=True)
+class _ClaimState:
+    """Fail-closed fold of durable state for one immutable PR head."""
+
+    max_attempt: int = 0
+    comment_posted: bool = False
+    submission_started: bool = False
+    retry_exhausted: bool = False
+
+
 def is_acting_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True only when ``CE_REVIEW_ACTING_ENABLED=1``. Default OFF."""
     values = os.environ if env is None else env
@@ -302,29 +312,92 @@ def _reviewer_verdict(output: str, ctx: ActingContext) -> str | None:
     return verdict
 
 
-def _claim_attempts(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> int:
-    """Count only durable claims for the exact immutable PR head."""
-    return sum(
-        1
+def _claim_state(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> _ClaimState:
+    """Fold one identity's append-only sequence without permitting ambiguity.
+
+    A ledger is durable evidence, not a best-effort activity log.  Claims use
+    their recorded attempt value (never their record count), and any sequence
+    that could hide a prior action is rejected before an actor can spawn or use
+    GitHub.  An interrupted claim is intentionally allowed to be superseded by
+    a higher claim: a process can crash after persisting its claim but before it
+    records its outcome.
+    """
+    matching = [
+        record
         for record in records
-        if record.get("action") == "attempt_claimed"
-        and str(record.get("repo") or "") == ctx.repo
+        if str(record.get("repo") or "") == ctx.repo
         and record.get("pr_number") == ctx.pr_number
         and str(record.get("head_sha") or "") == ctx.head_sha
+    ]
+    max_attempt = 0
+    open_claim = False
+    submission_started = False
+    retry_exhausted = False
+    comment_posted = False
+
+    outcome_actions = frozenset({
+        "spawner_unconfigured",
+        "spawn_failed",
+        "reviewer_authority_invalid",
+        "live_claim_mismatch",
+    })
+    for record in matching:
+        action = record["action"]
+        if comment_posted or retry_exhausted:
+            raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
+
+        if action == "attempt_claimed":
+            attempt = record["attempt"]
+            if attempt > MAX_ATTEMPTS_PER_CLAIM or attempt <= max_attempt:
+                raise ActingLedgerUnreadable("acting ledger contains an inconsistent claim sequence")
+            max_attempt = attempt
+            # A prior worker may have crashed after this append.  A later,
+            # strictly higher claim is the only retry shape that can be folded.
+            open_claim = True
+            continue
+
+        if action in outcome_actions:
+            if not open_claim or submission_started:
+                raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
+            open_claim = False
+            continue
+
+        if action == "comment_submission_started":
+            if not open_claim or submission_started:
+                raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
+            open_claim = False
+            submission_started = True
+            continue
+
+        if action == "comment_failed":
+            if not submission_started:
+                raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
+            continue
+
+        if action == "comment_posted":
+            # Older durable posted evidence predates the submission-start
+            # marker.  It remains terminal, but cannot be mixed with claims
+            # without that marker because that would hide a missing POST step.
+            if max_attempt and not submission_started:
+                raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
+            comment_posted = True
+            continue
+
+        if action == "retry_exhausted":
+            if max_attempt != MAX_ATTEMPTS_PER_CLAIM:
+                raise ActingLedgerUnreadable("acting ledger contains an inconsistent retry sequence")
+            open_claim = False
+            retry_exhausted = True
+            continue
+
+        raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
+
+    return _ClaimState(
+        max_attempt=max_attempt,
+        comment_posted=comment_posted,
+        submission_started=submission_started,
+        retry_exhausted=retry_exhausted,
     )
-
-
-def _submission_uncertain(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> bool:
-    """A started POST without a recorded URL is never safe to retry automatically."""
-    for record in records:
-        if (
-            record.get("action") == "comment_submission_started"
-            and str(record.get("repo") or "") == ctx.repo
-            and record.get("pr_number") == ctx.pr_number
-            and str(record.get("head_sha") or "") == ctx.head_sha
-        ):
-            return True
-    return False
 
 
 def _claim_record(ctx: ActingContext, attempt: int, *, clock: Callable[[], datetime | str] | None) -> dict[str, Any]:
@@ -409,11 +482,19 @@ def run_acting_pass(
     for item in items:
         ctx = _context_from_item(item)
         key = acting_ledger_key(ctx.repo, ctx.pr_number, ctx.head_sha)
-        if key in seen:
+        try:
+            state = _claim_state(records, ctx)
+        except ActingLedgerUnreadable as exc:
+            record = _failure_record(ctx, "ledger_unreadable", exc, clock=clock)
+            _log(log_sink, "review_acting_ledger_unreadable", record)
+            failed.append(record)
+            continue
+
+        if state.comment_posted or key in seen:
             skipped_dedup.append(dict(item))
             continue
 
-        if _submission_uncertain(records, ctx):
+        if state.submission_started:
             record = _failure_record(
                 ctx, "comment_submission_uncertain",
                 RuntimeError("a prior comment submission may have succeeded; refusing duplicate"), clock=clock,
@@ -422,8 +503,7 @@ def run_acting_pass(
             failed.append(record)
             continue
 
-        attempts = _claim_attempts(records, ctx)
-        if attempts >= MAX_ATTEMPTS_PER_CLAIM:
+        if state.retry_exhausted or state.max_attempt >= MAX_ATTEMPTS_PER_CLAIM:
             record = _failure_record(
                 ctx, "retry_exhausted",
                 RuntimeError(f"retry limit {MAX_ATTEMPTS_PER_CLAIM} reached"), clock=clock,
@@ -441,7 +521,7 @@ def run_acting_pass(
             failed.append(record)
             continue
 
-        claim = _claim_record(ctx, attempts + 1, clock=clock)
+        claim = _claim_record(ctx, state.max_attempt + 1, clock=clock)
         append_acting_ledger(acting_ledger_path, claim)
         records.append(claim)
 
