@@ -219,6 +219,7 @@ def poll_review_pickup(
     rate_limiter: SearchRateLimiter | None = None,
     sleep: Callable[[float], None] = time.sleep,
     controller_reviewer: str = DEFAULT_CONTROLLER_REVIEWER,
+    on_pass_items: Callable[[Sequence[Mapping[str, Any]], GhRunner], None] | None = None,
 ) -> ReviewPickupResult:
     """Route awaiting-review PRs to distinct non-author reviewer seats.
 
@@ -337,12 +338,15 @@ def poll_review_pickup(
             })
             continue
 
-    return ReviewPickupResult(
+    result = ReviewPickupResult(
         items=tuple(items),
         awaiting_decisions=tuple(awaiting_decisions),
         skipped=tuple(skipped),
         rate_limit=rate_limit or None,
     )
+    if on_pass_items is not None and effective_apply:
+        on_pass_items(result.items, gh_runner)
+    return result
 
 
 def run_review_pickup_loop(
@@ -369,6 +373,7 @@ def run_review_pickup_loop(
     clock: Callable[[], datetime | str] | None = None,
     inbox_writer: Callable[[Path, str], None] | None = None,
     max_consecutive_failures: int = DEFAULT_REVIEW_PICKUP_MAX_CONSECUTIVE_FAILURES,
+    on_pass_items: Callable[[Sequence[Mapping[str, Any]], GhRunner], None] | None = None,
 ) -> ReviewPickupLoopResult:
     """Run one or more bounded review-pickup passes.
 
@@ -406,22 +411,25 @@ def run_review_pickup_loop(
             )
         else:
             try:
-                result = poll_review_pickup(
-                    token=pass_token,
-                    reviewer_seats=reviewer_seats,
-                    gh_runner=pass_gh_runner,
-                    transport=transport,
-                    repo=repo,
-                    org=org,
-                    per_page=per_page,
-                    apply=apply,
-                    apply_stale=apply_stale,
-                    dry_run=dry_run,
-                    log_sink=log_sink,
-                    rate_limiter=rate_limiter,
-                    sleep=sleep,
-                    controller_reviewer=controller_reviewer,
-                )
+                poll_kwargs: dict[str, Any] = {
+                    "token": pass_token,
+                    "reviewer_seats": reviewer_seats,
+                    "gh_runner": pass_gh_runner,
+                    "transport": transport,
+                    "repo": repo,
+                    "org": org,
+                    "per_page": per_page,
+                    "apply": apply,
+                    "apply_stale": apply_stale,
+                    "dry_run": dry_run,
+                    "log_sink": log_sink,
+                    "rate_limiter": rate_limiter,
+                    "sleep": sleep,
+                    "controller_reviewer": controller_reviewer,
+                }
+                if on_pass_items is not None:
+                    poll_kwargs["on_pass_items"] = on_pass_items
+                result = poll_review_pickup(**poll_kwargs)
             except PickupRateLimited as exc:
                 _log_event(
                     log_sink,

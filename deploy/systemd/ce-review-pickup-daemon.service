@@ -8,9 +8,14 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
 WorkingDirectory=/workspace/creator-engine
+# Acting mode: Operator arms by uncommenting the vars + armed ExecStart below. Default OFF.
+# CE_REVIEW_ACTING_ENABLED=1
+# CE_REVIEW_ACTING_LEDGER_PATH=<state-root>/review-pickup-acting/ledger.ndjson
+# CE_REVIEW_ACTING_SPAWN_CMD='/usr/local/libexec/ce-governed-reviewer-spawn --repo {repo} --number {number} --head-sha {head_sha} --url {url}'
 # OpenBao-ready replacement, after CE_PICKUP_TOKEN_SECRET_TARGET_REF is verified live:
 # ExecStart=/usr/bin/env ce review-pickup --identity ce-dev-2 --repo "$CE_GATE_REPO" --seat ce-dev-1,ce-dev-3,ce-dev-4 --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --pickup-token-secret-backend "$CE_PICKUP_TOKEN_SECRET_BACKEND" --pickup-token-secret-mount "$CE_PICKUP_TOKEN_SECRET_MOUNT" --pickup-token-secret-path "$CE_PICKUP_TOKEN_SECRET_PATH" --pickup-token-secret-field "$CE_PICKUP_TOKEN_SECRET_FIELD" --pickup-token-secret-purpose "$CE_PICKUP_TOKEN_SECRET_PURPOSE" --pickup-token-secret-owner-ref "$CE_PICKUP_TOKEN_SECRET_OWNER_REF" --pickup-token-secret-ref-policy-sha "$CE_PICKUP_TOKEN_SECRET_REF_POLICY_SHA" --pickup-token-secret-target-ref "$CE_PICKUP_TOKEN_SECRET_TARGET_REF" --json
 ExecStart=/usr/bin/env ce review-pickup --identity ce-dev-2 --repo "$CE_GATE_REPO" --seat ce-dev-1,ce-dev-3,ce-dev-4 --loop --interval 120 --apply --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
+# ExecStart=/usr/bin/env ce review-pickup --identity ce-dev-2 --repo "$CE_GATE_REPO" --seat ce-dev-1,ce-dev-3,ce-dev-4 --loop --interval 120 --apply --acting --acting-ledger-path "${CE_REVIEW_ACTING_LEDGER_PATH}" --inbox-path .ce/state/controller-inbox/awaiting-review.json --json
 Restart=on-failure
 RestartSec=30s
 
