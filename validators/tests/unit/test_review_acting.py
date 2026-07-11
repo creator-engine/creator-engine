@@ -6,9 +6,13 @@ from creator_engine_validator.forge import review_acting, review_pickup
 
 
 class _FakeGhRunner:
-    def __init__(self, *, stdout='{"html_url": "https://example.test/comment/1"}', returncode=0):
+    def __init__(
+        self, *, stdout='{"html_url": "https://example.test/comment/1"}', returncode=0,
+        head_sha="a" * 40,
+    ):
         self.stdout = stdout
         self.returncode = returncode
+        self.head_sha = head_sha
         self.calls = []
 
     def __call__(self, argv, input_text=None):
@@ -18,7 +22,7 @@ class _FakeGhRunner:
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({
                 "number": number,
                 "base": {"repo": {"full_name": "owner/repo"}},
-                "head": {"sha": "a" * 40},
+                "head": {"sha": self.head_sha},
             }), stderr="")
         return subprocess.CompletedProcess(argv, self.returncode, stdout=self.stdout, stderr="")
 
@@ -69,20 +73,36 @@ def test_load_acting_ledger_missing_file_is_empty(tmp_path):
 
 def test_acting_ledger_ndjson_round_trip_and_key_shape(tmp_path):
     ledger = tmp_path / "acting" / "ledger.ndjson"
-    record = {"thread_id": "review-acting:owner/repo:42", "item_id": "owner/repo:42", "action": "comment_posted"}
+    head_sha = "a" * 40
+    record = {
+        "thread_id": f"review-acting:owner/repo:42:{head_sha}",
+        "item_id": f"owner/repo:42:{head_sha}",
+        "action": "comment_posted",
+        "repo": "owner/repo",
+        "pr_number": 42,
+        "head_sha": head_sha,
+    }
     review_acting.append_acting_ledger(ledger, record)
 
     assert review_acting.load_acting_ledger(ledger) == [record]
-    assert review_acting.acting_ledger_key("owner/repo", 42) == (
-        "review-acting:owner/repo:42", "owner/repo:42", "comment_posted"
+    assert review_acting.acting_ledger_key("owner/repo", 42, head_sha) == (
+        f"review-acting:owner/repo:42:{head_sha}", f"owner/repo:42:{head_sha}", "comment_posted"
     )
-    assert review_acting.acting_ledger_keys([record]) == {review_acting.acting_ledger_key("owner/repo", 42)}
+    assert review_acting.acting_ledger_keys([record]) == {
+        review_acting.acting_ledger_key("owner/repo", 42, head_sha)
+    }
 
 
 def test_run_acting_pass_skips_ledgered_pr(tmp_path):
     ledger = tmp_path / "ledger.ndjson"
+    head_sha = "a" * 40
     review_acting.append_acting_ledger(ledger, {
-        "thread_id": "review-acting:owner/repo:42", "item_id": "owner/repo:42", "action": "comment_posted",
+        "thread_id": f"review-acting:owner/repo:42:{head_sha}",
+        "item_id": f"owner/repo:42:{head_sha}",
+        "action": "comment_posted",
+        "repo": "owner/repo",
+        "pr_number": 42,
+        "head_sha": head_sha,
     })
     called = []
 
@@ -197,19 +217,68 @@ def test_run_acting_pass_caps_durable_spawn_retries(tmp_path):
     ) == review_acting.MAX_ATTEMPTS_PER_CLAIM
 
 
-def test_cross_restart_dedup_after_comment(tmp_path):
+def test_dedup_is_head_scoped_and_survives_restart(tmp_path):
     ledger = tmp_path / "ledger.ndjson"
     first = review_acting.run_acting_pass(
         items=[_item()], gh_runner=_FakeGhRunner(), acting_ledger_path=ledger,
         spawner=lambda ctx, runner: _evidence(ctx, "verdict"),
     )
-    second = review_acting.run_acting_pass(
+    same_head_restart = review_acting.run_acting_pass(
         items=[_item()], gh_runner=_FakeGhRunner(), acting_ledger_path=ledger,
         spawner=lambda ctx, runner: _evidence(ctx, "must not run"),
     )
+    later_head = "b" * 40
+    later = review_acting.run_acting_pass(
+        items=[_item(head_sha=later_head)], gh_runner=_FakeGhRunner(head_sha=later_head),
+        acting_ledger_path=ledger, spawner=lambda ctx, runner: _evidence(ctx, "later verdict"),
+    )
+    later_head_restart = review_acting.run_acting_pass(
+        items=[_item(head_sha=later_head)], gh_runner=_FakeGhRunner(head_sha=later_head),
+        acting_ledger_path=ledger, spawner=lambda ctx, runner: _evidence(ctx, "must not run"),
+    )
 
     assert len(first.commented) == 1
-    assert len(second.skipped_dedup) == 1
+    assert len(same_head_restart.skipped_dedup) == 1
+    assert len(later.commented) == 1
+    assert len(later_head_restart.skipped_dedup) == 1
+
+
+def test_run_acting_pass_refuses_malformed_ledger_without_acting(tmp_path):
+    ledger = tmp_path / "ledger.ndjson"
+    ledger.write_text('{"action": "comment_posted"}\nnot-json\n', encoding="utf-8")
+    runner = _FakeGhRunner()
+    logs = []
+
+    result = review_acting.run_acting_pass(
+        items=[_item()], gh_runner=runner, acting_ledger_path=ledger,
+        spawner=lambda ctx, _: _evidence(ctx), log_sink=logs.append, clock=_clock,
+    )
+
+    assert result.failed[0]["action"] == "ledger_unreadable"
+    assert runner.calls == []
+    assert logs[0]["event"] == "review_acting_ledger_unreadable"
+    assert "not-json" not in logs[0]["error"]
+
+
+def test_run_acting_pass_refuses_unreadable_ledger_without_acting(tmp_path, monkeypatch):
+    ledger = tmp_path / "ledger.ndjson"
+    ledger.write_text("{}\n", encoding="utf-8")
+    original_read_text = review_acting.Path.read_text
+
+    def deny_ledger_read(path, *args, **kwargs):
+        if path == ledger:
+            raise OSError("denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(review_acting.Path, "read_text", deny_ledger_read)
+    runner = _FakeGhRunner()
+    result = review_acting.run_acting_pass(
+        items=[_item()], gh_runner=runner, acting_ledger_path=ledger,
+        spawner=lambda ctx, _: _evidence(ctx), clock=_clock,
+    )
+
+    assert result.failed[0]["action"] == "ledger_unreadable"
+    assert runner.calls == []
 
 
 def test_post_pr_comment_uses_only_issues_comments_endpoint():

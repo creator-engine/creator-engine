@@ -29,6 +29,10 @@ class SpawnerUnconfigured(RuntimeError):
     """Raised when an armed acting pass lacks its Operator spawn template."""
 
 
+class ActingLedgerUnreadable(RuntimeError):
+    """Raised when durable acting state cannot be read safely."""
+
+
 @dataclass(frozen=True)
 class ActingContext:
     repo: str
@@ -66,25 +70,44 @@ def _ledger_path(path: Path | str) -> Path:
 
 
 def load_acting_ledger(path: Path | str) -> list[dict[str, Any]]:
-    """Read the tolerant append-only acting ledger; a missing file is empty."""
+    """Read the append-only acting ledger; only a missing file is empty.
+
+    A corrupt or unreadable ledger is not equivalent to an empty one: doing so
+    could lose durable submission evidence and permit a duplicate comment.
+    """
     ledger_path = _ledger_path(path)
-    if not ledger_path.is_file():
+    try:
+        exists = ledger_path.exists()
+    except OSError as exc:
+        raise ActingLedgerUnreadable("acting ledger cannot be inspected") from exc
+    if not exists:
         return []
+    try:
+        is_file = ledger_path.is_file()
+    except OSError as exc:
+        raise ActingLedgerUnreadable("acting ledger cannot be inspected") from exc
+    if not is_file:
+        raise ActingLedgerUnreadable("acting ledger is not a regular file")
     records: list[dict[str, Any]] = []
     try:
         text = ledger_path.read_text(encoding="utf-8")
-    except OSError:
-        return records
-    for line in text.splitlines():
+    except OSError as exc:
+        raise ActingLedgerUnreadable("acting ledger cannot be read") from exc
+    for line_number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         try:
             record = json.loads(line)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(record, dict):
-            records.append(record)
+        except (TypeError, ValueError) as exc:
+            raise ActingLedgerUnreadable(
+                f"acting ledger contains invalid JSON at record {line_number}"
+            ) from exc
+        if not isinstance(record, dict):
+            raise ActingLedgerUnreadable(
+                f"acting ledger contains a non-object record at record {line_number}"
+            )
+        records.append(record)
     return records
 
 
@@ -96,9 +119,13 @@ def append_acting_ledger(path: Path | str, record: Mapping[str, Any]) -> None:
         handle.write(json.dumps(dict(record), sort_keys=True) + "\n")
 
 
-def acting_ledger_key(repo: str, pr_number: int) -> tuple[str, str, str]:
-    """Return the durable dedup identity for one PR comment."""
-    return (f"review-acting:{repo}:{pr_number}", f"{repo}:{pr_number}", "comment_posted")
+def acting_ledger_key(repo: str, pr_number: int, head_sha: str) -> tuple[str, str, str]:
+    """Return the durable dedup identity for one immutable PR head comment."""
+    return (
+        f"review-acting:{repo}:{pr_number}:{head_sha}",
+        f"{repo}:{pr_number}:{head_sha}",
+        "comment_posted",
+    )
 
 
 def acting_ledger_keys(records: Iterable[Mapping[str, Any]]) -> set[tuple[str, str, str]]:
@@ -107,11 +134,16 @@ def acting_ledger_keys(records: Iterable[Mapping[str, Any]]) -> set[tuple[str, s
     for record in records:
         if not isinstance(record, Mapping):
             continue
-        keys.add((
-            str(record.get("thread_id") or ""),
-            str(record.get("item_id") or ""),
-            str(record.get("action") or ""),
-        ))
+        if record.get("action") != "comment_posted":
+            continue
+        repo = str(record.get("repo") or "")
+        head_sha = str(record.get("head_sha") or "")
+        try:
+            pr_number = int(record.get("pr_number"))
+        except (TypeError, ValueError):
+            continue
+        if repo and head_sha:
+            keys.add(acting_ledger_key(repo, pr_number, head_sha))
     return keys
 
 
@@ -291,7 +323,16 @@ def run_acting_pass(
     clock: Callable[[], datetime | str] | None = None,
 ) -> ActingPassResult:
     """Spawn reviewers and post their verdicts, continuing after per-item failures."""
-    records = load_acting_ledger(acting_ledger_path)
+    try:
+        records = load_acting_ledger(acting_ledger_path)
+    except ActingLedgerUnreadable as exc:
+        failed = tuple(
+            _failure_record(_context_from_item(item), "ledger_unreadable", exc, clock=clock)
+            for item in items
+        )
+        for record in failed:
+            _log(log_sink, "review_acting_ledger_unreadable", record)
+        return ActingPassResult(failed=failed)
     seen = acting_ledger_keys(records)
     commented: list[dict[str, Any]] = []
     skipped_dedup: list[dict[str, Any]] = []
@@ -300,7 +341,7 @@ def run_acting_pass(
 
     for item in items:
         ctx = _context_from_item(item)
-        key = acting_ledger_key(ctx.repo, ctx.pr_number)
+        key = acting_ledger_key(ctx.repo, ctx.pr_number, ctx.head_sha)
         if key in seen:
             skipped_dedup.append(dict(item))
             continue
