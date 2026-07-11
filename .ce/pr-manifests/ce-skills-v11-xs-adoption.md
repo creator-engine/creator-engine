@@ -6,7 +6,7 @@ exactly the authorized path-set below; this carrier lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** XS
+- **Declared work class:** tiny
 
 AUTHORIZED_PATHS_COUNT=8
 
