@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import socket
@@ -50,6 +51,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 # --- marker grammar ----------------------------------------------------------
 
@@ -117,9 +121,24 @@ class WorkClaimRefused(Exception):
 
     code = "WCLAIM-REFUSED"
 
-    def __init__(self, message: str, *, reason: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        work_key: "WorkKey | None" = None,
+        holder: str | None = None,
+        host: str | None = None,
+        claim_id: str | None = None,
+        claimed_at: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.reason = reason
+        self.work_key = work_key
+        self.holder = holder
+        self.host = host
+        self.claim_id = claim_id
+        self.claimed_at = claimed_at
 
 
 # --- gh transport (private copy of the forge GhRunner seam) ------------------
@@ -712,6 +731,59 @@ def _is_self(view: ClaimView | None, holder: str, host: str) -> bool:
     return bool(view and view.holder == holder and view.host == host)
 
 
+def _active_foreign_claim_refusal(key: WorkKey, active: ClaimView) -> WorkClaimRefused:
+    """Build the structured refusal used by the read-only and acquire gates."""
+    return WorkClaimRefused(
+        "double-assignment blocked: "
+        f"{key.work_key} held by {active.holder}@{active.host} "
+        f"since {active.claimed_at} (claim {active.claim_id})",
+        reason="active_foreign_claim",
+        work_key=key,
+        holder=active.holder,
+        host=active.host,
+        claim_id=active.claim_id,
+        claimed_at=active.claimed_at,
+    )
+
+
+def block_if_active_foreign_claim(
+    key: WorkKey,
+    runner: GhRunner,
+    *,
+    holder: str | None = None,
+    host: str | None = None,
+    now: datetime | None = None,
+    stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
+) -> None:
+    """Read live claims and raise for a fresh foreign holder without writing.
+
+    A stale foreign claim is only warned about because it remains seizable, while
+    a matching holder and host is an idempotent self-claim and returns normally.
+    """
+    now = now or datetime.now(timezone.utc)
+    holder = resolve_holder(holder)
+    host = resolve_host(host)
+    comments = fetch_comments(key, runner)
+    state = compute_state(
+        comments, key.work_key, now, stale_default=stale_after_seconds,
+    )
+    active = state.active
+    if active is None or _is_self(active, holder, host):
+        return
+    if active.stale:
+        logger.warning(
+            "stale foreign work claim remains seizable: %s held by %s@%s "
+            "since %s (claim %s)",
+            key.work_key,
+            active.holder,
+            active.host,
+            active.claimed_at,
+            active.claim_id,
+        )
+        return
+    raise _active_foreign_claim_refusal(key, active)
+
+
 def acquire(
     key: WorkKey,
     runner: GhRunner,
@@ -728,10 +800,11 @@ def acquire(
     idempotency_key: str | None = None,
     backoff_seconds: float = 1.0,
     sleep: Callable[[float], None] | None = None,
+    hard_block: bool = True,
 ) -> ClaimResult:
     """Acquire the work claim with the atomic-dispatch posture (spec §Atomic).
 
-    Reads → refuses on a foreign active claim → posts a structured acquire (or
+    Reads → blocks on a foreign active claim by default → posts a structured acquire (or
     takeover) → re-reads after a bounded backoff → recomputes the deterministic
     winner → proceeds only if the just-posted claim wins, else posts a void
     release and fails closed.
@@ -752,6 +825,8 @@ def acquire(
     if active is not None and not _is_self(active, holder, host):
         if not takeover:
             reason_code = "stale_foreign_claim" if active.stale else "active_foreign_claim"
+            if hard_block and not active.stale:
+                raise _active_foreign_claim_refusal(key, active)
             return ClaimResult(
                 ok=False, action="acquire", work_key=key.work_key, state=state,
                 refusal_reason=reason_code, claim_id=None,
