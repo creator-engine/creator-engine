@@ -7,7 +7,7 @@ Usage:
   deploy/dgx-runsc/build-image.sh [--image IMAGE] [--arch ARCH] [--dry-run]
 
 Environment:
-  CE_DGX_BUILD_IMAGE  Docker image tag (default: creator-engine/codex-runsc:0.142.4-aarch64)
+  CE_DGX_BUILD_IMAGE  Docker image tag (default: creator-engine/codex-runsc:0.144.1-aarch64)
   CE_DGX_USER         Runtime user name build arg (default: id -un)
   CE_DGX_UID          Runtime uid build arg (default: id -u)
   CE_DGX_GID          Runtime gid build arg (default: id -g)
@@ -21,7 +21,7 @@ quote_cmd() {
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../.." && pwd)"
-image="${CE_DGX_BUILD_IMAGE:-creator-engine/codex-runsc:0.142.4-aarch64}"
+image="${CE_DGX_BUILD_IMAGE:-creator-engine/codex-runsc:0.144.1-aarch64}"
 host_arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 case "${host_arch}" in
   aarch64)
@@ -78,7 +78,9 @@ docker_cmd=(
   --build-arg "CE_DGX_USER=${CE_DGX_USER:-$(id -un)}"
   --build-arg "CE_DGX_UID=${CE_DGX_UID:-$(id -u)}"
   --build-arg "CE_DGX_GID=${CE_DGX_GID:-$(id -g)}"
-  "${repo_root}/deploy/dgx-runsc"
+  --build-arg "CODEX_VERSION=${CE_DGX_CODEX_VERSION:-0.144.1}"
+  --build-arg "CODEX_SHA256=${CE_DGX_CODEX_SHA256:-9513fa3f5f4ad444ac1e40d972aef0e2664834ec54da987d54aba0dc2f13ea07}"
+  "${repo_root}"
 )
 
 if [ "${dry_run}" = "1" ]; then

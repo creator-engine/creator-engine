@@ -64,7 +64,36 @@ require_buildx() {
 }
 
 render_surface_build_args() {
+  local surface_arch
+  case "${platform}" in
+    linux/arm64)
+      surface_arch="arm64"
+      ;;
+    linux/amd64)
+      surface_arch="amd64"
+      ;;
+    linux/arm64,linux/amd64|linux/amd64,linux/arm64)
+      # Buildx needs the manifest-list pin for a true multi-platform build;
+      # a child digest is valid for only one target architecture. Render the
+      # manifest-list record as the existing Dockerfile argument and omit the
+      # child-only keys.
+      python3 "${repo_root}/surfaces/render.py" build-args | sed \
+        -e '/OCI_CPYTHON_BASE_IMAGE_AMD64_COMMIT_OR_DIGEST=/d' \
+        -e '/OCI_CPYTHON_BASE_IMAGE_ARM64_COMMIT_OR_DIGEST=/d' \
+        -e 's/OCI_CPYTHON_BASE_IMAGE_MANIFEST_LIST_COMMIT_OR_DIGEST=/OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST=/'
+      return
+      ;;
+    *)
+      printf 'unsupported OCI platform: %s (expected linux/arm64 or linux/amd64)\n' "${platform}" >&2
+      exit 2
+      ;;
+  esac
+  # Preserve the full rendered provenance set in the dry-run/build command,
+  # then append the architecture-selected generic arguments consumed by the
+  # OCI Dockerfile. The latter comes last, so its child digest is authoritative
+  # for this single-platform build.
   python3 "${repo_root}/surfaces/render.py" build-args
+  python3 "${repo_root}/surfaces/render.py" --arch "${surface_arch}" build-args
 }
 
 print_stage_context_commands() {

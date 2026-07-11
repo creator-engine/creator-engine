@@ -44,16 +44,18 @@ The local runner evidence is in
   `--network` by default.
 - The plan renders `--security-opt=no-new-privileges`, `--cap-drop=ALL`, the
   seat `--user uid:gid`, the policy bind mounts, the host `CODEX_HOME` bind
-  mount, the Codex binary bind mount, and the digest-pinned image reference.
+  mount, and the digest-pinned image reference. Codex itself is baked into the
+  image; the launcher does not bind-mount a host binary.
 - `SubprocessContainerRunner.egress_enforceable()` does not treat the DGX
   `gvproxy`/`runsc` route as allowlist enforcement. That route proves
   containment/routing only; a non-empty `egress_allowlist` must refuse unless a
   real allowlist enforcement primitive is proven.
 
-The portable CE CLI/validator image lives in `deploy/oci`. It is not a
-replacement for this herdr/Codex seat image; use it as a validator/preflight
-payload under the same `runsc-gvproxy-ptrace` runtime when DGX evidence needs
-the packaged `ce` and `creator-engine-validator` commands.
+The DGX seat image itself includes the CI-parity Python 3.14 validator venv,
+so `ce validate-pr` is available in the contained seat. The validator venv
+exposes both the `ce` and `creator-engine-validator` console scripts. The
+portable CE CLI image in `deploy/oci` remains a separate general-purpose
+payload.
 
 On the DGX, mirror that deployment shape by registering a dedicated Docker
 runtime named `runsc-gvproxy-ptrace`. That runtime keeps the process under
@@ -71,7 +73,6 @@ diagnostics.
    ```bash
    command -v docker
    command -v runsc
-   test -x "$HOME/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex"
    test -f "$HOME/.codex/auth.json"
    test -f "$HOME/.codex/config.toml"
    ```
@@ -113,16 +114,29 @@ diagnostics.
    ```
 
    The image builds `herdr` from the pinned herdr-ce source revision in a
-   Debian bookworm builder stage and copies that binary into the matching
-   bookworm runtime image. Do not stage or copy a host-built `herdr` binary
-   into the image; host glibc drift is intentionally excluded from this path.
+   Debian bookworm builder stage, bakes the CI-parity Python 3.14 validator
+   venv from the checked-in offline wheelhouses, and downloads the pinned
+   Codex 0.144.1 arm64 release artifact only after `sha256sum -c` succeeds.
+   Do not stage or copy host-built `herdr` or Codex binaries into the image.
+
+   The Codex artifact is pinned to
+   `https://github.com/openai/codex/releases/download/rust-v0.144.1/codex-aarch64-unknown-linux-musl.tar.gz`.
+   The build defaults to the controller-attested first-fetch SHA-256
+   `9513fa3f5f4ad444ac1e40d972aef0e2664834ec54da987d54aba0dc2f13ea07`
+   and fails closed on mismatch. Before a production rebuild, the Controller
+   must compare the exact filename in the release's `codex-package_SHA256SUMS`;
+   the sibling `codex-aarch64-unknown-linux-musl.sigstore` can additionally be
+   verified with Cosign where it is installed. The official fallback is
+   `openai_codex_cli_bin-0.144.1-py3-none-manylinux_2_17_aarch64.whl` from the
+   same release; it is an operator fallback, not an alternate implicit build
+   input.
 
 4. Verify the runtime is actually `runsc` and HTTPS egress follows the DGX
    `gvproxy`/`gvisor-tap-vsock` path:
 
    ```bash
    docker run --rm --runtime=runsc-gvproxy-ptrace \
-     creator-engine/codex-runsc:0.141.0-aarch64 \
+     creator-engine/codex-runsc:0.144.1-aarch64 \
      sh -lc 'cat /proc/version; git ls-remote https://github.com/github/gitignore.git HEAD >/dev/null'
    ```
 
@@ -139,8 +153,8 @@ diagnostics.
    ```
 
    The printed argv must include `docker run`, `--runtime=runsc-gvproxy-ptrace`, the
-   repo bind mount, the `.codex` bind mount, the Codex binary bind mount, and
-   the image followed by `exec`. It must include a runtime-owned tmpfs at
+   repo bind mount, the `.codex` bind mount, and the image followed by `exec`.
+   It must include a runtime-owned tmpfs at
    `/run/creator-engine` for herdr substrate state. It must not include a Docker
    `--network=` flag, a raw `HERDR_SOCKET_PATH=` container env, or a host bind
    mount under `/run/creator-engine/herdr`. The launcher passes
@@ -296,6 +310,7 @@ trust_level = "trusted"
 
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+check_for_update_on_startup = false
 ```
 
 Codex running inside gVisor MUST use `sandbox_mode = "danger-full-access"`
@@ -310,13 +325,12 @@ will fail.
 The script is parameterized through environment variables:
 
 ```text
-CE_DGX_IMAGE=creator-engine/codex-runsc:0.141.0-aarch64
+CE_DGX_IMAGE=creator-engine/codex-runsc:0.144.1-aarch64
 CE_DGX_RUNTIME=runsc-gvproxy-ptrace
 CE_DGX_DOCKER_NETWORK=
 CE_DGX_REPO=$(pwd)
 CE_DGX_CODEX_HOME=$HOME/.codex
 CE_DGX_CODEX_HOME_MODE=rw
-CE_DGX_CODEX_BIN=$HOME/.codex/packages/standalone/releases/0.141.0-aarch64-unknown-linux-musl/bin/codex
 CE_DGX_CONTAINED_CODEX_CONFIG=$HOME/.ce/logs/seats/<seat-id>/launcher/codex-config.toml
 CE_DGX_HOST_WORKTREE_ROOT=$HOME/.ce/logs/seats/<seat-id>/worktrees/<launch-id>
 CE_DGX_CONTAINER_WORKTREE_ROOT=/var/tmp
@@ -434,7 +448,7 @@ DGX apply checks:
 
 ```bash
 deploy/dgx-runsc/build-image.sh
-docker run --rm --runtime=runsc-gvproxy-ptrace creator-engine/codex-runsc:0.141.0-aarch64 \
+docker run --rm --runtime=runsc-gvproxy-ptrace creator-engine/codex-runsc:0.144.1-aarch64 \
   sh -lc 'cat /proc/version; git ls-remote https://github.com/github/gitignore.git HEAD >/dev/null'
 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh --dry-run exec --version
 CE_DGX_DRY_RUN=1 CE_DGX_REPO="$PWD" ./deploy/dgx-runsc/run-codex-runsc.sh tui
@@ -464,3 +478,27 @@ and a durable host worktree root mounted to `/var/tmp`.
   `~/.codex` bind mount. Do not copy them into the image.
 - The repo mount is read-write by design so Codex can author files. The process
   runs as the seat UID/GID, not root.
+
+## #953 rebuild rollout (controller/host act only)
+
+This branch prepares the rebuild; it does not build, publish, start, stop, or
+inspect a container. The Controller performs the following host-side sequence
+after merge:
+
+1. Record `git status --short` for every seat worktree and create a git bundle
+   for every unpushed branch before recreating any seat.
+2. Build and load the arm64 image with `deploy/dgx-runsc/build-image.sh`, then
+   record the resulting immutable image digest. If publishing to GHCR is
+   authorized, push the explicitly tagged image and record the published
+   manifest-list digest; do not treat a mutable tag as reproducibility proof.
+3. Canary one seat (UID/GID `1002:1002`), run contained `ce validate-pr`, and
+   inspect the dry-run/contained evidence. Then roll through the remaining
+   shared-Dockerfile seats: `1003:1003`, then `1004:1004`.
+4. If the canary or a later seat fails, stop rollout and restore the prior
+   recorded image tag/digest. Keep the failed named container for forensic
+   inspection until its evidence has been captured.
+
+The Dockerfile accepts `CE_DGX_UID`/`CE_DGX_GID` build arguments, so all three
+seat identities share this one image recipe; the Controller supplies the
+matching pair for each image/seat mapping and never changes ownership in a
+running seat.

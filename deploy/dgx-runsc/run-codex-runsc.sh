@@ -19,7 +19,7 @@ Detached mode:
                             run --rm and block the caller's terminal.
 
 Environment:
-  CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.142.4-aarch64)
+  CE_DGX_IMAGE              Docker image tag (default: creator-engine/codex-runsc:0.144.1-aarch64)
   CE_DGX_RUNTIME            Docker runtime (default: runsc-gvproxy-ptrace)
   CE_DGX_MEMORY_LIMIT       Docker --memory cgroup cap for this seat. Use docker units
                             (e.g. 8g, 12g, 16g). Set to empty string to disable.
@@ -29,7 +29,6 @@ Environment:
   CE_DGX_REPO               Host repo path (default: current directory)
   CE_DGX_CODEX_HOME         Host codex home (default: /home/cedev4/.codex)
   CE_DGX_CODEX_HOME_MODE    Mount mode for codex home: rw or ro (default: rw)
-  CE_DGX_CODEX_BIN          Host standalone codex binary
   CE_DGX_CONTAINED_CODEX_CONFIG Host path for generated contained Codex config
                             (default: <seat-log-dir>/launcher/codex-config.toml)
   CE_DGX_HERDR_SOCKET_PATH  Container-only herdr socket path (default: /run/creator-engine/herdr/herdr.sock)
@@ -115,14 +114,13 @@ if [ "${1:-}" = "tui" ] || [ "${1:-}" = "exec" ]; then
   shift
 fi
 
-CE_DGX_IMAGE="${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.142.4-aarch64}"
+CE_DGX_IMAGE="${CE_DGX_IMAGE:-creator-engine/codex-runsc:0.144.1-aarch64}"
 CE_DGX_RUNTIME="${CE_DGX_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_DGX_MEMORY_LIMIT="${CE_DGX_MEMORY_LIMIT-8g}"
 CE_DGX_DOCKER_NETWORK="${CE_DGX_DOCKER_NETWORK:-${CE_DGX_NETWORK:-}}"
 CE_DGX_REPO="${CE_DGX_REPO:-$(pwd)}"
 CE_DGX_CODEX_HOME="${CE_DGX_CODEX_HOME:-/home/cedev4/.codex}"
 CE_DGX_CODEX_HOME_MODE="${CE_DGX_CODEX_HOME_MODE:-rw}"
-CE_DGX_CODEX_BIN="${CE_DGX_CODEX_BIN:-/home/cedev4/.codex/packages/standalone/current/bin/codex}"
 CE_DGX_HERDR_SOCKET_PATH="${CE_DGX_HERDR_SOCKET_PATH:-/run/creator-engine/herdr/herdr.sock}"
 CE_DGX_SUBSTRATE_RUN_DIR="${CE_DGX_SUBSTRATE_RUN_DIR:-/run/creator-engine}"
 CE_DGX_CONTAINER_REPO="${CE_DGX_CONTAINER_REPO:-/workspace/creator-engine}"
@@ -318,6 +316,7 @@ sandbox_mode = "danger-full-access"
 model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 allow_managed_hooks_only = true
+check_for_update_on_startup = false
 
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "git-branch", "pull-request-number", "context-remaining", "context-used", "five-hour-limit", "weekly-limit"]
@@ -398,7 +397,6 @@ if [ "${dry_run}" != "1" ]; then
   }
   [ -d "${CE_DGX_REPO}" ] || { printf 'repo path not found: %s\n' "${CE_DGX_REPO}" >&2; exit 66; }
   [ -d "${CE_DGX_CODEX_HOME}" ] || { printf 'codex home not found: %s\n' "${CE_DGX_CODEX_HOME}" >&2; exit 66; }
-  [ -x "${CE_DGX_CODEX_BIN}" ] || { printf 'codex binary not executable: %s\n' "${CE_DGX_CODEX_BIN}" >&2; exit 66; }
   if [ -n "${CE_DGX_EGRESS_BROKER_SOCKET}" ]; then
     [ -S "${CE_DGX_EGRESS_BROKER_SOCKET}" ] || {
       printf 'egress broker socket not found: %s\n' "${CE_DGX_EGRESS_BROKER_SOCKET}" >&2
@@ -433,7 +431,6 @@ if [ "${CE_DGX_CODEX_HOME_MODE}" = "ro" ]; then
   codex_home_mount="${codex_home_mount},readonly"
 fi
 seat_log_mount="type=bind,source=${CE_DGX_SEAT_LOG_DIR},target=${CE_DGX_CONTAINER_SEAT_LOG_DIR}"
-codex_bin_mount="type=bind,source=${CE_DGX_CODEX_BIN},target=/usr/local/bin/codex,readonly"
 contained_codex_config_mount="type=bind,source=${CE_DGX_CONTAINED_CODEX_CONFIG},target=${CE_DGX_CONTAINER_CODEX_HOME}/config.toml,readonly"
 worktree_root_mount="type=bind,source=${CE_DGX_HOST_WORKTREE_ROOT},target=${CE_DGX_CONTAINER_WORKTREE_ROOT}"
 egress_broker_mount=""
@@ -485,7 +482,6 @@ docker_cmd+=(
   --mount "${seat_log_mount}"
   --mount "${contained_codex_config_mount}"
   --mount "${worktree_root_mount}"
-  --mount "${codex_bin_mount}"
 )
 
 if [ -n "${egress_broker_mount}" ]; then
