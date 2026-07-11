@@ -10,12 +10,11 @@ that fits — the early sections are shared.*
 
 ## What Creator Engine is, in one line
 
-**Creator Engine runs your own coding agent — under governance.**
+**Creator Engine helps your coding agent turn an idea into a reviewed result.**
 
-You keep using the coding agent you already use (Claude Code or Codex). CE wraps
-a structured, auditable workflow around it so that real work is planned,
-checked, reviewed, and merged **on purpose** — and so the dangerous things an
-agent can attempt are refused until a human says yes.
+You keep using the coding agent you already use (Claude Code or Codex). CE adds
+a clear workflow so real work is planned, checked, reviewed, and delivered with
+you making the important decisions.
 
 The key idea: **the thing that decides whether work is good lives *outside* the
 agent.** You judge artifacts — a plan, a diff, the evidence, the pull request —
