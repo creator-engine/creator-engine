@@ -23,6 +23,23 @@ Before dispatching any worker:
    the worker the file pointer plus hash — never inline the brief.
 4. Record the work claim before the worker starts.
 
+## Execution Routing — No Inlining
+
+**Bright-line rule.** A controller's own turn does only: reading state, adjudication, brief
+composition, pointer sends, and single probes. Any multi-step mechanical unit — sweeps,
+harvests, bundle extraction, preflights, cross-host recon, batch file ops, reviews — MUST be
+delegated to a spawned worker role from `.claude/agents/`. If a unit needs more than ~3
+mechanical tool calls, it is delegation-shaped. Controller context is the factory's scarcest
+resource.
+
+**Wait-contract rules.**
+- Spawn one-shot task agents that run to completion; waiting once on those is fine.
+- NEVER wait on persistent sessions (seats/foremen): they never emit a completed signal.
+  Coordinate via pane reads between turns plus durable READY signals instead.
+- Two consecutive empty waits = agents dead — verify liveness, re-dispatch once or escalate;
+  never re-enter the wait loop.
+- Explicitly close finished subagents (slot hygiene).
+
 ## Hard-Stop Rules (applies to ALL agents)
 
 - NEVER approve a pull request.
