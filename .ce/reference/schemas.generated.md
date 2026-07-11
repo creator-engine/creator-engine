@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 74
+Schema files: 75
 
 ## Index
 
@@ -27,6 +27,7 @@ Schema files: 74
 | `schemas/controller-runtime-contract.schema.yaml` | Creator Engine Controller Runtime Contract | `object` |
 | `schemas/coordination-policy.schema.yaml` | Creator Engine repo coordination policy (.ce/coordination.yml) | `object` |
 | `schemas/crosswalk-register.schema.yaml` | Creator Engine v1 -> v2 Crosswalk Register | `object` |
+| `schemas/daemon-heartbeat.schema.yaml` | Creator Engine daemon heartbeat | `object` |
 | `schemas/decision-record.schema.yaml` | Creator Engine Decision Record front-matter | `object` |
 | `schemas/devops-privileged-action-broker.schema.yaml` | Creator Engine DevOps privileged-action broker envelope | `object` |
 | `schemas/dispatch-record.schema.yaml` | Creator Engine Dispatch Record | `object` |
@@ -682,6 +683,33 @@ Properties:
 | `feature_labels` | array | no |  |  |
 | `sidecars` | array | no |  |  |
 | `context_disposition` | object | yes |  |  |
+
+### `schemas/daemon-heartbeat.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine daemon heartbeat |
+| `$id` | `https://creator-engine.local/schemas/daemon-heartbeat.schema.yaml` |
+| Root type | `object` |
+
+Latest non-secret liveness record emitted by a supervised CE daemon.
+
+Required fields:
+
+`schema_version`, `daemon_id`, `pass_index`, `ts`, `status`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `schema_version` | integer | yes | const `1` |  |
+| `daemon_id` | string | yes | pattern `^[a-z][a-z0-9-]{2,63}$` |  |
+| `pass_index` | integer | yes | minimum `0`<br>maximum `9223372036854775807` |  |
+| `ts` | string | yes | pattern `Z$`<br>format `date-time` |  |
+| `status` | string | yes | enum `starting`, `running`, `pass_complete`, `degraded`, `stopping`, `failed` |  |
+| `expected_interval_seconds` | number | no | maximum `86400` |  |
+| `unit` | string | no | pattern `^[A-Za-z0-9][A-Za-z0-9@_.:-]{0,126}\\.service$` |  |
+| `scope` | string | no | enum `system`, `user` |  |
 
 ### `schemas/decision-record.schema.yaml`
 

@@ -1,0 +1,48 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/daemon-heartbeat.schema.yaml"
+title: Creator Engine daemon heartbeat
+description: Latest non-secret liveness record emitted by a supervised CE daemon.
+type: object
+required:
+  - schema_version
+  - daemon_id
+  - pass_index
+  - ts
+  - status
+additionalProperties: false
+properties:
+  schema_version:
+    type: integer
+    const: 1
+  daemon_id:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{2,63}$"
+  pass_index:
+    type: integer
+    minimum: 0
+    maximum: 9223372036854775807
+  ts:
+    type: string
+    format: date-time
+    pattern: "Z$"
+  status:
+    type: string
+    enum:
+      - starting
+      - running
+      - pass_complete
+      - degraded
+      - stopping
+      - failed
+  expected_interval_seconds:
+    type: number
+    exclusiveMinimum: 0
+    maximum: 86400
+  unit:
+    type: string
+    pattern: "^[A-Za-z0-9][A-Za-z0-9@_.:-]{0,126}\\.service$"
+  scope:
+    type: string
+    enum:
+      - system
+      - user
