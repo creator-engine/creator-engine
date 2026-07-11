@@ -101,6 +101,50 @@ def test_unpaired_markdown_file_is_untouched_by_gate(tmp_path: Path) -> None:
     assert result.ok, [error.format() for error in result.errors]
 
 
+def test_one_sided_pair_deletion_fails(tmp_path: Path) -> None:
+    repo, base = _init_repo(tmp_path)
+    (repo / "docs/guide/example.md").unlink()
+    _commit_all(repo)
+
+    result = chk.run_with_base([repo], base)
+
+    assert not result.ok
+    assert {error.code for error in result.errors} == {chk.CODE_STALE_SIBLING}
+    rendered = "\n".join(error.format() for error in result.errors)
+    assert "docs/guide/example.html" in rendered
+
+
+def test_one_sided_pair_rename_fails(tmp_path: Path) -> None:
+    repo, base = _init_repo(tmp_path)
+    _git(repo, "mv", "docs/guide/example.md", "docs/guide/renamed.md")
+    _commit_all(repo)
+
+    result = chk.run_with_base([repo], base)
+
+    assert not result.ok
+    assert {error.code for error in result.errors} == {chk.CODE_STALE_SIBLING}
+    rendered = "\n".join(error.format() for error in result.errors)
+    assert "docs/guide/example.html" in rendered
+
+
+def test_diff_failure_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    repo, base = _init_repo(tmp_path)
+    real_run_git = chk.run_git
+
+    def failing_diff(args: list[str], repo_root: Path):
+        if args[:2] == ["diff", "--name-status"]:
+            return 1, "", "simulated diff failure"
+        return real_run_git(args, repo_root)
+
+    monkeypatch.setattr(chk, "run_git", failing_diff)
+
+    result = chk.run_with_base([repo], base)
+
+    assert not result.ok
+    assert {error.code for error in result.errors} == {chk.CODE_INVALID}
+    assert "simulated diff failure" in "\n".join(error.format() for error in result.errors)
+
+
 def test_tracked_file_discovery_failure_fails_closed(tmp_path: Path, monkeypatch) -> None:
     repo, base = _init_repo(tmp_path)
     _write_repo_file(repo, "docs/guide/unpaired.md", "# Unpaired\n\nChanged.\n")

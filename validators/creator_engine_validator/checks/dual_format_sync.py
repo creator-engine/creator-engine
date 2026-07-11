@@ -21,17 +21,17 @@ CODE_STALE_SIBLING: Final[str] = "dual_format_stale_sibling"
 CODE_INVALID: Final[str] = "dual_format_git_failed"
 
 
-def _tracked_files(repo_root: Path) -> set[str]:
-    returncode, stdout, stderr = run_git(["ls-files", "-z"], repo_root)
+def _tracked_files(repo_root: Path, ref: str | None = None) -> set[str]:
+    args = ["ls-files", "-z"] if ref is None else ["ls-tree", "-r", "--name-only", "-z", ref]
+    returncode, stdout, stderr = run_git(args, repo_root)
     if returncode != 0:
         detail = stderr.strip() or "unknown error"
-        raise RuntimeError(f"git ls-files -z failed: {detail}")
+        command = " ".join(args)
+        raise RuntimeError(f"git {command} failed: {detail}")
     return {path for path in stdout.split("\0") if path}
 
 
-def discover_sibling_pairs(repo_root: Path) -> dict[str, str]:
-    """Return both directions of tracked ``.md`` <-> ``.html`` sibling pairs."""
-    tracked = _tracked_files(repo_root)
+def _pairs_for_files(tracked: set[str]) -> dict[str, str]:
     siblings: dict[str, str] = {}
     for path in tracked:
         if not path.endswith(".md"):
@@ -44,26 +44,64 @@ def discover_sibling_pairs(repo_root: Path) -> dict[str, str]:
     return siblings
 
 
+def discover_sibling_pairs(repo_root: Path, base: str) -> dict[str, str]:
+    """Return pairs that exist at either the comparison base or ``HEAD``."""
+    siblings = _pairs_for_files(_tracked_files(repo_root, base))
+    siblings.update(_pairs_for_files(_tracked_files(repo_root)))
+    return siblings
+
+
+def _diff_failure(base: str, detail: str) -> CheckResult:
+    return CheckResult(
+        name=CHECK_NAME,
+        errors=(
+            make_error(
+                CODE_INVALID,
+                "PR_DIFF",
+                "",
+                f"git diff --name-status -z --find-renames {base}..HEAD failed: {detail}",
+                CONTRACT,
+            ),
+        ),
+    )
+
+
+def _parse_name_status(output: str) -> set[str]:
+    """Parse ``git diff --name-status -z`` and retain both rename paths."""
+    fields = output.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+
+    changed: set[str] = set()
+    index = 0
+    while index < len(fields):
+        status = fields[index]
+        index += 1
+        if not status or status[0] not in "ACDMRTUXB":
+            raise ValueError(f"invalid name-status token {status!r}")
+        path_count = 2 if status[0] in "CR" else 1
+        if index + path_count > len(fields):
+            raise ValueError(f"truncated name-status record for {status!r}")
+        paths = fields[index : index + path_count]
+        if any(not path for path in paths):
+            raise ValueError(f"empty path in name-status record for {status!r}")
+        changed.update(paths)
+        index += path_count
+    return changed
+
+
 def _changed_paths(repo_root: Path, base: str) -> tuple[set[str], CheckResult | None]:
     returncode, stdout, stderr = run_git(
-        ["diff", "--name-only", "--find-renames", f"{base}..HEAD"],
+        ["diff", "--name-status", "-z", "--find-renames", f"{base}..HEAD"],
         repo_root,
     )
     if returncode != 0:
         detail = stderr.strip() or "unknown error"
-        return set(), CheckResult(
-            name=CHECK_NAME,
-            errors=(
-                make_error(
-                    CODE_INVALID,
-                    "PR_DIFF",
-                    "",
-                    f"git diff --name-only --find-renames {base}..HEAD failed: {detail}",
-                    CONTRACT,
-                ),
-            ),
-        )
-    return {line.strip() for line in stdout.splitlines() if line.strip()}, None
+        return set(), _diff_failure(base, detail)
+    try:
+        return _parse_name_status(stdout), None
+    except ValueError as exc:
+        return set(), _diff_failure(base, f"malformed output: {exc}")
 
 
 @register(CHECK_NAME, [CODE_STALE_SIBLING, CODE_INVALID])
@@ -80,7 +118,7 @@ def run_with_base(paths: Iterable[Path], base: str) -> CheckResult:
         return failed
 
     try:
-        siblings = discover_sibling_pairs(repo_root)
+        siblings = discover_sibling_pairs(repo_root, base)
     except RuntimeError as exc:
         return CheckResult(
             name=CHECK_NAME,
