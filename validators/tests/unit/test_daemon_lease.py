@@ -606,6 +606,32 @@ def test_container_runner_maps_host_lease_root_to_container_state_mount(tmp_path
     assert str(host_lease) not in argv
 
 
+def test_container_runner_forwards_liveness_state_path_without_log_directory(tmp_path: Path):
+    fake_engine = tmp_path / "fake-engine"
+    argv_file = tmp_path / "engine-argv.txt"
+    _write_fake_container_engine(fake_engine, argv_file)
+    env = _container_runner_env(tmp_path, fake_engine)
+    env["CE_DAEMON_LIVENESS_STATE_PATH"] = "/ce/state/queue-daemon/liveness-state.json"
+
+    proc = _run_container_runner("queue-daemon", env)
+
+    assert proc.returncode == 0, proc.stderr
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert "CE_DAEMON_LIVENESS_STATE_PATH" in argv
+    assert "CE_DAEMON_LOG_DIR" not in argv
+
+
+def test_queue_daemon_iac_declares_liveness_without_log_directory():
+    root = _repo_root() / "deploy" / "queue-daemon"
+    declared_topology = "\n".join(
+        (root / name).read_text(encoding="utf-8")
+        for name in ("ce-queue-daemon.service", "ce-queue-daemon.env.template", "RELOCATION.md")
+    )
+
+    assert "CE_DAEMON_LIVENESS_STATE_PATH" in declared_topology
+    assert "CE_DAEMON_LOG_DIR" not in declared_topology
+
+
 def test_container_runner_rejects_env_file_without_0600_mode(tmp_path: Path):
     fake_engine = tmp_path / "fake-engine"
     argv_file = tmp_path / "engine-argv.txt"

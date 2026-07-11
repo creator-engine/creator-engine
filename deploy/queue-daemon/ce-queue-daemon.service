@@ -13,19 +13,13 @@ WorkingDirectory=/workspace/creator-engine
 EnvironmentFile=/etc/creator-engine/ce-queue-daemon.env
 Environment=CE_QUEUE_DAEMON_REPO_ROOT=/workspace/creator-engine
 Environment=CE_DAEMON_REPO_ROOT=/workspace/creator-engine
-Environment=CE_DAEMON_STATE_ROOT=/var/lib/ce-queue-daemon
-Environment=CE_DAEMON_CONTAINER_NAME=ce-queue-daemon
-Environment=CE_APPROVAL_WALL_SECRET_TARGET_FILE=/run/ce-queue-daemon/approval-wall-secret
-Environment=CE_APPROVAL_WALL_STATE=/var/lib/ce-queue-daemon/approval-wall-state.json
-ExecStart=/bin/bash -lc 'if [ "${CE_DAEMON_UNCONTAINED:-0}" = "1" ]; then exec /workspace/creator-engine/deploy/queue-daemon/launch-queue-daemon.sh; else exec /workspace/creator-engine/deploy/daemons/run-daemon-container.sh queue-daemon; fi'
+ExecStart=/bin/bash -lc 'exec "$CE_DAEMON_REPO_ROOT/deploy/daemons/run-daemon-container.sh" queue-daemon'
 Restart=always
 RestartSec=5
 RuntimeDirectory=ce-queue-daemon
 RuntimeDirectoryMode=0700
 StateDirectory=ce-queue-daemon
 StateDirectoryMode=0700
-LogsDirectory=ce-queue-daemon
-LogsDirectoryMode=0700
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
