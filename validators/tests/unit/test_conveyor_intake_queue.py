@@ -1,12 +1,20 @@
+import dataclasses
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import pytest
 
 from creator_engine_validator import conveyor_daemon_runner as runner
 from creator_engine_validator.conveyor_daemon_runner import load_config
 from creator_engine_validator.conveyor_intake_queue import (
     IntakeQueue,
     IntakeQueueReader,
+    IntakeTransitionError,
     IntakeUnit,
 )
+import creator_engine_validator.conveyor_intake_queue as intake
 
 
 class FakeLease:
@@ -27,6 +35,8 @@ def _unit(unit_id: str, *, priority: int = 10) -> IntakeUnit:
         work_class="S",
         status="pending",
         created_at="2026-07-08T00:00:00Z",
+        brief_sha="a" * 40,
+        territory_paths=("validators/", "docs/"),
     )
 
 
@@ -73,6 +83,27 @@ def test_claim_next_returns_none_when_empty(tmp_path: Path):
     assert queue.claim_next() is None
 
 
+@pytest.mark.parametrize(
+    ("name", "contents"),
+    [
+        ("00000-bad.yaml", "unit_id: [\n"),
+        ("00000-bad.json", "{not-json"),
+        ("00000-schema.yaml", "unit_id: malformed-only\n"),
+    ],
+)
+def test_claim_refuses_malformed_or_schema_invalid_pending_record(name: str, contents: str, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("valid", priority=1))
+    (queue.pending_dir / name).write_text(contents, encoding="utf-8")
+
+    with pytest.raises(intake.IntakeQueueRecordError) as raised:
+        queue.claim_entry("seat-a")
+
+    assert raised.value.path_name == name
+    assert (queue.pending_dir / "00001-valid.yaml").exists()
+    assert not any(queue.claimed_dir.iterdir())
+
+
 def test_mark_done_moves_to_done(tmp_path: Path):
     queue = IntakeQueue(tmp_path / "intake-queue")
     queue.stock(_unit("unit-a", priority=3))
@@ -92,6 +123,31 @@ def test_list_pending_returns_sorted_order(tmp_path: Path):
     queue.stock(_unit("last", priority=30))
 
     assert [unit.unit_id for unit in queue.list_pending()] == ["first", "middle", "last"]
+
+
+def test_numeric_priority_ordering_handles_six_digits_and_tie_breaks_by_filename(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("one-hundred-thousand", priority=100000))
+    queue.stock(_unit("ninety-nine-thousand", priority=99999))
+    queue.stock(_unit("same-priority-b", priority=5))
+    queue.stock(_unit("same-priority-a", priority=5))
+
+    assert [unit.unit_id for unit in queue.list_pending()] == [
+        "same-priority-a",
+        "same-priority-b",
+        "ninety-nine-thousand",
+        "one-hundred-thousand",
+    ]
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None and claimed.unit_id == "same-priority-a"
+
+
+@pytest.mark.parametrize("priority", [True, 1.0, -1])
+def test_non_integer_or_negative_priority_is_rejected(priority, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+
+    with pytest.raises(ValueError, match="priority"):
+        queue.stock(_unit("invalid-priority", priority=priority))
 
 
 def test_intake_queue_reader_plans_idle_seats(tmp_path: Path):
@@ -170,3 +226,563 @@ def test_load_config_intake_enabled_when_flag_set(tmp_path: Path):
 
     assert config.intake_enabled is True
     assert config.intake_queue_root == tmp_path / "intake"
+
+
+def test_brief_sha_is_required_and_nonempty_on_read(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    path = next(queue.pending_dir.iterdir())
+    payload = path.read_text(encoding="utf-8").replace("brief_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", "")
+    path.write_text(payload, encoding="utf-8")
+
+    errors = []
+    assert queue.list_pending(read_error_sink=lambda _path, error: errors.append(error)) == []
+    assert isinstance(errors[0], ValueError)
+    with pytest.raises(ValueError, match="brief_sha"):
+        queue.stock(dataclasses.replace(_unit("empty-sha"), brief_sha=""))
+
+
+def test_territory_paths_round_trip_and_publish_alias(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    unit = _unit("unit-a")
+
+    queue.publish_entry(unit)
+
+    assert queue.list_open()[0].territory_paths == ("validators/", "docs/")
+
+
+def test_duplicate_publication_is_idempotent_only_while_pending_and_never_reclaims_ownership(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    unit = _unit("unit-a")
+
+    queue.publish_entry(unit)
+    queue.publish_entry(unit)
+    assert [entry.unit_id for entry in queue.list_pending()] == ["unit-a"]
+
+    claimed = queue.claim_entry("seat-a", ttl_seconds=60)
+    assert claimed is not None and claimed.claim_token is not None
+    with pytest.raises(FileExistsError, match="claimed"):
+        queue.publish_entry(unit)
+    retained = queue._claimed_path_for_unit("unit-a")
+    assert retained is not None
+    assert intake._read_unit(retained) == claimed
+
+    queue.fence_launch("unit-a", "seat-a", claimed.claim_token)
+    with pytest.raises(FileExistsError, match="claimed"):
+        queue.publish_entry(unit)
+    assert intake._read_unit(retained).status == "launching"
+
+    queue.complete_entry(
+        "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+    )
+    with pytest.raises(FileExistsError, match="done"):
+        queue.publish_entry(unit)
+    assert len(list(queue.done_dir.iterdir())) == 1
+
+
+def test_publication_uses_stable_unit_identity_across_priority_and_serialization(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    unit = _unit("unit-a", priority=10)
+    queue.publish_entry(unit)
+
+    yaml_path = next(queue.pending_dir.iterdir())
+    json_path = queue.pending_dir / "00010-unit-a.json"
+    json_path.write_text(json.dumps(dataclasses.asdict(unit)), encoding="utf-8")
+    yaml_path.unlink()
+
+    # An identical replay matches the extant JSON publication even though the
+    # controller's serializer currently emits YAML.
+    queue.publish_entry(unit)
+    assert list(queue.pending_dir.iterdir()) == [json_path]
+
+    # Changing priority changes the filename, but never creates a second
+    # lifecycle record for the immutable identity.
+    with pytest.raises(FileExistsError, match="pending"):
+        queue.publish_entry(dataclasses.replace(unit, priority=20))
+    assert list(queue.pending_dir.iterdir()) == [json_path]
+
+
+def test_completion_refuses_duplicate_unit_identity_instead_of_selecting_a_generation(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.publish_entry(_unit("unit-a", priority=10))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=60)
+    assert claimed is not None
+
+    claimed_path = queue._claimed_path_for_unit("unit-a")
+    assert claimed_path is not None
+    duplicate = queue.claimed_dir / "99999-unit-a.json"
+    duplicate.write_text(json.dumps(dataclasses.asdict(claimed)), encoding="utf-8")
+
+    with pytest.raises(IntakeTransitionError, match="duplicate lifecycle"):
+        queue.complete_entry(
+            "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        )
+    assert claimed_path.exists() and duplicate.exists()
+
+
+def test_publish_and_claim_share_the_entry_lock_without_overwriting_a_winner(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    unit = _unit("unit-a")
+    queue.stock(unit)
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    claim_finished = threading.Event()
+    real_publication_record = queue._publication_record
+
+    def pause_publication_check(filename):
+        if not entered_write.is_set():
+            entered_write.set()
+            assert release_write.wait(2)
+        return real_publication_record(filename)
+
+    monkeypatch.setattr(queue, "_publication_record", pause_publication_check)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        published = executor.submit(queue.publish_entry, unit)
+        assert entered_write.wait(2)
+
+        def claim():
+            try:
+                return queue.claim_entry("seat-a")
+            finally:
+                claim_finished.set()
+
+        claimant = executor.submit(claim)
+        assert not claim_finished.wait(0.05)
+        release_write.set()
+        published.result()
+        claimed = claimant.result()
+
+    assert claimed is not None and claimed.claimed_by == "seat-a"
+    with pytest.raises(FileExistsError, match="claimed"):
+        queue.publish_entry(unit)
+    assert queue.list_pending() == []
+    retained = queue._claimed_path_for_unit("unit-a")
+    assert retained is not None and intake._read_unit(retained).claimed_by == "seat-a"
+
+
+def test_claim_entry_sets_lifecycle_fields(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+
+    claimed = queue.claim_entry("seat-a", ttl_seconds=60, clock=lambda: "2026-07-10T12:00:00Z")
+
+    assert claimed is not None
+    assert claimed.claimed_by == "seat-a"
+    assert claimed.claimed_at == "2026-07-10T12:00:00Z"
+    assert claimed.claim_expires_at == "2026-07-10T12:01:00Z"
+
+
+def test_concurrent_claimers_have_exactly_one_winner(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claims = list(executor.map(lambda seat: queue.claim_entry(seat), ("seat-a", "seat-b")))
+
+    assert sum(claim is not None for claim in claims) == 1
+    assert len(list(queue.claimed_dir.iterdir())) == 1
+
+
+def test_release_returns_entry_to_pending_and_rejects_wrong_claimer(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
+
+    try:
+        queue.release_entry("unit-a", "seat-b")
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("wrong claimer must be refused")
+    queue.release_entry("unit-a", "seat-a", claim_token=claimed.claim_token)
+
+    assert [unit.unit_id for unit in queue.list_pending()] == ["unit-a"]
+    assert queue.list_pending()[0].claimed_by is None
+
+
+def test_claim_tokens_fence_ownership_and_launching_claims_are_not_reclaimed(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None and claimed.claim_token is not None
+    with pytest.raises(PermissionError, match="token"):
+        queue.fence_launch("unit-a", "seat-a", "0" * 64, clock=lambda: "2026-07-10T12:00:00Z")
+    fenced = queue.fence_launch("unit-a", "seat-a", claimed.claim_token, clock=lambda: "2026-07-10T12:00:00Z")
+    assert fenced.status == "launching"
+    assert queue.claim_entry("seat-b", clock=lambda: "2026-07-10T12:00:02Z") is None
+
+
+def test_release_move_failure_restores_owned_record(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None and claimed.claim_token is not None
+    original_replace = queue.__class__.__module__
+    import creator_engine_validator.conveyor_intake_queue as intake
+    real_replace = intake.os.replace
+
+    def fail_pending(source, destination):
+        if Path(destination).parent == queue.pending_dir:
+            raise OSError("injected move failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(intake.os, "replace", fail_pending)
+    with pytest.raises(intake.IntakeTransitionError, match="release transition failed"):
+        queue.release_entry("unit-a", "seat-a", claim_token=claimed.claim_token)
+    restored = queue._claimed_path_for_unit("unit-a")
+    assert restored is not None
+    assert "status: claimed" in restored.read_text(encoding="utf-8")
+
+
+def test_claim_write_failure_rolls_back_to_pending_and_ledger_failure_is_bounded(monkeypatch, tmp_path: Path, capsys):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    import creator_engine_validator.conveyor_intake_queue as intake
+    real_write = intake._write_unit_atomic
+
+    def fail_claim_write(path, unit):
+        if path.parent == queue.claimed_dir:
+            raise OSError("injected write failure")
+        return real_write(path, unit)
+
+    monkeypatch.setattr(intake, "_write_unit_atomic", fail_claim_write)
+    with pytest.raises(intake.IntakeTransitionError, match="claim transition failed"):
+        queue.claim_entry("seat-a")
+    assert [unit.unit_id for unit in queue.list_pending()] == ["unit-a"]
+    assert list(queue.claimed_dir.iterdir()) == []
+    monkeypatch.setattr(intake, "_write_unit_atomic", real_write)
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
+    assert "ledger append failed" not in capsys.readouterr().err
+
+
+def test_claim_write_post_replace_fsync_failure_keeps_the_published_claim(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    source = next(queue.pending_dir.iterdir())
+    target = queue.claimed_dir / source.name
+    real_replace = intake.os.replace
+    real_fsync_directory = intake._fsync_directory
+    claim_payload_installed = False
+    failed = False
+
+    def observe_claim_payload_replace(from_path, to_path):
+        nonlocal claim_payload_installed
+        result = real_replace(from_path, to_path)
+        if Path(to_path) == target and Path(from_path).name.startswith(f".{target.name}."):
+            claim_payload_installed = True
+        return result
+
+    def fail_claim_payload_directory_fsync(path):
+        nonlocal failed
+        if claim_payload_installed and not failed and Path(path) == queue.claimed_dir:
+            failed = True
+            raise OSError("injected claimed payload fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(intake.os, "replace", observe_claim_payload_replace)
+    monkeypatch.setattr(intake, "_fsync_directory", fail_claim_payload_directory_fsync)
+
+    claimed = queue.claim_entry("seat-a")
+
+    assert failed
+    assert claimed is not None and claimed.status == "claimed"
+    assert not source.exists()
+    assert target.exists()
+    assert intake._read_unit(target) == claimed
+
+
+@pytest.mark.parametrize("window", ["destination", "source"])
+@pytest.mark.parametrize("transition, destination", [
+    ("release", "pending"),
+    ("complete", "done"),
+    ("reclaim", "pending"),
+])
+def test_post_rename_directory_fsync_failure_keeps_one_authoritative_record(
+    monkeypatch, tmp_path: Path, transition: str, destination: str, window: str,
+):
+    """A post-rename fsync error must never recreate the old claimed record."""
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None and claimed.claim_token is not None
+    source = queue._claimed_path_for_unit("unit-a")
+    assert source is not None
+    target = queue.root / destination / source.name
+    real_replace = intake.os.replace
+    real_fsync_directory = intake._fsync_directory
+    renamed = False
+    failed = False
+
+    def arm_after_rename(from_path, to_path):
+        nonlocal renamed
+        result = real_replace(from_path, to_path)
+        if Path(from_path) == source and Path(to_path) == target:
+            renamed = True
+        return result
+
+    def fail_one_window(path):
+        nonlocal failed
+        if renamed and not failed and Path(path) == (target.parent if window == "destination" else source.parent):
+            failed = True
+            raise OSError(f"injected {window} directory fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(intake.os, "replace", arm_after_rename)
+    monkeypatch.setattr(intake, "_fsync_directory", fail_one_window)
+    if transition == "release":
+        queue.release_entry("unit-a", "seat-a", claim_token=claimed.claim_token)
+    elif transition == "complete":
+        queue.complete_entry(
+            "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        )
+    else:
+        queue._reclaim_stale("2026-07-10T12:00:02Z")
+
+    assert failed
+    assert not source.exists()
+    assert target.exists()
+    assert intake._read_unit(target).status == ("done" if transition == "complete" else "pending")
+
+
+@pytest.mark.parametrize("status, destination", [("pending", "pending"), ("done", "done")])
+def test_process_death_between_state_write_and_rename_is_recovered(tmp_path: Path, status: str, destination: str):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
+    claimed_path = queue._claimed_path_for_unit("unit-a")
+    assert claimed_path is not None
+
+    # This is the durable on-disk fixture a process death leaves after the
+    # state write and before its location rename; no rollback mock is involved.
+    stranded = dataclasses.replace(
+        claimed,
+        status=status,  # type: ignore[arg-type]
+        claimed_by=None if status == "pending" else claimed.claimed_by,
+        claimed_at=None if status == "pending" else claimed.claimed_at,
+        claim_expires_at=None if status == "pending" else claimed.claim_expires_at,
+        claim_token=None if status == "pending" else claimed.claim_token,
+        launch_fenced_at=None if status == "pending" else claimed.launch_fenced_at,
+    )
+    intake._write_unit_atomic(claimed_path, stranded)
+
+    queue._ensure_dirs()
+
+    recovered = queue.root / destination / claimed_path.name
+    assert recovered.exists()
+    assert not claimed_path.exists()
+    assert intake._read_unit(recovered).status == status
+
+
+@pytest.mark.parametrize("status, destination", [("pending", "pending"), ("done", "done")])
+@pytest.mark.parametrize("window", ["destination", "source"])
+def test_recovery_post_rename_directory_fsync_failure_has_no_split_brain(
+    monkeypatch, tmp_path: Path, status: str, destination: str, window: str,
+):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a")
+    assert claimed is not None
+    source = queue._claimed_path_for_unit("unit-a")
+    assert source is not None
+    stranded = dataclasses.replace(
+        claimed,
+        status=status,  # type: ignore[arg-type]
+        claimed_by=None if status == "pending" else claimed.claimed_by,
+        claimed_at=None if status == "pending" else claimed.claimed_at,
+        claim_expires_at=None if status == "pending" else claimed.claim_expires_at,
+        claim_token=None if status == "pending" else claimed.claim_token,
+        launch_fenced_at=None if status == "pending" else claimed.launch_fenced_at,
+    )
+    intake._write_unit_atomic(source, stranded)
+    target = queue.root / destination / source.name
+    real_replace = intake.os.replace
+    real_fsync_directory = intake._fsync_directory
+    renamed = False
+    failed = False
+
+    def arm_after_rename(from_path, to_path):
+        nonlocal renamed
+        result = real_replace(from_path, to_path)
+        if Path(from_path) == source and Path(to_path) == target:
+            renamed = True
+        return result
+
+    def fail_one_window(path):
+        nonlocal failed
+        if renamed and not failed and Path(path) == (target.parent if window == "destination" else source.parent):
+            failed = True
+            raise OSError(f"injected {window} directory fsync failure")
+        return real_fsync_directory(path)
+
+    monkeypatch.setattr(intake.os, "replace", arm_after_rename)
+    monkeypatch.setattr(intake, "_fsync_directory", fail_one_window)
+    queue._recover_stranded_locations()
+
+    assert failed
+    assert not source.exists()
+    assert target.exists()
+    assert intake._read_unit(target).status == status
+
+
+def test_stale_claim_is_reclaimed_and_recorded(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("expired"))
+    assert queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z") is not None
+
+    claimed = queue.claim_entry("seat-b", clock=lambda: "2026-07-10T12:00:02Z")
+
+    assert claimed is not None
+    assert claimed.unit_id == "expired"
+    assert claimed.claimed_by == "seat-b"
+    assert _ledger_actions(queue) == ["claimed", "stale_reclaim", "claimed"]
+
+
+def test_fractional_ttl_preserves_precision_and_fence_boundary(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=0.5, clock=lambda: "2026-07-10T12:00:00Z")
+
+    assert claimed is not None
+    assert claimed.claim_expires_at == "2026-07-10T12:00:00.5Z"
+    assert claimed.claim_token is not None
+    fenced = queue.fence_launch(
+        "unit-a", "seat-a", claimed.claim_token, clock=lambda: "2026-07-10T12:00:00.499999Z",
+    )
+    assert fenced.status == "launching"
+
+    expired_queue = IntakeQueue(tmp_path / "expired-intake-queue")
+    expired_queue.stock(_unit("unit-b"))
+    expired = expired_queue.claim_entry("seat-a", ttl_seconds=0.5, clock=lambda: "2026-07-10T12:00:00Z")
+    assert expired is not None and expired.claim_token is not None
+    with pytest.raises(PermissionError, match="expired"):
+        expired_queue.fence_launch(
+            "unit-b", "seat-a", expired.claim_token, clock=lambda: "2026-07-10T12:00:00.5Z",
+        )
+
+
+@pytest.mark.parametrize("ttl", [0.0000001, 0.0000009])
+def test_ttl_below_serialized_microsecond_resolution_is_refused(ttl: float, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+
+    with pytest.raises(ValueError, match="ttl_seconds"):
+        queue.claim_entry("seat-a", ttl_seconds=ttl, clock=lambda: "2026-07-10T12:00:00Z")
+
+
+def test_complete_rejects_wrong_claimer_and_ledger_tracks_lifecycle(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None
+
+    try:
+        queue.complete_entry(
+            "unit-a", "seat-b", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        )
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("wrong claimer must be refused")
+    queue.complete_entry(
+        "unit-a", "seat-a", claim_token=claimed.claim_token, claim_generation=claimed.claim_generation,
+        clock=lambda: "2026-07-10T12:01:00Z",
+    )
+
+    ledger = _ledger_records(queue)
+    assert [entry["action"] for entry in ledger] == ["claimed", "completed"]
+    assert all(entry["unit_id"] == "unit-a" for entry in ledger)
+    assert all(entry["brief_sha"] == "a" * 40 for entry in ledger)
+
+
+def test_complete_refuses_stale_same_seat_claim_after_reclaim(tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    first = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert first is not None
+
+    successor = queue.claim_entry("seat-a", ttl_seconds=60, clock=lambda: "2026-07-10T12:00:02Z")
+    assert successor is not None and successor.claim_generation == first.claim_generation + 1
+
+    with pytest.raises(PermissionError, match="token|generation"):
+        queue.complete_entry(
+            "unit-a", "seat-a", claim_token=first.claim_token, claim_generation=first.claim_generation,
+        )
+    queue.complete_entry(
+        "unit-a", "seat-a", claim_token=successor.claim_token, claim_generation=successor.claim_generation,
+    )
+
+
+def test_stale_reclaim_and_launch_fence_serialize_one_claim_transition(monkeypatch, tmp_path: Path):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    claimed = queue.claim_entry("seat-a", ttl_seconds=1, clock=lambda: "2026-07-10T12:00:00Z")
+    assert claimed is not None and claimed.claim_token is not None
+    import creator_engine_validator.conveyor_intake_queue as intake
+
+    real_write = intake._write_unit_atomic
+    reclaim_read = threading.Event()
+    release_reclaim = threading.Event()
+    fence_finished = threading.Event()
+    fence_errors: list[BaseException] = []
+
+    def pause_reclaim(path, unit):
+        if path.parent == queue.claimed_dir and unit.status == "pending" and not reclaim_read.is_set():
+            reclaim_read.set()
+            assert release_reclaim.wait(2)
+        return real_write(path, unit)
+
+    monkeypatch.setattr(intake, "_write_unit_atomic", pause_reclaim)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        reclaimer = executor.submit(
+            queue.claim_entry, "seat-b", ttl_seconds=60, clock=lambda: "2026-07-10T12:00:02Z",
+        )
+        assert reclaim_read.wait(2)
+
+        def fence() -> None:
+            try:
+                queue.fence_launch("unit-a", "seat-a", claimed.claim_token, clock=lambda: "2026-07-10T12:00:00Z")
+            except BaseException as exc:
+                fence_errors.append(exc)
+            finally:
+                fence_finished.set()
+
+        executor.submit(fence)
+        assert not fence_finished.wait(0.05)
+        release_reclaim.set()
+        successor = reclaimer.result()
+        assert successor is not None and successor.claimed_by == "seat-b"
+        assert fence_finished.wait(2)
+
+    assert len(fence_errors) == 1
+    assert isinstance(fence_errors[0], (FileNotFoundError, PermissionError))
+    current = queue._claimed_path_for_unit("unit-a")
+    assert current is not None and "claimed_by: seat-b" in current.read_text(encoding="utf-8")
+
+
+def test_ledger_failure_does_not_abort_claim(monkeypatch, tmp_path: Path, capsys):
+    queue = IntakeQueue(tmp_path / "intake-queue")
+    queue.stock(_unit("unit-a"))
+    original_open = Path.open
+
+    def failing_ledger_open(path, *args, **kwargs):
+        if path == queue.ledger_path and args and args[0] == "a":
+            raise OSError("read-only queue root")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", failing_ledger_open)
+
+    claimed = queue.claim_entry("seat-a")
+
+    assert claimed is not None
+    assert "ledger append failed" in capsys.readouterr().err
+
+
+def _ledger_records(queue: IntakeQueue) -> list[dict[str, str]]:
+    return [json.loads(line) for line in queue.ledger_path.read_text(encoding="utf-8").splitlines()]
+
+
+def _ledger_actions(queue: IntakeQueue) -> list[str]:
+    return [entry["action"] for entry in _ledger_records(queue)]
