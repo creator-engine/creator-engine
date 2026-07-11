@@ -8,9 +8,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** XS
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=8
 
-AUTHORIZED_PATHS_SHA256=f5f8797775642d23c610ba7a5272f0ccf7c2afd93889aa3115f46c611a0ec4a4
+AUTHORIZED_PATHS_SHA256=5bfa5aec8340e482140cd842d4ef22cff43e64482a91abf8bdaf4c86cacee0c9
 
 ```text
 .ce/brain/assertions.yaml
@@ -20,4 +20,5 @@ AUTHORIZED_PATHS_SHA256=f5f8797775642d23c610ba7a5272f0ccf7c2afd93889aa3115f46c61
 .claude/agents/reviewer.md
 docs/architecture/shaping-ux.md
 playbooks/controller/briefs/dispatch.md
+validators/tests/unit/test_ce_brain_drift.py
 ```
