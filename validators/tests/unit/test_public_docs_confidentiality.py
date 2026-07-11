@@ -271,3 +271,16 @@ def test_public_docs_internal_trees_have_only_known_exceptions():
         + "\nStale exceptions:\n  "
         + ("\n  ".join(stale_exceptions) if stale_exceptions else "<none>")
     )
+
+
+def test_custody_runbook_is_an_exact_operations_exception():
+    """The custody runbook is admitted; an adjacent unlisted path is refused."""
+    custody_runbook = "docs/operations/MATERIALIZER_APPKEY_CUSTODY_RUNBOOK.md"
+    unlisted_neighbor = "docs/operations/MATERIALIZER_APPKEY_CUSTODY_NOTES.md"
+    paths = set(guard.KNOWN_OPERATIONS_EXCEPTIONS | guard.KNOWN_DELIVERY_EXCEPTIONS)
+    paths.update({custody_runbook, unlisted_neighbor})
+
+    unreviewed, stale_exceptions = guard.internal_tree_violations_for_paths(paths)
+
+    assert unreviewed == [unlisted_neighbor]
+    assert stale_exceptions == []
