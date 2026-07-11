@@ -35,6 +35,7 @@ def expected_contained_codex_config() -> str:
         'model = "gpt-5.6-terra"\n'
         'model_reasoning_effort = "high"\n'
         "allow_managed_hooks_only = true\n"
+        "check_for_update_on_startup = false\n"
         "\n"
         "[tui]\n"
         'status_line = ["model-with-reasoning", "current-dir", "git-branch", "pull-request-number", "context-remaining", "context-used", "five-hour-limit", "weekly-limit"]\n'
@@ -68,7 +69,6 @@ def run_wrapper(*args: str, **env_overrides: str | None) -> subprocess.Completed
                 "CE_DGX_IMAGE": "creator-engine/codex-runsc:test",
                 "CE_DGX_REPO": "/repo/creator-engine",
                 "CE_DGX_CODEX_HOME": "/home/cedev4/.codex",
-                "CE_DGX_CODEX_BIN": "/opt/codex/bin/codex",
                 "CE_DGX_SEAT_LOG_DIR": f"{runtime_dir}/seat-logs",
                 "CE_DGX_UID": "1000",
                 "CE_DGX_GID": "1000",
@@ -100,12 +100,9 @@ def run_wrapper_nondry_run_with_fake_docker(
         fake_bin = root / "bin"
         repo = root / "repo"
         codex_home = root / "codex-home"
-        codex_bin = root / "codex"
         fake_bin.mkdir()
         repo.mkdir()
         codex_home.mkdir()
-        codex_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        codex_bin.chmod(0o755)
         docker = fake_bin / "docker"
         docker.write_text(
             "#!/bin/sh\n"
@@ -124,7 +121,6 @@ def run_wrapper_nondry_run_with_fake_docker(
                 "CE_DGX_IMAGE": "creator-engine/codex-runsc:test",
                 "CE_DGX_REPO": str(repo),
                 "CE_DGX_CODEX_HOME": str(codex_home),
-                "CE_DGX_CODEX_BIN": str(codex_bin),
                 "CE_DGX_CONTAINED_CODEX_CONFIG": str(root / "contained-codex.toml"),
                 "CE_DGX_SEAT_LOG_DIR": str(root / "seat-logs"),
                 "CE_DGX_UID": "1000",
@@ -193,12 +189,9 @@ def run_live_dgx_wrapper_with_fake_docker(
     fake_bin = make_live_fake_dgx_docker(root)
     repo = root / "repo"
     codex_home = root / "codex-home"
-    codex_bin = root / "codex"
     seat_logs = root / "seat-logs"
     repo.mkdir(exist_ok=True)
     codex_home.mkdir(exist_ok=True)
-    codex_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    codex_bin.chmod(0o755)
 
     env = os.environ.copy()
     env.pop("CE_LEDGER_ROOT", None)
@@ -209,7 +202,6 @@ def run_live_dgx_wrapper_with_fake_docker(
             "CE_DGX_IMAGE": "creator-engine/codex-runsc:test",
             "CE_DGX_REPO": str(repo),
             "CE_DGX_CODEX_HOME": str(codex_home),
-            "CE_DGX_CODEX_BIN": str(codex_bin),
             "CE_DGX_CONTAINED_CODEX_CONFIG": str(root / "contained-codex.toml"),
             "CE_DGX_SEAT_LOG_DIR": str(seat_logs),
             "CE_DGX_UID": "1000",
@@ -306,10 +298,7 @@ def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() ->
     assert any(
         arg.endswith(",target=/home/cedev4/.codex/config.toml,readonly") for arg in argv
     )
-    assert any(
-        arg == "type=bind,source=/opt/codex/bin/codex,target=/usr/local/bin/codex,readonly"
-        for arg in argv
-    )
+    assert not any(arg.endswith("target=/usr/local/bin/codex,readonly") for arg in argv)
     assert not any("/run/creator-engine/herdr" in arg and arg.startswith("type=bind,") for arg in argv)
 
 
@@ -417,17 +406,10 @@ def test_codex_tui_dry_run_lets_image_entrypoint_select_default_harness() -> Non
     ]
 
 
-def test_codex_default_binary_tracks_standalone_current() -> None:
-    argv = dry_run_argv(run_wrapper("tui", CE_DGX_CODEX_BIN=None))
+def test_codex_image_bakes_binary_without_host_binary_mount() -> None:
+    argv = dry_run_argv(run_wrapper("tui"))
 
-    assert any(
-        arg
-        == (
-            "type=bind,source=/home/cedev4/.codex/packages/standalone/current/bin/codex,"
-            "target=/usr/local/bin/codex,readonly"
-        )
-        for arg in argv
-    )
+    assert not any(arg.endswith("target=/usr/local/bin/codex,readonly") for arg in argv)
 
 
 def test_codex_detach_flag_dry_run_uses_detached_lifecycle_flags() -> None:
@@ -744,12 +726,26 @@ def test_dockerfile_builds_herdr_from_source_and_uses_tini() -> None:
         'install -d -m 0700 -o "${CE_DGX_UID}" -g "${CE_DGX_GID}" /run/creator-engine/herdr'
         in text
     )
-    assert (
-        "COPY herdr-harness-entrypoint.sh /usr/local/bin/ce-herdr-harness-entrypoint"
-        in text
-    )
+    assert "COPY deploy/dgx-runsc/herdr-harness-entrypoint.sh /usr/local/bin/ce-herdr-harness-entrypoint" in text
+    assert "ARG CODEX_VERSION=0.144.1" in text
+    assert "ARG CODEX_SHA256=9513fa3f5f4ad444ac1e40d972aef0e2664834ec54da987d54aba0dc2f13ea07" in text
+    assert "sha256sum -c -" in text
+    assert "codex-aarch64-unknown-linux-musl.tar.gz" in text
+    assert "python3.14 -m venv /opt/ce-validator-venv" in text
+    assert "COPY --from=validator-venv-builder /opt/ce-validator-venv /opt/ce-validator-venv" in text
+    assert "/opt/ce-validator-venv/bin/ce --help" in text
+    assert "check_for_update_on_startup = false" in text
     assert "test -x /usr/local/bin/herdr" in text
     assert (
         'ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/ce-herdr-harness-entrypoint"]'
+        in text
+    )
+
+
+def test_dockerfile_venv_builder_installs_package_from_validators_subdir() -> None:
+    text = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert (
+        "/opt/ce-validator-venv/bin/pip install --no-index --no-build-isolation --no-deps validators/"
         in text
     )

@@ -1,11 +1,11 @@
 surfaces:
   - name: codex
-    version: "0.142.4"
+    version: "0.144.1"
     commit_or_digest: null
     source: npm:@openai/codex
     custody: rented
     update_policy: downstream digest capture pending
-    last_evaluated: "2026-06-30"
+    last_evaluated: "2026-07-11"
 
   - name: claude-code
     version: "2.1.201"
@@ -81,11 +81,14 @@ surfaces:
 
   - name: OCI CPython base image
     version: "3.14-slim-bookworm"
-    commit_or_digest: sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9
+    commit_or_digest:
+      manifest-list: sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9
+      amd64: sha256:01d4f0a9b0f284f9ef577e86a1ae7c7c22572e19fddc052d011c38217f856a94
+      arm64: sha256:0670f5b579f8ba90903a95007ae10c890ac7f0d54de138ebd20574d56b10f3cc
     source: docker.io/library/python:3.14-slim-bookworm
     custody: docker-base-image
-    update_policy: manifest-list digest pin required before multi-platform Dockerfile use
-    last_evaluated: "2026-06-26"
+    update_policy: per-architecture digest pins required before Dockerfile use; controller-attested manifest list retained as provenance
+    last_evaluated: "2026-07-11"
 
   - name: PyYAML
     version: "6.0.3"

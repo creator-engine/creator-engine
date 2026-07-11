@@ -1,9 +1,40 @@
+# Build context: the REPOSITORY ROOT (not deploy/dgx-runsc/). The validator
+# venv stage below COPYs validators/** so the contained seat has the same
+# Python-3.14 validator toolchain as CI.
+ARG OCI_CPYTHON_BASE_IMAGE_SOURCE=UNSET
+ARG OCI_CPYTHON_BASE_IMAGE_VERSION=UNSET
+ARG OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST=UNSET
 ARG RUST_SOURCE=UNSET
 ARG RUST_VERSION=UNSET
 ARG RUST_COMMIT_OR_DIGEST=UNSET
 ARG DEBIAN_SOURCE=UNSET
 ARG DEBIAN_VERSION=UNSET
 ARG DEBIAN_COMMIT_OR_DIGEST=UNSET
+
+FROM ${OCI_CPYTHON_BASE_IMAGE_SOURCE}:${OCI_CPYTHON_BASE_IMAGE_VERSION}@sha256:${OCI_CPYTHON_BASE_IMAGE_COMMIT_OR_DIGEST} AS validator-venv-builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /src
+
+COPY validators/pyproject.toml validators/pyproject.toml
+COPY validators/creator_engine_validator validators/creator_engine_validator
+COPY validators/requirements.txt validators/requirements.txt
+COPY validators/requirements-dev.txt validators/requirements-dev.txt
+COPY validators/wheelhouse validators/wheelhouse
+COPY validators/wheelhouse-dev validators/wheelhouse-dev
+
+# Install the first-party validator and its runtime/test closure offline. The
+# wheelhouses carry cp314 wheels for both supported image architectures.
+RUN set -eux; \
+    python3.14 -m venv /opt/ce-validator-venv; \
+    /opt/ce-validator-venv/bin/pip install --no-index --find-links validators/wheelhouse -r validators/requirements.txt; \
+    /opt/ce-validator-venv/bin/pip install --no-index --find-links validators/wheelhouse --find-links validators/wheelhouse-dev -r validators/requirements-dev.txt; \
+    /opt/ce-validator-venv/bin/pip install --no-index --no-build-isolation --no-deps validators/; \
+    /opt/ce-validator-venv/bin/python -c "import creator_engine_validator, pytest, yaml, jsonschema, xdist"; \
+    /opt/ce-validator-venv/bin/ce --help >/dev/null
 
 FROM ${RUST_SOURCE}:${RUST_VERSION}@sha256:${RUST_COMMIT_OR_DIGEST} AS herdr-builder
 
@@ -51,6 +82,9 @@ FROM ${DEBIAN_SOURCE}:${DEBIAN_VERSION}@sha256:${DEBIAN_COMMIT_OR_DIGEST}
 ARG CE_DGX_USER=cedev4
 ARG CE_DGX_UID=1000
 ARG CE_DGX_GID=1000
+ARG CODEX_VERSION=0.144.1
+ARG CODEX_SHA256=9513fa3f5f4ad444ac1e40d972aef0e2664834ec54da987d54aba0dc2f13ea07
+ARG CODEX_ARTIFACT_URL=https://github.com/openai/codex/releases/download/rust-v0.144.1/codex-aarch64-unknown-linux-musl.tar.gz
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
@@ -60,6 +94,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
       bash \
       ca-certificates \
+      curl \
       git \
       libsodium23 \
       openssh-client \
@@ -79,38 +114,50 @@ RUN set -eux; \
     install -d -m 0700 -o "${CE_DGX_UID}" -g "${CE_DGX_GID}" /run/creator-engine/herdr; \
     git config --system --add safe.directory /workspace/creator-engine
 
+# The release URL and controller-attested first-fetch digest are intentionally
+# explicit. The checksum check is mandatory: a missing/incorrect build arg
+# fails the image build rather than silently using an unverified Codex binary.
 RUN set -eux; \
-    python -m pip install \
-      --break-system-packages \
-      --no-cache-dir \
-      --disable-pip-version-check \
-      attrs==26.1.0 \
-      build==1.3.0 \
-      execnet==2.1.2 \
-      iniconfig==2.3.0 \
-      jsonschema==4.26.0 \
-      jsonschema-specifications==2025.9.1 \
-      packaging==26.2 \
-      pluggy==1.6.0 \
-      Pygments==2.20.0 \
-      PyNaCl==1.5.0 \
-      pyproject_hooks==1.2.0 \
-      pytest==9.0.2 \
-      pytest-xdist==3.8.0 \
-      PyYAML==6.0.3 \
-      referencing==0.37.0 \
-      rpds-py==0.30.0 \
-      setuptools==82.0.1 \
-      wheel==0.47.0; \
-    python -m pytest --co -q -n auto --dist loadgroup --help > /dev/null 2>&1 && echo "pytest-xdist smoke: OK"
+    test "${CODEX_VERSION}" = "0.144.1"; \
+    case "$(dpkg --print-architecture)" in arm64) ;; *) echo "Codex ${CODEX_VERSION} artifact is arm64-only" >&2; exit 66 ;; esac; \
+    curl --fail --location --show-error --silent "${CODEX_ARTIFACT_URL}" --output /tmp/codex.tar.gz; \
+    echo "${CODEX_SHA256}  /tmp/codex.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/codex-unpack; \
+    tar -xzf /tmp/codex.tar.gz -C /tmp/codex-unpack; \
+    codex_bin="$(find /tmp/codex-unpack -type f -name codex -perm -u+x | head -n 1)"; \
+    test -n "${codex_bin}"; \
+    install -m 0755 "${codex_bin}" /usr/local/bin/codex; \
+    rm -rf /tmp/codex.tar.gz /tmp/codex-unpack; \
+    /usr/local/bin/codex --version | grep -q "${CODEX_VERSION}"
+
+# CI-parity validator toolchain. The runtime is bookworm-compatible with the
+# pinned Python-3.14 base; putting the relocated venv first makes `ce` and
+# `pytest` resolve to Python 3.14 while retaining system Python for helpers.
+COPY --from=validator-venv-builder /usr/local/bin/python3.14 /usr/local/bin/python3.14
+COPY --from=validator-venv-builder /usr/local/lib/libpython3.14.so.1.0 /usr/local/lib/libpython3.14.so.1.0
+COPY --from=validator-venv-builder /usr/local/lib/python3.14 /usr/local/lib/python3.14
+COPY --from=validator-venv-builder /opt/ce-validator-venv /opt/ce-validator-venv
+
+ENV CE_VALIDATOR_VENV=/opt/ce-validator-venv
+ENV PATH="/opt/ce-validator-venv/bin:${PATH}"
+
+RUN set -eux; \
+    ldconfig; \
+    /opt/ce-validator-venv/bin/python --version | grep -q '^Python 3\\.14\\.'; \
+    /opt/ce-validator-venv/bin/ce --help >/dev/null; \
+    /opt/ce-validator-venv/bin/python -c "import pytest, yaml, jsonschema, xdist; print('validator toolchain OK')"; \
+    /opt/ce-validator-venv/bin/python -c "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'"
 
 COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr
-COPY herdr-harness-entrypoint.sh /usr/local/bin/ce-herdr-harness-entrypoint
+COPY deploy/dgx-runsc/herdr-harness-entrypoint.sh /usr/local/bin/ce-herdr-harness-entrypoint
+COPY deploy/dgx-runsc/codex-default-config.toml /etc/codex/config.toml
 
 RUN set -eux; \
     chmod 0755 /usr/local/bin/herdr /usr/local/bin/ce-herdr-harness-entrypoint; \
     test -x /usr/local/bin/herdr; \
-    test -x /usr/local/bin/ce-herdr-harness-entrypoint
+    test -x /usr/local/bin/ce-herdr-harness-entrypoint; \
+    test -x /usr/local/bin/codex; \
+    test "$(cat /etc/codex/config.toml)" = 'check_for_update_on_startup = false'
 
 USER ${CE_DGX_UID}:${CE_DGX_GID}
 WORKDIR /workspace/creator-engine

@@ -84,3 +84,26 @@ base64 -w0 <canonical-file>.sig
 Then replace `value: <RESIGN-REQUIRED-ce-root-v1>` with the base64 output and
 verify with stock `ssh-keygen -Y verify`. Publishing `docs/` to GitHub Pages is
 a separate gated deploy after re-signing.
+
+---
+
+## #953 DGX image rebuild provenance addendum
+
+Date: 2026-07-11. This is a PREP-only controller-attested record; no image was
+built, fetched, published, loaded, or run while preparing the carrier.
+
+- Codex 0.144.1 arm64 release artifact:
+  `https://github.com/openai/codex/releases/download/rust-v0.144.1/codex-aarch64-unknown-linux-musl.tar.gz`.
+  Controller-attested first-fetch SHA-256:
+  `9513fa3f5f4ad444ac1e40d972aef0e2664834ec54da987d54aba0dc2f13ea07`.
+  Production rebuilds compare the exact release asset in
+  `codex-package_SHA256SUMS`; the sibling Sigstore attestation is
+  `codex-aarch64-unknown-linux-musl.sigstore`.
+- CPython `3.14-slim-bookworm` controller-attested from
+  `docker buildx imagetools inspect` (Docker Library Python upstream revision
+  `7914d06b7ddb`): manifest list
+  `sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9`,
+  `linux/amd64` child
+  `sha256:01d4f0a9b0f284f9ef577e86a1ae7c7c22572e19fddc052d011c38217f856a94`,
+  and `linux/arm64/v8` child
+  `sha256:0670f5b579f8ba90903a95007ae10c890ac7f0d54de138ebd20574d56b10f3cc`.
