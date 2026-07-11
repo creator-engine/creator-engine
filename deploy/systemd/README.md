@@ -55,10 +55,10 @@ environment and the review-pickup SecretRef to the same env file:
 BAO_ADDR=<openbao-url>
 BAO_TOKEN=<openbao-token>
 BAO_CACERT=<optional-ca-cert-path>
-CE_OPENBAO_ALLOWED_REFS=path=forge/ce-dev-2/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+CE_OPENBAO_ALLOWED_REFS=path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
 CE_PICKUP_TOKEN_SECRET_BACKEND=openbao
 CE_PICKUP_TOKEN_SECRET_MOUNT=ce-kv
-CE_PICKUP_TOKEN_SECRET_PATH=forge/ce-dev-2/gh-token
+CE_PICKUP_TOKEN_SECRET_PATH=forge/reviewer/gh-token
 CE_PICKUP_TOKEN_SECRET_FIELD=token
 CE_PICKUP_TOKEN_SECRET_PURPOSE=review-pickup-token
 CE_PICKUP_TOKEN_SECRET_OWNER_REF=controller:reviewer

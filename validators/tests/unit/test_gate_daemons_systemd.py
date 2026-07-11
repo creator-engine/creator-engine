@@ -183,6 +183,19 @@ def test_integrator_authorized_reviewer_config_is_documented(repo_root: Path):
     assert "CE_GATE_AUTHORIZED_REVIEWERS=reviewer-login[,reviewer-login...]" in installer
 
 
+def test_review_pickup_openbao_deployment_settings_use_reviewer_secret_path(repo_root: Path):
+    systemd_readme = (repo_root / "deploy" / "systemd" / "README.md").read_text(encoding="utf-8")
+    installer = (
+        repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"
+    ).read_text(encoding="utf-8")
+
+    for text in (systemd_readme, installer):
+        assert "path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token" in text
+        assert "forge/ce-dev-2/gh-token" not in text
+
+    assert "CE_PICKUP_TOKEN_SECRET_PATH=forge/reviewer/gh-token" in systemd_readme
+
+
 # ---------------------------------------------------------------------------
 # Egress self-push broker systemd unit (ce-ops#265)
 # ---------------------------------------------------------------------------
