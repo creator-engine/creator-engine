@@ -157,6 +157,7 @@ KNOWN_OPERATIONS_EXCEPTIONS: frozenset[str] = frozenset(
         "docs/operations/HERDR_OPERATOR_REACH_PLANE.md",
         "docs/operations/INSTALLED_CE_DOGFOOD_MIGRATION.md",
         "docs/operations/INTEGRATION_QUEUE_DRY_RUN.md",
+        "docs/operations/MATERIALIZER_APPKEY_CUSTODY_RUNBOOK.md",
         "docs/operations/NO_COPY_PASTE_PATTERN.md",
         "docs/operations/ONBOARD_APPLY_PROTOCOL.md",
         "docs/operations/PANE_REGISTRY_PROTOCOL.md",
