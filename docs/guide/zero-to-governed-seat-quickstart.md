@@ -1,8 +1,8 @@
-# Zero to Governed Seat Quickstart
+# First Project Quickstart
 
-This is the shortest first-host path from a blank Linux pilot host to a CE
-governed seat. It keeps E1 trust verification separate from later human-approved
-apply gates.
+This is the shortest path from a blank Linux pilot host to your first Creator
+Engine project. It keeps installation verification separate from the later
+choices that need your approval.
 
 Before you start:
 

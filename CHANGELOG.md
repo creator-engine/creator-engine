@@ -22,6 +22,12 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## v0.3.4 — broker-lanes + takeover-core + memory-layer + continuity-drill (2026-07-08)
 
+### What's new
+
+- Start a project with a clearer guided path from installation through delivery.
+- Get more reliable local setup, review preparation, and project-context support.
+- See better help as you move between planning, building, and checking a change.
+
 35 PRs since v0.3.3 (plus one post-ledger hygiene patch), spanning JIT credential minting, egress broker read lane, work-claims lifecycle, controller takeover and continuity drill, brain memory-layer slice 1, brain-init that teaches, SSHSIG signing deputy design, host-ops broker design, ephemeral controller seam design, and a sheaf of fixes and infrastructure hardening.
 
 ### Security

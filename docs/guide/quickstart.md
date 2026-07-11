@@ -1,10 +1,8 @@
 # Creator Engine Quickstart
 
-This is the canonical, copy-paste path for a first governed change with
-Creator Engine. It starts from the proven tenant path: initialize the local CE
-brain once, launch your own coding agent through CE on the host backend, Shape a
-Scope, ratify it, let CE drive the governed run, then review the Completion
-Report.
+This is the canonical, copy-paste path for your first change with Creator
+Engine. Install CE, start your coding agent through CE, describe the result you
+want, confirm the plan, and then review the work and checks before delivery.
 
 Contained-by-default launch remains hardening work in progress. Today, use the
 host backend unless your operator has explicitly told you a contained backend is
@@ -41,44 +39,44 @@ Both paths produce the same Creator Engine installation. The difference is only
 who drives the steps: you drive the one-liner directly, or your agent follows
 the playbook under the same verification ceremony.
 
-## 1. First Run: Onboard
+## 1. Start your session
 
 ```bash
 ce onboard
 ```
 
 Artifact: a verified local CE install, initialized local state, and a first
-governed agent pane unless you opt out.
+agent session unless you opt out.
 
 State after this step: CE is installed, checked, on your `PATH`, and ready for a
-governed session. If onboarding refuses, fix the named prerequisite and try
+working session. If onboarding refuses, fix the named prerequisite and try
 again.
 
-`ce onboard` is the quick one-shot that gets you to a working governed session
+`ce onboard` is the quick one-shot that gets you to a working session
 on your machine. Standing up a fully governed seat on a GitHub repo, with the
 GitHub App connection and branch-protection floor, is the separate
 human-approved `ce install --plan` / `ce install --apply` flow covered in
 [`zero-to-governed-seat-quickstart.md`](./zero-to-governed-seat-quickstart.md)
 and the [Pilot Runbook](./pilot-runbook.md).
 
-## 2. Initialize CE Brain Once
+## 2. Initialize project context once
 
 ```bash
 ce brain init
 ```
 
-Artifact: a local CE brain store for this repo.
+Artifact: local CE project context for this repository.
 
-State after this step: CE can remember governed project context across sessions.
+State after this step: CE can remember project context across sessions.
 Run this once per repo, then leave it alone unless CE tells you to refresh it.
 
-## 3. Launch Your Governed Agent Session
+## 3. Launch your coding-agent session
 
 ```bash
 ce launch --backend host
 ```
 
-Artifact: a governed terminal session around the coding agent you already use.
+Artifact: a terminal session around the coding agent you already use.
 
 State after this step: you are in Frame. You can explore the goal in plain
 language, ask questions, and inspect the repo. This exploration shapes context
@@ -99,7 +97,7 @@ questions that must be answered before work can start.
 State after this step: CE has enough context to draft a Scope, or it has named
 the missing details you need to answer.
 
-## 5. Create The Scope
+## 5. Save the plan
 
 ```bash
 ce scope login-empty-state \

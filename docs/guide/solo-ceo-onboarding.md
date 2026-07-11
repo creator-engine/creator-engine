@@ -1,9 +1,9 @@
 # Solo + CEO Mode Onboarding
 
-*This guide is for a solo developer who has chosen **CEO mode**: you frame the
-work in plain language, authorize each gate, and judge the delivered artifacts.
-The governed agent turns that direction into scoped work, builds inside the
-approved envelope, and brings decisions back to you.*
+*This guide is for a solo developer who has chosen **CEO mode**: you describe
+the work in plain language, make the important decisions, and inspect the
+delivered results. Your coding agent turns that direction into focused work,
+builds it, and brings decisions back to you.*
 
 If you prefer the command-driven path where you operate the pipeline yourself,
 use [`solo-dev-onboarding.md`](./solo-dev-onboarding.md).
