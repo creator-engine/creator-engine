@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -50,6 +51,20 @@ Spawner = Callable[[ActingContext, GhRunner], str]
 # submission for which that outcome is possible: a later operator pass may
 # inspect the forge, but this actor must not emit a duplicate comment.
 MAX_ATTEMPTS_PER_CLAIM = 3
+
+_REPO_IDENTITY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_HEAD_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+_LEDGER_ACTIONS = frozenset({
+    "attempt_claimed",
+    "comment_submission_started",
+    "comment_posted",
+    "retry_exhausted",
+    "spawner_unconfigured",
+    "spawn_failed",
+    "reviewer_authority_invalid",
+    "live_claim_mismatch",
+    "comment_failed",
+})
 
 
 @dataclass(frozen=True)
@@ -107,8 +122,60 @@ def load_acting_ledger(path: Path | str) -> list[dict[str, Any]]:
             raise ActingLedgerUnreadable(
                 f"acting ledger contains a non-object record at record {line_number}"
             )
-        records.append(record)
+        records.append(_validate_ledger_record(record, line_number))
     return records
+
+
+def _validate_ledger_record(record: dict[str, Any], line_number: int) -> dict[str, Any]:
+    """Validate one durable record before it can influence future acting.
+
+    The ledger is submission evidence.  A syntactically valid but ambiguous
+    record is therefore unsafe to ignore: it could make a prior submission
+    disappear during folding and permit a duplicate comment.
+    """
+    action = record.get("action")
+    if not isinstance(action, str) or action not in _LEDGER_ACTIONS:
+        raise ActingLedgerUnreadable(
+            f"acting ledger contains an unsupported record at record {line_number}"
+        )
+    repo = record.get("repo")
+    pr_number = record.get("pr_number")
+    head_sha = record.get("head_sha")
+    if (
+        not isinstance(repo, str)
+        or not _REPO_IDENTITY.fullmatch(repo)
+        or isinstance(pr_number, bool)
+        or not isinstance(pr_number, int)
+        or pr_number <= 0
+        or not isinstance(head_sha, str)
+        or not _HEAD_SHA.fullmatch(head_sha)
+    ):
+        raise ActingLedgerUnreadable(
+            f"acting ledger contains malformed durable evidence at record {line_number}"
+        )
+
+    normalized = dict(record)
+    normalized["head_sha"] = head_sha.lower()
+    if action == "attempt_claimed":
+        attempt = record.get("attempt")
+        reviewer = record.get("assigned_reviewer")
+        if (
+            isinstance(attempt, bool)
+            or not isinstance(attempt, int)
+            or attempt <= 0
+            or not isinstance(reviewer, str)
+            or not reviewer.strip()
+        ):
+            raise ActingLedgerUnreadable(
+                f"acting ledger contains malformed claim evidence at record {line_number}"
+            )
+    elif action == "comment_submission_started":
+        reviewer = record.get("assigned_reviewer")
+        if not isinstance(reviewer, str) or not reviewer.strip():
+            raise ActingLedgerUnreadable(
+                f"acting ledger contains malformed submission evidence at record {line_number}"
+            )
+    return normalized
 
 
 def append_acting_ledger(path: Path | str, record: Mapping[str, Any]) -> None:
@@ -485,6 +552,7 @@ def _failure_record(
         "repo": ctx.repo,
         "pr_number": ctx.pr_number,
         "head_sha": ctx.head_sha,
+        "assigned_reviewer": ctx.assigned_reviewer,
         "error": str(exc),
         "ts": _timestamp(clock),
     }

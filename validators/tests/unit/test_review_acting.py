@@ -260,6 +260,41 @@ def test_run_acting_pass_refuses_malformed_ledger_without_acting(tmp_path):
     assert "not-json" not in logs[0]["error"]
 
 
+def test_run_acting_pass_refuses_semantically_malformed_posted_evidence_without_acting(tmp_path):
+    cases = (
+        ("missing", {"action": "comment_posted", "repo": "owner/repo", "pr_number": 42}),
+        ("empty", {"action": "comment_posted", "repo": "owner/repo", "pr_number": 42, "head_sha": ""}),
+        ("invalid", {"action": "comment_posted", "repo": "owner/repo", "pr_number": 42, "head_sha": "not-a-sha"}),
+    )
+    for label, record in cases:
+        ledger = tmp_path / f"{label}.ndjson"
+        ledger.write_text(json.dumps(record) + "\n", encoding="utf-8")
+        runner = _FakeGhRunner()
+        spawned = []
+        logs = []
+
+        result = review_acting.run_acting_pass(
+            items=[_item()], gh_runner=runner, acting_ledger_path=ledger,
+            spawner=lambda ctx, _: spawned.append(ctx) or _evidence(ctx),
+            log_sink=logs.append, clock=_clock,
+        )
+
+        assert result.failed[0]["action"] == "ledger_unreadable"
+        assert runner.calls == []
+        assert spawned == []
+        assert "not-a-sha" not in logs[0]["error"]
+
+
+def test_load_acting_ledger_normalizes_uppercase_posted_head_sha(tmp_path):
+    ledger = tmp_path / "ledger.ndjson"
+    ledger.write_text(json.dumps({
+        "action": "comment_posted", "repo": "owner/repo", "pr_number": 42,
+        "head_sha": "A" * 40,
+    }) + "\n", encoding="utf-8")
+
+    assert review_acting.load_acting_ledger(ledger)[0]["head_sha"] == "a" * 40
+
+
 def test_run_acting_pass_refuses_unreadable_ledger_without_acting(tmp_path, monkeypatch):
     ledger = tmp_path / "ledger.ndjson"
     ledger.write_text("{}\n", encoding="utf-8")
