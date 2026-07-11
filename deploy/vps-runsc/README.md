@@ -207,7 +207,7 @@ The launcher generates a per-seat contained Codex config and bind-mounts it over
 `${CODEX_HOME}/config.toml` inside the container:
 
 ```toml
-model = "gpt-5.5"
+model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
