@@ -4,7 +4,6 @@ date: 2026-07-11
 kind: added
 scope: controller continuity checkpoint skill
 issue: ce-ops#539
-base: c4d95873d08f254b78ecdb84ad2ee5dfe63f587d
 ---
 
 **Add a redaction-safe controller checkpoint skill.**
