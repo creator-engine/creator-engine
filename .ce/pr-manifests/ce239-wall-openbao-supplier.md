@@ -17,12 +17,14 @@ review-pickup OpenBao default path constant plus this carrier.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=3
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=4536a3a1a4cd10ffec78b4f59d7fd74b703057416024bc609f02950cac55e5b1
+AUTHORIZED_PATHS_SHA256=0608176345489c8bbe1100260e5a54052fb6d0ea5fdfc957ff83c1a70cb1bd92
 
 ```text
 .ce/changelog/ce239-wall-openbao-supplier.md
 .ce/pr-manifests/ce239-wall-openbao-supplier.md
 validators/creator_engine_validator/secret_identity.py
+validators/tests/unit/test_review_pickup_openbao_supplier.py
+validators/tests/unit/test_v3_cli.py
 ```
