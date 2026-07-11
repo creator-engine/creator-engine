@@ -20,6 +20,675 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 - **Acceptance-Evidence autoclose enforcement.** Directive-labeled ce-ops issues now stay open with a structured warning comment when a merged PR lacks an `Acceptance-Evidence:` field; missing cross-repo token configuration now exits nonzero with a GitHub Actions error instead of silently skipping closures.
 
+## v0.3.5 — docs + CLI parity + reliability (train 1, 2026-07-11)
+
+### Highlights
+
+- Get started with confidence using the new **Start Here** guide, platform support matrix, and
+  troubleshooting guide. The refreshed README and clearer first-run documentation make it easier
+  to understand the product journey and find the right next step.
+- Use a clearer, current command experience: public CLI guidance has been reconciled with
+  supported commands, installation-root options are documented, and setup guidance no longer
+  depends on retired local-state steps.
+- Install and operate Creator Engine more reliably with stronger install verification,
+  portable deployment guidance, safer contained-launch checks, and improved recovery guidance
+  when a background workspace needs attention.
+- Run contained coding-agent environments (DGX and VPS) with the current default model tier, while preserving
+  the existing high-reasoning launch posture.
+- Benefit from more dependable background operation: improved disk-space safeguards, durable
+  service health signals, safer retry and recovery behavior, and clearer operator-facing
+  diagnostics.
+- Follow a more understandable path from planning through review and release, with improved
+  onboarding material, release-readiness foundations, and user-visible status guidance.
+
+_Selected 81 changelog fragment(s) since release/v0.3.4._
+
+### Added
+
+- **ce-conveyor-intake-s1** (conveyor-intake-s1; conveyor daemon intake queue dry-run planning): **Add flag-gated conveyor intake queue planning.**
+
+  - Add a file-backed intake queue with `pending/`, `claimed/`, and `done/` states.
+  - Wire the conveyor daemon runner to log dry-run `WOULD_DISPATCH` plans for idle seats when `CE_CONVEYOR_INTAKE_ENABLED=1`.
+  - Document the queue layout and keep live dispatch out of this slice.
+- **ce-513-ratification-binding-design** (docs): **Design ratification authorization binding.**
+
+  - Added a docs-only design for binding agent-invoked ratification and merge
+    apply to recorded operator authorization events.
+  - Covered derived HMAC `approver_ref`, key custody and rotation through the
+    approval-capability mint pattern, `authorization_source` evidence records,
+    merge-apply capability markers, smoke-test coupling, validator/gate
+    enforcement layers, migration from legacy hex refs, a mergeable slice plan,
+    and before/after threat analysis.
+- **ce-p3-rehearsal-s1** (deploy rehearsal harness): Add Fresh-Tenant Rehearsal harness (slice 1) at `deploy/rehearsal/`: a fail-closed clean-container runner, authoritative JSON evidence format, usage documentation, and Docker-free dry-run smoke coverage for the documented CEO first-hour stage list with explicit `CE_REHEARSAL_STUB:` markers for live model, GitHub, pull request, and completed-run steps.
+- **ce-p5-seatwatch-s1** (ce-p5-seatwatch-s1; seat-watch daemon observe-only slice 1): **Add seat-watch daemon slice 1 (observe-only).**
+
+  Add seat-watch daemon slice 1 (observe-only) at `deploy/seat-watch/`: polls configured seat panes on a configurable interval, emits structured JSONL events (`ready_signal`, `blocked_signal`, `idle_without_signal`, `pane_error`, `dispatch_delivery_ack`), ships with a systemd unit, launcher script, 20 targeted unit tests, and a design doc. Reuses existing seat-probe argv machinery from `conveyor_discovery`; singleton lease; no dispatch authority in slice 1.
+- **ce-p8-review-daemon-s1** (ce-p8-review-daemon-s1; review-pickup dry-run daemon slice 1): **Add review-pickup dry-run daemon slice 1 (advisory/observe-only).**
+
+  Adds `forge.review_dry_run` module wrapping `forge.review_pickup.poll_review_pickup(dry_run=True)` with an Operator-held gate and a named JSONL feed. Emits `WOULD_ASSIGN` and `WOULD_SKIP` decisions per PR per pass; no GitHub writes in any path. The Operator-held gate checks the `awaiting-operator` label (fail-open on API error) and an optional held-list file. Fourteen offline unit tests cover both gates and the bounded/rate-limited daemon loop. Slice 2 will add the `cev3 review-dry-run` CLI surface wired to `gate-daemons.env`.
+- **ce-505-guided-journey-research** (docs): **Add guided journey UX research and design.**
+
+  - Added a CEO-first design for the guided journey surface, centered on
+    `Frame -> Shape -> Build -> Review -> Ship`, the awaiting-operator inbox,
+    batch ratification, vacation-test replay, and completion reports as the
+    emission feed.
+  - Captured explicit decisions with rationale and rejected alternatives while
+    preserving the rule that the UI is a read-model and emission surface of the
+    one governed face, never a second authority.
+- **ce-511-seatwatch-s2-events** (seat-watch daemon slice 2 events): **Add seat-watch slice 2 detector event durability.**
+
+  Seat-watch now persists `idle-without-signal` and `dispatch-undelivered`
+  detections as structured JSONL records under the daemon state root, with
+  `seat_id`, `class`, `evidence`, and `timestamp` fields. Adds a supervised
+  systemd example for restart-on-failure posture and focused unit coverage for
+  the detector ledger and exit-code expectations.
+- **ce-518s2-reconcile-feed** (validators): **Add a report-only live feed for stale ticket reconciliation.**
+
+  - Added a thin `gh` adapter that collects open tickets and recently merged PRs
+    into the frozen stale-ticket reconcile contract.
+  - Kept the sweep report-only: findings render as text or JSON, while only live
+    collection failures produce a non-zero exit.
+- **ce-materializer-adr-arming** (materializer arming ADR): Adds ADR-0015 resolving the materializer pre-arming decisions for authority,
+  credential custody, and lease topology.
+
+  - Arming should happen through a governed PR that flips the constant, plus an
+    Operator co-sign artifact under the ratified release-signing model.
+  - The dedicated App credential is issued via the vault_signer pattern (per-call
+    OpenBao KV v2 read → /dev/fd pipe → openssl; key never on disk, never in
+    worker env), anchored to the ce-kv/forge/github-apps/<app-name>/private-key
+    family from the OpenBao secret-path map.
+  - The current single-host singleton uses MaterializerLease wrapping
+    daemon_lease.acquire("brain-append", ...) in brain_intent_materializer.py,
+    with a hard revisit before any second host or instance gains brain-append
+    capability.
+- **ce-n11s1-intake-queue-substrate** (N-11 slice 1; conveyor intake queue): **Add durable conveyor intake claim lifecycle.**
+
+  - Pin queued briefs by SHA, declare controller path territory, and retain legacy queue APIs.
+  - Add atomic claim/release/complete transitions, TTL stale reclaim, and a best-effort append-only NDJSON claim ledger.
+  - Add a verified seat-pull handoff adapter with concrete normal work-claim/territory evidence, no-follow brief snapshots, and canonical launch metadata.
+  - Fence finite-TTL queue ownership with opaque claim tokens and generations, serialize stale-reclaim/launch transitions, and hand launchers a descriptor-anchored snapshot that fails closed on replacement.
+  - Recover or refuse queue crash windows deterministically, durably publish snapshots without partial final bytes, and close retained descriptors on fence-transition refusal.
+  - Bind publication and lifecycle lookup to stable unit identity across priority and JSON/YAML filename variants; refuse malformed queue input and invalid bounded claim TTLs as structured seat-pull outcomes.
+  - Treat malformed or schema-invalid pending records as structured queue-state refusals rather than empty work, normalize controller-evidence parser failures through owned-claim release, and preserve fractional TTL precision through launch fencing.
+- **ce-n15a-skip-anomaly** (merge queue daemon detection): Added detection-only alarms for repeated identical skip decisions and PRs that
+  remain approved without merging beyond their configured pass-age threshold.
+  Alarms are recorded beside the daemon liveness state and emitted loudly to
+  journald; they do not alter queue decisions or PR state.
+- **ce-n15b-composition-probe** (N-15b; validation composition detection): **Add a detection-only composition probe for representative changes against the current main tip.**
+
+  - Validate a real hook-free, unsigned composed commit against its exact immutable main parent.
+  - Retry from a standalone no-hardlink local clone so Git common state cannot contaminate classification.
+  - Sanitize every Git subprocess environment and disable hooks so ambient Git state cannot redirect composition.
+  - Run nested validation in that same scrubbed environment and report only validations that actually ran.
+  - Fail closed with bounded primary and cleanup evidence unless Git and filesystem cleanup verifies.
+  - Preserve merge-conflict classification on retries and suppress incidents whenever cleanup fails.
+  - Validate request shape before side effects and bound/redact validator and incident evidence.
+  - Return validator and optional incident-sink failures without misclassifying them as merge aborts.
+  - **Declared work class:** S
+- **ce-n8-queue-daemon-iac** (none; queue daemon deployment topology): **Queue daemon IaC declaration.**
+
+  - Declare a portable queue-daemon systemd topology and corrected liveness-state configuration.
+  - Forward the contained liveness-state path and verify container arguments.
+- **repair-n1s2-review4-dev3** (ce-n1s2-review-pickup-acting; review-pickup acting): **Add default-OFF review-pickup acting chain.**
+
+  Adds an explicitly armed reviewer-spawn and PR-comment path. The acting pass is
+  durably deduplicated, posts only through the Issues comments API, records
+  per-item failures without crash-looping, and requires an Operator-provided
+  spawn command template. The service remains unarmed by default.
+- **ce-n3-dualformat-sync-gate** (none; validator PR preflight): **Dual-format sibling sync gate.**
+
+  - Adds a PR-diff validator check for tracked Markdown/HTML sibling pairs.
+  - Wires the check into local validate-pr so a change to one sibling fails until
+    the matching sibling is also touched.
+  - Adds focused unit coverage for paired updates, one-sided Markdown changes,
+    one-sided HTML changes, and unpaired Markdown files.
+- **ce-sl3-ready-attestation-nudge** (SL-3 READY validation-attestation reducer): Adds a pure, injected-facts reducer that proposes pending, SHA-mismatch,
+  validator-live, green-attested, or failed READY-validation states. It performs
+  no observation, validation, queue, harvest, process, filesystem, network, or
+  forge action.
+- **ce-sl3-supervisor-nudge-snapshot** (validator / supervisor read model): **SL-3 supervisor nudge snapshot.**
+
+  - Added a pure, typed classifier for injected stale-review, seat, duplicate,
+    capacity, queue, coverage, and context-checkpoint observations.
+  - Proposals are deterministic, deduplicated, and fail closed for malformed or
+    incoherent snapshots; this slice has no discovery or actuation surface.
+
+### Added
+
+- **ce-f1-storage-admission** (VPS_STORAGE_GATE_INCIDENT_DESIGN_20260710 §C/F-1.2+F-1.3; disk headroom admission + scratch reaper slice 1): **Suite disk-headroom admission gate + deterministic scratch reaper (F-1.2 + F-1.3 slice 1).**
+
+  Addresses the recurrent 100%-disk fill class identified in the 2026-07-10 VPS storage-gate incident.
+
+  **F-1.2 — Headroom admission gate:**
+  - New module `validators/creator_engine_validator/disk_headroom.py` exposing `check_headroom(path, min_free_gb)`, `free_gb(path)`, `DiskHeadroomError`, and `effective_min_free_gb()`.
+  - `pr_preflight.py` gains a `disk_headroom (suite pre-flight)` check that runs immediately before the baseline-diff test command stage.  The gate fails-closed (returns 1) with a message naming `disk_headroom` and the measured free GiB when space is below the threshold (default 30 GiB; overridable via `CE_SUITE_MIN_FREE_GB`).  The pytest suite is never spawned when this check fails.
+
+  **F-1.3 slice 1 — Deterministic scratch reaper:**
+  - New script `deploy/storage-reaper/reap-scratch.sh`: sweeps `/var/tmp/wt-*` (48h), `/var/tmp/pt-*` (24h), and dangling Docker images.  Logs reclaimed bytes per category to stdout (journald when run under systemd).  Idempotent, refuses nothing, shellcheck-clean.  Supports `--dry-run` flag.
+  - Systemd service template `ce-storage-reaper.service` + daily timer `ce-storage-reaper.timer` (Persistent=true, 30-minute RandomizedDelaySec).
+
+  **Tests:**
+  - 18 unit tests for `disk_headroom.py` (threshold pass/fail via `os.statvfs` mock, env override, `DiskHeadroomError` attributes) plus preflight integration tests confirming the gate blocks before pytest and passes with adequate disk.
+  - 8 subprocess tests for `reap-scratch.sh --dry-run` including aged-fixture detection (wt-* at 50h, pt-* at 30h), below-threshold exclusion, no-delete guarantee, and unknown-flag exit.
+
+### Added
+
+- **ce-491-optiona-slice2** (CE-491; brain intent materializer): **Extend the Option A brain append intent materializer dry-run surface.**
+
+  - Wire the append-intent XOR gate into local PR preflight beside the direct ledger stale-tail gate.
+  - Add first-parent `origin/main` intent history scanning, HELD closeout-window evaluation, and a one-cycle materializer run-loop skeleton.
+  - Harden materializer state/armed-write bounds and add focused unit coverage for scan, closeout, run-loop, and hold-path remediations.
+- **ce-497-controller-state-sync-s1** (ce-497; controller-ops): **Add controller state snapshot tool.**
+
+  Adds a governed, dry-run-by-default controller snapshot tool for arc state, dispatch state, and optional controller memory. Snapshots include a structured manifest, hashes, source identity, timestamp, and portable restore instructions. The shared credential-path policy and descriptor-anchored, fail-closed symlink handling exclude credential-bearing paths, while verified descriptor-relative atomic publication keeps manifest hashes and payload bytes coherent and refuses stale output reuse or swapped output parents. Memory defaults are derived from the selected repo and can be explicitly overridden. Live push wiring remains out of scope for this slice.
+- **ce-518-stale-ticket-reconcile-s1** (validators): **Add report-only stale ticket reconciliation.**
+
+  - Added an offline reconciliation module that compares caller-provided open ticket
+    data and merged PR data with conservative branch/ref heuristics.
+  - Added deterministic text and JSON report rendering with focused unit coverage.
+- **ce-f3-migration-runbook** (controller-ops): **Codify controller migration completeness.**
+
+  Adds a controller migration completeness runbook covering role definitions,
+  memory, credentials, session infrastructure, and merge-gate topology with
+  acceptance evidence for each checklist item. Extends controller state snapshots
+  to carry `.claude/agents/*.md` role definitions through the manifest and
+  published snapshot tree so restored controllers can resolve worker roles before
+  dispatch.
+- **ce-n3-documented-verbs-gate** (round-3-unit-a; validator): **Add a documented `ce` verb registry gate.**
+
+  - Added a validator check that imports the in-process `ce` argparse registry and scans tracked markdown docs for taught `ce <verb>` invocations in code fences and inline code spans.
+  - Added explicit forward-teaching and baseline-debt seams so current docs debt is visible while new unshipped verb teachings fail.
+  - Wired the check into the generic registry, a focused CLI scan command, and `ce validate-pr`.
+
+### Changed
+
+- **ce-docs-cli-parity** (docs-cli-parity; public guide tree (docs/guide)): **Align guide CLI references and keep Welcome orientation-only.**
+
+  - Moves the day-one install and handoff material out of `welcome.md` and into
+    `quickstart.md`, leaving Welcome as orientation plus navigation.
+  - Removes the retired local-state gitignore prerequisite from the governed-seat
+    quickstart.
+  - Records a full `docs/guide` CLI reference sweep against the shipped `ce`
+    parser surfaces; no missing verbs were found.
+  - Replaces retired `cev3` CLI references (`cev3 onboard/session/ratify/drive/report/merge`) in the
+    governed-seat quickstart with the current `ce install --plan/--apply` and `ce launch` surface.
+- **ce-hermes-retirement** (onboard state): **Complete user-facing Hermes state retirement.**
+
+  - `ce onboard` now requires canonical `.ce/state/` bootstrap state instead of hard-requiring a `.hermes/` gitignore precondition.
+  - Legacy `.hermes/` directories are tolerated as advisory-only compatibility state.
+  - Updated CLI help, deployed runsc defaults, hook evidence roots, and functional docs to point at `.ce/state/`.
+  - Left v1-frozen templates and schema constants untouched for separate product follow-up.
+- **ce-readme-overhaul** (readme-overhaul; public README, CLI reference, and README version-drift gate): **Overhaul the public README, add the public CLI reference, and extend README version drift coverage.**
+
+  - Replace the stale README status narrative with a public-facing product overview, stage model, quickstart, modes table, status pointers, and documentation fan-out.
+  - Move the public `ce` command inventory to `docs/reference/cli.md` and keep README linked to that reference.
+  - Keep release freshness structural by pointing readers to the release badge, changelog, and GitHub Releases instead of hand-maintained dated status prose.
+  - Extend the current-version drift validator so README CE-version text claims are checked against the canonical package version.
+  - Add unit coverage for matching README version text, stale README version text, version-free README content, CLI-reference parity, and the README reference link.
+- **ce-427-approver-ref-provenance** (install answers ratification provenance): Install answers ratification bindings can now carry client App provenance for
+  the approver reference. A focused minting helper derives and verifies the
+  client-bound digest, while the schema keeps legacy bindings valid and requires
+  complete provenance when the provenance object is present.
+- **ce-512-redeploy-portability** (ce-512; deploy/singleton-redeploy): **Make singleton redeploy portable across deployment hosts.**
+
+  - Added service-user rendering for the queue daemon systemd unit.
+  - Kept linked worktree checkout validation compatible with the daemon container
+    mount model.
+  - Updated the health probe path to compose rendered unit `Environment=` values
+    with the host env file, including OpenBao CA handling.
+  - Rewrote the relocation runbook with parameterized host, user, path, state, and
+    OpenBao settings.
+  - Kept `container_launcher.py` in the portability plane manifest so future
+    launcher path changes remain covered by the portability guard.
+- **ce-516-item3-brain-window** (governance): **Correct autoclose fail-closed evidence.**
+
+  - Correct the autoclose workflow comment to describe fail-closed token handling.
+  - Supersede the stale brain evidence pin with the exact updated workflow hash.
+- **ce-p2-acceptance-evidence** (P2 acceptance autoclose): **P2 Acceptance-Evidence autoclose hardening.**
+
+  - Parse the PR body `Acceptance-Evidence:` field for issue validation evidence.
+  - Enforce warn-mode handling for tracked issues labeled exactly `directive`.
+  - Fail closed with exit 1 when the required cross-repo token is absent.
+  - Add focused unit coverage for the parser, directive-label behavior, and token absence path.
+- **ce-469-install-root-docs** (installer docs): **Document installer root override behavior.**
+
+  - Documents `CE_INSTALL_ROOT` in the installer contract as the environment
+    equivalent of the bootstrap `--install-root` override.
+  - Adds `CE_INSTALL_ROOT` to the CLI install/update environment reference with
+    the default root fallback.
+- **ce-terra-default-flip** (contained DGX and VPS Codex launchers): Plain contained DGX and VPS Codex launches now default to `gpt-5.6-terra` with high reasoning effort unchanged.
+- **ce239-wall-openbao-supplier** (review pickup OpenBao supplier): Record the Round 2 approval-wall-adjacent OpenBao supplier gate for
+  controller review-pickup token handling.
+
+  review-pickup can source the reviewer GitHub token through the generic
+  SecretIdentity/OpenBao supplier path instead of resolving one static token for
+  the daemon lifetime.
+
+  - Rebased the parked branch onto `origin/main` at
+    `6ce9527e1a9da3c578266db42b79625fe86392cd`.
+  - Verified queue-daemon startup lease symbols remain present after rebase.
+  - Verified `origin/main` already carries the review-pickup CLI secret flag
+    family, `_review_pickup_token_supplier_from_args()`, and per-pass
+    `run_review_pickup_loop()` token supplier/runner refresh with bounded retry.
+  - Preserved the existing static review-pickup token resolution path when the
+    pickup token secret flag family is unconfigured.
+  - Normalized the review-pickup default OpenBao path constant to the literal
+    `forge/reviewer/gh-token`.
+  - Left deployment files, approval-wall runtime behavior, signed artifacts, and
+    queue-daemon lease code untouched.
+- **ce-docs-product-lens-cleanup** (public documentation): **Clarify the product journey in public documentation.**
+
+  - Rewrote the README and first-run guides around what users can do with Creator Engine.
+
+### Fixed
+
+- **ce-491-prearming** (CE-491; materializer pre-arming checklist): **Close materializer pre-arming review findings.**
+
+  - Bumps the materializer audit actor version to `ce-491-prearming`.
+  - Normalizes materializer evidence paths before enforcing `.ce/state` bounds.
+  - Documents the HeldError artifact asymmetry beside the handler.
+  - Adds run-preflight coverage proving the brain append intent/direct ledger XOR gate fires in the real check sequence.
+- **ce-503-refresh-guard** (onboard refresh-workflow recognition guard): **generation-aware refresh workflow recognition.**
+
+  - Accepts prior CE-shipped validate workflow generations during `ce onboard --refresh-workflow`.
+  - Keeps refresh fail-closed for workflows that only mention the validator without the CE workflow structure.
+  - Deliberately refuses G1-era workflows with renamed job headings; modified CE workflows are foreign.
+- **ce-followups2-20260708** (review follow-ups / validator preflight / deploy smoke): Batch two follow-up fixes from merged review findings.
+
+  - DGX runsc image rendering now defaults surface build args to the host architecture
+    and accepts `--arch` when cross-building.
+  - Singleton redeploy smoke coverage accepts both install and unchanged dry-run paths,
+    while redeploy rendering escapes backslashes and cleans temp files on early function
+    exits.
+  - Seat-ready preflight now normalizes registered autogen surface paths consistently
+    and has companion coverage for schema-reference autogen repair commits.
+  - The seat-ready pytest worker cap is pinned directly in unit coverage.
+- **ce-461-merge-group-e2e** (validators): Adds a slow adoption integration fixture that drives a non-CE-shaped repository through the brownfield join-PR scaffold and verifies the emitted validation workflow keeps merge-queue trigger parity without carrying internal repository paths.
+- **ce-453a-hashpin-hotfix** (validate-pr / signed-artifact-pins / path-manifest-fidelity): **Hotfix: signed-artifact-pins fails closed on real file; path-manifest scan counts negative fixtures as offenses.**
+
+  Two gate-side defects introduced by #935 are causing uniform branch-validate failures:
+
+  - **signed_artifact_pins (VAL-SIGNED-ARTIFACT-PINS-INVALID):** `_extract_signed_yaml` was
+    calling `yaml.safe_load` on the entire HTML-comment body of `docs/llms-install.md`, including
+    the human-readable prose paragraph that precedes the YAML block.  The prose contains
+    colon-bearing text (e.g. `(no CE tooling: that is what breaks the bootstrap circularity)`)
+    that YAML rejects as malformed mappings.  Additionally, the YAML section itself contains
+    `python_requires: >=3.14` where `>` is inadvertently treated as a YAML block-scalar
+    indicator.  Fix: skip the prose paragraph (non-blank lines before the first blank separator)
+    and sanitize inline mapping values that start with `>` or `|` but are not valid YAML
+    block-scalar headers before passing to `yaml.safe_load`.  A new `SPEC_WITH_PROSE` fixture
+    and a live `docs/llms-install.md` test guard against regression.
+
+  - **path_manifest_fidelity (false offenses from negative fixtures):** the registered `run()`
+    check's `_iter_documents` directory sweep included `examples/malformed/handoffs/*.md` —
+    intentionally malformed fixtures (`count-mismatch.md`, `hash-mismatch.md`,
+    `init-py-corruption.md`) designed to produce errors in the integration-test "malformed
+    examples rejected" harness.  These files were producing false `path_manifest_count_mismatch`,
+    `path_manifest_hash_mismatch`, and `path_manifest_init_py_corruption` offenses during the
+    repo-wide scan.  Fix: add `_is_under_malformed_examples` guard in `_iter_documents` (follows
+    the same convention used by `identity.py` and `sidecar_utils.py`).  The negative-fixture
+    integration tests continue to pass because they pass each file as an explicit path, which
+    takes the `root.is_file()` branch and is never filtered.
+- **ce-469-verify-install-root** (validators): **Verify installs against the requested install root.**
+
+  `ce verify-install` now reports the effective root in machine-readable output
+  and refuses install-state or live venv probes that resolve outside that root.
+- **ce-519-doctor-agent-scan-default** (doctor): **Run the coding-agent CLI scan in default doctor mode.**
+
+  - Surface a missing configured harness CLI as an advisory doctor finding by default.
+  - Preserve hard refusal for missing harness runtime when visible launch is required.
+- **ce-520-reap-selfservice-kill** (reap / stale tmux self-service): **`ce reap once` now teaches the operator how to clear stale live tmux launch surfaces.**
+
+  - Adds tmux-specific operator guidance when a launched/no-exit seat is stale but
+    its recorded PID is still live.
+  - The escalation JSON and escalation record now name the exact tmux session and
+    the self-service `tmux kill-session -t ...` command, followed by `ce reap once`.
+  - Pins the behavior with focused `seat_reaper` policy-layer unit coverage.
+- **ce-523-sentinel-signal-race** (ce-523; seat sentinel tests): **Deflake the trapped-signal sentinel wrapper test.**
+
+  - Wait deterministically for the wrapper's trapped-signal `exited` record before
+    asserting the exit contract, removing a parallel-runner timing race without
+    weakening the required signal-derived exit code.
+  - Preserve the product signal that a killed seat still leaves reliable lifecycle
+    evidence for harvest and operator diagnosis.
+- **ce-523c-sentinel-trapped-signal-deflake** (seat sentinel tests): **Deflake the trapped-signal sentinel wrapper test.**
+
+  - Synchronize the test with foreground-child creation before sending the
+    whole-process-group signal, so SIGHUP deterministically exercises the
+    wrapper trap rather than racing the child launch.
+- **ce-529-broker-refusal-robustness** (egress broker): **Keep the SELF-PUSH broker available after request failures.**
+
+  - Convert normal push guard denials into audited broker refusals.
+  - Return structured internal-error responses for forge failures and keep accepting later requests.
+  - Tolerate clients that disconnect while a request is being received.
+  - Classify host audit, persistence, and courier failures separately from client disconnects.
+
+### Fixed
+
+- **ce-followups-20260708** (validators, host-ops-broker): **Review follow-up batch for merged PR minors.**
+
+  - Tighten host-ops broker fail-closed kill-switch and schema minor findings from merged PR #898.
+  - Scope seat-ready autogen commits to the regenerated artifact and pin the missing PR #896 test coverage.
+  - Isolate the stale checkout artifact determinism test in a temporary repo copy; partially addresses #504 minors only, with MAJOR broker arming findings remaining out of scope.
+- **ce-523b-jit-deflake** (523; Deflake test_live_cli_mismatched_peercred_rejects_jit_mint_without_credential — BrokenPipeError/ConnectionResetError race on AF_UNIX rejection path; tight 2s thread-join replaced with poll-with-deadline.): **test: deflake JIT peercred rejection race.**
+
+  The live-socket peercred rejection test was flaking under xdist load because the
+  server can check `SO_PEERCRED` and close the connection before the client's
+  `sendall` returns, causing a `BrokenPipeError` or `ConnectionResetError` that the
+  test treated as unexpected. Separately, a fixed 2 s `thread.join` deadline was too
+  tight on a loaded CI runner.
+
+  Fix: tolerate `BrokenPipeError`/`ConnectionResetError` on `sendall` as an expected
+  part of the AF_UNIX rejection path (the 403 response is already buffered), handle
+  EOF gracefully in the receive loop, and replace the `join(timeout=2)` with a
+  `_poll_until` helper that allows up to 30 s for the server thread to exit. The core
+  assertion — no credential minted, 403 returned, audit record correct — is
+  unchanged.
+- **ce-f1s2-preflight-env-propagation** (preflight subprocess environment propagation): Preserve caller-provided pytest temporary-directory and option settings when preflight launches inner test suites.
+- **ce-f2-gate-hardening** (VPS_STORAGE_GATE_INCIDENT_20260710; gate): **Gate hardening: homeless attempt log, disk-headroom refusal, liveness state export.**
+
+  Implements F-2 from `VPS_STORAGE_GATE_INCIDENT_DESIGN_20260710.md §C/F-2`, three
+  behaviors that prevent the merge-gate crashloop that occurred when the root disk
+  hit 0 bytes (05:24–05:30 UTC 2026-07-10):
+
+  - **F-2.1 — Homeless attempt log (`deploy/daemons/run-daemon-container.sh`):**
+    `setup_attempt_log` no longer depends on `$HOME` for the log directory. Fallback
+    order is now: `CE_DAEMON_LOG_DIR` → `LOGS_DIRECTORY` (systemd `LogsDirectory=`
+    injection) → journald-only degradation (warning to stderr, daemon continues).
+    Every failure path emits a `WARNING:` to stderr and returns successfully; the
+    daemon NEVER exits because a log file cannot be created.
+
+  - **F-2.1b — `LogsDirectory=` unit addition (`deploy/queue-daemon/ce-queue-daemon.service`):**
+    Added `LogsDirectory=ce-queue-daemon` / `LogsDirectoryMode=0700` so systemd
+    provisions `/var/log/ce-queue-daemon` and exports it as `LOGS_DIRECTORY` for
+    the contained launch path.
+
+  - **F-2.2 — Startup disk-headroom check (`deploy/queue-daemon/launch-queue-daemon.sh`):**
+    Added `check_disk_headroom` function that runs in `main_uncontained` after
+    `validate_required_env` but BEFORE `exec_with_queue_daemon_lease`. If the
+    filesystem hosting `CE_DAEMON_STATE_ROOT` (or nearest existing ancestor) has
+    fewer than `CE_DAEMON_DISK_HEADROOM_GB` GiB free (default 5), the script exits
+    with code **75** and an error message naming `disk_headroom`. This refusal
+    happens before the singleton lease is acquired so a low-disk boot does not
+    block future lease takeover.
+
+  - **F-2.3 — Liveness state export (`validators/creator_engine_validator/forge/integrator_belt.py`):**
+    `run_daemon_loop` accepts a new `liveness_state_path` keyword argument (falls
+    back to `CE_DAEMON_LIVENESS_STATE_PATH` env var). After each `daemon_pass_complete`
+    log entry, `_write_liveness_state` atomically refreshes a JSON file containing
+    `last_pass_timestamp`, `pass_index`, and `failed_count`. Write failures are
+    non-fatal (warning to stderr, loop continues). An external watchdog can now
+    detect stale passes without parsing docker logs.
+
+  Extend-don't-weaken: all existing tests pass without modification.
+- **ce-f2-logsdirectory-bind** (deploy): **F-2.1b repair: restore `LogsDirectory=`/`LogsDirectoryMode=` binding in `ce-queue-daemon.service`.**
+
+  The `ce-f2-gate-hardening` PR (#969's successor) merged F-2.1 (homeless-log
+  fallback chain), F-2.2 (disk-headroom pre-lease refusal), and F-2.3 (atomic
+  liveness-state export) into main. The `LogsDirectory=ce-queue-daemon` /
+  `LogsDirectoryMode=0700` binding that lets systemd provision the log directory
+  and inject it as `LOGS_DIRECTORY` was omitted from the merged service file.
+
+  This patch restores the two missing lines so the F-2.1 `LOGS_DIRECTORY`
+  environment fallback is provisioned automatically on service start rather than
+  depending on `CE_DAEMON_LOG_DIR` being set externally.
+
+### Documentation
+
+- **ce-496-controller-bootstrap-doc-s1** (ce-496-controller-bootstrap-doc-s1; operations): **Controller bootstrap runbook.**
+
+  - Add a replacement-controller bootstrap runbook with public placeholders and explicit identity, state, and parity gaps.
+  - Add smoke tests for path references, confidentiality scrub, and the unavailable state restore inverse.
+  - Admit the new operations runbook to the exact public-doc operations-tree exception ratchet.
+  - Align takeover and continuity drill examples with the current CLI parser's required arguments.
+  - List the YAML reader prerequisite required by the documented registry fallback command.
+  - Separate standby surface provisioning from manual takeover acceptance evidence for the current tracked script.
+  - Mark the current standby provisioning script as pending repair instead of a directly executable live step.
+  - List the file-sync prerequisite required by the documented manual restore commands.
+- **ce-materializer-appkey-custody-runbook** (materializer credential custody): **Add the materializer App-key custody runbook.**
+
+  - Documents role-based credential custody, rotation, revocation, and recovery.
+  - Records the ADR-backed per-call signer and single-host lease constraints.
+- **ce-agents-execution-routing** (AGENTS.md / fleet policy): **Add execution-routing / no-inlining section to AGENTS.md.**
+
+  New section "Execution Routing — No Inlining" inserted between "Dispatch Discipline" and
+  "Hard-Stop Rules" in `AGENTS.md`. Covers two binding rules:
+
+  - **Bright-line delegation rule.** A controller turn is limited to: reading state,
+    adjudication, brief composition, pointer sends, and single probes. Any unit needing more
+    than ~3 mechanical tool calls (sweeps, harvests, preflights, cross-host recon, batch file
+    ops, reviews) MUST be delegated to a spawned worker from `.claude/agents/`. Controller
+    context is the factory's scarcest resource.
+
+  - **Wait-contract rules.** One-shot task agents may be awaited once. Persistent sessions
+    (seats/foremen) MUST NOT be awaited — they never emit a completion signal; use pane reads
+    between turns and durable READY signals. Two consecutive empty waits trigger liveness
+    check + single re-dispatch or escalation. Finished subagents must be explicitly closed
+    (slot hygiene).
+
+  **Why now.** SL-DAY arc evidence (2026-07-10 night) recorded in
+  `.ce/state/research/SL_DAY_LEDGER_20260711.md`: an inline wait-loop burned ~60 % of
+  controller context in a single turn before being caught. The wait-contract diagnosis
+  from that incident is now policy-level text so every agent session sees it at bootstrap.
+  Operator directive 2026-07-11, SL-DAY arc remedy b.
+- **ce-docs-start-here-matrix**: New Start Here guide and platform support matrix.
+- **ce-docs-troubleshooting**: New troubleshooting guide for install and setup
+- **ce-skills-v11-xs-adoption** (agent prompt and shaping dialogue discipline): **Adopt the ratified skills-v1.1 prompt-layer practices and pin brain assertion.**
+
+  - Adds review smells, two-axis review guidance, and refactoring ownership.
+  - Adds bounded TDD, HITL Frame dialogue, and research persistence conventions.
+  - Ratified Operator amendment (2026-07-11): append tombstone + v3 brain assertion for
+    `brain-assertion-d1b-14-reviewer-readonly-prepared-worktree` to pin the updated
+    reviewer.md evidence hash; supersedes v2 via B2 append-only pattern per
+    brain_runtime `correct` semantics.
+
+### Stories
+
+- **ce-materializer-deploy-unit** (materializer deploy pre-arming): **Add dry-run materializer deployment support.**
+
+  - Adds a supervised dry-run materializer service, environment template, and health-capable launcher with arming disabled by default.
+  - Extends singleton redeploy support so operators can dry-run or redeploy the materializer service through the same bounded flow used by existing singleton daemons.
+  - Adds focused deploy tests for the systemd unit shape, dry-run redeploy path, and rendered health-probe environment.
+
+### Chores
+
+- **ce-publication-pipeline-canary-20260711** (internal): Internal release-pipeline verification marker; no user-facing changes.
+
+### Design
+
+- **ce-509-release-acceptance-design** (CE-509; release acceptance stage): Designs the release-acceptance stage between merge and ship.
+
+  - Defines the RC-to-promote state machine and repository-visible acceptance
+    record location.
+  - Makes the existing fresh-tenant rehearsal harness the default promotion
+    evidence path.
+  - Requires release-ticket closure to link acceptance evidence, including
+    persistent-state probes for deploy-class claims.
+  - Names the ring-0 dogfood seat as the first consumer after promotion.
+
+### Documentation
+
+- **ce-506-daemon-vs-agent-rubric-design-s1** (ce-506; design): **Add the daemon-vs-agent routing rubric.**
+
+  Proposes a routing rubric for deterministic daemons and bounded agent-organs,
+  applies it organ by organ, defines an SSOT-first advisory hydration contract,
+  and sketches AutoReview and belt-driven triage patterns. AutoReview is bound to
+  trusted digest-pinned policy and cannot approve or ratify; recall remains a
+  rebuildable non-canonical projection. DESIGN-PREVIEW: hold for Operator review
+  before merge; this artifact is not ratified and grants no implementation
+  authority.
+
+### Implementation
+
+- **ce-510-ship-gate-s2** (release acceptance gate mechanics): Adds the release-acceptance state machine mechanics for RC ship-gating.
+
+  - Models repository-visible release-acceptance records and governed state
+    transitions for candidate promotion through closure.
+  - Fails closed when rehearsal evidence lacks RC identity fields needed for
+    promotion binding.
+  - Adds pure closure-integrity checks so release-ticket closure requires linked
+    acceptance evidence and persistent-state probes for deploy-class claims.
+
+### Other
+
+- **ce-419-mint-broker-server**: # ce-419 Mint Broker Server
+
+  - Added the loopback-only mint-broker HTTP server entrypoint.
+  - Added the systemd unit, example config, and focused unit coverage for routing,
+    loopback binding, config permissions, and body-free access logging.
+- **ce-470-infra-identity-schema**: Identity registry schema now accepts tenant App metadata, documents registry precedence, and keeps the public example strictly placeholder-valued (real tenant identifiers live only in the internal registry).
+- **ce-490-contained-launch-preflight-s1**: ## ce-490-contained-launch-preflight-s1
+
+  - fix(launch): add pre-spawn policy validation for contained launch - slice 1
+
+    Adds `_validate_contained_launch_plan()` to launch_runtime and wires it into
+    the contained-launch path. It fires when `plan.runtime_policy is not None`,
+    so bare and host-backend launches are unaffected.
+
+    Three plan-time gaps are checked before any docker/runtime side effect:
+
+    (a) Placeholder image digest (`sha256:000...000`) is a policy-content defect
+        verifiable from the record alone; it is always refused with instructions
+        to re-run `ce onboard` after runtime_posture resolves
+        (`G6-LAUNCH-POLICY-INVALID`, `ContainedLaunchPreflightRefused`).
+
+    (b) Absent bind-mount sources are checked against THIS host's filesystem.
+        Optional agent-config dirs (`~/.claude`, `~/.config/claude`, `~/.codex`,
+        `~/.config/codex`) are conditionally omitted when absent and emit a
+        warning. Any other absent source path, or a sentinel-wrapper path not
+        covered by a surviving mount, raises `ContainedLaunchPlanUnverifiable`
+        (a `ContainedLaunchPreflightRefused` subclass).
+
+    `launch()` treats (a) as a hard pre-spawn refusal, matching the original
+    design. It treats (b) as a *warning* (logged via `LOGGER.warning`,
+    non-fatal): the v3 runner backends (`gvisor-proxy`/`docker`) keep their plan
+    translation pure/I-O-free by design (see `runner/gvisor_proxy_backend.py`'s
+    "translate-vs-execute split") precisely so a runtime-policy-record's
+    `mount_manifest` can carry symbolic or not-yet-materialized host paths —
+    main's own launch_runtime test corpus relies on this for CI-safe unit tests.
+    Hard-refusing (b) unconditionally would regress every such launch, so on an
+    unverifiable plan `launch()` warns and falls through to the runtime backend
+    with the original (unfiltered) manifest — the same behavior a launch without
+    this preflight would have had. `_validate_contained_launch_plan()` itself
+    stays fully strict for direct callers (this slice's own dedicated fast unit
+    tests in `test_contained_launch_preflight.py` continue to exercise (b) as a
+    hard raise), so the check is fully implemented and ready to be tightened
+    once `mount_manifest` entries are guaranteed to reference real, resolved
+    host paths by the time `launch()` runs.
+
+    Previously, these cases could reach docker, fail at container-creation time,
+    or produce an unresolvable launch-probe timeout with no actionable message;
+    (a) now raises a hard pre-spawn refusal (``ContainedLaunchPreflightRefused``)
+    before any runtime side effect, (b) now surfaces a named warning instead of
+    silence.
+
+    Out of scope for slice 1: the sentinel HUP race / kill-session exited event,
+    the zero-digest emitted during onboard, live docker stderr forwarding when
+    docker is still reached, and resolving `mount_manifest` entries against real
+    host paths so (b) can become a hard refusal without conflicting with
+    main's symbolic-plan test fixtures.
+
+    - **Declared work class:** story
+- **ce-491-optiona-slice1**: # ce-491-optiona-slice1
+
+  - Added the dry-run-only CE-491 Option A brain intent materializer library with deterministic keying, intent rediscovery, live-tail proofing, mediated record construction, HELD/quarantine state, append-only daemon events, and a local brain-append lease wrapper.
+  - Added the `brain_append_intent_xor_direct_ledger` hard gate for hybrid append-intent plus direct-ledger PRs.
+  - Added focused unit coverage for key derivation, validation, record determinism, holds/quarantine, lease behavior, dry-run orchestration, and XOR gate behavior.
+- **ce-492-smoke-uid-mismatch**: The daemon container smoke now makes the generated signing secret readable by the image uid under rootful Docker, while preserving best-effort behavior for rootless engines. Cleanup also emits captured per-pass smoke logs before deleting the temporary directory so timeout failures retain their diagnostic output.
+- **ce-493-approval-marker-ttl-remint**: Queue daemon approval capability markers that expire during retry loops are now re-minted only when a trusted current-head approval is still present. Expired markers without a current authorized review continue to fail closed with explicit evidence.
+- **ce-500-launcher-caps-s2**: ## ce-500-launcher-caps-s2
+
+  - fix(contained-seat): add cgroup memory cap to DGX and VPS runsc launchers
+
+    Adds `CE_DGX_MEMORY_LIMIT` (default `8g`) and `CE_VPS_MEMORY_LIMIT` (default `8g`)
+    env-configurable docker `--memory` flags to the runsc seat launchers. Seats now OOM
+    inside the container (pytest dies, work survives in the durable bind-mount worktree)
+    rather than triggering a host OOM-kill that evaporates the gVisor sentry and all in-
+    progress work. Disable by setting the env var to empty string.
+
+  - fix(preflight): add governed TMPDIR + parallelism cap wrapper for host preflight runs
+
+    Adds `tools/preflight-caps.sh`: a thin bash wrapper that exports TMPDIR to a disk-backed
+    path (default `$HOME/tmp`), warns if the resolved TMPDIR is on tmpfs, caps `-n auto` to
+    `-n 4` (configurable via CE_PREFLIGHT_MAX_WORKERS), forwards all argv to the wrapped
+    command, and cleans up `pytest-of-*` tmpdirs post-run. Prevents host-tmpfs RAM
+    competition with contained-seat sentry processes during concurrent preflight runs.
+
+  **Declared work class: story**
+- **ce-501-queue-canary**: ## ce-501-queue-canary
+
+  - feat(queue-daemon): add CE_QUEUE_DAEMON_CANARY=1 mode to launch-queue-daemon.sh
+
+    When CE_QUEUE_DAEMON_CANARY=1 is set: implies --dry-run, omits all
+    --approval-wall-secret-* flags (wall resolves DORMANT legitimately), relaxes
+    required-env to GH_TOKEN + CE_GATE_REPO + CE_GATE_AUTHORIZED_REVIEWERS,
+    refuses if CE_DAEMON_STATE_ROOT conflicts with the live daemon default,
+    and emits a visible CANARY MODE banner. Closes the queue canary launcher gap.
+
+    - **Declared work class:** S
+- **ce-502-standby-surface**: ## ce-502-standby-surface
+
+  - fix(standby): provision dedicated main-tracking surface + mint-forge-token repair + drill gate
+
+    Adds deploy/dgx-controller-runsc/provision-standby-surface.sh to provision the standby
+    controller with its own main-tracking git worktree (default /home/cedev2/ce-standby-main),
+    decoupling it from the shared mutable checkout. Fixes the D6 Drill #1 FAIL where the
+    shared checkout on ce-release-0.3.1-rc2 lacked `ce takeover`.
+
+    Adds tools/mint-forge-token.py replacing the traceback-producing helper with a
+    guarded implementation that accepts --help and --dry-run without errors.
+
+    Extends continuity_drill_runtime with a standby_liveness gate: drills missing a
+    standby liveness proof degrade to WARNING status rather than silently passing.
+    The gate only passes with a structured standby-emitted `ce takeover --dry-run
+    --json` packet where `ring0_verify.ok=true` and
+    `initial_state=AWAITING-OPERATOR`; raw boolean flags remain WARNING.
+
+    - **Declared work class:** S
+- **ce-504-broker-arming-blockers**: Host-ops broker target arming now rejects unowned container image prefixes, honors configured state-root prefixes, and avoids treating benign audit keys containing "value" as credential indicators. Focused unit coverage documents the new config resolution behavior and the audit false-positive guard.
+- **ce-515-xdist-copytree-fix**: The release-finalize integration fixture now skips build outputs, distribution
+  artifacts, and editable-install metadata while copying the repository under
+  test. This keeps parallel test workers from racing against transient artifact
+  trees during fixture setup.
+- **ce-516-autoclose-s2**: Acceptance-Evidence autoclose handling now avoids duplicate warning comments, keeps directive issues open when warning delivery fails, and emits a best-effort governance alert when required token configuration is absent. Workflow comment refresh is deferred pending the next brain-ledger window.
+- **ce-521a-worktree-venv-bootstrap**: ## ce-521a-worktree-venv-bootstrap
+
+  - Added linked-worktree validator Python resolution that reuses the main checkout `.venv` instead of building duplicate per-worktree environments.
+  - Updated local PR preflight defaults so contained worktrees can run validator and pytest commands through the shared main venv when `CE_VALIDATOR_PYTHON` is unset.
+  - Added focused unit coverage for shared venv resolution, linked-worktree detection, explicit env precedence, and fail-closed repair guidance.
+- **ce-materializer-cas-push**: # Materializer CAS Push Pre-Arming
+
+  - Added deterministic materialization commit construction for merge-time brain append intents.
+  - Added compare-and-swap push handling that abandons stale commits and rescans before rebuilding.
+  - Preserved disabled arming by keeping push refusal behind the arming guard while allowing disarmed commit inspection.
+  - Added focused unit coverage for deterministic construction, CAS push refusal, and rescan behavior.
+- **ce-readme-review-minors**: Tighten README current-version detection so non-CE runtime version mentions do not raise stale-release drift errors, document the shipped `ce conveyor` queue repair command, and extend CLI reference reconciliation so public command groups dispatched before argparse stay covered by tests.
+- **ce-solo-ceo-onboarding-fix**: Rewrote the Solo + CEO onboarding guide so default-mode users state intent and authorization in dialogue while the governed agent runs the mechanical pipeline. The guide now keeps command details in clearly labeled technical asides, replaces the removed decision-inbox command with the forge-based awaiting-decision flow, and keeps the CEO path centered on Goal, Done-when, Change-type, artifact review, and explicit shipping approval.
+- **ce-docs-first-project**: New first-project tutorial for planning, reviewing, and delivering a small repository change.
+
+### Task
+
+- **ce-953-image-rebuild** (dgx contained Codex image preparation): Prepare the DGX contained-seat image recipe for a verified Codex 0.144.1 arm64 artifact, Python 3.14 validator tooling, shared seat UID/GID builds, and a controller-run canary rollout with rollback guidance.
+- **ce-seat-preflight-parity** (validators): Adjusted the seat-ready preflight profile so the control-plane portability guard is skipped for seat validation because seat-image runtime characteristics produce proven false failures, while the scan remains enforced by the default-profile preflight at controller harvest. Added unit coverage proving a simulated scanner failure does not fail the seat-ready profile and that the default profile still enforces the guard.
+
+### Validator
+
+- **ce-453a-hash-pin-guard** (validate-pr): **signed artifact hash-pin validate-pr guard.**
+
+  - Add a validate-pr guard for signed artifact hash-pinned source changes.
+  - Cover pinned-file, paired pin update, unrelated, and pin-only diff cases.
+  - Fail CLOSED (`VAL-SIGNED-ARTIFACT-PINS-INVALID`) on frontmatter corruption,
+    a missing/malformed `artifact_manifest` section, or zero discoverable pins,
+    instead of silently degrading protection to an empty pin set.
+  - Protect the `install.sh` / `docs/install.sh` byte chain via the existing
+    `sha256s_sha256` pin's SHA256SUMS alias, so editing the installer without a
+    matching pin/SHA256SUMS change is caught.
+  - Give whole-document pins (e.g. `content_sha256`) a distinct "whole-document
+    re-sign required" notice instead of the generic missing-pinned-file wording.
+  - Cover missing/unreadable signed doc, frontmatter-corruption, git-diff
+    subprocess failure, synthetic-fixture-doc-changes-in-diff, and the
+    install.sh-chain RED case.
+
 ## v0.3.4 — broker-lanes + takeover-core + memory-layer + continuity-drill (2026-07-08)
 
 ### What's new

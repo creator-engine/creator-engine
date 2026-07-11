@@ -6,7 +6,7 @@ the engine named by `CE_CONTAINER_ENGINE` (`docker` by default, `podman`
 supported through the same OCI flags).
 
 When `CE_DAEMON_IMAGE` is unset, the adapter defaults to
-`ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.4`. Release automation
+`ghcr.io/creator-engine/creator-engine/ce-runtime:0.3.5`. Release automation
 should set a digest-pinned runtime reference for production cutovers.
 
 The runner mounts only:
