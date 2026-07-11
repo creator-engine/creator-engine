@@ -292,10 +292,75 @@ def test_acquire_refuses_foreign_active_before_posting():
     gh = FakeGh([_comment(1, _acquire_body("wclaim-foreign", holder="other", host="X"))])
     key = wc.parse_ticket("creator-engine/ce-ops#38")
     res = wc.acquire(key, gh, holder="ce-dev-2", host="H", now=NOW,
-                     nonce="n1", backoff_seconds=0, sleep=lambda s: None)
+                     nonce="n1", backoff_seconds=0, sleep=lambda s: None,
+                     hard_block=False)
     assert not res.ok
     assert res.refusal_reason == "active_foreign_claim"
     assert gh.posts == []  # refuse BEFORE side effect
+
+
+def test_block_if_active_foreign_claim_raises_on_active():
+    gh = FakeGh([_comment(1, _acquire_body("wclaim-foreign", holder="other", host="X"))])
+    key = wc.parse_ticket("creator-engine/ce-ops#38")
+
+    with pytest.raises(wc.WorkClaimRefused) as exc_info:
+        wc.block_if_active_foreign_claim(key, gh, holder="ce-dev-2", host="H", now=NOW)
+
+    assert "wclaim-foreign" in str(exc_info.value)
+    assert exc_info.value.work_key == key
+    assert exc_info.value.holder == "other"
+    assert exc_info.value.host == "X"
+    assert exc_info.value.claim_id == "wclaim-foreign"
+    assert exc_info.value.claimed_at == _ts(timedelta(hours=-1))
+    assert gh.posts == []
+
+
+def test_block_if_active_foreign_claim_allows_stale(caplog):
+    gh = FakeGh([_comment(
+        1, _acquire_body("wclaim-stale", holder="other", host="X",
+                         claimed_at=_ts(timedelta(hours=-6))),
+    )])
+    key = wc.parse_ticket("creator-engine/ce-ops#38")
+
+    wc.block_if_active_foreign_claim(key, gh, holder="ce-dev-2", host="H", now=NOW)
+
+    assert "stale foreign work claim remains seizable" in caplog.text
+    assert gh.posts == []
+
+
+def test_block_if_active_foreign_claim_allows_self():
+    gh = FakeGh([_comment(1, _acquire_body("wclaim-self", holder="ce-dev-2", host="H"))])
+    key = wc.parse_ticket("creator-engine/ce-ops#38")
+
+    wc.block_if_active_foreign_claim(key, gh, holder="ce-dev-2", host="H", now=NOW)
+
+    assert gh.posts == []
+
+
+def test_acquire_hard_block_true_raises_on_active_foreign():
+    gh = FakeGh([_comment(1, _acquire_body("wclaim-foreign", holder="other", host="X"))])
+    key = wc.parse_ticket("creator-engine/ce-ops#38")
+
+    with pytest.raises(wc.WorkClaimRefused, match="double-assignment blocked") as exc_info:
+        wc.acquire(key, gh, holder="ce-dev-2", host="H", now=NOW,
+                   nonce="n1", backoff_seconds=0, sleep=lambda s: None,
+                   hard_block=True)
+
+    assert exc_info.value.claim_id == "wclaim-foreign"
+    assert gh.posts == []
+
+
+def test_acquire_hard_block_false_returns_soft_refusal():
+    gh = FakeGh([_comment(1, _acquire_body("wclaim-foreign", holder="other", host="X"))])
+    key = wc.parse_ticket("creator-engine/ce-ops#38")
+
+    result = wc.acquire(key, gh, holder="ce-dev-2", host="H", now=NOW,
+                        nonce="n1", backoff_seconds=0, sleep=lambda s: None,
+                        hard_block=False)
+
+    assert not result.ok
+    assert result.refusal_reason == "active_foreign_claim"
+    assert gh.posts == []
 
 
 def test_acquire_loses_reread_release_and_fail_closed():
