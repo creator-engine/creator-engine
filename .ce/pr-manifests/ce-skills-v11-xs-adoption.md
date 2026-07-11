@@ -8,11 +8,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** XS
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=5f112cd11ffbbb000377b466fa84831a67ba2089340a5abc12708748b70dc202
+AUTHORIZED_PATHS_SHA256=f5f8797775642d23c610ba7a5272f0ccf7c2afd93889aa3115f46c611a0ec4a4
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-skills-v11-xs-adoption.md
 .ce/pr-manifests/ce-skills-v11-xs-adoption.md
 .claude/agents/implementer.md
