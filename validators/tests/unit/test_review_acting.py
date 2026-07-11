@@ -34,8 +34,8 @@ def _item(number=42, **overrides):
         "head_sha": "a" * 40,
         "url": f"https://example.test/owner/repo/pull/{number}",
         "title": "Normal title",
-        "assigned_reviewer": "ce-dev-3",
-        "author": "ce-dev-4",
+        "assigned_reviewer": "reviewer-seat-a",
+        "author": "author-seat-b",
         "reason": "awaiting_review",
     }
     item.update(overrides)
@@ -67,7 +67,7 @@ def _claim(attempt):
         "repo": "owner/repo",
         "pr_number": 42,
         "head_sha": "a" * 40,
-        "assigned_reviewer": "ce-dev-3",
+        "assigned_reviewer": "reviewer-seat-a",
         "attempt": attempt,
     }
 
@@ -189,7 +189,7 @@ def test_run_acting_pass_refuses_unbound_stale_or_self_reviewer_evidence(tmp_pat
     cases = (
         ("malformed", _item(), lambda ctx: "not-json"),
         ("stale", _item(), lambda ctx: _evidence(ctx, head_sha="b" * 40)),
-        ("self", _item(author="ce-dev-3"), lambda ctx: _evidence(ctx)),
+        ("self", _item(author="reviewer-seat-a"), lambda ctx: _evidence(ctx)),
     )
     for label, item, output in cases:
         calls = []
@@ -299,7 +299,7 @@ def test_run_acting_pass_refuses_action_after_terminal_evidence_without_acting(t
             }),
             json.dumps({
                 "action": "spawn_failed", "repo": "owner/repo", "pr_number": 42,
-                "head_sha": "a" * 40, "assigned_reviewer": "ce-dev-3",
+                "head_sha": "a" * 40, "assigned_reviewer": "reviewer-seat-a",
             }),
         )) + "\n",
         encoding="utf-8",
@@ -452,8 +452,8 @@ def test_default_spawner_substitutes_template_without_shell_or_title_injection(m
     monkeypatch.setattr(review_acting.subprocess, "run", fake_run)
     ctx = review_acting.ActingContext(
         repo="owner/repo", pr_number=42, head_sha="a" * 40,
-        url="https://example.test/pull/42?a=1&b=2", title="$(would-run-if-shell)", assigned_reviewer="ce-dev-3",
-        author="ce-dev-4",
+        url="https://example.test/pull/42?a=1&b=2", title="$(would-run-if-shell)", assigned_reviewer="reviewer-seat-a",
+        author="author-seat-b",
     )
 
     assert review_acting.default_spawner(ctx, _FakeGhRunner()) == "verdict"
@@ -480,7 +480,7 @@ def test_review_pickup_loop_forwards_optional_on_pass_items(monkeypatch):
     monkeypatch.setattr(review_pickup, "poll_review_pickup", fake_poll)
     runner = _FakeGhRunner()
     result = review_pickup.run_review_pickup_loop(
-        token="token", reviewer_seats=["ce-dev-3"], gh_runner=runner, repo="owner/repo",
+        token="token", reviewer_seats=["reviewer-seat-a"], gh_runner=runner, repo="owner/repo",
         apply=True, iterations=1, on_pass_items=lambda items, runner: received.append((items, runner)),
     )
 
