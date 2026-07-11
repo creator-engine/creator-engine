@@ -91,8 +91,8 @@ wrong, revise it before starting work.
 
 ## 4. Confirm the plan
 
-When the plan describes exactly what you want, create a fresh confirmation
-reference and confirm it:
+When the plan describes exactly what you want, create a fresh approver ref
+and confirm it:
 
 ```bash
 ce ratify readme-build-badge \
@@ -127,10 +127,14 @@ A completed report identifies the outcome, the completion-check result, and
 the next review action. For example:
 
 ```text
-Outcome   PR opened -> #24
-Verdict   Done-when 3/3 met · tests green · in scope
-Next      Review PR #24
+┌─ ◆ CE COMPLETION REPORT · run run-readme-build-badge-20260711T140000Z · Scope readme-build-badge ──────────────────
+│ Outcome   PR opened → #24
+│ Verdict   Done-when 3/3 met · tests green · in scope ✓
+│ Next      → Review PR #24  (Change-type docs → your approval)
+└────────────────────────────────────────────────────────────
 ```
+
+Note the run ID in the report header (`run run-readme-build-badge-…`) — step 7 needs it.
 
 Your pull-request number and wording will differ. Open the reported pull
 request and inspect the README as a reader would. Check that the badge is
