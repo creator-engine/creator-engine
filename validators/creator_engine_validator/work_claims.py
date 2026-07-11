@@ -800,11 +800,11 @@ def acquire(
     idempotency_key: str | None = None,
     backoff_seconds: float = 1.0,
     sleep: Callable[[float], None] | None = None,
-    hard_block: bool = True,
+    hard_block: bool = False,
 ) -> ClaimResult:
     """Acquire the work claim with the atomic-dispatch posture (spec §Atomic).
 
-    Reads → blocks on a foreign active claim by default → posts a structured acquire (or
+    Reads → refuses on a foreign active claim unless ``hard_block=True`` → posts a structured acquire (or
     takeover) → re-reads after a bounded backoff → recomputes the deterministic
     winner → proceeds only if the just-posted claim wins, else posts a void
     release and fails closed.

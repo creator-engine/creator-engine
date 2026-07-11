@@ -337,13 +337,14 @@ def test_block_if_active_foreign_claim_allows_self():
     assert gh.posts == []
 
 
-def test_acquire_hard_block_default_raises_on_active_foreign():
+def test_acquire_hard_block_true_raises_on_active_foreign():
     gh = FakeGh([_comment(1, _acquire_body("wclaim-foreign", holder="other", host="X"))])
     key = wc.parse_ticket("creator-engine/ce-ops#38")
 
     with pytest.raises(wc.WorkClaimRefused, match="double-assignment blocked") as exc_info:
         wc.acquire(key, gh, holder="ce-dev-2", host="H", now=NOW,
-                   nonce="n1", backoff_seconds=0, sleep=lambda s: None)
+                   nonce="n1", backoff_seconds=0, sleep=lambda s: None,
+                   hard_block=True)
 
     assert exc_info.value.claim_id == "wclaim-foreign"
     assert gh.posts == []
