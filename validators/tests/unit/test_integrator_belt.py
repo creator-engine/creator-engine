@@ -1811,6 +1811,304 @@ def test_daemon_loop_does_not_crash_after_exhausted_search_rate_limit(tmp_path):
     assert any(log["action"] == "daemon_rate_limited" for log in logs)
 
 
+def test_daemon_rate_limit_does_not_clear_alarm_continuity(monkeypatch):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "2")
+    monkeypatch.setenv("CE_APPROVED_AGE_N", "1")
+    logs: list[dict] = []
+    valid_pass = belt.DaemonPassResult(
+        decisions=(_skip_decision("governance_missing"),),
+        dry_run=True,
+        evaluated_prs=(_daemon_pr(pr_number=901),),
+    )
+    outcomes = iter((
+        valid_pass,
+        belt.SearchApiRateLimited("Search API rate limit exhausted"),
+        valid_pass,
+    ))
+
+    def run_pass(**_kwargs):
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    class StopLoop(Exception):
+        pass
+
+    sleep_count = 0
+
+    def stop_after_third_pass(_seconds):
+        nonlocal sleep_count
+        sleep_count += 1
+        if sleep_count == 3:
+            raise StopLoop
+
+    monkeypatch.setattr(belt, "run_daemon_pass", run_pass)
+    try:
+        belt.run_daemon_loop(
+            token="ghp_fake",
+            repo=REPO,
+            once=False,
+            interval_seconds=1,
+            gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(argv, 0, "", ""),
+            sleep=stop_after_third_pass,
+            log_sink=logs.append,
+        )
+    except StopLoop:
+        pass
+    else:
+        raise AssertionError("daemon loop did not stop after the third pass")
+
+    alarms = [entry for entry in logs if entry["action"] == "daemon_alarm"]
+    assert [(entry["pass_number"], entry["alarm_class"], entry["details"]) for entry in alarms] == [
+        (3, "skip_anomaly_recurrence", {
+            "repo": REPO,
+            "pr_number": PR,
+            "head_sha": HEAD,
+            "reason": "governance_missing",
+            "pass_count": 2,
+            "threshold": 2,
+        }),
+        (3, "approved_pr_age_exceeded", {
+            "repo": REPO,
+            "pr_number": 901,
+            "head_sha": HEAD,
+            "age": 2,
+            "threshold": 1,
+        }),
+    ]
+
+
+def _skip_decision(reason: str, pr_number: int = PR) -> belt.DaemonDecision:
+    return belt.DaemonDecision(
+        status="skip",
+        reason=reason,
+        repo=REPO,
+        pr_number=pr_number,
+        head_sha=HEAD,
+    )
+
+
+def test_skip_anomaly_recurrence_alarms_exactly_at_threshold(monkeypatch):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "3")
+    state = belt.DaemonAlarmState()
+    decisions = (_skip_decision("governance_missing"),)
+
+    first = belt._observe_daemon_alarms(
+        state=state, pass_number=1, decisions=decisions, candidates=()
+    )
+    second = belt._observe_daemon_alarms(
+        state=state, pass_number=2, decisions=decisions, candidates=()
+    )
+    third = belt._observe_daemon_alarms(
+        state=state, pass_number=3, decisions=decisions, candidates=()
+    )
+    fourth = belt._observe_daemon_alarms(
+        state=state, pass_number=4, decisions=decisions, candidates=()
+    )
+
+    assert first == second == fourth == ()
+    assert third[0]["alarm_class"] == "skip_anomaly_recurrence"
+    assert third[0]["details"] == {
+        "repo": REPO,
+        "pr_number": PR,
+        "head_sha": HEAD,
+        "reason": "governance_missing",
+        "pass_count": 3,
+        "threshold": 3,
+    }
+
+
+def test_skip_anomaly_tracks_each_pr_reason_across_unrelated_decisions(monkeypatch):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "3")
+    state = belt.DaemonAlarmState()
+    unrelated_enqueue = belt.DaemonDecision(
+        status="enqueue", reason="eligible", repo=REPO, pr_number=902, head_sha=HEAD
+    )
+    unrelated_defer = belt.DaemonDecision(
+        status="defer", reason="settling", repo=REPO, pr_number=903, head_sha=HEAD
+    )
+
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=1, decisions=(_skip_decision("same_reason"),), candidates=()
+    ) == ()
+    assert belt._observe_daemon_alarms(
+        state=state,
+        pass_number=2,
+        decisions=(_skip_decision("same_reason"), unrelated_enqueue),
+        candidates=(),
+    ) == ()
+    records = belt._observe_daemon_alarms(
+        state=state,
+        pass_number=3,
+        decisions=(_skip_decision("same_reason"), _skip_decision("same_reason", 902), unrelated_defer),
+        candidates=(),
+    )
+
+    assert records[0]["details"] == {
+        "repo": REPO,
+        "pr_number": PR,
+        "head_sha": HEAD,
+        "reason": "same_reason",
+        "pass_count": 3,
+        "threshold": 3,
+    }
+    assert belt._observe_daemon_alarms(
+        state=state,
+        pass_number=4,
+        decisions=(_skip_decision("same_reason", 902),),
+        candidates=(),
+    ) == ()
+    records = belt._observe_daemon_alarms(
+        state=state,
+        pass_number=5,
+        decisions=(_skip_decision("same_reason", 902), unrelated_enqueue),
+        candidates=(),
+    )
+    assert records[0]["details"]["pr_number"] == 902
+    assert records[0]["details"]["pass_count"] == 3
+
+
+def test_approved_pr_age_alarms_after_threshold_and_resets_on_merge(monkeypatch):
+    monkeypatch.setenv("CE_APPROVED_AGE_N", "2")
+    state = belt.DaemonAlarmState()
+    approved = _daemon_pr(pr_number=901)
+
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=1, decisions=(), candidates=(approved,)
+    ) == ()
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=2, decisions=(), candidates=(approved,)
+    ) == ()
+    records = belt._observe_daemon_alarms(
+        state=state, pass_number=3, decisions=(), candidates=(approved,)
+    )
+    assert records[0]["alarm_class"] == "approved_pr_age_exceeded"
+    assert records[0]["details"] == {
+        "repo": REPO,
+        "pr_number": 901,
+        "head_sha": HEAD,
+        "age": 3,
+        "threshold": 2,
+    }
+
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=4, decisions=(), candidates=()
+    ) == ()
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=5, decisions=(), candidates=(approved,)
+    ) == ()
+
+
+def test_approved_pr_age_requires_current_head_witness_and_resets_on_head_change(monkeypatch):
+    monkeypatch.setenv("CE_APPROVED_AGE_N", "1")
+    state = belt.DaemonAlarmState()
+    old_head = "c" * 40
+    new_head = "d" * 40
+    old_witness = belt.DaemonApprovalWitness(APPROVER, old_head, review_id="review-old")
+    old_approved = _daemon_pr(
+        pr_number=901,
+        head_sha=old_head,
+        approval_witnesses=(old_witness,),
+    )
+
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=1, decisions=(), candidates=(old_approved,)
+    ) == ()
+    records = belt._observe_daemon_alarms(
+        state=state, pass_number=2, decisions=(), candidates=(old_approved,)
+    )
+    assert records[0]["details"] == {
+        "repo": REPO,
+        "pr_number": 901,
+        "head_sha": old_head,
+        "age": 2,
+        "threshold": 1,
+    }
+
+    stale_new_head = _daemon_pr(
+        pr_number=901,
+        head_sha=new_head,
+        approval_witnesses=(old_witness,),
+    )
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=3, decisions=(), candidates=(stale_new_head,)
+    ) == ()
+    assert state.approved_ages == {}
+
+    new_approved = _daemon_pr(
+        pr_number=901,
+        head_sha=new_head,
+        approval_witnesses=(belt.DaemonApprovalWitness(APPROVER, new_head, review_id="review-new"),),
+    )
+    assert belt._observe_daemon_alarms(
+        state=state, pass_number=4, decisions=(), candidates=(new_approved,)
+    ) == ()
+
+
+def test_approved_pr_age_fails_closed_for_absent_or_malformed_witness_or_head(monkeypatch):
+    monkeypatch.setenv("CE_APPROVED_AGE_N", "1")
+    state = belt.DaemonAlarmState()
+    malformed_witness = belt.DaemonApprovalWitness(APPROVER, "not-a-sha", review_id="bad")
+    candidates = (
+        _daemon_pr(pr_number=901, approval_witnesses=()),
+        _daemon_pr(pr_number=902, approval_witnesses=(malformed_witness,)),
+        _daemon_pr(pr_number=903, head_sha="not-a-sha"),
+    )
+
+    for pass_number, candidate in enumerate(candidates, start=1):
+        assert belt._observe_daemon_alarms(
+            state=state, pass_number=pass_number, decisions=(), candidates=(candidate,)
+        ) == ()
+    assert state.approved_ages == {}
+    assert state.alerted_approved_prs == set()
+
+
+def test_daemon_alarm_record_is_well_formed_jsonl_and_journald_loud(
+    tmp_path: Path, monkeypatch, capsys
+):
+    monkeypatch.setenv("CE_SKIP_ANOMALY_K", "1")
+    liveness_path = tmp_path / "liveness.json"
+    logs: list[dict] = []
+
+    monkeypatch.setattr(
+        belt,
+        "run_daemon_pass",
+        lambda **_kwargs: belt.DaemonPassResult(
+            decisions=(_skip_decision("same_reason"),),
+            dry_run=True,
+            evaluated_prs=(),
+        ),
+    )
+    belt.run_daemon_loop(
+        token="ghp_fake",
+        repo=REPO,
+        once=True,
+        gh_runner=lambda argv, input_text=None: subprocess.CompletedProcess(argv, 0, "", ""),
+        liveness_state_path=liveness_path,
+        log_sink=logs.append,
+    )
+
+    records = [json.loads(line) for line in liveness_path.with_suffix(".events.jsonl").read_text().splitlines()]
+    assert records == [{
+        "timestamp": records[0]["timestamp"],
+        "pass_number": 1,
+        "alarm_class": "skip_anomaly_recurrence",
+        "details": {
+            "repo": REPO,
+            "pr_number": PR,
+            "head_sha": HEAD,
+            "reason": "same_reason",
+            "pass_count": 1,
+            "threshold": 1,
+        },
+        "journald_priority": 3,
+    }]
+    assert "T" in records[0]["timestamp"]
+    assert any(log["action"] == "daemon_alarm" for log in logs)
+    assert "PRIORITY=3 daemon_alarm" in capsys.readouterr().err
+
+
 def _assert_valid_daemon_search_query(query: str) -> None:
     assert query.count("{") == query.count("}")
     assert "$query" not in query
