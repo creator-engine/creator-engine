@@ -21,6 +21,19 @@ confirms the shaped Scope. Multi-Scope decomposition stays outside this path.
 
 A **Scope artifact does not exist during Frame.** Free chat — questions, exploring, thinking out loud — is Frame, untracked. A Scope crystallizes only at the **Frame→Shape transition**. So *"when does chat become a Scope?"* is exactly *"when does Frame become Shape?"* — and that one move both answers the trigger question and **bounds Scope proliferation** (nothing is tracked until intent is concrete enough to draft a Scope).
 
+### HITL Frame dialogue discipline
+
+In human-in-the-loop Frame sessions, separate facts from decisions. **Facts**
+are discoverable by the agent through codebase exploration, so the agent must
+investigate them rather than ask the user. **Decisions** belong to the user or
+Operator, so the agent must ask rather than self-answer them. Ask only **one
+question at a time**; presenting several at once is bewildering. Do not enact
+the proposed transition or work until the Operator confirms shared
+understanding.
+
+This dialogue discipline applies only to HITL Frame sessions. Do not copy this
+phrasing into AFK worker briefs.
+
 ## The "Ready" gate (Shape→Build)
 
 The Definition-of-Ready gate is a **visible, compact checklist** that fills as the dialogue closes gaps, then the human ratifies the Scope:

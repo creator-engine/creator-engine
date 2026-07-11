@@ -4300,4 +4300,54 @@ records:
   verification_method:
     evidence_ref: .github/workflows/ce-ops-autoclose.yml
     type: static
+- claim:
+    details: Reviewer workers are read-only and depend on the controller to provide
+      an already-prepared review worktree and context.
+    evidence_sha256: 80e36ae1280da0de79c1a6d7e42bfaf5488c906d8123d18cc579d84b34a1850b
+    item: 14
+    object: reviewer-readonly-prepared-worktree
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: d8ef6b2181619aa51ec346ff63ee2df000c429b0d1e37b7faf2877d9c98bf7a6
+  evidence_ref: .claude/agents/reviewer.md
+  id: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree-v2
+  kind: brain-assertion
+  prev_hash: 33cadaa941fc40af057753733fbba3cfe392c763a89117e2184667380723d5a6
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 165
+  statement: Reviewer workers are read-only and depend on the controller to provide
+    an already-prepared review worktree and context.
+  status: superseded
+  superseded_by: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree-v3
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/reviewer.md
+    type: static
+- claim:
+    details: Reviewer workers are read-only and depend on the controller to provide
+      an already-prepared review worktree and context.
+    evidence_sha256: f0f55b136fcf5034ee592440dc9f9ac14c08c3a7747e6f7e1cded301ac0cafe1
+    item: 14
+    object: reviewer-readonly-prepared-worktree
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 00590442e5a63bf2e40e846641533b678e0ae75b23e752b3681a4a8b2365da81
+  evidence_ref: .claude/agents/reviewer.md
+  id: brain-assertion-d1b-14-reviewer-readonly-prepared-worktree-v3
+  kind: brain-assertion
+  prev_hash: d8ef6b2181619aa51ec346ff63ee2df000c429b0d1e37b7faf2877d9c98bf7a6
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 166
+  statement: Reviewer workers are read-only and depend on the controller to provide
+    an already-prepared review worktree and context.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/reviewer.md
+    type: static
 schema_version: '1'

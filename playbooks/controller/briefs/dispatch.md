@@ -4,6 +4,9 @@ Create a governed-seat brief that names the ticket, branch, role, allowed paths
 or surfaces, expected evidence, and stop line. Record or verify the work claim
 before the target seat starts.
 
+For research dispatches, the controller persists findings in the existing
+`.ce/state/research/` notes location, following its naming convention.
+
 ## Standing preflight directive (ce-ops#303)
 
 Every dispatch brief must carry this line: run the FULL local validator
