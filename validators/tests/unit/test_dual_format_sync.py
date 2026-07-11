@@ -99,3 +99,23 @@ def test_unpaired_markdown_file_is_untouched_by_gate(tmp_path: Path) -> None:
     result = chk.run_with_base([repo], base)
 
     assert result.ok, [error.format() for error in result.errors]
+
+
+def test_tracked_file_discovery_failure_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    repo, base = _init_repo(tmp_path)
+    _write_repo_file(repo, "docs/guide/unpaired.md", "# Unpaired\n\nChanged.\n")
+    _commit_all(repo)
+    real_run_git = chk.run_git
+
+    def failing_ls_files(args: list[str], repo_root: Path):
+        if args == ["ls-files", "-z"]:
+            return 1, "", "simulated repository failure"
+        return real_run_git(args, repo_root)
+
+    monkeypatch.setattr(chk, "run_git", failing_ls_files)
+
+    result = chk.run_with_base([repo], base)
+
+    assert not result.ok
+    assert {error.code for error in result.errors} == {chk.CODE_INVALID}
+    assert "git ls-files -z failed" in "\n".join(error.format() for error in result.errors)

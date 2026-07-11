@@ -22,9 +22,10 @@ CODE_INVALID: Final[str] = "dual_format_git_failed"
 
 
 def _tracked_files(repo_root: Path) -> set[str]:
-    returncode, stdout, _stderr = run_git(["ls-files", "-z"], repo_root)
+    returncode, stdout, stderr = run_git(["ls-files", "-z"], repo_root)
     if returncode != 0:
-        return set()
+        detail = stderr.strip() or "unknown error"
+        raise RuntimeError(f"git ls-files -z failed: {detail}")
     return {path for path in stdout.split("\0") if path}
 
 
@@ -78,7 +79,21 @@ def run_with_base(paths: Iterable[Path], base: str) -> CheckResult:
     if failed is not None:
         return failed
 
-    siblings = discover_sibling_pairs(repo_root)
+    try:
+        siblings = discover_sibling_pairs(repo_root)
+    except RuntimeError as exc:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(
+                make_error(
+                    CODE_INVALID,
+                    "TRACKED_FILES",
+                    "",
+                    str(exc),
+                    CONTRACT,
+                ),
+            ),
+        )
     errors = []
     seen_pairs: set[tuple[str, str]] = set()
     for path in sorted(changed):

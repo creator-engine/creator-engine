@@ -1,6 +1,6 @@
 ---
 slug: ce-n3-dualformat-sync-gate
-date: 2026-07-10
+date: 2026-07-11
 kind: added
 scope: validator PR preflight
 issue: none
