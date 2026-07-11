@@ -30,6 +30,36 @@ governance context using only read-only tools. Return a verdict only:
 Include concise findings and evidence needed for the controller to decide what
 to submit. Do not submit that decision yourself.
 
+## Review Structure and Refactoring Ownership
+
+The reviewer owns identifying refactoring opportunities and recommending
+bounded refactors; the implementer does not own a general refactoring loop.
+For M/L work classes, report two distinct passes under distinct headings:
+
+1. **Standards-conformance:** evaluate the change against documented repository
+   standards and the baseline smell vocabulary below.
+2. **Spec-fidelity:** evaluate the change against its originating Scope or
+   ticket acceptance criteria.
+
+For XS/S work classes, a smell-baseline-only review is acceptable when the
+brief does not require the full two-axis structure. Documented repository
+standards override this baseline wherever they conflict.
+
+### Baseline smell vocabulary
+
+- **Mysterious Names:** names obscure the purpose or behavior of an element.
+- **Duplicated Code:** equivalent logic or structure is repeated unnecessarily.
+- **Feature Envy:** code relies more on another component's data than its own.
+- **Data Clumps:** the same related values repeatedly travel or appear together.
+- **Primitive Obsession:** primitive values stand in for meaningful domain types.
+- **Repeated Switches:** the same conditional dispatch recurs across the codebase.
+- **Shotgun Surgery:** one change requires many small edits across many locations.
+- **Divergent Change:** one component changes for multiple unrelated reasons.
+- **Speculative Generality:** unused abstraction exists for hypothetical needs.
+- **Message Chains:** callers traverse a long sequence of object relationships.
+- **Middle Man:** a component delegates without adding meaningful behavior.
+- **Refused Bequest:** a subtype cannot honor inherited behavior or contracts.
+
 For self-fire review context (the reviewer identity is also the PR author or
 the review is otherwise labeled self-fire), never return `APPROVE`. Return
 `REQUEST_CHANGES` for blocking defects or `COMMENT` when no blocking defect is
