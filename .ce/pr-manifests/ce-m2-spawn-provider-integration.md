@@ -6,13 +6,14 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** M
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=5b9dea4e38c563b4b68545affe39bd6d9b9919de27bcb62c3760e3414c790c14
+AUTHORIZED_PATHS_SHA256=cd8768631c8f1d36072816cbb462511beaa4616c1817d5b3dea301e7275c10dc
 
 ```text
 .ce/changelog/ce-m2-spawn-provider-integration.md
 .ce/pr-manifests/ce-m2-spawn-provider-integration.md
+.ce/reference/cli.generated.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/forge/review_acting.py
 validators/creator_engine_validator/v3_cli.py
