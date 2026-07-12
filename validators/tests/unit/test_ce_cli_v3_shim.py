@@ -129,6 +129,32 @@ def test_v3_forwarder_uses_subprocess_and_propagates_return_code(monkeypatch) ->
     assert forwarded_envs[0][ce_cli._V3_FORWARDED_ENV] == "1"
 
 
+def test_review_spawn_provider_shim_forwards_config_without_importing_v3(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv, *, check, env):
+        calls.append(list(argv))
+        assert check is False
+        assert env[ce_cli._V3_FORWARDED_ENV] == "1"
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(ce_cli.subprocess, "run", fake_run)
+
+    assert ce_cli.main([
+        "review-spawn-provider",
+        "--config",
+        "/etc/creator-engine/ce-review-spawn-provider.env",
+    ]) == 0
+    assert calls == [[
+        sys.executable,
+        "-m",
+        "creator_engine_validator.v3_cli",
+        "review-spawn-provider",
+        "--config",
+        "/etc/creator-engine/ce-review-spawn-provider.env",
+    ]]
+
+
 def test_dequeue_forwarder_sets_v3_sentinel_and_keeps_stderr_quiet(monkeypatch, capsys) -> None:
     calls: list[list[str]] = []
     forwarded_envs: list[dict[str, str]] = []

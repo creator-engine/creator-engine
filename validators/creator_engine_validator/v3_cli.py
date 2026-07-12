@@ -4491,6 +4491,22 @@ def _build_parser() -> argparse.ArgumentParser:
 
     from .forge import review_pickup as review_pickup_module
 
+    p_review_spawn_provider = sub.add_parser(
+        "review-spawn-provider",
+        help="default-OFF governed reviewer spawn-provider policy seam",
+    )
+    p_review_spawn_provider.add_argument(
+        "--config",
+        required=True,
+        help="operator-owned environment-file reference supplied by the service unit",
+    )
+    p_review_spawn_provider.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable status",
+    )
+
     p_review_pickup = sub.add_parser(
         "review-pickup",
         help="controller review-pickup: route awaiting-review PRs to distinct non-author seats (ce-ops#188)",
@@ -6012,6 +6028,47 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     return _emit(args, 0, lines, payload)
 
 
+def _cmd_review_spawn_provider(args: argparse.Namespace) -> int:
+    """Report explicit provider policy without launching a reviewer process."""
+    from .forge import review_acting, review_spawn_provider
+
+    if not review_acting.is_acting_enabled():
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · review-spawn-provider REFUSED (gate): CE_REVIEW_ACTING_ENABLED=1 is required"],
+            {"error": "review_spawn_provider_disabled", "detail": "CE_REVIEW_ACTING_ENABLED=1 is required"},
+        )
+    try:
+        policy = review_spawn_provider.ProviderPolicy.from_env()
+    except review_spawn_provider.ProviderRefused as exc:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · review-spawn-provider REFUSED (policy): {exc}"],
+            {"error": "review_spawn_provider_policy", "detail": str(exc)},
+        )
+    if policy.capacity == 0:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · review-spawn-provider REFUSED (policy): CE_REVIEW_SPAWN_CAPACITY must be > 0"],
+            {"error": "review_spawn_provider_capacity", "detail": "CE_REVIEW_SPAWN_CAPACITY must be > 0"},
+        )
+    return _emit(
+        args,
+        0,
+        [f"{_BRAND} · review-spawn-provider configured: no request supplied; no reviewer launched"],
+        {
+            "action": "review_spawn_provider",
+            "configured": True,
+            "launched": False,
+            "capacity": policy.capacity,
+            "timeout_seconds": policy.timeout_seconds,
+        },
+    )
+
+
 def _path_manifest_against_index(
     repo_root: Path,
     *,
@@ -6320,6 +6377,7 @@ _DISPATCH = {
     "review-submit": _cmd_review_submit,
     "auto-merge": _cmd_auto_merge,
     "review-pickup": _cmd_review_pickup,
+    "review-spawn-provider": _cmd_review_spawn_provider,
     "review": _cmd_review,
     "merge": _cmd_merge,
     "playbook": playbook_runtime.run_cli,

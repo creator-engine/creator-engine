@@ -122,6 +122,18 @@ def test_review_pickup_unit_execstart(repo_root: Path):
     assert exec_start.endswith(" --json")
 
 
+def test_review_spawn_provider_unit_is_default_off_and_uses_ce_console_script(repo_root: Path):
+    unit = _read_unit(repo_root, "ce-review-spawn-provider.service")
+    service = unit["Service"]
+
+    assert service["EnvironmentFile"] == "/etc/creator-engine/ce-review-spawn-provider.env"
+    assert "Environment" not in service
+    assert service["ExecStart"] == (
+        "/usr/bin/env ce review-spawn-provider "
+        "--config /etc/creator-engine/ce-review-spawn-provider.env"
+    )
+
+
 def test_gate_daemon_installer_is_valid_bash(repo_root: Path):
     script = repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"
     result = subprocess.run(["bash", "-n", str(script)], check=False, capture_output=True, text=True)

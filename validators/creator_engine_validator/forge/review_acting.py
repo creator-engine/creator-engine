@@ -356,6 +356,16 @@ def _claim_state(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> _C
         "spawn_failed",
         "reviewer_authority_invalid",
         "live_claim_mismatch",
+        # M2 provider terminal-attempt vocabulary. These records are emitted
+        # by the sequenced provider adapter, so fold them before it can write
+        # durable evidence.
+        "SPAWN_REFUSED",
+        "SPAWN_FAILED",
+        "TIMEOUT",
+        "STALE_HEAD",
+        "MALFORMED_RESULT",
+        "PARTIAL_OUTPUT",
+        "REVIEWER_EXIT_NONZERO",
     })
     for record in matching:
         action = record["action"]
@@ -376,6 +386,15 @@ def _claim_state(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> _C
             if not open_claim or submission_started:
                 raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
             open_claim = False
+            continue
+
+        if action == "UNCERTAIN_COMMENT":
+            # The comment may already have reached the forge. Preserve this
+            # durable no-duplicate state for controller reconciliation.
+            if not open_claim or submission_started:
+                raise ActingLedgerUnreadable("acting ledger contains an impossible durable sequence")
+            open_claim = False
+            submission_started = True
             continue
 
         if action == "comment_submission_started":
