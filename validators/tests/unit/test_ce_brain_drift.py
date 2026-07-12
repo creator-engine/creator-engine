@@ -816,7 +816,7 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 109
+    assert len(active) == 110
     assert {
         brain_probe.record_probe_name(record)
         for record in active
