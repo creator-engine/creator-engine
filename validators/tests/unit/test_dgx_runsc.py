@@ -742,6 +742,14 @@ def test_dockerfile_builds_herdr_from_source_and_uses_tini() -> None:
     )
 
 
+def test_dockerfile_disables_git_commit_signing_for_all_seat_users() -> None:
+    text = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "git config --system commit.gpgsign false" in text
+    assert "git config --system --unset-all user.signingkey || true" in text
+    assert "git config --system --unset-all gpg.format || true" in text
+
+
 def test_dockerfile_venv_builder_installs_package_from_validators_subdir() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
 

@@ -112,6 +112,9 @@ RUN set -eux; \
     useradd --uid "${CE_DGX_UID}" --gid "${CE_DGX_GID}" --create-home --shell /bin/bash "${CE_DGX_USER}"; \
     install -d -o "${CE_DGX_UID}" -g "${CE_DGX_GID}" /workspace/creator-engine; \
     install -d -m 0700 -o "${CE_DGX_UID}" -g "${CE_DGX_GID}" /run/creator-engine/herdr; \
+    git config --system commit.gpgsign false; \
+    git config --system --unset-all user.signingkey || true; \
+    git config --system --unset-all gpg.format || true; \
     git config --system --add safe.directory /workspace/creator-engine
 
 # The release URL and controller-attested first-fetch digest are intentionally
