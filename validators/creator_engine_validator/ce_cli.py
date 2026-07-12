@@ -150,6 +150,7 @@ from . import (
     worktree_prune,
 )
 from ._versions import V3_LOCAL_STATE_ROOT
+from .daemon_heartbeat import DaemonHeartbeatEmitter
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
 from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
@@ -5171,6 +5172,22 @@ def _pickup_poll(args) -> int:
     except pickup.PickupError as exc:
         return _emit_pickup(args, 2, f"ce pickup poll refused (input): {exc}", None)
 
+    heartbeat_path = Path(os.environ.get(
+        "CE_BELT_HEARTBEAT_PATH",
+        Path.home() / ".local" / "state" / "creator-engine" / "daemon-heartbeats" / "belt.json",
+    ))
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat = DaemonHeartbeatEmitter(
+        heartbeat_path,
+        daemon_id="belt",
+        expected_interval_seconds=float(os.environ.get("CE_BELT_INTERVAL_SECONDS", "120")),
+        unit="ce-belt-daemon.service",
+        scope="system",
+    )
+    start_index = max(heartbeat.last_pass_index, 0)
+    heartbeat.emit("starting", start_index)
+    pass_index = heartbeat.last_pass_index + 1
+
     try:
         token = pickup.resolve_token(
             keys_dir=args.keys_dir,
@@ -5178,9 +5195,11 @@ def _pickup_poll(args) -> int:
             allow_ambient_gh=getattr(args, "allow_ambient_gh", False),
         )
     except pickup.PickupError as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         return _emit_pickup(args, 2, f"ce pickup poll refused (input): {exc}", None)
 
     try:
+        heartbeat.emit("running", pass_index)
         result = pickup.poll(
             token=token,
             transport=_make_pickup_transport(),
@@ -5188,7 +5207,11 @@ def _pickup_poll(args) -> int:
             repo=getattr(args, "repo", None),
             org=getattr(args, "org", None),
         )
+    except KeyboardInterrupt:
+        heartbeat.emit("stopping", heartbeat.last_pass_index)
+        raise
     except pickup.PickupRateLimited as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         return _emit_pickup(
             args,
             2,
@@ -5196,13 +5219,16 @@ def _pickup_poll(args) -> int:
             {"backoff": exc.to_payload()},
         )
     except pickup.PickupError as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         return _emit_pickup(args, 2, f"ce pickup poll failed: {exc}", None)
 
     # S1 observe-only is the default. When --claim is set the poller forge-arbitrates
     # a claim per actionable item (S2) and, only when --enable-launch is ALSO set,
     # spawns a fresh governed lane (S3, canary OFF by default).
     if getattr(args, "pickup_claim", False):
-        return _pickup_claim_and_launch(args, pickup, result, token)
+        code = _pickup_claim_and_launch(args, pickup, result, token)
+        heartbeat.emit("pass_complete" if code == 0 else "failed", heartbeat.last_pass_index)
+        return code
 
     payload = {
         "ok": True,
@@ -5220,6 +5246,7 @@ def _pickup_poll(args) -> int:
               f"(next poll >= {result.poll_interval}s)")
         for item in result.items:
             print(f"  - [{item['kind']}] {item['repo']}#{item['number']} ({item['reason']}) {item['url']}")
+    heartbeat.emit("pass_complete", pass_index)
     return 0
 
 

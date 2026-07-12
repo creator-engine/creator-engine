@@ -520,6 +520,49 @@ def test_cli_pickup_poll_missing_token_exit_2(monkeypatch, tmp_path, capsys):
     assert code == 2
 
 
+def test_cli_pickup_poll_heartbeat_marks_failed_poll(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    class CapturingHeartbeat:
+        instances = []
+
+        def __init__(self, path, **kwargs):
+            self.path = path
+            self.kwargs = kwargs
+            self.last_pass_index = -1
+            self.emissions = []
+            self.instances.append(self)
+
+        def emit(self, status, pass_index):
+            self.emissions.append((status, pass_index))
+            self.last_pass_index = pass_index
+
+    CapturingHeartbeat.instances.clear()
+    monkeypatch.setattr(ce_cli, "DaemonHeartbeatEmitter", CapturingHeartbeat)
+    monkeypatch.setenv("CE_BELT_HEARTBEAT_PATH", str(tmp_path / "belt.json"))
+    monkeypatch.setattr(pickup, "resolve_token", lambda **_kwargs: "token")
+    monkeypatch.setattr(
+        pickup,
+        "poll",
+        lambda **_kwargs: (_ for _ in ()).throw(pickup.PickupError("search unavailable")),
+    )
+
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-3", "--repo", "o/r", "--json",
+    ])
+
+    assert code == 2
+    heartbeat = CapturingHeartbeat.instances[0]
+    assert heartbeat.kwargs == {
+        "daemon_id": "belt",
+        "expected_interval_seconds": 120.0,
+        "unit": "ce-belt-daemon.service",
+        "scope": "system",
+    }
+    assert heartbeat.emissions == [("starting", 0), ("running", 1), ("failed", 1)]
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
 # ===========================================================================
 # S2 — claim + idempotency (dry-run).
 # ===========================================================================

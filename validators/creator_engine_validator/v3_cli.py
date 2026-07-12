@@ -5214,6 +5214,31 @@ def _cmd_controller_inbox(args: argparse.Namespace) -> int:
 def _cmd_queue_daemon(args: argparse.Namespace) -> int:
     """Autonomous Integrator merge-queue daemon."""
     lease: daemon_lease.DaemonLease | None = None
+    heartbeat_path = Path(os.environ.get(
+        "CE_INTEGRATOR_HEARTBEAT_PATH",
+        Path.home() / ".local" / "state" / "creator-engine" / "daemon-heartbeats" / "integrator.json",
+    ))
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat = DaemonHeartbeatEmitter(
+        heartbeat_path,
+        daemon_id="integrator",
+        expected_interval_seconds=float(args.interval),
+        unit="ce-integrator-daemon.service",
+        scope="system",
+    )
+    heartbeat.emit("starting", max(heartbeat.last_pass_index, 0))
+    heartbeat_index_offset = heartbeat.last_pass_index
+
+    def heartbeat_log_sink(record: Mapping[str, Any]) -> None:
+        event = record.get("action")
+        index = record.get("index")
+        if isinstance(index, int):
+            if event == "daemon_pass_start":
+                heartbeat.emit("running", heartbeat_index_offset + index)
+            elif event == "daemon_pass_complete":
+                heartbeat.emit("pass_complete", heartbeat_index_offset + index)
+        _queue_daemon_lease_log_sink(logger, lease)(record)
+
     try:
         lease = _acquire_queue_daemon_lease(args)
         # ``lease`` may legitimately be ``None`` here: the CLI deferred to a
@@ -5241,24 +5266,29 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
             interval_seconds=args.interval,
             dry_run=bool(args.dry_run),
             approval_wall=wall,
-            log_sink=_queue_daemon_lease_log_sink(logger, lease),
+            log_sink=heartbeat_log_sink,
             authorized_reviewers=_comma_values(getattr(args, "authorized_reviewers", ()) or ()),
             approval_marker_issuer=approval_marker_issuer,
             approval_settle_seconds=float(getattr(args, "approval_settle_seconds", 0.0)),
         )
     except daemon_lease.DaemonLeaseHeld as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         print(_queue_daemon_lease_refusal(args, stale=False, detail=str(exc)), file=sys.stderr)
         return 73
     except daemon_lease.DaemonLeaseStale as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         print(_queue_daemon_lease_refusal(args, stale=True, detail=str(exc)), file=sys.stderr)
         return 73
     except KeyboardInterrupt:  # pragma: no cover - operator stop for loop mode
+        heartbeat.emit("stopping", heartbeat.last_pass_index)
         print(f"{CE_CMD} queue-daemon: stopped", file=sys.stderr)
         return 130
     except integrator_belt.IntegratorBeltError as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         print(f"ERROR: {CE_CMD} queue-daemon refused: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:  # pragma: no cover - defensive fail-closed
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         print(f"ERROR: {CE_CMD} queue-daemon failed closed: {exc}", file=sys.stderr)
         return 1
     finally:
@@ -5943,12 +5973,15 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
         loop_result = review_pickup.run_review_pickup_loop(**loop_kwargs)
         result = loop_result.passes[-1] if loop_result.passes else review_pickup.ReviewPickupResult()
     except KeyboardInterrupt:
+        heartbeat.emit("stopping", heartbeat.last_pass_index)
         return _emit(args, 0, [f"{_BRAND} · review-pickup loop stopped"],
                      {"action": "review_pickup", "mode": mode, "loop": loop_mode, "stopped": True, "dry_run": dry_run})
     except pickup_search.PickupRateLimited as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         return _emit(args, 2, [f"{_BRAND} · review-pickup failed closed: {exc}"],
                      {"error": "rate_limited", "backoff": exc.to_payload()})
     except pickup_search.PickupError as exc:
+        heartbeat.emit("failed", heartbeat.last_pass_index)
         return _emit(args, 2, [f"{_BRAND} · review-pickup failed: {exc}"],
                      {"error": "review_pickup_failed", "detail": str(exc)})
 

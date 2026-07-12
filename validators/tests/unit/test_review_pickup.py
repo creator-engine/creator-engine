@@ -785,6 +785,27 @@ def test_cev3_review_pickup_heartbeat_bridges_passes_and_waits(monkeypatch, caps
     assert json.loads(capsys.readouterr().out)["action"] == "review_pickup"
 
 
+def test_cev3_review_pickup_heartbeat_marks_failed_loop_exit(monkeypatch, capsys):
+    from creator_engine_validator import v3_cli
+
+    _CapturingHeartbeat.instances.clear()
+    monkeypatch.setattr(v3_cli, "DaemonHeartbeatEmitter", _CapturingHeartbeat)
+    monkeypatch.setattr(v3_cli, "_review_pickup_token_supplier_from_args", lambda _args: lambda: "token")
+    monkeypatch.setattr(
+        review_pickup,
+        "run_review_pickup_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(review_pickup.PickupError("search unavailable")),
+    )
+
+    code = v3_cli.main([
+        "review-pickup", "--identity", "controller", "--repo", "o/r", "--seat", "ce-dev-3", "--json",
+    ])
+
+    assert code == 2
+    assert _CapturingHeartbeat.instances[0].emissions == [("starting", 0), ("failed", 0)]
+    assert json.loads(capsys.readouterr().out)["error"] == "review_pickup_failed"
+
+
 def test_awaiting_review_inbox_paginates_past_routing_first_page():
     forge = _FakeReviewPickupForge(author="author-a", requested=["ce-dev-2"])
     transport = _fake_transport([

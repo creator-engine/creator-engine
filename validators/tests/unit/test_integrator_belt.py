@@ -2413,6 +2413,47 @@ def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys, tmp_path: Path):
     assert '"enqueue_count": 0' in capsys.readouterr().out
 
 
+def test_ce_queue_daemon_heartbeat_marks_failed_loop_exit(monkeypatch, capsys, tmp_path: Path):
+    class CapturingHeartbeat:
+        instances = []
+
+        def __init__(self, path, **kwargs):
+            self.path = path
+            self.kwargs = kwargs
+            self.last_pass_index = -1
+            self.emissions = []
+            self.instances.append(self)
+
+        def emit(self, status, pass_index):
+            self.emissions.append((status, pass_index))
+            self.last_pass_index = pass_index
+
+    CapturingHeartbeat.instances.clear()
+    monkeypatch.setattr(v3_cli, "DaemonHeartbeatEmitter", CapturingHeartbeat)
+    monkeypatch.setenv("CE_INTEGRATOR_HEARTBEAT_PATH", str(tmp_path / "integrator.json"))
+    monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda _name: "token")
+    monkeypatch.setattr(
+        v3_cli.integrator_belt,
+        "run_daemon_loop",
+        lambda **_kwargs: (_ for _ in ()).throw(belt.IntegratorBeltError("queue unavailable")),
+    )
+
+    ret = v3_cli.main([
+        "queue-daemon", "--repo", REPO, "--once", "--dry-run", "--root", str(tmp_path), "--json",
+    ])
+
+    assert ret == 1
+    heartbeat = CapturingHeartbeat.instances[0]
+    assert heartbeat.kwargs == {
+        "daemon_id": "integrator",
+        "expected_interval_seconds": 60.0,
+        "unit": "ce-integrator-daemon.service",
+        "scope": "system",
+    }
+    assert heartbeat.emissions == [("starting", 0), ("failed", 0)]
+    assert "queue unavailable" in capsys.readouterr().err
+
+
 def test_ce_queue_daemon_refuses_second_singleton_lease_before_first_pass(
     monkeypatch,
     capsys,

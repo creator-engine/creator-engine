@@ -33,6 +33,9 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
         assert unit.has_section("Install")
         assert unit["Service"]["EnvironmentFile"]
         assert unit["Service"]["WorkingDirectory"] == "/workspace/creator-engine"
+        assert unit["Service"]["ExecStartPre"] == (
+            "/usr/bin/mkdir -p %h/.local/state/creator-engine/daemon-heartbeats"
+        )
         assert unit["Service"]["Restart"] == "on-failure"
         assert unit["Service"]["RestartSec"]
         assert "Environment" not in unit["Service"]
