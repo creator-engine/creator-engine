@@ -46,7 +46,7 @@ def _clock():
     return datetime(2026, 7, 10, 16, 0, tzinfo=timezone.utc)
 
 
-def _evidence(ctx, verdict="review verdict", **authority_overrides):
+def _evidence(ctx, verdict="COMMENT", **authority_overrides):
     authority = {
         "repo": ctx.repo,
         "pr_number": ctx.pr_number,
@@ -149,7 +149,7 @@ def test_run_acting_pass_spawns_and_posts_comment(tmp_path):
     assert spawned[0][1] is runner
     assert result.commented[0]["action"] == "comment_posted"
     post = next(call for call in runner.calls if "/issues/" in " ".join(call[0]))
-    assert json.loads(post[1]) == {"body": "review verdict"}
+    assert json.loads(post[1]) == {"body": "COMMENT"}
 
 
 def test_spawn_failure_logs_continues_and_is_durable(tmp_path):
@@ -159,7 +159,7 @@ def test_spawn_failure_logs_continues_and_is_durable(tmp_path):
     def spawn(ctx, runner):
         if ctx.pr_number == 42:
             raise RuntimeError("spawn refused")
-        return _evidence(ctx, "verdict")
+        return _evidence(ctx, "COMMENT")
 
     result = review_acting.run_acting_pass(
         items=[_item(42), _item(43)], gh_runner=_FakeGhRunner(), acting_ledger_path=ledger,
@@ -199,6 +199,7 @@ def test_run_acting_pass_refuses_unbound_stale_or_self_reviewer_evidence(tmp_pat
         ("malformed", _item(), lambda ctx: "not-json"),
         ("stale", _item(), lambda ctx: _evidence(ctx, head_sha="b" * 40)),
         ("self", _item(author="reviewer-seat-a"), lambda ctx: _evidence(ctx)),
+        ("approve", _item(), lambda ctx: _evidence(ctx, verdict="APPROVE")),
     )
     for label, item, output in cases:
         calls = []
@@ -211,6 +212,20 @@ def test_run_acting_pass_refuses_unbound_stale_or_self_reviewer_evidence(tmp_pat
 
         assert result.failed[0]["action"] == "reviewer_authority_invalid"
         assert not any("/issues/" in " ".join(argv) for argv, _ in calls)
+
+
+def test_default_spawner_uses_configured_provider_timeout(monkeypatch):
+    observed = {}
+
+    def fake_run(argv, **kwargs):
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+
+    monkeypatch.setenv(review_acting.ACTING_SPAWN_COMMAND_ENV, "reviewer --head {head_sha}")
+    monkeypatch.setenv("CE_REVIEW_SPAWN_TIMEOUT_SECONDS", "17")
+    monkeypatch.setattr(review_acting.subprocess, "run", fake_run)
+    review_acting.default_spawner(review_acting._context_from_item(_item()), _FakeGhRunner())
+    assert observed["timeout"] == 17
 
 
 def test_run_acting_pass_caps_durable_spawn_retries(tmp_path):
@@ -330,7 +345,7 @@ def test_dedup_is_head_scoped_and_survives_restart(tmp_path):
     ledger = tmp_path / "ledger.ndjson"
     first = review_acting.run_acting_pass(
         items=[_item()], gh_runner=_FakeGhRunner(), acting_ledger_path=ledger,
-        spawner=lambda ctx, runner: _evidence(ctx, "verdict"),
+        spawner=lambda ctx, runner: _evidence(ctx, "COMMENT"),
     )
     same_head_restart = review_acting.run_acting_pass(
         items=[_item()], gh_runner=_FakeGhRunner(), acting_ledger_path=ledger,
@@ -339,7 +354,7 @@ def test_dedup_is_head_scoped_and_survives_restart(tmp_path):
     later_head = "b" * 40
     later = review_acting.run_acting_pass(
         items=[_item(head_sha=later_head)], gh_runner=_FakeGhRunner(head_sha=later_head),
-        acting_ledger_path=ledger, spawner=lambda ctx, runner: _evidence(ctx, "later verdict"),
+        acting_ledger_path=ledger, spawner=lambda ctx, runner: _evidence(ctx, "COMMENT"),
     )
     later_head_restart = review_acting.run_acting_pass(
         items=[_item(head_sha=later_head)], gh_runner=_FakeGhRunner(head_sha=later_head),

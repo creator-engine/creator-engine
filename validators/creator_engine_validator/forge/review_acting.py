@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .review_spawn_provider import ProviderPolicy
+
 from ..pickup_search import GhRunner
 
 
@@ -305,7 +307,7 @@ def _reviewer_verdict(output: str, ctx: ActingContext) -> str | None:
     # directly; M2 emits a versioned envelope with the same binding mapping.
     if authority is None and evidence.get("version") == 1:
         authority = evidence.get("authority")
-    if not isinstance(verdict, str) or not verdict.strip() or not isinstance(authority, Mapping):
+    if verdict not in {"COMMENT", "REQUEST_CHANGES"} or not isinstance(authority, Mapping):
         return None
     if not ctx.assigned_reviewer or not ctx.author or reviewer != ctx.assigned_reviewer:
         return None
@@ -458,7 +460,7 @@ def default_spawner(ctx: ActingContext, gh_runner: GhRunner) -> str:
         check=False,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=ProviderPolicy.from_env().timeout_seconds,
         shell=False,
     )
     if proc.returncode != 0:
