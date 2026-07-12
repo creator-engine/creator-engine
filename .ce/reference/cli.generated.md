@@ -1182,6 +1182,14 @@ Positional arguments:
 | --- | --- | --- |
 | `v3_args` |  |  |
 
+### `ratifier-queue`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `ratify`
 
 Positional arguments:

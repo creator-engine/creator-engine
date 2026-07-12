@@ -10,6 +10,7 @@ SERVICE_NAMES = (
     "ce-belt-daemon.service",
     "ce-integrator-daemon.service",
     "ce-review-pickup-daemon.service",
+    "ce-ratifier-queue.service",
 )
 SEAT_UNIT_NAME = "ce-codex-seat@.service"
 
@@ -57,6 +58,19 @@ def test_belt_daemon_unit_execstart_is_observe_only_poll_loop(repo_root: Path):
     assert "--claim" not in exec_start
     assert "--enable-launch" not in exec_start
     assert "--allow-ambient-gh" not in exec_start
+
+
+def test_ratifier_queue_unit_is_proposal_only_and_restart_supervised(repo_root: Path):
+    unit = _read_unit(repo_root, "ce-ratifier-queue.service")
+    service = unit["Service"]
+    assert service["EnvironmentFile"]
+    assert service["WorkingDirectory"] == "/workspace/creator-engine"
+    assert service["Restart"] == "on-failure"
+    assert "ce ratifier-queue" in service["ExecStart"]
+    assert "--loop" in service["ExecStart"]
+    assert "CE_RATIFIER_QUEUE_CANDIDATES_PATH" in service["ExecStart"]
+    assert "GH_TOKEN" not in service["ExecStart"]
+    assert "--apply" not in service["ExecStart"]
 
 
 def test_codex_seat_unit_supervises_detached_container(repo_root: Path):

@@ -1,0 +1,15 @@
+[Unit]
+Description=Creator Engine ratifier queue proposal daemon
+Documentation=./README.md
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
+WorkingDirectory=/workspace/creator-engine
+ExecStartPre=/usr/bin/mkdir -p %h/.local/state/creator-engine/daemon-heartbeats
+ExecStart=/usr/bin/env ce ratifier-queue --candidates "$CE_RATIFIER_QUEUE_CANDIDATES_PATH" --state-path "${CE_RATIFIER_QUEUE_STATE_PATH:-%h/.local/state/creator-engine/ratifier-queue/state.json}" --loop --interval "${CE_RATIFIER_QUEUE_INTERVAL_SECONDS:-120}" --json
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=default.target

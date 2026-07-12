@@ -38,7 +38,7 @@ def _run_module(module: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.parametrize(
     "command",
-    ["install", "dispatch", "scope", "ratify", "drive", "report", "session", "queue-daemon"],
+    ["install", "dispatch", "scope", "ratify", "drive", "report", "session", "queue-daemon", "ratifier-queue"],
 )
 def test_ce_v3_shim_help_matches_v3_help(command: str) -> None:
     v3_command = ce_cli.V3_FORWARDING_SHIMS[command][1]
@@ -53,7 +53,7 @@ def test_ce_v3_shim_help_matches_v3_help(command: str) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["install", "dispatch", "scope", "ratify", "drive", "report", "session", "queue-daemon"],
+    ["install", "dispatch", "scope", "ratify", "drive", "report", "session", "queue-daemon", "ratifier-queue"],
 )
 def test_ce_v3_shim_propagates_bad_arg_return_code(command: str) -> None:
     v3_command = ce_cli.V3_FORWARDING_SHIMS[command][1]
