@@ -55,9 +55,14 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Protocol
 
+from .. import side_effect_ledger_runtime
 from ._redact import redact_gh_stderr
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused
 from .scoped_token import ScopedToken
@@ -77,6 +82,7 @@ _SCRUBBED_CHILD_ENV = ("GH_DEBUG", "GH_HOST", "GH_CONFIG_DIR", "GITHUB_API_URL")
 #: ``gh auth git-credential`` (which reads ``GH_TOKEN`` from the env). The token never enters argv.
 _GH_CREDENTIAL_ARGS = ("-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential")
 _ADR_NUMBER_RE = re.compile(r"(?:^|/)ADR-(\d{4,})[-_.]")
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 
 class PushRefused(ForgeConfigRefused):
@@ -124,6 +130,78 @@ class PushResult:
             "applied": self.applied,
             "pushed": self.pushed,
         }
+
+
+@dataclass(frozen=True)
+class PublishRequest:
+    """Value-free publish-gate input for policy hooks."""
+
+    repo: str
+    branch: str
+    local_sha: str
+    remote_sha: str | None
+    actor: str
+    seat_id: str
+    attribution: str
+    apply: bool
+    force: bool
+    fast_forward: bool | None
+    phase: str
+
+
+@dataclass(frozen=True)
+class PublishPolicyVerdict:
+    """Secret-free policy outcome for the publish gate."""
+
+    allowed: bool
+    reason: str | None = None
+    policy_name: str = "default_publish_policy"
+
+
+class PublishPolicy(Protocol):
+    """Pluggable publish policy seam."""
+
+    def evaluate(self, request: PublishRequest) -> PublishPolicyVerdict:
+        """Return a policy verdict for one publish request."""
+
+
+@dataclass(frozen=True)
+class DefaultPublishPolicy:
+    """Fail-closed baseline: attributed publishes only, never force."""
+
+    policy_name: str = "default_publish_policy"
+
+    def evaluate(self, request: PublishRequest) -> PublishPolicyVerdict:
+        if request.force:
+            return PublishPolicyVerdict(False, "force_push_refused", self.policy_name)
+        if not request.actor.strip() or not request.seat_id.strip() or not request.attribution.strip():
+            return PublishPolicyVerdict(False, "missing_publish_attribution", self.policy_name)
+        if not _REPO_RE.match(request.repo or ""):
+            return PublishPolicyVerdict(False, "malformed_repo", self.policy_name)
+        if not (request.branch or "").strip():
+            return PublishPolicyVerdict(False, "malformed_branch", self.policy_name)
+        if not _SHA_RE.fullmatch((request.local_sha or "").strip()):
+            return PublishPolicyVerdict(False, "malformed_local_sha", self.policy_name)
+        if request.phase == "final" and request.fast_forward is False:
+            return PublishPolicyVerdict(False, "non_fast_forward_refused", self.policy_name)
+        return PublishPolicyVerdict(True, None, self.policy_name)
+
+
+@dataclass(frozen=True)
+class PublishLedgerContext:
+    """Side-Effect Ledger binding and attribution for one host publish gate."""
+
+    controller_id: str
+    lane_id: str
+    claim_ref: str
+    repo_root: str | Path
+    side_effect_ledger_root: str | Path
+    active_work_ledger_root: str | Path
+    actor: str
+    seat_id: str
+    attribution: str
+    actor_role: str = "controller"
+    now: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -561,6 +639,138 @@ def _is_ancestor(spawn, source_dir: str, ancestor: str, descendant: str) -> bool
     return getattr(proc, "returncode", 1) == 0
 
 
+def _utc_now_str(now: datetime | None) -> str:
+    return (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _publish_actor(context: PublishLedgerContext | None) -> str:
+    return context.actor if context is not None else ""
+
+
+def _publish_seat(context: PublishLedgerContext | None) -> str:
+    return context.seat_id if context is not None else ""
+
+
+def _publish_attribution(context: PublishLedgerContext | None) -> str:
+    return context.attribution if context is not None else ""
+
+
+def _make_publish_request(
+    *,
+    repo: str,
+    branch: str,
+    local_sha: str,
+    remote_sha: str | None,
+    apply: bool,
+    force: bool,
+    fast_forward: bool | None,
+    phase: str,
+    publish_context: PublishLedgerContext | None,
+) -> PublishRequest:
+    return PublishRequest(
+        repo=repo,
+        branch=branch,
+        local_sha=local_sha.lower(),
+        remote_sha=remote_sha.lower() if isinstance(remote_sha, str) else None,
+        actor=_publish_actor(publish_context),
+        seat_id=_publish_seat(publish_context),
+        attribution=_publish_attribution(publish_context),
+        apply=bool(apply),
+        force=bool(force),
+        fast_forward=fast_forward,
+        phase=phase,
+    )
+
+
+def _evaluate_publish_policy(
+    policy: PublishPolicy | Callable[[PublishRequest], PublishPolicyVerdict],
+    request: PublishRequest,
+) -> PublishPolicyVerdict:
+    try:
+        raw = policy.evaluate(request) if hasattr(policy, "evaluate") else policy(request)
+    except Exception as exc:  # pragma: no cover - defensive policy boundary
+        return PublishPolicyVerdict(False, f"policy_error:{type(exc).__name__}", "publish_policy")
+    if not isinstance(raw, PublishPolicyVerdict):
+        return PublishPolicyVerdict(False, "malformed_policy_verdict", "publish_policy")
+    if raw.allowed and raw.reason:
+        return PublishPolicyVerdict(False, "allow_verdict_carried_refusal_reason", raw.policy_name)
+    if not raw.allowed and not raw.reason:
+        return PublishPolicyVerdict(False, "missing_refusal_reason", raw.policy_name)
+    return raw
+
+
+def _remote_state(request: PublishRequest) -> str:
+    if request.remote_sha is None:
+        return "absent"
+    if request.remote_sha == request.local_sha:
+        return "same"
+    return "ancestor" if request.fast_forward else "diverged"
+
+
+def _record_publish_event(
+    *,
+    context: PublishLedgerContext | None,
+    request: PublishRequest,
+    verdict: PublishPolicyVerdict,
+    effect_status: str,
+    refusal_reason: str | None = None,
+    pushed: bool = False,
+    up_to_date: bool = False,
+) -> None:
+    if context is None:
+        return
+    reason = refusal_reason or verdict.reason or "none"
+    side_effect_ledger_runtime.record(
+        controller_id=context.controller_id,
+        lane_id=context.lane_id,
+        claim_ref=context.claim_ref,
+        effect_id=f"publish-{uuid.uuid4().hex[:16]}",
+        effect_kind="git_mutation",
+        effect_status=effect_status,
+        summary=f"Host publish gate {verdict.policy_name} {('allowed' if verdict.allowed else 'refused')} {request.branch}.",
+        occurred_at=_utc_now_str(context.now),
+        repo_root=context.repo_root,
+        side_effect_ledger_root=context.side_effect_ledger_root,
+        active_work_ledger_root=context.active_work_ledger_root,
+        actor_role=context.actor_role,
+        subject_git_sha=request.local_sha,
+        details={
+            "event": "host_substrate_publish_gate",
+            "repo": request.repo,
+            "branch": request.branch,
+            "actor": request.actor,
+            "seat": request.seat_id,
+            "attribution": request.attribution,
+            "policy_name": verdict.policy_name,
+            "policy_verdict": "allow" if verdict.allowed else "deny",
+            "refusal_reason": reason,
+            "phase": request.phase,
+            "remote_state": _remote_state(request),
+            "apply": request.apply,
+            "force": request.force,
+            "pushed": pushed,
+            "up_to_date": up_to_date,
+        },
+        now=context.now,
+    )
+
+
+def _refuse_publish_policy(
+    *,
+    context: PublishLedgerContext | None,
+    request: PublishRequest,
+    verdict: PublishPolicyVerdict,
+) -> None:
+    _record_publish_event(
+        context=context,
+        request=request,
+        verdict=verdict,
+        effect_status="failed",
+        refusal_reason=verdict.reason,
+    )
+    raise PushRefused(f"publish policy {verdict.policy_name} refused {request.branch!r}: {verdict.reason}")
+
+
 def _validate(repo: str, branch: str, token: ScopedToken) -> None:
     """Refuse a malformed / credential-less request BEFORE any git call."""
     if not _REPO_RE.match(repo or ""):
@@ -583,6 +793,9 @@ def push_change(
     apply: bool = False,
     spawn=None,
     supersession_policy: SupersessionPolicy | None = SupersessionPolicy(),
+    publish_context: PublishLedgerContext | None = None,
+    publish_policy: PublishPolicy | Callable[[PublishRequest], PublishPolicyVerdict] | None = None,
+    force: bool = False,
 ) -> PushResult:
     """Push (or plan to push) ``refs/heads/<branch>`` to the CONSTRUCTED HTTPS remote (plan-by-default).
 
@@ -597,22 +810,81 @@ def push_change(
     _validate(repo, branch, token)
     _spawn = spawn or _default_spawn
     url = _https_remote_url(repo)
+    policy = publish_policy or (DefaultPublishPolicy() if publish_context is not None else None)
 
     local = _local_head(_spawn, source_dir, branch)
+    if policy is not None:
+        preflight_request = _make_publish_request(
+            repo=repo,
+            branch=branch,
+            local_sha=local,
+            remote_sha=None,
+            apply=apply,
+            force=force,
+            fast_forward=None,
+            phase="preflight",
+            publish_context=publish_context,
+        )
+        preflight_verdict = _evaluate_publish_policy(policy, preflight_request)
+        if not preflight_verdict.allowed:
+            _refuse_publish_policy(
+                context=publish_context, request=preflight_request, verdict=preflight_verdict
+            )
     if supersession_policy is not None:
         _enforce_supersession_guard(_spawn, source_dir, branch, local, supersession_policy)
     remote = _ls_remote(_spawn, source_dir, url, branch, token)
+    fast_forward = None if remote is None or remote == local else _is_ancestor(_spawn, source_dir, remote, local)
+
+    if policy is not None:
+        final_request = _make_publish_request(
+            repo=repo,
+            branch=branch,
+            local_sha=local,
+            remote_sha=remote,
+            apply=apply,
+            force=force,
+            fast_forward=fast_forward,
+            phase="final",
+            publish_context=publish_context,
+        )
+        final_verdict = _evaluate_publish_policy(policy, final_request)
+        if not final_verdict.allowed:
+            _refuse_publish_policy(
+                context=publish_context, request=final_request, verdict=final_verdict
+            )
+    else:
+        final_request = None
+        final_verdict = None
 
     if remote is not None and remote == local:
         # Idempotent: the remote already carries this exact head — nothing to push.
-        return PushResult(
+        result = PushResult(
             repo=repo, branch=branch, remote_url=url,
             local_head=local, remote_head=remote,
             changed=False, up_to_date=True, applied=apply, pushed=False,
         )
+        if final_request is not None and final_verdict is not None:
+            _record_publish_event(
+                context=publish_context,
+                request=final_request,
+                verdict=final_verdict,
+                effect_status="observed",
+                up_to_date=True,
+            )
+        return result
 
-    if remote is not None and not _is_ancestor(_spawn, source_dir, remote, local):
+    if remote is not None and not fast_forward:
         # The remote head is not an ancestor of the local head: a fast-forward is impossible.
+        if final_request is not None:
+            _record_publish_event(
+                context=publish_context,
+                request=final_request,
+                verdict=PublishPolicyVerdict(
+                    False, "non_fast_forward_refused", "push_transport_invariant"
+                ),
+                effect_status="failed",
+                refusal_reason="non_fast_forward_refused",
+            )
         raise PushRefused(
             f"remote {url} {branch} is not a fast-forward of the local head "
             f"(remote {remote[:12]}.. is not an ancestor of {local[:12]}..); "
@@ -621,11 +893,19 @@ def push_change(
 
     # A push is needed (create or fast-forward update).
     if not apply:
-        return PushResult(
+        result = PushResult(
             repo=repo, branch=branch, remote_url=url,
             local_head=local, remote_head=remote,
             changed=True, up_to_date=False, applied=False, pushed=False,
         )
+        if final_request is not None and final_verdict is not None:
+            _record_publish_event(
+                context=publish_context,
+                request=final_request,
+                verdict=final_verdict,
+                effect_status="requested",
+            )
+        return result
 
     proc = _spawn(
         [
@@ -636,12 +916,29 @@ def push_change(
         _child_env(token),
     )
     if getattr(proc, "returncode", 1) != 0:
+        if final_request is not None and final_verdict is not None:
+            _record_publish_event(
+                context=publish_context,
+                request=final_request,
+                verdict=final_verdict,
+                effect_status="failed",
+                refusal_reason="transport_push_failed",
+            )
         raise ForgeConfigError(
             f"could not push {branch} to {url}: "
             f"{redact_gh_stderr(getattr(proc, 'stderr', '') or '') or 'unknown error'}"
         )
-    return PushResult(
+    result = PushResult(
         repo=repo, branch=branch, remote_url=url,
         local_head=local, remote_head=remote,
         changed=True, up_to_date=False, applied=True, pushed=True,
     )
+    if final_request is not None and final_verdict is not None:
+        _record_publish_event(
+            context=publish_context,
+            request=final_request,
+            verdict=final_verdict,
+            effect_status="succeeded",
+            pushed=True,
+        )
+    return result

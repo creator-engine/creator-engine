@@ -9,11 +9,19 @@ before any remote read or push.
 from __future__ import annotations
 
 import subprocess
+import json
+from pathlib import Path
 
 import pytest
+import yaml
 
 from creator_engine_validator.forge import change_push
-from creator_engine_validator.forge.change_push import PushRefused, push_change
+from creator_engine_validator.forge.change_push import (
+    PublishLedgerContext,
+    PublishPolicyVerdict,
+    PushRefused,
+    push_change,
+)
 from creator_engine_validator.forge.github_repo_config import ForgeConfigError
 from creator_engine_validator.forge.scoped_token import ScopedToken
 
@@ -25,6 +33,8 @@ LOCAL = "a" * 40
 REMOTE = "b" * 40
 BASE = "c" * 40
 MERGE_BASE = "d" * 40
+CONTROLLER = "host-controller"
+LANE = "host-publish"
 
 
 def _token(value: str = SENTINEL) -> ScopedToken:
@@ -33,6 +43,56 @@ def _token(value: str = SENTINEL) -> ScopedToken:
         permissions=(("contents", "write"), ("pull_requests", "write")),
         expires_at="2026-06-11T10:00:00Z", token_ref=f"{REPO}@x", value=value,
     )
+
+
+def _claim(awl_root: Path) -> str:
+    claim_ref = f"claims/{CONTROLLER}/{LANE}.yaml"
+    path = awl_root / claim_ref
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "kind": "active-work-ledger-record",
+                "record_type": "claim",
+                "schema_version": "1",
+                "controller_id": CONTROLLER,
+                "lane_id": LANE,
+                "record_timestamp": "source-controlled:claims/host-controller/host-publish.yaml",
+                "worktree_path": "/worktrees/host-publish",
+                "envelope_ref": ".hermes/envelopes/host-publish.md",
+                "lease_seconds": 3600,
+                "claimed_at": "source-controlled:claims/host-controller/host-publish.yaml",
+                "last_heartbeat_at": "source-controlled:claims/host-controller/host-publish.yaml",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return claim_ref
+
+
+def _publish_context(tmp_path: Path, *, attribution: str = "host-substrate:publish") -> PublishLedgerContext:
+    awl_root = tmp_path / ".hermes" / "active-work-ledger"
+    claim_ref = _claim(awl_root)
+    return PublishLedgerContext(
+        controller_id=CONTROLLER,
+        lane_id=LANE,
+        claim_ref=claim_ref,
+        repo_root=tmp_path,
+        side_effect_ledger_root=tmp_path / "side-effect-ledger",
+        active_work_ledger_root=awl_root,
+        actor="ce-dev-1-host",
+        seat_id="ce-dev-1",
+        attribution=attribution,
+    )
+
+
+def _ledger_records(root: Path) -> list[dict]:
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((root / "side-effect-ledger").rglob("*.json"))
+        if path.name != "_head.json"
+    ]
 
 
 class ScriptedGit:
@@ -144,6 +204,91 @@ def test_apply_pushes_when_branch_is_new():
     push = git.argv_for("push")
     assert push is not None
     assert f"refs/heads/{BRANCH}:refs/heads/{BRANCH}" in push
+
+
+def test_apply_with_publish_context_records_allowed_publish_event(tmp_path):
+    git = ScriptedGit(remote_head=None)
+    ctx = _publish_context(tmp_path)
+
+    res = push_change(
+        REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git,
+        publish_context=ctx,
+    )
+
+    assert res.pushed is True
+    records = _ledger_records(tmp_path)
+    assert len(records) == 1
+    record = records[0]
+    assert record["effect_kind"] == "git_mutation"
+    assert record["effect_status"] == "succeeded"
+    assert record["subject_git_sha"] == LOCAL
+    assert record["details"]["event"] == "host_substrate_publish_gate"
+    assert record["details"]["actor"] == "ce-dev-1-host"
+    assert record["details"]["seat"] == "ce-dev-1"
+    assert record["details"]["branch"] == BRANCH
+    assert record["details"]["attribution"] == "host-substrate:publish"
+    assert record["details"]["policy_verdict"] == "allow"
+    assert record["details"]["refusal_reason"] == "none"
+    assert record["details"]["pushed"] is True
+
+
+def test_publish_context_refuses_missing_attribution_before_remote_read(tmp_path):
+    git = ScriptedGit(remote_head=None)
+    ctx = _publish_context(tmp_path, attribution="")
+
+    with pytest.raises(PushRefused, match="missing_publish_attribution"):
+        push_change(
+            REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git,
+            publish_context=ctx,
+        )
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+    records = _ledger_records(tmp_path)
+    assert len(records) == 1
+    assert records[0]["effect_status"] == "failed"
+    assert records[0]["subject_git_sha"] == LOCAL
+    assert records[0]["details"]["policy_verdict"] == "deny"
+    assert records[0]["details"]["refusal_reason"] == "missing_publish_attribution"
+
+
+def test_publish_policy_refuses_force_before_remote_read(tmp_path):
+    git = ScriptedGit(remote_head=None)
+    ctx = _publish_context(tmp_path)
+
+    with pytest.raises(PushRefused, match="force_push_refused"):
+        push_change(
+            REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git,
+            publish_context=ctx, force=True,
+        )
+
+    assert git.argv_for("ls-remote") is None
+    assert git.argv_for("push") is None
+    records = _ledger_records(tmp_path)
+    assert len(records) == 1
+    assert records[0]["details"]["force"] is True
+    assert records[0]["details"]["refusal_reason"] == "force_push_refused"
+
+
+def test_non_fast_forward_invariant_records_refusal_even_if_custom_policy_allows(tmp_path):
+    git = ScriptedGit(remote_head=REMOTE, is_ancestor=False)
+    ctx = _publish_context(tmp_path)
+
+    with pytest.raises(PushRefused, match="not a fast-forward"):
+        push_change(
+            REPO, BRANCH, source_dir="/wt", token=_token(), apply=True, spawn=git,
+            publish_context=ctx,
+            publish_policy=lambda request: PublishPolicyVerdict(True, None, "allow_all_test"),
+        )
+
+    assert git.argv_for("push") is None
+    records = _ledger_records(tmp_path)
+    assert len(records) == 1
+    assert records[0]["effect_status"] == "failed"
+    assert records[0]["details"]["policy_name"] == "push_transport_invariant"
+    assert records[0]["details"]["policy_verdict"] == "deny"
+    assert records[0]["details"]["remote_state"] == "diverged"
+    assert records[0]["details"]["refusal_reason"] == "non_fast_forward_refused"
 
 
 def test_apply_idempotent_noop_when_up_to_date():

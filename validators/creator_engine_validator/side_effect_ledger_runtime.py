@@ -194,6 +194,7 @@ def record(
     actor_role: str | None = None,
     pane_ref: str | None = None,
     subject_ref: str | None = None,
+    subject_git_sha: str | None = None,
     evidence_refs: Sequence[str] | None = None,
     redactions: Sequence[str] | None = None,
     details: dict[str, Any] | None = None,
@@ -249,6 +250,8 @@ def record(
         payload["pane_ref"] = pane_ref
     if subject_ref is not None:
         payload["subject_ref"] = subject_ref
+    if subject_git_sha is not None:
+        payload["subject_git_sha"] = subject_git_sha
     if evidence_refs:
         payload["evidence_refs"] = list(evidence_refs)
     if redactions:
