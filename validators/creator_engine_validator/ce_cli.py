@@ -45,6 +45,7 @@ ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
 ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
+ce containment-status   # probe fleet seat containment from live pids plus registry posture derivation
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -76,6 +77,7 @@ from . import (
     brain_probe,
     brain_runtime,
     containment_probe,
+    containment_status,
     brain_ingest_runtime,
     brain_recall,
     brain_recall_surface,
@@ -978,6 +980,41 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="json_output",
         help="emit the machine-readable JSON verdict",
+    )
+
+    containment_status_cmd = groups.add_parser(
+        "containment-status",
+        help="probe containment for a fleet of seats from live pids (fail-closed)",
+    )
+    containment_status_cmd.add_argument(
+        "--seat",
+        action="append",
+        dest="containment_seats",
+        default=[],
+        help="repeatable seat id or seat=pid binding; comma-separated values allowed",
+    )
+    containment_status_cmd.add_argument(
+        "--registry",
+        action="append",
+        dest="containment_registries",
+        default=[],
+        help="repeatable registry file/dir containing pane, seat-lifecycle, or seat_contract records",
+    )
+    containment_status_cmd.add_argument(
+        "--proc-root",
+        default="/proc",
+        help="proc tree root to read (default: /proc; override for fixtures)",
+    )
+    containment_status_cmd.add_argument(
+        "--host-pid",
+        default="1",
+        help="reference host pid to compare namespaces/root against (default: 1)",
+    )
+    containment_status_cmd.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit the machine-readable JSON fleet status",
     )
 
     # ce init — idempotent local v1.0 kernel state initialization (RV1-062).
@@ -2743,6 +2780,25 @@ def _containment_probe(args) -> int:
     return 0 if verdict.contained else 1
 
 
+def _containment_status(args) -> int:
+    """Emit fleet seat containment status from live pid probes.
+
+    Registry content can locate a seat's pid and Ring1/Herdr posture, but the
+    contained boolean/backend always comes from ``containment_probe``.
+    """
+    status = containment_status.probe_fleet(
+        seat_specs=getattr(args, "containment_seats", ()),
+        registry_paths=getattr(args, "containment_registries", ()),
+        proc_root=args.proc_root,
+        host_pid=args.host_pid,
+    )
+    if getattr(args, "json_output", False):
+        print(containment_status.render_json(status))
+    else:
+        print(containment_status.render_table(status))
+    return 0 if status.ok else 1
+
+
 def _make_gh_runner():
     """Factory for the work-claim gh runner (monkeypatchable in tests)."""
     return work_claims.default_gh_runner
@@ -3341,6 +3397,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _doctor(args)
     if args.group == "containment-probe":
         return _containment_probe(args)
+    if args.group == "containment-status":
+        return _containment_status(args)
     if args.group == "init":
         return _init(args)
     if args.group in ("launch", "hud"):
