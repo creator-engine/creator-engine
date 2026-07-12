@@ -66,6 +66,29 @@ def _empty_searches(count):
     return [_empty_search() for _ in range(count)]
 
 
+def _prime_belt_heartbeat(monkeypatch, tmp_path: Path) -> None:
+    """Keep pickup tests isolated from a prior user-scope heartbeat."""
+    heartbeat_path = tmp_path / "belt-heartbeat.json"
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "daemon_id": "belt",
+                "pass_index": 0,
+                "ts": "2026-07-12T00:00:00.000000Z",
+                "status": "pass_complete",
+                "expected_interval_seconds": 120.0,
+                "unit": "ce-belt-daemon.service",
+                "scope": "user",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CE_BELT_HEARTBEAT_PATH", str(heartbeat_path))
+
+
 def _queries_from_calls(calls):
     return [
         urllib.parse.parse_qs(urllib.parse.urlparse(call["url"]).query)["q"][0]
@@ -405,6 +428,7 @@ def test_resolve_token_missing_raises(monkeypatch, tmp_path):
 def test_cli_pickup_poll_observe_only_emits_items(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_clitoken\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
@@ -450,6 +474,7 @@ def test_cli_pickup_poll_unscoped_label_fails_before_transport(monkeypatch, tmp_
 def test_cli_pickup_poll_scoped_label_still_emits_labeled_item(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_clitoken\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
@@ -491,6 +516,7 @@ def test_cli_pickup_poll_help_mentions_search_label_and_launch(capsys):
 def test_cli_pickup_poll_rate_limit_json_fail_closed(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_clitoken\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
@@ -512,12 +538,79 @@ def test_cli_pickup_poll_rate_limit_json_fail_closed(monkeypatch, tmp_path, caps
 def test_cli_pickup_poll_missing_token_exit_2(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
     monkeypatch.delenv("CE_PICKUP_ALLOW_AMBIENT_GH", raising=False)
     code = ce_cli.main([
         "pickup", "poll", "--identity", "ce-dev-9", "--keys-dir", str(tmp_path),
     ])
     assert code == 2
+
+
+def test_cli_pickup_poll_heartbeat_marks_failed_poll(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import ce_cli
+
+    class CapturingHeartbeat:
+        instances = []
+
+        def __init__(self, path, **kwargs):
+            self.path = path
+            self.kwargs = kwargs
+            self.last_pass_index = -1
+            self.emissions = []
+            self.instances.append(self)
+
+        def emit(self, status, pass_index):
+            self.emissions.append((status, pass_index))
+            self.last_pass_index = pass_index
+
+    CapturingHeartbeat.instances.clear()
+    monkeypatch.setattr(ce_cli, "DaemonHeartbeatEmitter", CapturingHeartbeat)
+    monkeypatch.setenv("CE_BELT_HEARTBEAT_PATH", str(tmp_path / "belt.json"))
+    monkeypatch.setattr(pickup, "resolve_token", lambda **_kwargs: "token")
+    monkeypatch.setattr(
+        pickup,
+        "poll",
+        lambda **_kwargs: (_ for _ in ()).throw(pickup.PickupError("search unavailable")),
+    )
+
+    code = ce_cli.main([
+        "pickup", "poll", "--identity", "ce-dev-3", "--repo", "o/r", "--json",
+    ])
+
+    assert code == 2
+    heartbeat = CapturingHeartbeat.instances[0]
+    assert heartbeat.kwargs == {
+        "daemon_id": "belt",
+        "expected_interval_seconds": 120.0,
+        "unit": "ce-belt-daemon.service",
+        "scope": "user",
+    }
+    assert heartbeat.emissions == [("starting", 0), ("running", 1), ("failed", 1)]
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_cli_pickup_poll_heartbeat_resumes_pass_index_across_invocations(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    """Per-invocation belt processes continue the persisted heartbeat index."""
+    from creator_engine_validator import ce_cli
+    from creator_engine_validator.daemon_heartbeat import read_heartbeat
+
+    heartbeat_path = tmp_path / "belt.json"
+    monkeypatch.setenv("CE_BELT_HEARTBEAT_PATH", str(heartbeat_path))
+    monkeypatch.setattr(pickup, "resolve_token", lambda **_kwargs: "token")
+    monkeypatch.setattr(pickup, "poll", lambda **_kwargs: pickup.PollResult())
+
+    args = ["pickup", "poll", "--identity", "ce-dev-3", "--repo", "o/r", "--json"]
+    assert ce_cli.main(args) == 0
+    assert read_heartbeat(heartbeat_path)["pass_index"] == 1
+    capsys.readouterr()
+
+    assert ce_cli.main(args) == 0
+    assert read_heartbeat(heartbeat_path)["pass_index"] == 2
 
 
 # ===========================================================================
@@ -1166,6 +1259,7 @@ def test_mark_thread_read_only_after_launched(tmp_path):
 def test_cli_enable_launch_offline_e2e_asserts_full_lane_contract(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
@@ -1224,6 +1318,7 @@ def test_cli_enable_launch_offline_e2e_asserts_full_lane_contract(monkeypatch, t
 def test_flag_off_stays_dry_run(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
@@ -1259,6 +1354,7 @@ def test_cli_claim_without_launch_uses_default_state_root_and_records_ledger(
 ):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
@@ -1301,6 +1397,7 @@ def test_cli_claim_without_launch_uses_default_state_root_and_records_ledger(
 def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
