@@ -86,6 +86,10 @@ def test_existing_hadolint_must_be_an_executable_with_exact_pinned_bytes(tmp_pat
     binary = tmp_path / "hadolint"
     binary.write_bytes(b"pinned")
     binary.chmod(0o755)
+    # Stub the arch guard so the hash-verification logic is exercised hermetically
+    # on every host (including aarch64 CI seats); the arch guard itself is tested
+    # separately in test_selected_tier_refuses_missing_or_wrong_architecture_tools.
+    monkeypatch.setattr(smoke, "_require_linux_x86_64", lambda: None)
     monkeypatch.setattr(smoke, "_sha256", lambda _path: smoke.HADOLINT_SHA256)
     assert smoke.verify_hadolint(binary) == binary
 
@@ -94,7 +98,11 @@ def test_existing_hadolint_must_be_an_executable_with_exact_pinned_bytes(tmp_pat
         smoke.verify_hadolint(binary)
 
 
-def test_download_refuses_hash_mismatch_before_creating_executable(tmp_path: Path):
+def test_download_refuses_hash_mismatch_before_creating_executable(tmp_path: Path, monkeypatch):
+    # Stub the arch guard so the hash-check-before-write logic is exercised
+    # hermetically on every host; production refuses aarch64 binaries correctly.
+    monkeypatch.setattr(smoke, "_require_linux_x86_64", lambda: None)
+
     class Response:
         def __enter__(self):
             return self
