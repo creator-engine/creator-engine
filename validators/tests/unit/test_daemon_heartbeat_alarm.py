@@ -8,17 +8,23 @@ import pytest
 from creator_engine_validator import ce_cli, daemon_heartbeat_alarm as alarms
 
 
-# Keep CLI-path heartbeat fixtures fresh against the production clock while the
-# direct classifier assertions continue to share one deterministic test anchor.
+# NOW anchors the deterministic classifier tests: all boundary assertions (e.g.
+# 181 s vs 180 s grace) share one fixed instant so skew is zero.
+# The CLI-path test (test_cli_human_json_and_exit_contract) stamps its fixtures
+# at CALL TIME via `base=datetime.now(timezone.utc)` because the production
+# clock is used on that path — if the import-time anchor is reused, a slow CI
+# serial suite (collection-to-execution > interval × grace_factor = 180 s)
+# causes the "fresh" fixture to appear STALE.
 NOW = datetime.now(timezone.utc)
 
 
-def _heartbeat(daemon_id: str, *, status: str = "running", age: int = 0, interval: int = 60) -> dict[str, object]:
+def _heartbeat(daemon_id: str, *, status: str = "running", age: int = 0, interval: int = 60, base: datetime | None = None) -> dict[str, object]:
+    anchor = base if base is not None else NOW
     return {
         "schema_version": 1,
         "daemon_id": daemon_id,
         "pass_index": 1,
-        "ts": (NOW - timedelta(seconds=age)).isoformat().replace("+00:00", "Z"),
+        "ts": (anchor - timedelta(seconds=age)).isoformat().replace("+00:00", "Z"),
         "status": status,
         "expected_interval_seconds": interval,
     }
@@ -68,7 +74,7 @@ def test_alarm_append_is_deduplicated_within_window(tmp_path) -> None:
 
 
 def test_cli_human_json_and_exit_contract(tmp_path, monkeypatch, capsys) -> None:
-    _write(tmp_path, "belt")
+    _write(tmp_path, "belt", base=datetime.now(timezone.utc))
     monkeypatch.setenv("CE_HEARTBEAT_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("CE_HEARTBEAT_EXPECTED_DAEMONS", "belt")
     assert ce_cli.main(["heartbeat", "check", "--json"]) == 0
