@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=14
+AUTHORIZED_PATHS_COUNT=16
 
-AUTHORIZED_PATHS_SHA256=2c692e67886285f3c50bf01bd4a412dee0737c453552a7a3acebc2750196b69c
+AUTHORIZED_PATHS_SHA256=4df7ef80a4cde4e1ef02fd1c0005c7e9725fe3b0703d0a5dcc1150cb02025503
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-538-hookpack-delivery.md
 .ce/pr-manifests/ce-538-hookpack-delivery.md
 validators/creator_engine_validator/claude_hook_pack.py
@@ -21,6 +22,7 @@ validators/creator_engine_validator/hook_pack_assets/ce-stop.sh
 validators/creator_engine_validator/hook_pack_assets/settings.json
 validators/creator_engine_validator/onboard_apply.py
 validators/pyproject.toml
+validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_claude_hook_pack.py
 validators/tests/unit/test_claude_launch_spec.py
 validators/tests/unit/test_launch_runtime.py

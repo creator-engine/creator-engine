@@ -4453,4 +4453,56 @@ records:
   verification_method:
     evidence_ref: validators/tests/integration/test_install_bootstrap.py
     type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: ce1f229f7c6d255e98a0777a93cdfc5741a61ca484b0754d83510db34ccdfefb
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 7e459c1c2189c5b0d27bdaf7875eda4b216a86617e1fc33ca18512214e768e65
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-d1b-39-full-validator-long-running-v7
+  kind: brain-assertion
+  prev_hash: 1e0a67c8699cb730ffa99e924f4396ad029b6454b96c590ffd46c2854d1bf70f
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 171
+  statement: doctrine-item asserts full-validator-long-running
+  status: superseded
+  superseded_by: brain-assertion-077ad4cbb40a07ce2a4870e4
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: 82acbfb9d88b46c618dbee8b026ea8b1745c2ea5421884b329a4b71f45311b27
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 39a842a805e03e37190effa768e20857e1d2d6d394fbe9ba53973d683c0294e5
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-077ad4cbb40a07ce2a4870e4
+  kind: brain-assertion
+  prev_hash: 7e459c1c2189c5b0d27bdaf7875eda4b216a86617e1fc33ca18512214e768e65
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 172
+  statement: doctrine-item asserts full-validator-long-running
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
 schema_version: '1'
