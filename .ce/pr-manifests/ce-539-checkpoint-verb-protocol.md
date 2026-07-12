@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=16
+AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=6ca23c200e2feabd57b9dfe0d3cd0635f6c88c2455cde5c0172cf8079b057027
+AUTHORIZED_PATHS_SHA256=c6d73afbe08fada350895f007ec1be9c19f5fe2aa943dae546cb027f8077fa92
 
 ```text
 .ce/brain/assertions.yaml
@@ -22,6 +22,7 @@ playbooks/controller/briefs/checkpoint.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/checkpoint_runtime.py
 validators/creator_engine_validator/checks/documented_verbs.py
+validators/creator_engine_validator/pr_preflight.py
 validators/creator_engine_validator/schemas/checkpoint-input.schema.yaml
 validators/tests/unit/test_ce_brain_drift.py
 validators/tests/unit/test_ce_checkpoint_cli.py
