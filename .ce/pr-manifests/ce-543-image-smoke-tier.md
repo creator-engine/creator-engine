@@ -1,12 +1,10 @@
-# PR path manifest — ce-ops#543 · Dockerfile image-build smoke tier
+# PR path manifest — ce-ops#543 · Add a pinned Dockerfile image-build smoke tier to PR validation
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-543-image-smoke-tier` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
-
-BASE=2d7c4635e3c6485eb025f7b4bee540417496901c
 
 AUTHORIZED_PATHS_COUNT=7
 
