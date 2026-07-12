@@ -1,0 +1,10 @@
+[Unit]
+Description=Creator Engine daemon heartbeat alarm check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/creator-engine/gate-daemons.env
+WorkingDirectory=/workspace/creator-engine
+ExecStart=/usr/bin/env ce heartbeat check --json

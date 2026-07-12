@@ -74,8 +74,7 @@ def test_as_built_ce_inventory_matches_expected():
         "review-pickup", "review-spawn-provider", "ratifier-queue", "escalation", "notify", "reap", "status", "show",
         "artifacts", "report", "install", "carrier", "guide", "cockpit", "session",
         "queue-poll", "inbox", "controller-inbox", "queue-daemon", "emergency-stop",
-        "queue-dequeue", "approval-capability",
-        "checkpoint",
+        "queue-dequeue", "approval-capability", "checkpoint", "heartbeat",
     }
 
 

@@ -674,6 +674,18 @@ Options:
 | `--repo-root` | no |  | repo root to probe (default: cwd) |
 | `--json` | no |  | emit machine-readable JSON instead of Markdown |
 
+### `heartbeat`
+
+check supervised daemon heartbeat freshness
+
+### `heartbeat check`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--json` | no |  | emit machine-readable report |
+
 ### `hud`
 
 Options:
