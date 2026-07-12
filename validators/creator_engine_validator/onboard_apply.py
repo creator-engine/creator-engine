@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from . import brain_runtime, v3_installer, version as ce_version
+from . import brain_runtime, claude_hook_pack, v3_installer, version as ce_version
 from .checks import ce_runtime_policy
 from .forge.github_repo_config import DEFAULT_MAIN_PROTECTION, BranchProtectionPolicy
 from .forge.protection_diagnostics import (
@@ -2197,11 +2197,15 @@ def _run_leg(
         verify = driver.verify_checkout(repo=prepared.target_repo, branch=prepared.target_branch, path=path)
         if not verify.get("ok"):
             raise ApplyFailed("workspace_checkout_verify_failed", str(verify))
+        try:
+            hook_pack = claude_hook_pack.materialize_claude_hook_pack(path)
+        except claude_hook_pack.HookPackMaterializationError as exc:
+            raise ApplyFailed("hook_pack_materialization_failed", str(exc)) from exc
         return LegOutcome(
             leg_id,
             "already_satisfied" if action.get("already") else "applied",
             "checkout_greenfield_workspace",
-            verification={"ok": True, "path": str(path), **verify},
+            verification={"ok": True, "path": str(path), **verify, "hook_pack": hook_pack.to_dict()},
             rollback={"automatic": "remove E2-created checkout only when no operator edits are present"},
             mutated=not bool(action.get("already")),
         )

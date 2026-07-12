@@ -186,6 +186,28 @@ def test_build_governed_command_is_idempotent_on_clean_setting_sources():
     assert cls.evaluate_claude_launch(built, hook_pack_confirmed=True).ok
 
 
+@pytest.mark.parametrize(
+    ("base_argv", "expected_continue_count"),
+    [
+        ([], 1),
+        (["--verbose"], 1),
+        (["--continue"], 1),
+        (["--resume"], 0),
+        (["--session-id", "tenant-session"], 0),
+    ],
+)
+def test_build_governed_command_defaults_continue_unless_session_selected(
+    base_argv, expected_continue_count
+):
+    command = cls.build_governed_claude_command(
+        base_argv=base_argv,
+        mcp_config_path=".ce/state/launch/s/mcp/ce-mcp.json",
+    )
+    assert command.count("--continue") == expected_continue_count
+    for token in base_argv:
+        assert token in command
+
+
 def test_build_governed_command_refuses_conflicting_setting_sources():
     with pytest.raises(cls.GovernedCommandError):
         cls.build_governed_claude_command(

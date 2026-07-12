@@ -265,6 +265,21 @@ def _is_ce_owned_mcp_path(path: str) -> bool:
 _BUILDER_OWNED_VALUE_FLAGS = frozenset({"--setting-sources", "--mcp-config"})
 _BUILDER_OWNED_BARE_FLAGS = frozenset({"--strict-mcp-config"})
 
+# Claude's session selectors determine whether a new invocation resumes the
+# latest conversation, selects one interactively, or targets an explicit ID.
+# CE's default is ``--continue``; preserve a caller's explicit selection rather
+# than adding a contradictory second selector.
+_SESSION_SELECTION_FLAGS = frozenset({"--continue", "-c", "--resume", "-r", "--session-id"})
+
+
+def _has_session_selection(tokens: Sequence[str]) -> bool:
+    """Return true when the caller supplied any Claude session-selection flag."""
+    for token in tokens:
+        name, _sep, _value = token.partition("=")
+        if name in _SESSION_SELECTION_FLAGS:
+            return True
+    return False
+
 
 def build_governed_claude_command(
     *,
@@ -300,6 +315,10 @@ def build_governed_claude_command(
         )
 
     passthrough = _strip_builder_owned_flags(base)
+    # Extra Claude arguments are independent of default resume behavior. Only a
+    # real session selector supplied by the caller suppresses the default.
+    if not _has_session_selection(passthrough):
+        passthrough.append("--continue")
     command = ["claude", *passthrough]
     command += ["--setting-sources", "project"]
     command += ["--strict-mcp-config", "--mcp-config", mcp_config_path]
