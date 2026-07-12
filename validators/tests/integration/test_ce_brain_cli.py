@@ -45,6 +45,28 @@ def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def test_ce_brain_reconcile_requires_plan_acceptance_and_writes(tmp_path: Path, capsys):
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text("current", encoding="utf-8")
+    captured: list[tuple[Path, str]] = []
+    rt.assert_claim(
+        assertion_id="brain-assertion-reconcile-cli-0001",
+        claim={"subject": "artifact", "predicate": "hash", "object": "evidence.txt", "sha256": hashlib.sha256(b"old").hexdigest()},
+        scope="integration", evidence_ref="evidence.txt",
+        verification_method={"type": "static", "evidence_ref": "evidence.txt"},
+        state_root=tmp_path / ".ce", records=[], write=lambda path, text: captured.append((path, text)),
+    )
+    path, text = captured[-1]
+    _write_text(path, text)
+    argv = ["brain", "reconcile", "--repo-root", str(tmp_path), "--id", "brain-assertion-reconcile-cli-0001", "--json"]
+    assert ce_cli.main(argv) == 0
+    planned = json.loads(capsys.readouterr().out)
+    assert planned["written"] is False and planned["plan"]["write_required"] is True
+    assert ce_cli.main([*argv[:-1], "--apply", "--accept-plan-sha", planned["plan"]["plan_sha256"], "--json"]) == 0
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["written"] is True
+
+
 def _write_authoritative_validate_workflow_ledger(repo: Path) -> Path:
     captured: list[tuple[Path, str]] = []
     rt.assert_claim(
