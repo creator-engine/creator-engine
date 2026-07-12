@@ -5224,7 +5224,7 @@ def _cmd_queue_daemon(args: argparse.Namespace) -> int:
         daemon_id="integrator",
         expected_interval_seconds=float(args.interval),
         unit="ce-integrator-daemon.service",
-        scope="system",
+        scope="user",
     )
     heartbeat.emit("starting", max(heartbeat.last_pass_index, 0))
     heartbeat_index_offset = heartbeat.last_pass_index

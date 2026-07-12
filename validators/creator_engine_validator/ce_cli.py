@@ -5182,7 +5182,7 @@ def _pickup_poll(args) -> int:
         daemon_id="belt",
         expected_interval_seconds=float(os.environ.get("CE_BELT_INTERVAL_SECONDS", "120")),
         unit="ce-belt-daemon.service",
-        scope="system",
+        scope="user",
     )
     start_index = max(heartbeat.last_pass_index, 0)
     heartbeat.emit("starting", start_index)
@@ -5207,7 +5207,7 @@ def _pickup_poll(args) -> int:
             repo=getattr(args, "repo", None),
             org=getattr(args, "org", None),
         )
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:  # pragma: no cover - operator stop for loop mode
         heartbeat.emit("stopping", heartbeat.last_pass_index)
         raise
     except pickup.PickupRateLimited as exc:

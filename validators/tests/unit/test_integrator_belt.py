@@ -2448,7 +2448,7 @@ def test_ce_queue_daemon_heartbeat_marks_failed_loop_exit(monkeypatch, capsys, t
         "daemon_id": "integrator",
         "expected_interval_seconds": 60.0,
         "unit": "ce-integrator-daemon.service",
-        "scope": "system",
+        "scope": "user",
     }
     assert heartbeat.emissions == [("starting", 0), ("failed", 0)]
     assert "queue unavailable" in capsys.readouterr().err

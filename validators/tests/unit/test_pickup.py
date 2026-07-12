@@ -557,10 +557,33 @@ def test_cli_pickup_poll_heartbeat_marks_failed_poll(monkeypatch, tmp_path, caps
         "daemon_id": "belt",
         "expected_interval_seconds": 120.0,
         "unit": "ce-belt-daemon.service",
-        "scope": "system",
+        "scope": "user",
     }
     assert heartbeat.emissions == [("starting", 0), ("running", 1), ("failed", 1)]
     assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_cli_pickup_poll_heartbeat_resumes_pass_index_across_invocations(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    """Per-invocation belt processes continue the persisted heartbeat index."""
+    from creator_engine_validator import ce_cli
+    from creator_engine_validator.daemon_heartbeat import read_heartbeat
+
+    heartbeat_path = tmp_path / "belt.json"
+    monkeypatch.setenv("CE_BELT_HEARTBEAT_PATH", str(heartbeat_path))
+    monkeypatch.setattr(pickup, "resolve_token", lambda **_kwargs: "token")
+    monkeypatch.setattr(pickup, "poll", lambda **_kwargs: pickup.PollResult())
+
+    args = ["pickup", "poll", "--identity", "ce-dev-3", "--repo", "o/r", "--json"]
+    assert ce_cli.main(args) == 0
+    assert read_heartbeat(heartbeat_path)["pass_index"] == 1
+    capsys.readouterr()
+
+    assert ce_cli.main(args) == 0
+    assert read_heartbeat(heartbeat_path)["pass_index"] == 2
 
 
 # ===========================================================================
