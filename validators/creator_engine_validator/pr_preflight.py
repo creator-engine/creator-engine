@@ -50,11 +50,17 @@ PYTEST_FAILURE_PATTERN = re.compile(
 PYTEST_COLLECTED_PATTERN = re.compile(r"\bcollected\s+(\d+)\s+items?\b")
 PYTEST_OUTCOME_PATTERN = re.compile(
     r"\b(\d+)\s+"
-    r"(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns)\b"
+    r"(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns|deselected)\b"
 )
 PYTEST_OUTCOME_COUNT_PATTERN = re.compile(
     r"\b(?P<count>\d+)\s+"
-    r"(?P<outcome>passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns)\b"
+    r"(?P<outcome>passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns|deselected)\b"
+)
+PYTEST_TERMINAL_SUMMARY_PATTERN = re.compile(
+    r"^(?P<summary>(?:\d+\s+(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns|deselected)"
+    r"(?:\s*,\s*\d+\s+(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns|deselected))*))"
+    r"(?:\s*,\s*\d+\s+warnings?)*(?:\s+in\s+\d+(?:\.\d+)?s)?$",
+    re.IGNORECASE,
 )
 PYTEST_SKIP_REASON_PATTERN = re.compile(
     r"^SKIPPED\s+\[(?P<count>\d+)\]\s+(?P<location>.+?)(?::\s+(?P<reason>.*))?$",
@@ -115,6 +121,14 @@ class SkipReportEntry:
 class BaselineDiffTestResult:
     detail: str
     head_skip_count: int = 0
+
+
+@dataclass(frozen=True)
+class PytestExecutionCounts:
+    """Trustworthy counts parsed from one pytest leg's terminal summary."""
+
+    collected: int
+    passed: int
 
 
 @dataclass(frozen=True)
@@ -576,12 +590,48 @@ def _failure_ids(result: CommandResult) -> set[str]:
     return failures
 
 
-def _pytest_executed_test_count(result: CommandResult) -> int:
+def _pytest_terminal_counts(result: CommandResult) -> PytestExecutionCounts | None:
+    """Return counts only when pytest emitted a complete terminal outcome summary.
+
+    Quiet pytest output does not always include its collection banner.  In that
+    case the terminal outcome total is the only trustworthy collection count.
+    Looking for outcome tokens anywhere in the stream is deliberately avoided:
+    partial, truncated, or collection-error output must not turn a vacuous leg
+    green.
+    """
     text = result.stdout + "\n" + result.stderr
+    summaries: list[tuple[int, int]] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip().strip("=").strip()
+        terminal = PYTEST_TERMINAL_SUMMARY_PATTERN.match(line)
+        if terminal is None:
+            continue
+        outcome_counts = [
+            (int(match.group("count")), match.group("outcome"))
+            for match in PYTEST_OUTCOME_COUNT_PATTERN.finditer(terminal.group("summary"))
+        ]
+        if not outcome_counts:
+            continue
+        summaries.append((sum(count for count, _outcome in outcome_counts), sum(
+            count for count, outcome in outcome_counts if outcome == "passed"
+        )))
+
+    if not summaries:
+        return None
+
+    outcome_total, passed = summaries[-1]
+    if outcome_total <= 0:
+        return None
     collected = [int(match.group(1)) for match in PYTEST_COLLECTED_PATTERN.finditer(text)]
     if collected:
-        return max(collected)
-    return sum(int(match.group(1)) for match in PYTEST_OUTCOME_PATTERN.finditer(text))
+        collected_count = max(collected)
+        # A terminal summary that accounts for fewer tests than collection did is
+        # incomplete output, not evidence that the leg executed successfully.
+        if collected_count <= 0 or collected_count != outcome_total:
+            return None
+    else:
+        collected_count = outcome_total
+    return PytestExecutionCounts(collected=collected_count, passed=passed)
 
 
 def _pytest_outcome_count(result: CommandResult, outcome: str) -> int:
@@ -651,15 +701,17 @@ def _print_pytest_skip_report(result: CommandResult, out: TextIO) -> int:
     return skip_count
 
 
-def _validate_pytest_execution(label: str, result: CommandResult, command: str) -> None:
-    executed_count = _pytest_executed_test_count(result)
-    if result.returncode in (0, 1) and executed_count > 0:
-        return
+def _validate_pytest_execution(label: str, result: CommandResult, command: str) -> PytestExecutionCounts:
+    counts = _pytest_terminal_counts(result)
+    if result.returncode in (0, 1) and counts is not None:
+        return counts
 
-    if result.returncode == 5 or executed_count == 0:
-        reason = "pytest collected zero tests or produced no test-execution summary"
+    if result.returncode == 5:
+        reason = "pytest collected zero tests"
+    elif counts is None:
+        reason = "pytest produced no trustworthy terminal test-execution summary"
     else:
-        reason = f"pytest exited with code {result.returncode}, which indicates interruption, internal error, or usage error"
+        reason = f"pytest exited with code {result.returncode}, which indicates collection/import failure, interruption, internal error, or usage error"
     output = (result.stdout + "\n" + result.stderr).strip()
     excerpt = f" Output excerpt: {output[:500]}" if output else ""
     raise RuntimeError(
@@ -669,6 +721,18 @@ def _validate_pytest_execution(label: str, result: CommandResult, command: str) 
         "`$CE_VALIDATOR_PYTHON -m creator_engine_validator.ce_cli validate-pr ...` "
         f"and fix the test command/dependencies before trusting the diff gate. command={command!r}.{excerpt}"
     )
+
+
+def _pytest_counts_detail(
+    baseline: PytestExecutionCounts | None,
+    head: PytestExecutionCounts | None,
+) -> str:
+    def render(counts: PytestExecutionCounts | None) -> str:
+        if counts is None:
+            return "unavailable/unavailable"
+        return f"{counts.collected}/{counts.passed}"
+
+    return f"baseline collected/passed={render(baseline)}, head collected/passed={render(head)}"
 
 
 def _run_baseline_diff_tests(
@@ -699,8 +763,13 @@ def _run_baseline_diff_tests(
             remove = runner(["git", "worktree", "remove", "--force", str(base_worktree)], config.repo_root, None)
             _print_streams(remove, out, err)
 
-    _validate_pytest_execution("baseline", baseline, config.test_command)
-    _validate_pytest_execution("head", head, config.test_command)
+    parsed_baseline = _pytest_terminal_counts(baseline)
+    parsed_head = _pytest_terminal_counts(head)
+    try:
+        baseline_counts = _validate_pytest_execution("baseline", baseline, config.test_command)
+        head_counts = _validate_pytest_execution("head", head, config.test_command)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}. {_pytest_counts_detail(parsed_baseline, parsed_head)}") from None
     baseline_failures = _failure_ids(baseline)
     head_failures = _failure_ids(head)
     new_failures = sorted(head_failures - baseline_failures)
@@ -710,12 +779,15 @@ def _run_baseline_diff_tests(
         more = "" if len(new_failures) <= 5 else f" (+{len(new_failures) - 5} more)"
         raise RuntimeError(
             "baseline-diff test gate found new failure(s): "
-            f"{preview}{more} (baseline={len(baseline_failures)}, head={len(head_failures)})"
+            f"{preview}{more} (baseline={len(baseline_failures)} failures, head={len(head_failures)} failures; "
+            f"{_pytest_counts_detail(baseline_counts, head_counts)})"
         )
     return BaselineDiffTestResult(
         detail=(
             "zero new failures "
-            f"(baseline={len(baseline_failures)}, head={len(head_failures)}, command={config.test_command!r})"
+            f"(baseline={len(baseline_failures)} failures, head={len(head_failures)} failures; "
+            f"{_pytest_counts_detail(baseline_counts, head_counts)}; "
+            f"command={config.test_command!r})"
         ),
         head_skip_count=head_skip_count,
     )

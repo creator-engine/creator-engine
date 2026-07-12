@@ -1243,6 +1243,23 @@ def test_preflight_fails_closed_when_pytest_missing_on_both_sides(tmp_path: Path
     assert not any("verify-path-manifest" in call for call in runner.argv_calls())
 
 
+def test_preflight_fails_closed_when_collection_or_import_exits_nonzero(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    collection_failure = pr_preflight.CommandResult(
+        2,
+        "ERROR collecting validators/tests/unit/test_import.py\n1 error in 0.01s\n",
+        "ImportError while importing test module\n",
+    )
+    runner = FakeRunner(tmp_path, baseline_test_result=collection_failure)
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    assert "baseline-diff test command did not execute tests on baseline" in out.getvalue()
+    assert "collection/import failure" in out.getvalue()
+
+
 def test_preflight_fails_closed_when_one_side_collects_zero_tests(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pr_preflight, "_yaml_parse", lambda paths, label, err: None)
     monkeypatch.setattr(pr_preflight, "_workflow_yaml_paths", lambda repo_root: [])
@@ -1262,6 +1279,46 @@ def test_preflight_fails_closed_when_one_side_collects_zero_tests(tmp_path: Path
     assert "baseline-diff test command did not execute tests on head" in output
     assert "collected zero tests" in output
     assert not any("verify-path-manifest" in call for call in runner.argv_calls())
+
+
+def test_preflight_fails_closed_when_one_leg_has_no_output(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(tmp_path, head_test_result=pr_preflight.CommandResult(0, "", ""))
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    assert "baseline-diff test command did not execute tests on head" in out.getvalue()
+    assert "no trustworthy terminal test-execution summary" in out.getvalue()
+
+
+def test_preflight_fails_closed_when_summary_counts_are_untrustworthy(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    runner = FakeRunner(
+        tmp_path,
+        baseline_test_result=pr_preflight.CommandResult(0, "collected 2 items\n1 passed\n", ""),
+    )
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 1
+    assert "baseline-diff test command did not execute tests on baseline" in out.getvalue()
+    assert "no trustworthy terminal test-execution summary" in out.getvalue()
+
+
+def test_preflight_surfaces_baseline_and_head_collected_passed_counts(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    result = pr_preflight.CommandResult(0, "collected 2 items\n2 passed in 0.01s\n", "")
+    runner = FakeRunner(tmp_path, baseline_test_result=result, head_test_result=result)
+    out = io.StringIO()
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
+
+    assert rc == 0
+    assert "baseline collected/passed=2/2" in out.getvalue()
+    assert "head collected/passed=2/2" in out.getvalue()
 
 
 def test_preflight_still_passes_genuine_identical_test_failures(tmp_path: Path, monkeypatch):
@@ -1284,7 +1341,9 @@ def test_preflight_still_passes_genuine_identical_test_failures(tmp_path: Path, 
     rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=out, err=io.StringIO())
 
     assert rc == 0
-    assert "zero new failures (baseline=1, head=1" in out.getvalue()
+    assert "zero new failures (baseline=1 failures, head=1 failures" in out.getvalue()
+    assert "baseline collected/passed=1/0" in out.getvalue()
+    assert "head collected/passed=1/0" in out.getvalue()
     assert "PASS: PR preflight" in out.getvalue()
 
 
