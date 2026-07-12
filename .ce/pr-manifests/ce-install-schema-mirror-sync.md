@@ -1,5 +1,7 @@
 # PR path manifest — none · fix(install): sync docs/schemas install-answers mirror to canonical + parity guard
 
+- **Declared work class:** story
+
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-install-schema-mirror-sync` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
