@@ -81,6 +81,25 @@ Run `sha256sum .ce/state/research/RESUME_STATE_<UTC timestamp>.md` and record
 the digest in the checkpoint response. Do not say `/clear` occurred, is safe,
 or is complete until the file exists and this hash has been verified.
 
+### Structured command protocol
+
+For a deterministic agent-facing invocation, place the labeled facts in a JSON
+document conforming to
+`validators/creator_engine_validator/schemas/checkpoint-input.schema.yaml`, then
+run:
+
+```text
+ce checkpoint --facts <facts.json> --clean-boundary <reason> [--prior-checkpoint <path>] [--json]
+```
+
+The command consumes only this supplied document. It refuses secret- or
+transcript-shaped fields, incomplete/ambiguous facts, unsafe roots, and tracked
+targets before writing. A green result reports `path`, `sha256`, `complete`, and
+whether it was idempotent; human and JSON forms carry the same result facts.
+The caller may consider `/clear` only after independently verifying the exact
+persisted bytes and terminal-green completeness result. The command neither
+performs nor claims `/clear`.
+
 ## Completeness check
 
 Before handoff, verify every item is present or explicitly `unknown`:

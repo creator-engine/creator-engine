@@ -1,0 +1,63 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/checkpoint-input.schema.yaml"
+title: Creator Engine checkpoint facts input
+description: Caller-supplied, redaction-safe facts for the local-only ce checkpoint verb.
+type: object
+required: [facts, next_safe_act, reload_sources]
+unevaluatedProperties: false
+properties:
+  facts:
+    type: object
+    required:
+      - objective_and_boundary
+      - lanes_and_seats
+      - claims_and_territory
+      - heads_and_bases
+      - durable_paths_and_sha256s
+      - validation_review_and_gates
+      - blockers_and_awaiting_operator
+      - authority_boundaries_and_next_safe_act
+      - arc_rung_stamp
+    unevaluatedProperties: false
+    properties:
+      objective_and_boundary: {$ref: "#/$defs/fact"}
+      lanes_and_seats: {$ref: "#/$defs/fact"}
+      claims_and_territory: {$ref: "#/$defs/fact"}
+      heads_and_bases: {$ref: "#/$defs/fact"}
+      durable_paths_and_sha256s: {$ref: "#/$defs/fact"}
+      validation_review_and_gates: {$ref: "#/$defs/fact"}
+      blockers_and_awaiting_operator: {$ref: "#/$defs/fact"}
+      authority_boundaries_and_next_safe_act: {$ref: "#/$defs/fact"}
+      arc_rung_stamp: {$ref: "#/$defs/fact"}
+  delta:
+    type: array
+    minItems: 1
+    items: {$ref: "#/$defs/fact"}
+  next_safe_act:
+    type: string
+    minLength: 1
+    maxLength: 2000
+  reload_sources:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      minLength: 1
+      maxLength: 1024
+$defs:
+  fact:
+    type: object
+    required: [label, fact, source]
+    unevaluatedProperties: false
+    properties:
+      label:
+        type: string
+        enum: [probed, asserted, unknown]
+      fact:
+        type: string
+        minLength: 1
+        maxLength: 4000
+      source:
+        type: string
+        minLength: 1
+        maxLength: 1024

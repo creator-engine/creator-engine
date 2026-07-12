@@ -114,6 +114,7 @@ from . import (
     ce_event_runtime,
     ce_onboard,
     ce_provenance,
+    checkpoint_runtime,
     connector_runtime,
     continuity_drill_runtime,
     controller_posture,
@@ -523,6 +524,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="target interpreter path (overrides --venv)",
     )
     bootstrap.add_argument("--json", action="store_true", dest="json_output")
+
+    checkpoint = groups.add_parser(
+        "checkpoint",
+        help="persist a validated, local-only resume checkpoint; never grants authority",
+    )
+    checkpoint.add_argument("--facts", required=True, type=Path, help="JSON facts document matching checkpoint-input.schema.yaml")
+    checkpoint.add_argument("--clean-boundary", required=True, help="why this is a clean handoff boundary")
+    checkpoint.add_argument("--prior-checkpoint", default=None, help="optional prior checkpoint path; it is recorded, not read")
+    checkpoint.add_argument("--repo-root", default=".", help="repository root containing the untracked .ce/state/research root")
+    checkpoint.add_argument("--as-of", default=None, help="optional injected UTC RFC3339 timestamp for deterministic output")
+    checkpoint.add_argument("--json", action="store_true", dest="json_output", help="emit the same result fields as JSON")
 
     lane = groups.add_parser("lane", help="governed visible lane-launch primitive")
     lane_sub = lane.add_subparsers(dest="lane_cmd")
@@ -4451,6 +4463,32 @@ def _takeover(args) -> int:
     return 0 if plan.ring0_ok else 1
 
 
+def _checkpoint(args) -> int:
+    """Persist only caller-injected facts; this command has no controller authority."""
+    try:
+        result = checkpoint_runtime.create_checkpoint(
+            repo_root=args.repo_root,
+            facts_path=args.facts,
+            prior_checkpoint=args.prior_checkpoint,
+            clean_boundary=args.clean_boundary,
+            as_of=args.as_of,
+        )
+    except checkpoint_runtime.CheckpointError as exc:
+        if getattr(args, "json_output", False):
+            print(json.dumps({"kind": "ce-checkpoint-result", "status": "refused", "message": str(exc)}, sort_keys=True))
+        else:
+            print(f"ERROR: ce checkpoint refused: {exc}", file=sys.stderr)
+        return 2
+    payload = result.to_dict()
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, sort_keys=True))
+    else:
+        state = "idempotent" if result.idempotent else "persisted"
+        print(f"ce checkpoint: {state}; complete=green; path={result.path}; sha256={result.sha256}")
+        print("/clear was not performed or claimed; only consider it after independently verifying this persisted-byte hash.")
+    return 0
+
+
 def _continuity_drill(args) -> int:
     try:
         prior_runs = tuple(
@@ -5958,6 +5996,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return ce_onboard.run_cli(args)
     if args.group == "bootstrap":
         return _bootstrap(args)
+    if args.group == "checkpoint":
+        return _checkpoint(args)
     if args.group == "check":
         return _check(args)
     if args.group == "doctor":

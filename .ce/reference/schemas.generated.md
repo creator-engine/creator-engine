@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 75
+Schema files: 76
 
 ## Index
 
@@ -19,6 +19,7 @@ Schema files: 75
 | `schemas/brain-recall-record.schema.yaml` | Creator Engine Brain Recall Index Entry | `object` |
 | `schemas/brownfield-baseline-attestation.schema.yaml` | Creator Engine Brownfield Baseline Attestation | `object` |
 | `schemas/ce-event-block.schema.yaml` | Creator Engine CE-event signed block substrate | `object` |
+| `schemas/checkpoint-input.schema.yaml` | Creator Engine checkpoint facts input | `object` |
 | `schemas/completion-report.schema.yaml` | Creator Engine Completion Report | `object` |
 | `schemas/computer-use-authority-envelope.schema.yaml` | Creator Engine computer-use UI side-effect authority envelope | `object` |
 | `schemas/connector.schema.yaml` | Creator Engine connector descriptor substrate | `object` |
@@ -410,6 +411,35 @@ Definitions:
 | `hash` | string | no | pattern `^[0-9a-f]{64}$` |  |
 | `timestamp` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` |  |
 | `block` | object | no | additionalProperties `false` |  |
+
+### `schemas/checkpoint-input.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine checkpoint facts input |
+| `$id` | `https://creator-engine.local/schemas/checkpoint-input.schema.yaml` |
+| Root type | `object` |
+
+Caller-supplied, redaction-safe facts for the local-only ce checkpoint verb.
+
+Required fields:
+
+`facts`, `next_safe_act`, `reload_sources`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `facts` | object | yes | unevaluatedProperties `false` |  |
+| `delta` | array | no | minItems `1` |  |
+| `next_safe_act` | string | yes | minLength `1`<br>maxLength `2000` |  |
+| `reload_sources` | array | yes | minItems `1` |  |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `fact` | object | no | unevaluatedProperties `false` |  |
 
 ### `schemas/completion-report.schema.yaml`
 
