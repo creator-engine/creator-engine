@@ -45,6 +45,7 @@ ce connector plan       # build + validate a read-only read plan (offline)
 ce connector fetch      # execute one read-only GET via an injectable client; --provider github|jira|gitlab (G2.005.3); credential by reference; offline fails closed
 ce connector write-plan # build + validate a strict-mode tracker_mirror write plan (offline) (G2.005.2)
 ce connector submit     # execute one bounded tracker_mirror write; credential REQUIRED by reference; offline fails closed
+ce publish-branch       # host-side verified branch publish gate (fast-forward/no-force)
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -106,6 +107,11 @@ from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
 from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
 from .checks import ce_brain_drift
+from .forge.publish_branch import (
+    SeatIdentityExpectation,
+    default_git_runner as _publish_branch_default_git_runner,
+    publish_branch as run_publish_branch,
+)
 from .tmux_adapter import TmuxAdapter
 
 
@@ -127,6 +133,11 @@ def _make_worker_broker():
 def _make_worker_spawn_launcher():
     """Factory for the worker-spawn launcher seam (monkeypatchable in tests)."""
     return worker_spawn.LaunchRuntimeWorkerLauncher()
+
+
+def _make_publish_branch_runner():
+    """Factory for the host publish git runner (monkeypatchable in tests)."""
+    return _publish_branch_default_git_runner
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -234,6 +245,40 @@ def _build_parser() -> argparse.ArgumentParser:
         help="target interpreter path (overrides --venv)",
     )
     bootstrap.add_argument("--json", action="store_true", dest="json_output")
+
+    publish = groups.add_parser(
+        "publish-branch",
+        help="host-side verified branch publish gate (fast-forward/no-force)",
+    )
+    publish.add_argument("branch", help="local branch to publish to origin")
+    publish.add_argument("--repo-root", default=".", help="repo root/worktree containing the branch")
+    publish.add_argument("--repo", default=None, help="owner/name repo id (default: derived from origin URL)")
+    publish.add_argument(
+        "--expect-author-name",
+        default=None,
+        help="expected HEAD author name for the seat identity gate",
+    )
+    publish.add_argument(
+        "--expect-author-email",
+        default=None,
+        help="expected HEAD author email for the seat identity gate",
+    )
+    publish.add_argument(
+        "--expect-committer-name",
+        default=None,
+        help="expected HEAD committer name for the seat identity gate",
+    )
+    publish.add_argument(
+        "--expect-committer-email",
+        default=None,
+        help="expected HEAD committer email for the seat identity gate",
+    )
+    publish.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="verify publishability without pushing",
+    )
+    publish.add_argument("--json", action="store_true", dest="json_output")
 
     lane = groups.add_parser("lane", help="governed visible lane-launch primitive")
     lane_sub = lane.add_subparsers(dest="lane_cmd")
@@ -2762,6 +2807,35 @@ def _bootstrap(args) -> int:
     return 0 if result.ok else 1
 
 
+def _publish_branch(args) -> int:
+    expected = SeatIdentityExpectation(
+        author_name=getattr(args, "expect_author_name", None),
+        author_email=getattr(args, "expect_author_email", None),
+        committer_name=getattr(args, "expect_committer_name", None),
+        committer_email=getattr(args, "expect_committer_email", None),
+    )
+    result = run_publish_branch(
+        args.branch,
+        repo=getattr(args, "repo", None),
+        source_dir=getattr(args, "repo_root", "."),
+        expected_identity=expected,
+        apply=not getattr(args, "dry_run", False),
+        spawn=_make_publish_branch_runner(),
+    )
+    if getattr(args, "json_output", False):
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.ok:
+        action = "verified" if getattr(args, "dry_run", False) else ("pushed" if result.pushed else "up to date")
+        print(f"ce publish-branch: {action} {result.branch} ({result.local_head})")
+    else:
+        detail = "; ".join(result.evidence) if result.evidence else "verification failed"
+        print(
+            f"ERROR: ce publish-branch refused [{result.refusal_reason}]: {detail}",
+            file=sys.stderr,
+        )
+    return 0 if result.ok else 1
+
+
 def _containment_probe(args) -> int:
     """ce-ops#221 Fix-1 — emit a live-runtime containment verdict for a pid.
 
@@ -3371,6 +3445,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return ce_onboard.run_cli(args)
     if args.group == "bootstrap":
         return _bootstrap(args)
+    if args.group == "publish-branch":
+        return _publish_branch(args)
     if args.group == "check":
         return _check(args)
     if args.group == "doctor":

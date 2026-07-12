@@ -102,6 +102,14 @@ from .github_repo_config import (
 from .auto_merge import AutoMergeRefused, AutoMergeResult, enable_auto_merge
 from .merge import MergeRefused, MergeResult, merge
 from .plan_approval import ApprovalQuery, plan_approved
+from .publish_branch import (
+    CommitIdentity,
+    PublishBranchRefused,
+    PublishBranchResult,
+    SeatIdentityExpectation,
+    default_git_runner,
+    publish_branch,
+)
 from .review_submit import ReviewResult, ReviewSubmitRefused, submit_review
 from .ruleset import (
     CE_PROTECTION_RULESET_NAME,
@@ -144,6 +152,7 @@ __all__ = [
     "MergeRefused",
     "MergeResult",
     "OpenChangeRefused",
+    "CommitIdentity",
     "EvictionDetectionError",
     "ExecutorAdapter",
     "ExecutorPublishResult",
@@ -152,6 +161,8 @@ __all__ = [
     "AutoMergeResult",
     "RepairNeededEvent",
     "RepairPollResult",
+    "PublishBranchRefused",
+    "PublishBranchResult",
     "IntegratorExecutionResult",
     "RepairWorkItem",
     "ReviewResult",
@@ -164,6 +175,7 @@ __all__ = [
     "RulesetRefused",
     "RulesetResult",
     "RunnerResolutionPlan",
+    "SeatIdentityExpectation",
     "ScopedToken",
     "TokenMintRefused",
     "TokenRequest",
@@ -185,6 +197,8 @@ __all__ = [
     "mint_scoped_token",
     "open_change",
     "plan_approved",
+    "default_git_runner",
+    "publish_branch",
     "poll_repair_needed",
     "resolve_conflict",
     "resolve_non_overlapping_additions",
