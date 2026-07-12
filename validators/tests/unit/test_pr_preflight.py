@@ -353,6 +353,10 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
 
 def test_preflight_runs_shared_image_build_smoke_tier(tmp_path: Path, monkeypatch):
     _stub_expensive_preflight_checks(monkeypatch)
+    # This fixture calls the full preflight orchestration only to assert the
+    # shared smoke-tier seam. Keep the unrelated production disk gate outside
+    # this unit's scope, as nested preflight test subprocesses do.
+    monkeypatch.setenv(pr_preflight.DISK_HEADROOM_GATE_DISABLED_ENV, "1")
     calls = []
 
     def fake_smoke(base, repo_root, *, runner, out):
