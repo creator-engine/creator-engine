@@ -153,6 +153,7 @@ from . import (
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from .daemon_heartbeat import DaemonHeartbeatEmitter
+from . import daemon_heartbeat_alarm
 from .checks.side_effect_ledger import EFFECT_KINDS, EFFECT_STATUSES
 from .checks import ce_runtime_policy
 from .checks import ce_brain_assertions
@@ -1494,6 +1495,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=sorted(launch_runtime.SUPPORTED_HARNESSES),
         help="Controller-seat harness binary to preflight when visible launch is required",
     )
+
+    heartbeat = groups.add_parser("heartbeat", help="check supervised daemon heartbeat freshness")
+    heartbeat_sub = heartbeat.add_subparsers(dest="heartbeat_cmd")
+    heartbeat_check = heartbeat_sub.add_parser("check", help="classify daemon heartbeats and emit alarms")
+    heartbeat_check.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable report")
 
     # ce containment-probe — ce-ops#221 Fix-1. Containment is PROBED from the
     # live kernel runtime (/proc/<pid>), never self-reported. Fail-closed:
@@ -5809,6 +5815,24 @@ def _maybe_guard_stale_wheel_skew(args) -> int | None:
     return None
 
 
+def _heartbeat_check(args: argparse.Namespace) -> int:
+    state_dir, grace_factor, expected = daemon_heartbeat_alarm.configuration_from_environment()
+    report = daemon_heartbeat_alarm.check_heartbeats(
+        state_dir, grace_factor=grace_factor, expected_daemons=expected
+    )
+    if not report["ok"]:
+        daemon_heartbeat_alarm.append_new_alarms(
+            report, Path(".ce/state/controller-inbox/daemon-alarms.ndjson")
+        )
+    if args.json_output:
+        print(json.dumps(report, sort_keys=True))
+    else:
+        for entry in report["daemons"]:
+            marker = "OK" if entry["state"] == "OK" else "FAIL"
+            print(f"[{marker}] {entry['daemon_id']}: {entry['state']} — {entry['cause']}")
+    return 0 if report["ok"] else 1
+
+
 def _maybe_print_startup_update_notice(args) -> None:
     if getattr(args, "json_output", False):
         return
@@ -5851,6 +5875,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.group == "dequeue":
         return _dequeue(args)
+    if args.group == "heartbeat":
+        if getattr(args, "heartbeat_cmd", None) != "check":
+            parser.parse_args(["heartbeat", "--help"])
+            return 2
+        return _heartbeat_check(args)
     if args.group == "lane":
         lane_cmd = getattr(args, "lane_cmd", None)
         handler = _LANE_DISPATCH.get(lane_cmd)

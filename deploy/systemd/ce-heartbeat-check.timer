@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Creator Engine daemon heartbeat alarm check every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=ce-heartbeat-check.service
+
+[Install]
+WantedBy=timers.target
