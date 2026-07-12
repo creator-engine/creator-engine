@@ -6,16 +6,19 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=117bd71b170a3030b43dbbbbda6818b0071b17ea014312c1ffa1576caf99f14d
+AUTHORIZED_PATHS_SHA256=aaba9158baeb6aacbe1e4b6c90708cc2698bc05acbfac0119fdb1892812eec5b
 
 ```text
 .ce/changelog/ce-s4-heartbeat-alarms.md
 .ce/pr-manifests/ce-s4-heartbeat-alarms.md
+.ce/reference/cli.generated.md
 deploy/systemd/ce-heartbeat-check.service
 deploy/systemd/ce-heartbeat-check.timer
+docs/reference/cli.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/daemon_heartbeat_alarm.py
 validators/tests/unit/test_daemon_heartbeat_alarm.py
+validators/tests/unit/test_v1_docs_reconciliation.py
 ```

@@ -8,7 +8,9 @@ import pytest
 from creator_engine_validator import ce_cli, daemon_heartbeat_alarm as alarms
 
 
-NOW = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+# Keep CLI-path heartbeat fixtures fresh against the production clock while the
+# direct classifier assertions continue to share one deterministic test anchor.
+NOW = datetime.now(timezone.utc)
 
 
 def _heartbeat(daemon_id: str, *, status: str = "running", age: int = 0, interval: int = 60) -> dict[str, object]:
