@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 
 from creator_engine_validator import onboard_connection_status as status
-from creator_engine_validator.onboard_apply import LEG_IDS
+
+
+LEG_IDS = status.LEG_IDS
 
 
 def _entry(invocation: str, leg_id: str, action: str = "applied", outcome: str = "applied") -> dict:

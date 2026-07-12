@@ -6,12 +6,37 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .onboard_apply import LEG_IDS
-
-
 RESOLVED = "RESOLVED"
 UNRESOLVED_CONNECTION = "UNRESOLVED_CONNECTION"
 UNKNOWN = "UNKNOWN"
+
+# This is the schema-v1 order recorded in ``onboard/ledger.ndjson``.  Keep the
+# read-only status projection in the shared layer: importing the v3 apply
+# executor only to obtain this wire-format constant would cross the version
+# boundary.  A future ledger schema revision must update this decoder together
+# with the record format.
+LEG_IDS: tuple[str, ...] = (
+    "signed_spec_verify",
+    "answers_merge",
+    "host_dependencies",
+    "runtime_posture",
+    "cli_exposure",
+    "brain_genesis",
+    "github_bootstrap_token_probe",
+    "github_repo_create",
+    "github_app_install",
+    "github_workflow_install",
+    "github_branch_protection",
+    "workspace_checkout",
+    "first_project_smoke",
+    "brownfield_inventory_drift_check",
+    "brownfield_secret_preflight",
+    "brownfield_build_scaffold",
+    "brownfield_push_branch",
+    "brownfield_open_join_pr",
+    "brownfield_verify_preserved_checks",
+    "brownfield_record_apply_evidence",
+)
 
 
 @dataclass(frozen=True)
