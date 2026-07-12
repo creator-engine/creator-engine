@@ -341,6 +341,29 @@ def test_run_acting_pass_refuses_action_after_terminal_evidence_without_acting(t
     assert runner.calls == []
 
 
+def test_claim_state_folds_m2_provider_outcomes_before_adapter_writes_them():
+    ctx = review_acting._context_from_item(_item())
+    retryable = (
+        "SPAWN_REFUSED",
+        "SPAWN_FAILED",
+        "TIMEOUT",
+        "STALE_HEAD",
+        "MALFORMED_RESULT",
+        "PARTIAL_OUTPUT",
+        "REVIEWER_EXIT_NONZERO",
+    )
+    for action in retryable:
+        state = review_acting._claim_state([_claim(1), {**_claim(1), "action": action}], ctx)
+        assert state.max_attempt == 1
+        assert state.submission_started is False
+
+    uncertain = review_acting._claim_state(
+        [_claim(1), {**_claim(1), "action": "UNCERTAIN_COMMENT"}], ctx,
+    )
+    assert uncertain.max_attempt == 1
+    assert uncertain.submission_started is True
+
+
 def test_dedup_is_head_scoped_and_survives_restart(tmp_path):
     ledger = tmp_path / "ledger.ndjson"
     first = review_acting.run_acting_pass(

@@ -58,7 +58,7 @@ BASELINE_OFFENSES: frozenset[tuple[str, int, str]] = frozenset(
         ("docs/operations/CONTROLLER_BOOTSTRAP.md", 50, "identity"),
         ("docs/operations/CONTROLLER_BOOTSTRAP.md", 230, "identity"),
         ("docs/reference/cli.md", 7, "dev"),
-        ("docs/reference/cli.md", 80, "conveyor"),
+        ("docs/reference/cli.md", 81, "conveyor"),
     }
 )
 

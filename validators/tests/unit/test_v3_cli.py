@@ -3838,3 +3838,23 @@ def test_install_subparser_accepts_legacy_onboard_alias():
     # and the canonical spelling still resolves to the very same handler
     canonical_args = parser.parse_args(["install", "--spec", "some/spec.yaml"])
     assert v3_cli._DISPATCH.get(canonical_args.command) is handler
+
+
+def test_review_spawn_provider_refuses_by_default_and_only_reports_configured_policy(monkeypatch, capsys):
+    argv = ["review-spawn-provider", "--config", "/etc/creator-engine/ce-review-spawn-provider.env", "--json"]
+    monkeypatch.delenv("CE_REVIEW_ACTING_ENABLED", raising=False)
+    monkeypatch.delenv("CE_REVIEW_SPAWN_CAPACITY", raising=False)
+
+    assert v3_cli.main(argv) == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "review_spawn_provider_disabled"
+
+    monkeypatch.setenv("CE_REVIEW_ACTING_ENABLED", "1")
+    assert v3_cli.main(argv) == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "review_spawn_provider_capacity"
+
+    monkeypatch.setenv("CE_REVIEW_SPAWN_CAPACITY", "1")
+    assert v3_cli.main(argv) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "review_spawn_provider"
+    assert payload["configured"] is True
+    assert payload["launched"] is False
