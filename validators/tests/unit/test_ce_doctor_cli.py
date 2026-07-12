@@ -192,6 +192,24 @@ def test_doctor_human_marks_default_missing_harness_as_warning(
     assert "[FAIL] RED-G-HARNESS-PATH configured harness binary on PATH" not in out
 
 
+def test_doctor_marks_unresolved_connection_fail_without_changing_exit(inject_facts, monkeypatch, capsys):
+    inject_facts()
+    from creator_engine_validator import onboard_connection_status
+
+    monkeypatch.setattr(
+        doctor_runtime.onboard_connection_status,
+        "read_status",
+        lambda _root: onboard_connection_status.OnboardConnectionStatus(
+            onboard_connection_status.UNRESOLVED_CONNECTION, "forge identity unresolved"
+        ),
+    )
+    ret = ce_cli.main(["doctor", "--repo-root", "."])
+    out = capsys.readouterr().out
+    assert ret == 0
+    assert "ce doctor: PASS" in out
+    assert "[FAIL] CE-ONBOARD-CONNECTION onboard forge connection" in out
+
+
 def test_doctor_codex_harness_check_honors_override_env_exclusively(
     inject_facts, monkeypatch, tmp_path, capsys
 ):

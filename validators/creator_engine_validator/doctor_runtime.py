@@ -25,6 +25,7 @@ from typing import Any, Sequence
 from . import bootstrap_runtime
 from . import environment_guard as guard
 from . import launch_runtime
+from . import onboard_connection_status
 from . import resource_bound_spec
 from .packaging_runtime import interpreter_in_contract, verify_packaging_contract
 from .tmux_adapter import TmuxAdapter
@@ -340,6 +341,20 @@ def run_doctor(
     if require_visible_launch and harness_check["applicable"] and not harness_check["ok"]:
         payload["refused_clauses"].append(harness_check["clause"])
         payload["ok"] = False
+    connection = onboard_connection_status.read_status(Path(repo_root) / ".ce" / "state")
+    payload["onboard_connection"] = connection.to_dict()
+    payload["checks"].append(
+        {
+            "clause": "CE-ONBOARD-CONNECTION",
+            "name": "onboard forge connection",
+            "applicable": True,
+            "ok": connection.state == onboard_connection_status.RESOLVED,
+            "detail": connection.detail,
+            # An unresolved connection must be visually unmistakable, but it is
+            # advisory-only: doctor keeps its longstanding exit-code contract.
+            "advisory_failure": connection.state == onboard_connection_status.UNRESOLVED_CONNECTION,
+        }
+    )
     # ce-ops#25: surface the derived CE version identity beside the packaging
     # health line (local preflight telemetry, Open-Q3 — never attestation).
     payload["ce_version"] = ce_version(repo_root)
@@ -432,6 +447,8 @@ def render_human(report: DoctorReport) -> str:
             mark = "skip"
         elif check["ok"]:
             mark = "ok"
+        elif check.get("advisory_failure"):
+            mark = "FAIL"
         elif (
             check.get("clause") == "CE-BRAIN-RECALL"
             or check.get("clause") not in report.payload["refused_clauses"]

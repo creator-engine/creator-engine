@@ -975,6 +975,25 @@ def test_status_projects_phase_skin(tmp_path, capsys):
     assert payload["scopes"][0]["projection"]["board"] == "READY"
 
 
+def test_status_surfaces_unresolved_onboard_connection(monkeypatch, tmp_path, capsys):
+    from creator_engine_validator import onboard_connection_status
+
+    monkeypatch.setattr(
+        v3_cli.onboard_connection_status,
+        "read_status",
+        lambda _root: onboard_connection_status.OnboardConnectionStatus(
+            onboard_connection_status.UNRESOLVED_CONNECTION, "forge identity unresolved"
+        ),
+    )
+    ret = v3_cli.main(["status", "--root", str(tmp_path), "--json"])
+    assert ret == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["onboard_connection"]["state"] == "UNRESOLVED_CONNECTION"
+    ret = v3_cli.main(["status", "--root", str(tmp_path)])
+    assert ret == 0
+    assert "WARNING: onboard connection UNRESOLVED" in capsys.readouterr().out
+
+
 def test_show_surfaces_card_labels(tmp_path, capsys):
     _file_ready(tmp_path)
     v3_cli.main(["show", "rate-limit-login", "--root", str(tmp_path)])
