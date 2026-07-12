@@ -1222,6 +1222,14 @@ Positional arguments:
 | --- | --- | --- |
 | `v3_args` |  |  |
 
+### `review-spawn-provider`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `review-submit`
 
 Positional arguments:
