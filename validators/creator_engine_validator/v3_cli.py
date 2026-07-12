@@ -93,6 +93,7 @@ from . import (
 )
 from ._versions import V3_LOCAL_STATE_ROOT
 from . import daemon_lease
+from .daemon_heartbeat import DaemonHeartbeatEmitter
 from .forge import (
     RulesetBypassActor,
     RulesetPolicy,
@@ -5807,12 +5808,6 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     from . import pickup_search
     from .forge import review_pickup
 
-    try:
-        review_pickup.review_pickup_query(repo=getattr(args, "repo", None), org=getattr(args, "org", None))
-    except pickup_search.PickupError as exc:
-        return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): {exc}"],
-                     {"error": "review_pickup_input", "detail": str(exc)})
-
     loop_mode = bool(getattr(args, "loop", False))
     mode = "loop" if loop_mode else "once"
     interval = (
@@ -5823,6 +5818,26 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     if loop_mode and interval <= 0:
         return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): --loop requires --interval > 0"],
                      {"error": "review_pickup_input", "detail": "--loop requires --interval > 0", "mode": mode})
+    heartbeat_path = Path(os.environ.get(
+        "CE_REVIEW_PICKUP_HEARTBEAT_PATH",
+        str(Path(os.environ.get("HOME", str(Path.home()))) / ".local" / "state" / "creator-engine"
+            / "daemon-heartbeats" / "review-pickup.json"),
+    )).expanduser()
+    heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat = DaemonHeartbeatEmitter(
+        heartbeat_path,
+        daemon_id="review-pickup",
+        expected_interval_seconds=interval if interval > 0 else None,
+        unit="ce-review-pickup-daemon.service",
+        scope="user",
+    )
+    heartbeat.emit("starting", 0)
+
+    try:
+        review_pickup.review_pickup_query(repo=getattr(args, "repo", None), org=getattr(args, "org", None))
+    except pickup_search.PickupError as exc:
+        return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): {exc}"],
+                     {"error": "review_pickup_input", "detail": str(exc)})
 
     try:
         token_supplier = _review_pickup_token_supplier_from_args(args)
@@ -5852,6 +5867,22 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     dry_run = bool(getattr(args, "dry_run", False))
     applied = bool(getattr(args, "apply", False) and not dry_run)
     logger = review_pickup.JsonLineLogger(sys.stderr)
+
+    def heartbeat_log_sink(payload: Mapping[str, Any]) -> None:
+        logger(payload)
+        event = payload.get("event")
+        index = payload.get("index")
+        if not isinstance(index, int):
+            return
+        if event == "review_pickup_pass_start":
+            heartbeat.emit("running", index)
+        elif event == "review_pickup_pass_complete":
+            heartbeat.emit("pass_complete", index)
+
+    def heartbeat_sleep(seconds: float) -> None:
+        time.sleep(seconds)
+        heartbeat.emit_periodic_running(heartbeat.last_pass_index)
+
     inbox_path = getattr(args, "inbox_path", None) or str(review_pickup.DEFAULT_AWAITING_REVIEW_INBOX_PATH)
     acting = bool(getattr(args, "acting", False))
     acting_callback = None
@@ -5898,7 +5929,8 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
             dry_run=dry_run,
             iterations=None if loop_mode else 1,
             interval=interval,
-            log_sink=logger,
+            log_sink=heartbeat_log_sink,
+            sleep=heartbeat_sleep,
             inbox_path=inbox_path,
             max_consecutive_failures=getattr(
                 args,
