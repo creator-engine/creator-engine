@@ -3546,6 +3546,7 @@ def _brain_reconcile(args) -> int:
         print(f"plan_sha256: {plan['plan_sha256']}")
         print(f"ledger_head_before: {plan['ledger_head_before']}")
         print(f"ledger_head_after: {plan['ledger_head_after']}")
+        print(f"flat_active_count_delta: +{plan['flat_active_count_delta']}")
         if payload["persisted_sha256"] is not None:
             print(f"persisted_sha256: {payload['persisted_sha256']}")
     return 0

@@ -61,22 +61,34 @@ def test_apply_requires_exact_digest_and_is_idempotent(tmp_path: Path):
     result = brain_reconcile.apply(repo_root=tmp_path, assertion_ids=_ids(1), accept_plan_sha=plan["plan_sha256"])
     assert result.written and result.persisted_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
     assert os.stat(path).st_mode & 0o777 == 0o600
-    no_change = brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+    with pytest.raises(brain_reconcile.BrainReconcileRefused, match="not active"):
+        brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+    no_change = brain_reconcile.plan(
+        repo_root=tmp_path,
+        assertion_ids=[plan["changes"][0]["replacement_id"]],
+    )
     assert not no_change["write_required"]
 
 
-def test_multiple_readdresses_downstream_and_preserves_semantics(tmp_path: Path):
+def test_multiple_appends_preserve_exact_ledger_prefix_and_supersede_pairs(tmp_path: Path):
     path, files = _ledger(tmp_path, ["one", "two", "three"])
     files[0].write_text("changed-one", encoding="utf-8")
     files[2].write_text("changed-three", encoding="utf-8")
-    before = rt.load_records_from_path(path)
+    before = path.read_bytes()
+    original_records = rt.load_records_from_path(path)
     plan = brain_reconcile.plan(repo_root=tmp_path, assertion_ids=[_ids(3)[0], _ids(3)[2]])
     brain_reconcile.apply(repo_root=tmp_path, assertion_ids=[_ids(3)[0], _ids(3)[2]], accept_plan_sha=plan["plan_sha256"])
     after = rt.load_records_from_path(path)
-    assert plan["affected_record_count"] == 3
-    for index, record in enumerate(after):
-        assert {key: value for key, value in record.items() if key not in {"claim", "prev_hash", "content_hash"}} == {key: value for key, value in before[index].items() if key not in {"claim", "prev_hash", "content_hash"}}
-    assert after[1]["prev_hash"] == after[0]["content_hash"]
+    assert plan["affected_record_count"] == 4
+    assert plan["flat_active_count_delta"] == 2
+    assert len(after) == len(original_records) + 4
+    assert after[:len(original_records)] == original_records
+    for change, tombstone, replacement in zip(plan["changes"], after[-4::2], after[-3::2]):
+        assert tombstone["id"] == change["id"]
+        assert tombstone["status"] == "superseded"
+        assert tombstone["superseded_by"] == replacement["id"] == change["replacement_id"]
+        assert replacement["status"] == "active"
+        assert replacement["claim"]["evidence_sha256"] == change["new_sha256"]
 
 
 @pytest.mark.parametrize("bad", ["../outside", "/tmp/outside", "https://example.invalid/e", "missing.txt"])
@@ -91,7 +103,7 @@ def test_refuses_unsafe_or_missing_evidence(tmp_path: Path, bad: str):
         brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
 
 
-def test_refuses_duplicate_unknown_inactive_and_ambiguous(tmp_path: Path):
+def test_refuses_duplicate_unknown_and_ambiguous(tmp_path: Path):
     path, _ = _ledger(tmp_path)
     with pytest.raises(brain_reconcile.BrainReconcileRefused): brain_reconcile.plan(repo_root=tmp_path, assertion_ids=[_ids(1)[0], _ids(1)[0]])
     with pytest.raises(brain_reconcile.BrainReconcileRefused): brain_reconcile.plan(repo_root=tmp_path, assertion_ids=["brain-assertion-unknown-0000"])
@@ -100,3 +112,66 @@ def test_refuses_duplicate_unknown_inactive_and_ambiguous(tmp_path: Path):
     records[0]["content_hash"] = rt.canonical_content_hash(records[0])
     path.write_text(rt.serialize_ledger(records), encoding="utf-8")
     with pytest.raises(brain_reconcile.BrainReconcileRefused): brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+
+
+def test_refuses_inactive_assertion(tmp_path: Path):
+    _path, files = _ledger(tmp_path)
+    files[0].write_text("changed", encoding="utf-8")
+    initial = brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+    brain_reconcile.apply(repo_root=tmp_path, assertion_ids=_ids(1), accept_plan_sha=initial["plan_sha256"])
+    with pytest.raises(brain_reconcile.BrainReconcileRefused, match="not active"):
+        brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+
+
+def test_refuses_non_static_assertion(tmp_path: Path):
+    path, _files = _ledger(tmp_path)
+    records = rt.load_records_from_path(path)
+    records[0]["verification_method"] = {"type": "probe", "probe": "self_identity"}
+    records[0]["evidence_ref"] = "probe:self_identity"
+    records[0]["content_hash"] = rt.canonical_content_hash(records[0])
+    path.write_text(rt.serialize_ledger(records), encoding="utf-8")
+    with pytest.raises(brain_reconcile.BrainReconcileRefused, match="not static evidence"):
+        brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+
+
+def test_apply_verifies_only_selected_static_replacements(tmp_path: Path, monkeypatch):
+    _path, files = _ledger(tmp_path)
+    files[0].write_text("changed", encoding="utf-8")
+    current = brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+    monkeypatch.setattr(
+        brain_reconcile.ce_brain_drift,
+        "verify_state_root",
+        lambda *_args, **_kwargs: pytest.fail("reconcile must not live-probe unrelated active assertions"),
+    )
+    result = brain_reconcile.apply(
+        repo_root=tmp_path,
+        assertion_ids=_ids(1),
+        accept_plan_sha=current["plan_sha256"],
+    )
+    assert result.written
+
+
+def test_apply_preserves_primary_error_when_rollback_fails(tmp_path: Path, monkeypatch):
+    path, files = _ledger(tmp_path)
+    files[0].write_text("changed", encoding="utf-8")
+    current = brain_reconcile.plan(repo_root=tmp_path, assertion_ids=_ids(1))
+    original_write = brain_reconcile._atomic_write
+    calls = 0
+
+    def fail_rollback(target: Path, text: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            original_write(target, text)
+            return
+        raise OSError("rollback unavailable")
+
+    monkeypatch.setattr(brain_reconcile, "_atomic_write", fail_rollback)
+    monkeypatch.setattr(brain_reconcile, "_verify_replacements", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("primary failure")))
+    with pytest.raises(RuntimeError, match="primary failure"):
+        brain_reconcile.apply(
+            repo_root=tmp_path,
+            assertion_ids=_ids(1),
+            accept_plan_sha=current["plan_sha256"],
+        )
+    assert calls == 2

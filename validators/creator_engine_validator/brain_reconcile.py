@@ -1,8 +1,8 @@
 """Fail-closed, reviewable static-evidence ledger reconciliation.
 
-This module deliberately changes no assertion semantics.  It only replaces an
-explicitly selected static evidence digest and re-addresses the hash chain that
-follows it.  The caller must separately accept the exact deterministic plan.
+This module deliberately changes no existing assertion record.  It appends an
+explicitly selected static-evidence correction as a ce-411 supersede pair. The
+caller must separately accept the exact deterministic plan.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from typing import Any, Iterable
 
 from . import brain_runtime
 from .checks import ce_brain_drift
-from .runtime_evidence_spine import CONTENT_HASH_FIELD, GENESIS_PREV_HASH, canonical_content_hash
+from .runtime_evidence_spine import CONTENT_HASH_FIELD
 
 
 class BrainReconcileRefused(brain_runtime.BrainRuntimeError):
@@ -101,11 +101,55 @@ def _latest(records: list[dict[str, Any]]) -> dict[str, int]:
     return result
 
 
-def _readdress(records: list[dict[str, Any]], start: int) -> None:
-    for index in range(start, len(records)):
+def _corrected_claim(record: dict[str, Any], *, owner: dict[str, Any], key: str, digest: str) -> dict[str, Any]:
+    claim = copy.deepcopy(record["claim"])
+    if owner is record["claim"]:
+        target = claim
+    else:
+        target = claim["evidence"]
+    target[key] = digest
+    return claim
+
+
+def _append_supersede_pair(
+    records: list[dict[str, Any]],
+    *,
+    record: dict[str, Any],
+    claim: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str]:
+    """Append one ce-411 correction without mutating the current ledger prefix."""
+    result = brain_runtime.correct_claim(
+        assertion_id=str(record["id"]),
+        claim=claim,
+        evidence_ref=str(record["evidence_ref"]),
+        statement=str(record["statement"]),
+        assertion_type=str(record["type"]),
+        verification_method=copy.deepcopy(record["verification_method"]),
+        scope=copy.deepcopy(record["scope"]),
+        state_root=Path(".ce"),
+        records=records,
+        write=lambda _path, _text: None,
+    )
+    return [*records, result.superseded_record, result.record], str(result.record["id"])
+
+
+def _verify_replacements(
+    *,
+    records: list[dict[str, Any]],
+    ledger_path: Path,
+    repo_root: Path,
+    replacement_ids: Iterable[str],
+) -> None:
+    """Drift-verify only static replacements; unrelated live probes are excluded."""
+    latest = _latest(records)
+    context = ce_brain_drift.DriftContext(repo_root=repo_root)
+    findings = []
+    for assertion_id in replacement_ids:
+        index = latest[assertion_id]
         record = records[index]
-        record["prev_hash"] = str(records[index - 1][CONTENT_HASH_FIELD]) if index else GENESIS_PREV_HASH
-        record[CONTENT_HASH_FIELD] = canonical_content_hash(record)
+        findings.extend(ce_brain_drift._verify_record(record, ledger_path, ("records", index), context))
+    if findings:
+        raise BrainReconcileRefused("post-write selected static assertion verification failed")
 
 
 def plan(*, repo_root: str | Path, assertion_ids: Iterable[str], ledger_path: str | Path | None = None) -> dict[str, Any]:
@@ -127,10 +171,9 @@ def plan(*, repo_root: str | Path, assertion_ids: Iterable[str], ledger_path: st
         raise BrainReconcileRefused("unknown assertion ID: " + ", ".join(sorted(unknown)))
     updated = copy.deepcopy(records)
     changes: list[dict[str, Any]] = []
-    indexes: list[int] = []
     for assertion_id in selected:
         index = latest[assertion_id]
-        record = updated[index]
+        record = records[index]
         if record.get("status") != "active":
             raise BrainReconcileRefused(f"assertion {assertion_id} is not active")
         method = record.get("verification_method")
@@ -140,19 +183,24 @@ def plan(*, repo_root: str | Path, assertion_ids: Iterable[str], ledger_path: st
         observed = hashlib.sha256(_evidence(root, record.get("evidence_ref")).read_bytes()).hexdigest()
         if old == observed:
             continue
-        owner[key] = observed
-        changes.append({"id": assertion_id, "old_sha256": old, "new_sha256": observed, "record_index": index})
-        indexes.append(index)
-    if indexes:
-        _readdress(updated, min(indexes))
+        corrected_claim = _corrected_claim(record, owner=owner, key=key, digest=observed)
+        updated, replacement_id = _append_supersede_pair(updated, record=record, claim=corrected_claim)
+        changes.append({
+            "id": assertion_id,
+            "old_sha256": old,
+            "new_sha256": observed,
+            "replacement_id": replacement_id,
+        })
+    if changes:
         errors = brain_runtime.validate_records(updated, path)
         if errors:
             raise BrainReconcileRefused("reconciled ledger failed validation: " + "; ".join(error.format() for error in errors))
     after = str(updated[-1][CONTENT_HASH_FIELD]) if updated else None
     payload: dict[str, Any] = {
-        "affected_record_count": len(updated) - min(indexes) if indexes else 0,
+        "affected_record_count": len(changes) * 2,
         "changed_assertion_ids": [change["id"] for change in changes],
         "changes": changes,
+        "flat_active_count_delta": len(changes),
         "ledger_head_after": after,
         "ledger_head_before": before,
         "ledger_path": str(path),
@@ -196,20 +244,32 @@ def apply(*, repo_root: str | Path, assertion_ids: Iterable[str], accept_plan_sh
     original = path.read_bytes()
     records = brain_runtime.load_records_from_path(path)
     root = Path(repo_root).resolve()
-    latest = _latest(records)
+    replacement_ids: list[str] = []
     for change in current["changes"]:
+        latest = _latest(records)
         record = records[latest[change["id"]]]
         owner, key, _old = _hash_slot(record)
-        owner[key] = change["new_sha256"]
-    _readdress(records, min(change["record_index"] for change in current["changes"]))
+        claim = _corrected_claim(record, owner=owner, key=key, digest=change["new_sha256"])
+        records, replacement_id = _append_supersede_pair(records, record=record, claim=claim)
+        if replacement_id != change["replacement_id"]:
+            raise BrainReconcileRefused("fresh reconcile plan no longer matches replacement assertion IDs")
+        replacement_ids.append(replacement_id)
     text = brain_runtime.serialize_ledger(records)
     try:
         _atomic_write(path, text)
         brain_runtime.load_records_from_path(path)
-        drift = ce_brain_drift.verify_state_root(root / ".ce", context=ce_brain_drift.DriftContext(repo_root=root))
-        if not drift.ok:
-            raise BrainReconcileRefused("post-write brain drift verification failed")
+        _verify_replacements(
+            records=records,
+            ledger_path=path,
+            repo_root=root,
+            replacement_ids=replacement_ids,
+        )
     except Exception:
-        _atomic_write(path, original.decode("utf-8"))
+        try:
+            _atomic_write(path, original.decode("utf-8"))
+        except Exception:
+            # The original failure is the actionable cause; rollback failure must
+            # not replace it at the public command boundary.
+            pass
         raise
     return ReconcileResult(path, current, True, hashlib.sha256(path.read_bytes()).hexdigest())
