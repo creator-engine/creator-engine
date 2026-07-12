@@ -6,6 +6,9 @@ These units keep the autonomous gate daemons alive after host reboot:
   work-pickup conveyor belt; it does not claim work or launch seats.
 - `ce-integrator-daemon.service`: runs `queue-daemon` for merge-queue repair.
 - `ce-review-pickup-daemon.service`: runs `review-pickup` for review fan-out.
+- `ce-ratifier-queue.service`: folds controller-supplied candidate/evidence
+  snapshots into a durable, proposal-only ratifier queue; it cannot approve,
+  enqueue, merge, sign, or remove the legacy session crons.
 - `ce-codex-seat@.service`: clears any stale named Codex seat container, starts
   a fresh detached runsc container through the checked-in launcher, and keeps
   `docker wait <container>` in the foreground so systemd owns restart.
@@ -38,6 +41,10 @@ CE_BELT_INTERVAL_SECONDS=120
 CE_BELT_LABELS=enhancement
 GH_TOKEN=<integrator-token>
 CE_PICKUP_TOKEN=<review-pickup-token>
+CE_RATIFIER_QUEUE_CANDIDATES_PATH=/owner-only/path/ratifier-candidates.json
+# Optional; the unit default is %h/.local/state/creator-engine/ratifier-queue/state.json
+CE_RATIFIER_QUEUE_STATE_PATH=/owner-only/path/ratifier-state.json
+CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120
 ```
 
 `GH_TOKEN` and `CE_GATE_AUTHORIZED_REVIEWERS` are required by the integrator
@@ -79,6 +86,35 @@ keeps the poll observe-only: no `--claim`, no `--enable-launch`, and no ambient
 explicit ambient-auth flag. Set optional `CE_BELT_LABELS` to pass one scoped
 `--label` filter such as `enhancement`; leave it unset to observe the default
 pickup queries.
+
+## Ratifier-Queue Reversible Handoff
+
+`ce-ratifier-queue.service` is default-off in authority: it reads only the
+operator-created, owner-only candidate document named by
+`CE_RATIFIER_QUEUE_CANDIDATES_PATH`, persists an owner-only local proposal
+state, and emits `PENDING`, `STALE`, `BLOCKED`, or `ATTESTED` evidence. An
+`ATTESTED` row is never an approval, enqueue, merge, signature, or ratification
+act. The service has no forge or credential configuration.
+
+The candidate document is strict JSON with `version: 1` and a `candidates`
+array. Each candidate supplies immutable PR/head identity plus the complete
+injected ready-attestation fact shape. Do not put credentials, tokens, or raw
+controller identity values in either document.
+
+Controller deployment evidence template (the controller, not this installer,
+owns the live transition):
+
+1. Run the installer with `--no-start`; inspect the rendered unit, candidate
+   path, state parent, and state-file permissions (owner-only).
+2. Start `ce-ratifier-queue.service`, observe two successful intervals, then
+   restart it and prove preserved candidate order, checked count, timestamp,
+   and PR/head dedup identity.
+3. Compare both queue summaries with the legacy `:23` and `:53` session passes.
+   Any mismatch stops the handoff, stops the service, retains the old crons,
+   and removes only the new local state after evidence is captured.
+4. Only after that evidence is accepted may the controller remove the legacy
+   session crons. This repository change neither starts the service nor removes
+   a cron.
 
 ## Egress Self-Push Broker Peer Credentials
 

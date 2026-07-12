@@ -3858,3 +3858,34 @@ def test_review_spawn_provider_refuses_by_default_and_only_reports_configured_po
     assert payload["action"] == "review_spawn_provider"
     assert payload["configured"] is True
     assert payload["launched"] is False
+
+
+def test_ratifier_queue_once_json_and_interval_refusal(tmp_path, capsys):
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(json.dumps({
+        "version": 1,
+        "candidates": [{
+            "pr_number": 7,
+            "head_sha": "a" * 40,
+            "branch": "ce-ratifier-test",
+            "enqueued_at": "2026-07-12T09:00:00Z",
+            "attestation_state": "pending",
+            "last_checked_at": None,
+            "checked_count": 0,
+            "facts": {
+                "ready_sha": "a" * 40,
+                "validation_sha": "a" * 40,
+                "validator_live": False,
+                "exit_code": 0,
+                "structural_failures": 0,
+                "environment_failures": 0,
+            },
+        }],
+    }), encoding="utf-8")
+    state = tmp_path / "state.json"
+    assert v3_cli.main(["ratifier-queue", "--candidates", str(candidates), "--state-path", str(state), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["proposal_only"] is True
+    assert payload["entries"][0]["status"] == "ATTESTED"
+    assert v3_cli.main(["ratifier-queue", "--candidates", str(candidates), "--loop", "--interval", "0", "--json"]) == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "ratifier_queue_interval"

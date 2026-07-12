@@ -267,6 +267,7 @@ V3_FORWARDING_SHIMS: dict[str, tuple[str, str]] = {
     "auto-merge": ("plan/apply GraphQL per-PR auto-merge for a run's opened PR", "auto-merge"),
     "review-pickup": ("controller review-pickup: route awaiting-review PRs to distinct non-author seats", "review-pickup"),
     "review-spawn-provider": ("default-OFF governed reviewer spawn-provider policy seam", "review-spawn-provider"),
+    "ratifier-queue": ("persist and surface caller-supplied ratifier proposals; never ratifies or acts", "ratifier-queue"),
     "escalation": ("manage local AWAITING-OPERATOR escalation records", "escalation"),
     "notify": ("Operator-notify feed for AWAITING-OPERATOR entry/exit", "notify"),
     "reap": ("seat/venue retirement reaper for terminal sentinel events", "reap"),

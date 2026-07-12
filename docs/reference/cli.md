@@ -44,6 +44,7 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce review-submit` | Submit the separate reviewer approval for a run's opened pull request. |
 | `ce review-pickup` | Route awaiting-review pull requests to distinct non-author seats. |
 | `ce review-spawn-provider` | Default-OFF governed reviewer spawn-provider policy seam. |
+| `ce ratifier-queue` | Persist and surface controller-supplied ratifier proposals; it never approves, enqueues, merges, signs, or ratifies. |
 | `ce reviewer-triage` | Plan reviewer assignment without mutating the source host. |
 | `ce merge` | Read or apply the gated squash-merge decision for a run's opened pull request. |
 | `ce auto-merge` | Plan or apply per-PR auto-merge for a run's opened pull request. |

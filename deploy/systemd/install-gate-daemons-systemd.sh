@@ -104,6 +104,7 @@ services=(
   ce-belt-daemon.service
   ce-integrator-daemon.service
   ce-review-pickup-daemon.service
+  ce-ratifier-queue.service
   # ce-egress-broker.service uses its own EnvironmentFile (ce-egress-broker.env) which must
   # include BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT, BROKER_APPROLE_ROLE_ID, and
   # BROKER_APPROLE_SECRET_ID for vault-backed seats; create that file before starting.
@@ -154,6 +155,11 @@ Optional for work-pickup belt:
   CE_BELT_INTERVAL_SECONDS=120
   CE_BELT_LABELS=enhancement
   CE_PICKUP_TOKEN=...
+Required for the ratifier proposal queue:
+  CE_RATIFIER_QUEUE_CANDIDATES_PATH=/owner-only/path/candidates.json
+Optional for the ratifier proposal queue:
+  CE_RATIFIER_QUEUE_STATE_PATH=/owner-only/path/state.json
+  CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120
 EOF
   exit 1
 fi

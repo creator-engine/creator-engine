@@ -130,6 +130,11 @@ _ESCALATION_ID_RE = re.compile(r"(^[a-z][a-z0-9-]{2,63}$)|(^[0-9a-f]{64}$)")
 #: Value-free 64-hex opaque digest (the ratification ``approver_ref``).
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
+# Injected only in focused unit tests.  The ratifier queue has no ambient
+# observation seam: candidate facts remain caller supplied.
+_RATIFIER_QUEUE_CLOCK = lambda: datetime.now(timezone.utc)
+_RATIFIER_QUEUE_SLEEP = time.sleep
+
 #: The user-facing Scope-card labels (the canon skin) over the conserved fields.
 CARD_LABELS = {
     "intent": "Goal",
@@ -4519,6 +4524,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="emit machine-readable status",
     )
 
+    p_ratifier_queue = sub.add_parser(
+        "ratifier-queue",
+        help="persist and surface caller-supplied ratifier proposals; never ratifies or acts",
+    )
+    p_ratifier_queue.add_argument(
+        "--candidates",
+        required=True,
+        help="strict versioned candidate/evidence JSON supplied by the controller",
+    )
+    p_ratifier_queue.add_argument(
+        "--state-path",
+        default=None,
+        help="owner-only durable queue state (default: <root>/ratifier-queue/state.json)",
+    )
+    ratifier_mode = p_ratifier_queue.add_mutually_exclusive_group(required=False)
+    ratifier_mode.add_argument("--once", action="store_true", help="fold one supplied snapshot and exit (default)")
+    ratifier_mode.add_argument("--loop", action="store_true", help="repeat supplied snapshot folding under a supervisor")
+    p_ratifier_queue.add_argument(
+        "--interval", type=float, default=None,
+        help="seconds between --loop passes (must be > 0)",
+    )
+    _add_root(p_ratifier_queue)
+
     p_review_pickup = sub.add_parser(
         "review-pickup",
         help="controller review-pickup: route awaiting-review PRs to distinct non-author seats (ce-ops#188)",
@@ -6081,6 +6109,50 @@ def _cmd_review_spawn_provider(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_ratifier_queue(args: argparse.Namespace) -> int:
+    """Persist injected ratifier proposals without any forge or gate action."""
+    from .forge import ratifier_queue_runtime
+
+    loop = bool(args.loop)
+    if loop and (args.interval is None or args.interval <= 0):
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · ratifier-queue REFUSED (input): --loop requires --interval > 0"],
+            {"error": "ratifier_queue_interval", "detail": "--loop requires --interval > 0"},
+        )
+    if not loop and args.interval is not None:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · ratifier-queue REFUSED (input): --interval requires --loop"],
+            {"error": "ratifier_queue_interval", "detail": "--interval requires --loop"},
+        )
+    state_path = Path(args.state_path) if args.state_path else Path(args.root) / "ratifier-queue" / "state.json"
+    try:
+        while True:
+            queue_state = ratifier_queue_runtime.run_once(
+                args.candidates, state_path, clock=_RATIFIER_QUEUE_CLOCK,
+            )
+            payload = {
+                "action": "ratifier_queue",
+                "state_path": str(state_path),
+                "proposal_only": True,
+                **ratifier_queue_runtime.summary(queue_state),
+            }
+            lines = [f"{_BRAND} · {line}" for line in payload["human"].splitlines()]
+            if not loop:
+                return _emit(args, 0, lines, payload)
+            _emit(args, 0, lines, payload)
+            _RATIFIER_QUEUE_SLEEP(float(args.interval))
+    except KeyboardInterrupt:
+        return _emit(args, 0, [f"{_BRAND} · ratifier-queue loop stopped"], {"action": "ratifier_queue", "stopped": True})
+    except ratifier_queue_runtime.RatifierQueueRuntimeError as exc:
+        return _emit(
+            args, 2,
+            [f"{_BRAND} · ratifier-queue REFUSED (state): {exc}"],
+            {"error": "ratifier_queue_refused", "detail": str(exc)},
+        )
+
+
 def _path_manifest_against_index(
     repo_root: Path,
     *,
@@ -6390,6 +6462,7 @@ _DISPATCH = {
     "auto-merge": _cmd_auto_merge,
     "review-pickup": _cmd_review_pickup,
     "review-spawn-provider": _cmd_review_spawn_provider,
+    "ratifier-queue": _cmd_ratifier_queue,
     "review": _cmd_review,
     "merge": _cmd_merge,
     "playbook": playbook_runtime.run_cli,
