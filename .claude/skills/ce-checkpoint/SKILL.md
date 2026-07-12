@@ -27,11 +27,15 @@ disable-model-invocation: false
 
 1. Read `playbooks/controller/briefs/checkpoint.md` and follow it verbatim. It
    is the source of truth for the checkpoint procedure and format.
-2. Apply the refuse-unsafe-input rule (no secrets, credentials, raw logs, or
-   committed `READY` file) per the brief.
-3. Write the `RESUME_STATE_<UTC timestamp>.md` file, run `sha256sum` on it, and
-   record the digest before reporting completion.
-4. Verify the completeness checklist in the brief before handoff.
+2. Put only labeled, redaction-safe facts in a JSON document conforming to
+   `validators/creator_engine_validator/schemas/checkpoint-input.schema.yaml`.
+3. Invoke `ce checkpoint --facts <facts.json> --clean-boundary <reason>` and
+   retain its terminal `path`, `sha256`, and `complete` result. Add
+   `--prior-checkpoint <path>` only to record a known predecessor; the verb
+   does not read ambient controller state.
+4. The caller may consider `/clear` only after independently verifying the
+   persisted-byte hash and terminal green completeness result. The verb never
+   performs or claims `/clear`.
 
 This skill carries no authority and grants no gate. Any forge mutation still
 rides on CE's `PreToolUse` hook-check seam. Do not embed forge commands here.

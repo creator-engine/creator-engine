@@ -59,7 +59,7 @@ PYTEST_OUTCOME_COUNT_PATTERN = re.compile(
 PYTEST_TERMINAL_SUMMARY_PATTERN = re.compile(
     r"^(?P<summary>(?:\d+\s+(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns|deselected)"
     r"(?:\s*,\s*\d+\s+(?:passed|failed|error|errors|skipped|xfailed|xpassed|rerun|reruns|deselected))*))"
-    r"(?:\s*,\s*\d+\s+warnings?)*(?:\s+in\s+\d+(?:\.\d+)?s)?$",
+    r"(?:\s*,\s*\d+\s+warnings?)*(?:\s+in\s+\d+(?:\.\d+)?s)?(?:\s+\(\d+:\d+:\d+\))?$",
     re.IGNORECASE,
 )
 PYTEST_SKIP_REASON_PATTERN = re.compile(

@@ -265,6 +265,19 @@ Options:
 | `--tenant` | no |  | restrict cross-artifact checks to one tenant |
 | `--list-checks` | no |  | list enabled checks and their FRs |
 
+### `checkpoint`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--facts` | yes |  | JSON facts document matching checkpoint-input.schema.yaml |
+| `--clean-boundary` | yes |  | why this is a clean handoff boundary |
+| `--prior-checkpoint` | no |  | optional prior checkpoint path; it is recorded, not read |
+| `--repo-root` | no |  | repository root containing the untracked .ce/state/research root |
+| `--as-of` | no |  | optional injected UTC RFC3339 timestamp for deterministic output |
+| `--json` | no |  | emit the same result fields as JSON |
+
 ### `claim`
 
 work-claim locks: hub-visible per-ticket compose/dispatch claims (ce-ops#38)
