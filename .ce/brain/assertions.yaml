@@ -4403,4 +4403,54 @@ records:
   verification_method:
     evidence_ref: validators/pyproject.toml
     type: static
+- claim:
+    details: Leaking checkout import paths into install-bootstrap subprocesses can
+      make console-script checks validate source instead of the installed wheel.
+    evidence_sha256: 863d4dd621858f525b6f90983ad4d6e6117db56de412b63be4707c39d4d43c94
+    item: 40
+    object: pythonpath-install-bootstrap-footgun
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 2841adc28bfb5f02dadd8b60e8087b0c744ff65075271545281bd631f7529c23
+  evidence_ref: validators/tests/integration/test_install_bootstrap.py
+  id: brain-assertion-d1b-40-pythonpath-install-bootstrap-footgun-v2
+  kind: brain-assertion
+  prev_hash: 6405314bfbbfd167ff069a56cf36d91fe9458b48d5b6b52358b5d679d7aa6185
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 169
+  statement: Leaking checkout import paths into install-bootstrap subprocesses can
+    make console-script checks validate source instead of the installed wheel.
+  status: superseded
+  superseded_by: brain-assertion-84e9d4f9fd1e33732ac217f6
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/integration/test_install_bootstrap.py
+    type: static
+- claim:
+    details: Leaking checkout import paths into install-bootstrap subprocesses can
+      make console-script checks validate source instead of the installed wheel.
+    evidence_sha256: 6406c03efbcadf2d492524f390c774542ec63978f4344e03f9f997555b596f57
+    item: 40
+    object: pythonpath-install-bootstrap-footgun
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 1e0a67c8699cb730ffa99e924f4396ad029b6454b96c590ffd46c2854d1bf70f
+  evidence_ref: validators/tests/integration/test_install_bootstrap.py
+  id: brain-assertion-84e9d4f9fd1e33732ac217f6
+  kind: brain-assertion
+  prev_hash: 2841adc28bfb5f02dadd8b60e8087b0c744ff65075271545281bd631f7529c23
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 170
+  statement: Leaking checkout import paths into install-bootstrap subprocesses can
+    make console-script checks validate source instead of the installed wheel.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/integration/test_install_bootstrap.py
+    type: static
 schema_version: '1'
