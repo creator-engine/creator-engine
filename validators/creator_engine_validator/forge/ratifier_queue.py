@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections.abc import Iterable
 from typing import Literal
+from collections.abc import Mapping
 
 from .ready_attestation_nudge import ReadyAttestationFacts, reduce_ready_attestation
 
@@ -51,6 +52,18 @@ class RatifierQueueState:
         """Return the same oldest-first candidates without losing entry detail."""
 
         return tuple(entry.candidate for entry in self.entries)
+
+
+def advisory_review_provenance(response: Mapping[str, object]) -> dict[str, object]:
+    """Return bounded advisory reviewer provenance without constructing facts.
+
+    Provider output may keep a caller-owned candidate pending, but this pure
+    helper intentionally cannot write the queue or infer an attestation state.
+    """
+    verdict = response.get("verdict")
+    if verdict not in {"COMMENT", "REQUEST_CHANGES"}:
+        raise ValueError("reviewer verdict is not advisory provenance")
+    return {key: response[key] for key in ("verdict", "reviewer", "head_sha", "request_id") if key in response}
 
 
 def compute_queue_state(candidates: Iterable[RatifierCandidate]) -> RatifierQueueState:

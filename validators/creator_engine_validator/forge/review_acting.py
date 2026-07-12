@@ -64,6 +64,16 @@ _LEDGER_ACTIONS = frozenset({
     "reviewer_authority_invalid",
     "live_claim_mismatch",
     "comment_failed",
+    # M2 provider outcome vocabulary.  These remain durable, fail-closed
+    # evidence when an acting adapter is later wired behind the S3 seam.
+    "SPAWN_REFUSED",
+    "SPAWN_FAILED",
+    "TIMEOUT",
+    "STALE_HEAD",
+    "MALFORMED_RESULT",
+    "PARTIAL_OUTPUT",
+    "REVIEWER_EXIT_NONZERO",
+    "UNCERTAIN_COMMENT",
 })
 
 
@@ -291,6 +301,10 @@ def _reviewer_verdict(output: str, ctx: ActingContext) -> str | None:
     verdict = evidence.get("verdict")
     reviewer = str(evidence.get("reviewer") or "")
     authority = evidence.get("reviewer_authority")
+    # Dual-support transition: legacy evidence carries ``reviewer_authority``
+    # directly; M2 emits a versioned envelope with the same binding mapping.
+    if authority is None and evidence.get("version") == 1:
+        authority = evidence.get("authority")
     if not isinstance(verdict, str) or not verdict.strip() or not isinstance(authority, Mapping):
         return None
     if not ctx.assigned_reviewer or not ctx.author or reviewer != ctx.assigned_reviewer:

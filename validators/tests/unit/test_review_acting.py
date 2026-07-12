@@ -61,6 +61,15 @@ def _evidence(ctx, verdict="review verdict", **authority_overrides):
     })
 
 
+def test_versioned_authority_envelope_remains_dual_supported():
+    ctx = review_acting._context_from_item(_item())
+    assert review_acting._reviewer_verdict(json.dumps({
+        "version": 1, "verdict": "COMMENT", "reviewer": ctx.assigned_reviewer,
+        "authority": {"repo": ctx.repo, "pr_number": ctx.pr_number,
+                      "head_sha": ctx.head_sha, "actor": ctx.assigned_reviewer},
+    }), ctx) == "COMMENT"
+
+
 def _claim(attempt):
     return {
         "action": "attempt_claimed",
