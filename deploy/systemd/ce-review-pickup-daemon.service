@@ -7,7 +7,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
+Environment=CE_REVIEW_PICKUP_HEARTBEAT_PATH=%h/.local/state/creator-engine/daemon-heartbeats/review-pickup.json
 WorkingDirectory=/workspace/creator-engine
+ExecStartPre=/usr/bin/mkdir -p %h/.local/state/creator-engine/daemon-heartbeats
 # Acting mode: Operator arms by uncommenting the vars + armed ExecStart below. Default OFF.
 # CE_REVIEW_ACTING_ENABLED=1
 # CE_REVIEW_ACTING_LEDGER_PATH=<state-root>/review-pickup-acting/ledger.ndjson

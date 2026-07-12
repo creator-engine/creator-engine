@@ -680,13 +680,14 @@ def test_run_review_pickup_loop_retries_pickup_error_with_supplier():
     assert "requires at least one --seat reviewer" in incomplete[0]["note"]
 
 
-def test_cev3_review_pickup_supplier_failures_return_nonzero(monkeypatch, capsys):
+def test_cev3_review_pickup_supplier_failures_return_nonzero(monkeypatch, capsys, tmp_path):
     from creator_engine_validator import v3_cli
 
     def token_supplier() -> str:
         raise RuntimeError("backend unavailable")
 
     monkeypatch.setattr(v3_cli, "_review_pickup_token_supplier_from_args", lambda args: token_supplier)
+    monkeypatch.setenv("CE_REVIEW_PICKUP_HEARTBEAT_PATH", str(tmp_path / "heartbeat.json"))
 
     code = v3_cli.main([
         "review-pickup",
@@ -702,6 +703,81 @@ def test_cev3_review_pickup_supplier_failures_return_nonzero(monkeypatch, capsys
     out = json.loads(capsys.readouterr().out)
     assert out["error"] == "review_pickup_failed"
     assert "exiting for supervisor restart" in out["detail"]
+
+
+class _CapturingHeartbeat:
+    instances = []
+
+    def __init__(self, path, **kwargs):
+        self.path = path
+        self.kwargs = kwargs
+        self.emissions = []
+        self.periodic = []
+        self.last_pass_index = 0
+        self.instances.append(self)
+
+    def emit(self, status, pass_index):
+        self.emissions.append((status, pass_index))
+        self.last_pass_index = pass_index
+
+    def emit_periodic_running(self, pass_index):
+        self.periodic.append(pass_index)
+
+
+def test_cev3_review_pickup_heartbeat_starts_before_token_setup_failure(monkeypatch, capsys):
+    from creator_engine_validator import v3_cli
+
+    _CapturingHeartbeat.instances.clear()
+
+    def token_setup(_args):
+        raise review_pickup.PickupError("secret backend unavailable")
+
+    monkeypatch.setattr(v3_cli, "DaemonHeartbeatEmitter", _CapturingHeartbeat)
+    monkeypatch.setattr(v3_cli, "_review_pickup_token_supplier_from_args", token_setup)
+
+    code = v3_cli.main([
+        "review-pickup", "--identity", "controller", "--repo", "o/r", "--seat", "ce-dev-3", "--json",
+    ])
+
+    assert code == 2
+    assert _CapturingHeartbeat.instances[0].emissions == [("starting", 0)]
+    assert json.loads(capsys.readouterr().out)["error"] == "review_pickup_token"
+
+
+def test_cev3_review_pickup_heartbeat_bridges_passes_and_waits(monkeypatch, capsys):
+    from creator_engine_validator import v3_cli
+
+    _CapturingHeartbeat.instances.clear()
+    sleep_calls = []
+
+    def fake_loop(**kwargs):
+        kwargs["log_sink"]({"event": "review_pickup_pass_start", "index": 1})
+        kwargs["log_sink"]({"event": "review_pickup_pass_complete", "index": 1})
+        kwargs["sleep"](3)
+        return review_pickup.ReviewPickupLoopResult(passes=(review_pickup.ReviewPickupResult(),))
+
+    monkeypatch.setattr(v3_cli, "DaemonHeartbeatEmitter", _CapturingHeartbeat)
+    monkeypatch.setattr(v3_cli, "_review_pickup_token_supplier_from_args", lambda _args: lambda: "token")
+    monkeypatch.setattr(review_pickup, "run_review_pickup_loop", fake_loop)
+    monkeypatch.setattr(v3_cli.time, "sleep", sleep_calls.append)
+
+    code = v3_cli.main([
+        "review-pickup", "--identity", "controller", "--repo", "o/r", "--seat", "ce-dev-3",
+        "--loop", "--interval", "3", "--json",
+    ])
+
+    assert code == 0
+    heartbeat = _CapturingHeartbeat.instances[0]
+    assert heartbeat.kwargs == {
+        "daemon_id": "review-pickup",
+        "expected_interval_seconds": 3.0,
+        "unit": "ce-review-pickup-daemon.service",
+        "scope": "user",
+    }
+    assert heartbeat.emissions == [("starting", 0), ("running", 1), ("pass_complete", 1)]
+    assert heartbeat.periodic == [1]
+    assert sleep_calls == [3]
+    assert json.loads(capsys.readouterr().out)["action"] == "review_pickup"
 
 
 def test_awaiting_review_inbox_paginates_past_routing_first_page():
@@ -838,6 +914,7 @@ def test_cev3_review_pickup_routes_with_json(monkeypatch, tmp_path, capsys):
         lambda: _fake_transport([(200, {}, _body(_hit(repo="o/r", number=12, pr=True)))]),
     )
     monkeypatch.setattr(v3_cli, "_review_pickup_gh_runner", lambda identity, token: forge.runner)
+    monkeypatch.setenv("CE_REVIEW_PICKUP_HEARTBEAT_PATH", str(tmp_path / "heartbeat.json"))
     inbox_path = tmp_path / "awaiting-review.json"
 
     code = v3_cli.main([
