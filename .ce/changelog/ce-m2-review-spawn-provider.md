@@ -6,7 +6,7 @@ scope: forge
 issue: M2
 ---
 
-**Governed review-acting spawn provider.**
+**Governed review-acting spawn provider — core (M2 part 1).**
 
 - Adds a default-OFF, flock-claimed, strict JSON provider primitive without forge, queue, or attestation authority.
 - Defaulted pending Operator policy: capacity=0, timeout=180 seconds, retention=86400 seconds, and sandbox attestation is disabled until explicitly configured.

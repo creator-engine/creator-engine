@@ -1,4 +1,4 @@
-# PR path manifest — M2 · Governed review-acting spawn provider
+# PR path manifest — M2 · Governed review-acting spawn provider — core (M2 part 1)
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-m2-review-spawn-provider` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
