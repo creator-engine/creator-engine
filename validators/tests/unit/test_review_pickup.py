@@ -724,7 +724,7 @@ class _CapturingHeartbeat:
         self.periodic.append(pass_index)
 
 
-def test_cev3_review_pickup_heartbeat_starts_before_token_setup_failure(monkeypatch, capsys):
+def test_cev3_review_pickup_heartbeat_starts_before_token_setup_failure(monkeypatch, capsys, tmp_path):
     from creator_engine_validator import v3_cli
 
     _CapturingHeartbeat.instances.clear()
@@ -734,12 +734,17 @@ def test_cev3_review_pickup_heartbeat_starts_before_token_setup_failure(monkeypa
 
     monkeypatch.setattr(v3_cli, "DaemonHeartbeatEmitter", _CapturingHeartbeat)
     monkeypatch.setattr(v3_cli, "_review_pickup_token_supplier_from_args", token_setup)
+    monkeypatch.delenv("CE_REVIEW_PICKUP_HEARTBEAT_PATH", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
 
     code = v3_cli.main([
         "review-pickup", "--identity", "controller", "--repo", "o/r", "--seat", "ce-dev-3", "--json",
     ])
 
     assert code == 2
+    assert _CapturingHeartbeat.instances[0].path == (
+        tmp_path / ".local/state/creator-engine/daemon-heartbeats/review-pickup.json"
+    )
     assert _CapturingHeartbeat.instances[0].emissions == [("starting", 0)]
     assert json.loads(capsys.readouterr().out)["error"] == "review_pickup_token"
 

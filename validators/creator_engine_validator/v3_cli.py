@@ -5818,12 +5818,11 @@ def _cmd_review_pickup(args: argparse.Namespace) -> int:
     if loop_mode and interval <= 0:
         return _emit(args, 2, [f"{_BRAND} · review-pickup REFUSED (input): --loop requires --interval > 0"],
                      {"error": "review_pickup_input", "detail": "--loop requires --interval > 0", "mode": mode})
-    heartbeat_path = Path(
-        os.environ.get(
-            "CE_REVIEW_PICKUP_HEARTBEAT_PATH",
-            "~/.local/state/creator-engine/daemon-heartbeats/review-pickup.json",
-        )
-    ).expanduser()
+    heartbeat_path = Path(os.environ.get(
+        "CE_REVIEW_PICKUP_HEARTBEAT_PATH",
+        str(Path(os.environ.get("HOME", str(Path.home()))) / ".local" / "state" / "creator-engine"
+            / "daemon-heartbeats" / "review-pickup.json"),
+    )).expanduser()
     heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
     heartbeat = DaemonHeartbeatEmitter(
         heartbeat_path,
