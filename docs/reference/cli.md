@@ -68,6 +68,7 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce posture` | Print the read-only Controller posture banner. |
 | `ce takeover` | Produce a read-only controller-continuity takeover plan and evidence packet. |
 | `ce continuity-drill` | Run the scheduled benign controller-continuity drill proof. |
+| `ce checkpoint` | Save a validated resume point at a clean handoff, so the next session can continue with clear, trustworthy context. |
 
 ## Queue And Coordination
 
