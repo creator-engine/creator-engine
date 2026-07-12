@@ -101,6 +101,7 @@ from typing import Sequence
 
 from . import (
     brain_bootstrap,
+    brain_reconcile,
     brain_probe,
     brain_runtime,
     containment_probe,
@@ -1181,6 +1182,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="repo root containing .ce/brain/assertions.yaml (default: derived from --state-root)",
     )
     bs.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    breconcile = brain_sub.add_parser(
+        "reconcile",
+        help="plan or atomically apply an explicitly accepted static-evidence hash-chain repair",
+    )
+    breconcile.add_argument("--repo-root", default=".", help="repository root containing the tracked ledger")
+    breconcile.add_argument("--ledger-path", default=None, help="tracked ledger path, relative to --repo-root")
+    breconcile.add_argument("--id", action="append", dest="assertion_ids", required=True, help="active assertion id to reconcile (repeatable)")
+    breconcile.add_argument("--apply", action="store_true", help="write only after accepting the exact fresh plan digest")
+    breconcile.add_argument("--accept-plan-sha", default=None, help="required exact plan_sha256 with --apply")
+    breconcile.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     bi = brain_sub.add_parser("ingest", help="derive/update the local rebuildable recall vector store")
     _add_state_root(bi)
@@ -3504,6 +3516,42 @@ def _brain_sync(args) -> int:
     return 0
 
 
+def _brain_reconcile(args) -> int:
+    try:
+        if getattr(args, "apply", False):
+            if not args.accept_plan_sha:
+                raise brain_reconcile.BrainReconcileRefused("--apply requires --accept-plan-sha")
+            result = brain_reconcile.apply(
+                repo_root=args.repo_root,
+                ledger_path=args.ledger_path,
+                assertion_ids=args.assertion_ids,
+                accept_plan_sha=args.accept_plan_sha,
+            )
+            payload = result.to_dict()
+        else:
+            if args.accept_plan_sha:
+                raise brain_reconcile.BrainReconcileRefused("--accept-plan-sha requires --apply")
+            payload = {"ledger_path": str((Path(args.repo_root) / (args.ledger_path or ".ce/brain/assertions.yaml")).resolve()),
+                       "persisted_sha256": None,
+                       "plan": brain_reconcile.plan(repo_root=args.repo_root, ledger_path=args.ledger_path, assertion_ids=args.assertion_ids),
+                       "written": False}
+    except brain_runtime.BrainRuntimeError as exc:
+        return _brain_error("reconcile", exc)
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        plan = payload["plan"]
+        action = "wrote" if payload["written"] else "planned"
+        print(f"ce brain reconcile: {action} {len(plan['changed_assertion_ids'])} assertion(s)")
+        print(f"plan_sha256: {plan['plan_sha256']}")
+        print(f"ledger_head_before: {plan['ledger_head_before']}")
+        print(f"ledger_head_after: {plan['ledger_head_after']}")
+        print(f"flat_active_count_delta: +{plan['flat_active_count_delta']}")
+        if payload["persisted_sha256"] is not None:
+            print(f"persisted_sha256: {payload['persisted_sha256']}")
+    return 0
+
+
 def _brain_probe(args) -> int:
     has_name = getattr(args, "probe_name", None) is not None
     has_all = bool(getattr(args, "all_probes", False))
@@ -5616,6 +5664,7 @@ _BRAIN_DISPATCH = {
     "init": _brain_init,
     "ingest": _brain_ingest,
     "recall": _brain_recall,
+    "reconcile": _brain_reconcile,
     "probe": _brain_probe,
     "sync": _brain_sync,
     "verify": _brain_verify,

@@ -221,6 +221,19 @@ Options:
 | `--core-path` | no |  | always-load CORE markdown path reported by --hydrate (never edited) |
 | `--json` | no |  | emit machine-readable JSON |
 
+### `brain reconcile`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--repo-root` | no |  | repository root containing the tracked ledger |
+| `--ledger-path` | no |  | tracked ledger path, relative to --repo-root |
+| `--id` | yes |  | active assertion id to reconcile (repeatable) |
+| `--apply` | no |  | write only after accepting the exact fresh plan digest |
+| `--accept-plan-sha` | no |  | required exact plan_sha256 with --apply |
+| `--json` | no |  | emit machine-readable JSON |
+
 ### `brain sync`
 
 Options:

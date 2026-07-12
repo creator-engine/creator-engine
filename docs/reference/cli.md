@@ -21,7 +21,7 @@ There is no `ce dev` command in the v1.0 public CLI.
 
 | Command | Use it for |
 | --- | --- |
-| `ce brain` | Manage the local assertion ledger and recall surface, including `ce brain init`, assert, check, correct, sync, ingest, recall, verify, probe, and bootstrap. |
+| `ce brain` | Manage the local assertion ledger and recall surface, including `ce brain init`, assert, check, correct, reconcile, sync, ingest, recall, verify, probe, and bootstrap. |
 | `ce shape` | Turn an initial draft into a sharper Scope by finding gaps and asking the next questions. |
 | `ce scope` | File a Scope with Goal, Done-when, and Change-type. |
 | `ce ratify` | Approve a ready Scope at the human front gate. |
