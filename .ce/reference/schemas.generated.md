@@ -707,7 +707,7 @@ Properties:
 | `pass_index` | integer | yes | minimum `0`<br>maximum `9223372036854775807` |  |
 | `ts` | string | yes | pattern `Z$`<br>format `date-time` |  |
 | `status` | string | yes | enum `starting`, `running`, `pass_complete`, `degraded`, `stopping`, `failed` |  |
-| `expected_interval_seconds` | number | no | maximum `86400` |  |
+| `expected_interval_seconds` | number | no | maximum `86400`<br>exclusiveMinimum `0` |  |
 | `unit` | string | no | pattern `^[A-Za-z0-9][A-Za-z0-9@_.:-]{0,126}\\.service$` |  |
 | `scope` | string | no | enum `system`, `user` |  |
 

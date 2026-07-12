@@ -126,6 +126,27 @@ def test_generator_check_mode_flags_schema_drift(tmp_path: Path):
     assert "stale" in message
 
 
+def test_generator_renders_direct_numeric_constraints_from_copied_schema(tmp_path: Path):
+    generator = _load_generator()
+    _seed_repo(tmp_path, doc_text=None)
+    schema = tmp_path / "schemas" / "daemon-heartbeat.schema.yaml"
+    schema.write_text(
+        schema.read_text(encoding="utf-8").replace(
+            "    exclusiveMinimum: 0\n    maximum: 86400\n",
+            "    exclusiveMinimum: 0\n"
+            "    exclusiveMaximum: 86400\n"
+            "    multipleOf: 0.5\n",
+        ),
+        encoding="utf-8",
+    )
+
+    reference = generator.render(tmp_path)
+
+    assert "exclusiveMinimum `0`" in reference
+    assert "exclusiveMaximum `86400`" in reference
+    assert "multipleOf `0.5`" in reference
+
+
 def test_unreadable_generator_fails_closed(tmp_path: Path):
     (tmp_path / GENERATOR_RELATIVE).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / GENERATOR_RELATIVE).write_text(
