@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** M
 
-AUTHORIZED_PATHS_COUNT=12
+AUTHORIZED_PATHS_COUNT=13
 
-AUTHORIZED_PATHS_SHA256=e9a274f5f3745a8b49cfc45461c48cdb84715b464b1f6e0dbf1c72b6a24274ab
+AUTHORIZED_PATHS_SHA256=f5a1e9361791048a8217ae7f68a677dbcf8000455b90aba9fb73ce7efcea11dd
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-m2-spawn-provider-integration.md
 .ce/pr-manifests/ce-m2-spawn-provider-integration.md
 .ce/reference/cli.generated.md
