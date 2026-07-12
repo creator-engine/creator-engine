@@ -129,6 +129,7 @@ from . import (
     lane_runtime,
     launch_runtime,
     main_head_install,
+    onboard_connection_status,
     orchestrator_status,
     pcl_runtime,
     playbook_runtime,
@@ -4328,6 +4329,13 @@ def _launch(args, invoked_as: str = "launch") -> int:
         )
     except launch_runtime.LaunchError as exc:
         return _print_launch_refusal(args, invoked_as, exc)
+    connection = onboard_connection_status.read_status(Path(args.repo_root) / ".ce" / "state")
+    if connection.state == onboard_connection_status.UNRESOLVED_CONNECTION:
+        print(
+            "WARNING: ce launch: onboard forge connection is unresolved; "
+            "launch remains available. " + connection.detail,
+            file=sys.stderr,
+        )
     if getattr(args, "preflight", False):
         report = launch_runtime.preflight_launch(
             harness=args.harness,

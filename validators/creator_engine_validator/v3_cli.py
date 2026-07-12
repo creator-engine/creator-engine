@@ -78,6 +78,7 @@ from . import (
     journey_guidance,
     onboard_apply,
     onboard_apply_live,
+    onboard_connection_status,
     playbook_runtime,
     runtime_evidence_spine,
     seat_reaper,
@@ -2577,6 +2578,11 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"{_BRAND} · {len(scopes)} Scope(s) · "
         + " · ".join(f"{p} {counts[p]}" for p in coordination.COGNITIVE_PHASES),
     ]
+    connection = onboard_connection_status.read_status(root)
+    if connection.state == onboard_connection_status.UNRESOLVED_CONNECTION:
+        lines.append(f"{_BRAND} · WARNING: onboard connection UNRESOLVED — {connection.detail}")
+    else:
+        lines.append(f"{_BRAND} · onboard connection: {connection.state}")
     scope_payloads: list[dict[str, Any]] = []
     for s in sorted(scopes, key=lambda x: str(x.get("scope_id"))):
         # v3.1-G2c: surface the opened PR + a live reviewer venue on the Scope line.
@@ -2591,7 +2597,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
         )
     return _emit(
         args, 0, lines,
-        {"action": "status", "count": len(scopes), "phase_counts": counts, "scopes": scope_payloads},
+        {
+            "action": "status",
+            "count": len(scopes),
+            "phase_counts": counts,
+            "scopes": scope_payloads,
+            "onboard_connection": connection.to_dict(),
+        },
     )
 
 

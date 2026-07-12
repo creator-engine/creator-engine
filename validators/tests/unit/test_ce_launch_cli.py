@@ -398,6 +398,25 @@ def test_launch_dry_run_json(use_fake_tmux, capsys):
     assert payload["spawned"] is False
 
 
+def test_launch_warns_for_unresolved_connection_without_breaking_json(
+    use_fake_tmux, monkeypatch, capsys
+):
+    from creator_engine_validator import onboard_connection_status
+
+    monkeypatch.setattr(
+        ce_cli.onboard_connection_status,
+        "read_status",
+        lambda _root: onboard_connection_status.OnboardConnectionStatus(
+            onboard_connection_status.UNRESOLVED_CONNECTION, "forge identity unresolved"
+        ),
+    )
+    ret = ce_cli.main(["launch", "--dry-run", "--json"])
+    captured = capsys.readouterr()
+    assert ret == 0
+    assert json.loads(captured.out)["spawned"] is False
+    assert "onboard forge connection is unresolved" in captured.err
+
+
 def test_raw_controller_role_launch_refuses_with_recovery_command_json(
     tmp_path, use_fake_tmux, monkeypatch, capsys
 ):
