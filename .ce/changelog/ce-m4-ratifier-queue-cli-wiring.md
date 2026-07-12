@@ -8,4 +8,4 @@ issue: ce-m4-ratifier-queue-cli-wiring
 
 **M4 ratifier queue CLI wiring.**
 
-Proposal-only runtime, CLI, systemd wiring, and reversible controller handoff documentation.
+Proposal-only runtime, CLI, systemd wiring, reversible controller handoff, and ratified brain evidence supersession.
