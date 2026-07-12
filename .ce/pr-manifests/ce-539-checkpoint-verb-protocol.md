@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=13
+AUTHORIZED_PATHS_COUNT=15
 
-AUTHORIZED_PATHS_SHA256=9d34f331f9ab845111d9c1167112f0ad554720648496fd3c4ba9d11917c7aac4
+AUTHORIZED_PATHS_SHA256=e0db092bf3c9c8a86cb9dfc7aaf46cc4a7e6f7b20d81cfbd386da0f8eb5abb09
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-539-checkpoint-verb-protocol.md
 .ce/pr-manifests/ce-539-checkpoint-verb-protocol.md
 .ce/reference/cli.generated.md
@@ -20,6 +21,7 @@ docs/reference/cli.md
 playbooks/controller/briefs/checkpoint.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/checkpoint_runtime.py
+validators/creator_engine_validator/checks/documented_verbs.py
 validators/creator_engine_validator/schemas/checkpoint-input.schema.yaml
 validators/tests/unit/test_ce_checkpoint_cli.py
 validators/tests/unit/test_checkpoint_runtime.py
