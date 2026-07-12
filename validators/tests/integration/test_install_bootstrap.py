@@ -746,3 +746,38 @@ def test_install_sh_fetch_hardening_and_uv_path_are_declared(repo_root: Path):
     assert "installed verified uv" in script
     assert "uv python install 3.14" in script
     assert "Remediation: uv python find 3.14" in script
+
+
+def test_docs_schemas_install_answers_mirror_is_byte_identical_to_validators_canonical(repo_root: Path):
+    """docs/schemas/install-answers.schema.yaml must be byte-identical to the canonical copy.
+
+    Pages serves docs/ at creator-engine.dev.  The live installer fetches
+    docs/schemas/install-answers.schema.yaml and verifies it against the
+    answers_schema_sha256 pin embedded in the signed install spec.  If the
+    docs mirror drifts from validators/creator_engine_validator/schemas/
+    install-answers.schema.yaml (the file the spec was signed against), every
+    fresh install refuses with INSTALL_REFUSED artifact_hash_mismatch.
+
+    Root cause of the 0.3.5 regression: PR #924 updated the canonical
+    validators schema without syncing the docs mirror, leaving the mirror at
+    the pre-#924 hash (be67d554…) while the signed spec pin references the
+    post-#924 hash (621a76f2…).  This guard ensures that class of drift is
+    caught at preflight rather than at install time.
+    """
+    canonical = (
+        repo_root
+        / "validators"
+        / "creator_engine_validator"
+        / "schemas"
+        / "install-answers.schema.yaml"
+    )
+    mirror = repo_root / "docs" / "schemas" / "install-answers.schema.yaml"
+    assert canonical.is_file(), f"canonical schema not found: {canonical}"
+    assert mirror.is_file(), f"docs mirror schema not found: {mirror}"
+    assert mirror.read_bytes() == canonical.read_bytes(), (
+        f"docs/schemas/install-answers.schema.yaml is stale.\n"
+        f"  mirror sha256:    {__import__('hashlib').sha256(mirror.read_bytes()).hexdigest()}\n"
+        f"  canonical sha256: {__import__('hashlib').sha256(canonical.read_bytes()).hexdigest()}\n"
+        "Fix: copy validators/creator_engine_validator/schemas/install-answers.schema.yaml "
+        "to docs/schemas/install-answers.schema.yaml."
+    )
