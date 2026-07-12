@@ -78,6 +78,8 @@ class FakeRunner:
             return pr_preflight.CommandResult(0, "abc1234\n", "")
         if argv == ["git", "diff", "--name-only", "abc1234..HEAD"]:
             return pr_preflight.CommandResult(0, self.changed_paths, "")
+        if argv == ["git", "diff", "--name-status", "-z", "abc1234..HEAD"]:
+            return pr_preflight.CommandResult(0, "", "")
         if argv[:2] == ["git", "show"] and len(argv) == 3 and ":" in argv[2]:
             ref, path = argv[2].split(":", 1)
             return self.ledger_show.get(
@@ -347,6 +349,26 @@ def test_preflight_uses_merge_base_for_diff_gates_and_requires_carrier(tmp_path:
         "dev4-night-lane0-pr-preflight",
         "--require-carrier",
     ] in calls
+
+
+def test_preflight_runs_shared_image_build_smoke_tier(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    # This fixture calls the full preflight orchestration only to assert the
+    # shared smoke-tier seam. Keep the unrelated production disk gate outside
+    # this unit's scope, as nested preflight test subprocesses do.
+    monkeypatch.setenv(pr_preflight.DISK_HEADROOM_GATE_DISABLED_ENV, "1")
+    calls = []
+
+    def fake_smoke(base, repo_root, *, runner, out):
+        calls.append((base, repo_root, runner, out))
+        return "no-op: no changed Dockerfile"
+
+    monkeypatch.setattr(pr_preflight.image_build_smoke, "run_image_build_smoke", fake_smoke)
+    runner = FakeRunner(tmp_path)
+
+    assert pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=io.StringIO(), err=io.StringIO()) == 0
+    assert len(calls) == 1
+    assert calls[0][:3] == ("abc1234", tmp_path, runner)
 
 
 def test_preflight_runs_fleet_manifest_guard(tmp_path: Path, monkeypatch):
