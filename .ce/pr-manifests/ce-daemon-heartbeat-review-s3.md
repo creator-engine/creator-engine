@@ -1,12 +1,10 @@
-# PR path manifest — ce-daemon-heartbeat-review-s3
+# PR path manifest — none · feat(daemons): review-pickup heartbeat adoption (S3)
 
-This carrier lists the closed five-path Slice 3 review-pickup heartbeat adoption.
-
-Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
+This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-daemon-heartbeat-review-s3` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
 - **Declared work class:** story
 
-COMPARISON_BASE_SHA=16143d6c250c04924298ce90e47a1be413986baa
+Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=5
 
