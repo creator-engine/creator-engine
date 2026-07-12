@@ -1616,6 +1616,20 @@ def test_claude_launch_pins_setting_sources_and_strict_mcp(monkeypatch):
     assert "--setting-sources" in inner and "project" in inner and "--strict-mcp-config" in inner
 
 
+@pytest.mark.parametrize(
+    ("extra_args", "expected_continue_count"),
+    [
+        (None, 1),
+        (["--verbose"], 1),
+        (["--continue"], 1),
+        (["--resume"], 0),
+    ],
+)
+def test_claude_launch_continue_is_independent_of_extra_args(extra_args, expected_continue_count):
+    result = launch_runtime.launch(harness="claude", extra_args=extra_args, dry_run=True)
+    assert result.plan.command.count("--continue") == expected_continue_count
+
+
 def test_claude_launch_allows_skip_perms_with_confirmed_pack(monkeypatch):
     adapter = FakeAdapter()
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: True)

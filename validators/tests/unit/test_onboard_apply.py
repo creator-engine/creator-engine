@@ -14,6 +14,7 @@ import yaml
 
 from creator_engine_validator import (
     brain_runtime,
+    hook_pack_confirm,
     launch_runtime,
     onboard_apply,
     release_publish,
@@ -350,6 +351,18 @@ def _apply(tmp_path: Path, driver: FakeDriver, **request_kwargs):
 
 def _leg(summary: dict[str, Any], leg_id: str) -> dict[str, Any]:
     return next(leg for leg in summary["legs"] if leg["id"] == leg_id)
+
+
+def test_apply_materializes_confirmed_claude_hook_pack_in_fresh_workspace(tmp_path):
+    driver = FakeDriver()
+    summary = _apply(tmp_path, driver)
+
+    workspace = tmp_path / "workspaces" / "greenfield"
+    confirmation = hook_pack_confirm.confirm_hook_pack(workspace)
+    checkout = _leg(summary, "workspace_checkout")
+
+    assert confirmation.confirmed, confirmation.detail
+    assert ".claude/settings.json" in checkout["verification"]["hook_pack"]["created"]
 
 
 def test_apply_refuses_self_attested_spec_before_side_effects(tmp_path):

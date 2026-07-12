@@ -49,7 +49,12 @@ include = ["creator_engine_validator", "creator_engine_validator.*"]
 # unchanged; the resolver (`schema.py:_resolve_schema_path`) anchors to this packaged
 # directory so it is robust in both a source tree and an installed wheel.
 [tool.setuptools.package-data]
-creator_engine_validator = ["schemas/*.schema.yaml", "forge/*.yaml"]
+creator_engine_validator = [
+  "schemas/*.schema.yaml",
+  "forge/*.yaml",
+  "hook_pack_assets/*.json",
+  "hook_pack_assets/*.sh",
+]
 
 [tool.pytest.ini_options]
 markers = [
