@@ -4644,4 +4644,60 @@ records:
   verification_method:
     evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
     type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: f73749d1ab91e3a13d045744cad14abd6014abcf29702a087572b96312cd3ab8
+    item: 9
+    object: validators/tests/unit/test_v1_docs_reconciliation.py
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: 92affd05898d1493589fb1642b714f9e8a39dfd7e6b0918c55b980da1dea7089
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-18d7fd1a8e7c2e66f5f3d646-v3
+  kind: brain-assertion
+  prev_hash: 2899799d9050b3d7bf0740837164cc9ee6c427b18dfe30b5c865148753177011
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 178
+  statement: Adding a top-level ce CLI group couples docs reconciliation and generated
+    CLI reference updates in the same change.
+  status: superseded
+  superseded_by: brain-assertion-18d7fd1a8e7c2e66f5f3d646-v4
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: 703b7107019b67dff2daef83cb953571c7a4a0cf40262cb9657d240a3da01517
+    item: 9
+    object: validators/tests/unit/test_v1_docs_reconciliation.py
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: 99a8033ac859327cb627dd792a24dc378fac5dda8aa0a58c1d7f6e1bf244100c
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-18d7fd1a8e7c2e66f5f3d646-v4
+  kind: brain-assertion
+  prev_hash: 92affd05898d1493589fb1642b714f9e8a39dfd7e6b0918c55b980da1dea7089
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 179
+  statement: Adding a top-level ce CLI group couples docs reconciliation and generated
+    CLI reference updates in the same change.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
 schema_version: '1'
