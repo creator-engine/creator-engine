@@ -66,6 +66,29 @@ def _empty_searches(count):
     return [_empty_search() for _ in range(count)]
 
 
+def _prime_belt_heartbeat(monkeypatch, tmp_path: Path) -> None:
+    """Keep pickup tests isolated from a prior user-scope heartbeat."""
+    heartbeat_path = tmp_path / "belt-heartbeat.json"
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "daemon_id": "belt",
+                "pass_index": 0,
+                "ts": "2026-07-12T00:00:00.000000Z",
+                "status": "pass_complete",
+                "expected_interval_seconds": 120.0,
+                "unit": "ce-belt-daemon.service",
+                "scope": "user",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CE_BELT_HEARTBEAT_PATH", str(heartbeat_path))
+
+
 def _queries_from_calls(calls):
     return [
         urllib.parse.parse_qs(urllib.parse.urlparse(call["url"]).query)["q"][0]
@@ -405,6 +428,7 @@ def test_resolve_token_missing_raises(monkeypatch, tmp_path):
 def test_cli_pickup_poll_observe_only_emits_items(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_clitoken\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
@@ -450,6 +474,7 @@ def test_cli_pickup_poll_unscoped_label_fails_before_transport(monkeypatch, tmp_
 def test_cli_pickup_poll_scoped_label_still_emits_labeled_item(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_clitoken\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
@@ -491,6 +516,7 @@ def test_cli_pickup_poll_help_mentions_search_label_and_launch(capsys):
 def test_cli_pickup_poll_rate_limit_json_fail_closed(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_clitoken\n", encoding="utf-8")
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
@@ -512,6 +538,7 @@ def test_cli_pickup_poll_rate_limit_json_fail_closed(monkeypatch, tmp_path, caps
 def test_cli_pickup_poll_missing_token_exit_2(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     monkeypatch.delenv("CE_PICKUP_TOKEN", raising=False)
     monkeypatch.delenv("CE_PICKUP_ALLOW_AMBIENT_GH", raising=False)
     code = ce_cli.main([
@@ -1232,6 +1259,7 @@ def test_mark_thread_read_only_after_launched(tmp_path):
 def test_cli_enable_launch_offline_e2e_asserts_full_lane_contract(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
@@ -1290,6 +1318,7 @@ def test_cli_enable_launch_offline_e2e_asserts_full_lane_contract(monkeypatch, t
 def test_flag_off_stays_dry_run(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
@@ -1325,6 +1354,7 @@ def test_cli_claim_without_launch_uses_default_state_root_and_records_ledger(
 ):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")
@@ -1367,6 +1397,7 @@ def test_cli_claim_without_launch_uses_default_state_root_and_records_ledger(
 def test_dry_run_cli_reports_would_launch(monkeypatch, tmp_path, capsys):
     from creator_engine_validator import ce_cli
 
+    _prime_belt_heartbeat(monkeypatch, tmp_path)
     forge = _FakeForge()
     pat = tmp_path / "ce-dev-2.pat"
     pat.write_text("ghp_t\n", encoding="utf-8")

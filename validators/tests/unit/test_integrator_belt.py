@@ -68,6 +68,29 @@ def _test_limiter(tmp_path, clock=None):
     )
 
 
+def _prime_integrator_heartbeat(monkeypatch, tmp_path: Path) -> None:
+    """Keep queue-daemon tests isolated from a prior user-scope heartbeat."""
+    heartbeat_path = tmp_path / "integrator-heartbeat.json"
+    heartbeat_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "daemon_id": "integrator",
+                "pass_index": 0,
+                "ts": "2026-07-12T00:00:00.000000Z",
+                "status": "pass_complete",
+                "expected_interval_seconds": 60.0,
+                "unit": "ce-integrator-daemon.service",
+                "scope": "user",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CE_INTEGRATOR_HEARTBEAT_PATH", str(heartbeat_path))
+
+
 def _event(**overrides) -> RepairNeededEvent:
     data = {
         "repo": REPO,
@@ -2375,6 +2398,7 @@ def test_daemon_manifest_overlap_defers_second_pr():
 
 def test_ce_queue_daemon_cli_once_json(monkeypatch, capsys, tmp_path: Path):
     captured = {}
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
 
     monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
     monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "daemon-secret")
@@ -2459,6 +2483,7 @@ def test_ce_queue_daemon_refuses_second_singleton_lease_before_first_pass(
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     lease_root = tmp_path / "leases"
     lease_root.mkdir()
     held = daemon_lease.acquire("queue-daemon", "existing-holder", state_root=lease_root)
@@ -2497,6 +2522,7 @@ def test_ce_queue_daemon_refuses_stale_singleton_lease_without_takeover(
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     lease_root = tmp_path / "leases"
     lease_root.mkdir()
     (lease_root / "queue-daemon.lease").write_text(
@@ -2540,6 +2566,7 @@ def test_ce_queue_daemon_heartbeats_each_pass_and_releases_cleanly(
     monkeypatch,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     class FakeLease:
         def __init__(self):
             self.heartbeats = 0
@@ -2629,6 +2656,7 @@ def test_ce_queue_daemon_defers_to_live_ancestor_supervisor_lease(
     (proceed without acquiring/releasing its own lease) instead of deadlocking
     with DaemonLeaseHeld, exactly the ce-ops#444 startup deadlock this rework
     closes."""
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     lease_root = tmp_path / "leases"
     lease_root.mkdir()
     supervisor_pid = os.getppid()  # a real, live ancestor of this test process
@@ -2681,6 +2709,7 @@ def test_ce_queue_daemon_refuses_live_non_ancestor_holder(
     other unrelated live daemon instance) must still refuse with the
     pre-existing exit-73 behavior — the ancestry deferral must not become an
     unverified bypass."""
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     lease_root = tmp_path / "leases"
     lease_root.mkdir()
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -2729,6 +2758,7 @@ def test_ce_queue_daemon_stale_lease_not_deferred_even_with_ancestor_pid(
     ever reachable from the ``DaemonLeaseHeld`` (live) path, never from
     ``DaemonLeaseStale``, so stale takeover stays fully gated on the
     pre-existing explicit-audited-takeover path, unchanged by this rework."""
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     lease_root = tmp_path / "leases"
     lease_root.mkdir()
     ancestor_pid = os.getppid()
@@ -2783,6 +2813,7 @@ def test_ce_queue_daemon_refuses_live_remote_host_lease_even_with_ancestor_pid(
     namespaces are host-local, so a foreign-host record with a matching pid
     number must never be treated as a local ancestor.
     """
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     lease_root = tmp_path / "leases"
     lease_root.mkdir()
     ancestor_pid = os.getppid()
@@ -2835,6 +2866,7 @@ def test_ce_queue_daemon_approval_wall_prefers_secret_identity_backend_over_env(
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     captured = {}
     backend_secret = "backend-secret"
     env_fallback_secret = "env-fallback-secret"
@@ -2951,6 +2983,7 @@ def test_ce_queue_daemon_openbao_configured_verifies_controller_minted_marker(
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     captured = {}
     openbao_secret = "openbao-approval-wall-secret"
     env_fallback_secret = "env-fallback-secret"
@@ -3056,6 +3089,7 @@ def test_ce_queue_daemon_configured_backend_empty_refuses_without_env_fallback(
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     ref = _approval_secret_ref()
     materialized_path = tmp_path / "empty-approval-wall-secret"
 
@@ -3107,6 +3141,7 @@ def test_ce_queue_daemon_configured_backend_unreachable_does_not_fall_back_to_en
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     ref = _approval_secret_ref()
     materialized_path = tmp_path / "unreachable-approval-wall-secret"
     openbao_calls: list[OpenBaoRequest] = []
@@ -3167,6 +3202,7 @@ def test_ce_queue_daemon_partial_backend_config_refuses_env_fallback(
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
     monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
 
@@ -3195,6 +3231,7 @@ def test_ce_queue_daemon_env_target_ref_rejected_as_fork_unsafe(
     capsys,
     tmp_path: Path,
 ):
+    _prime_integrator_heartbeat(monkeypatch, tmp_path)
     ref = _approval_secret_ref()
     monkeypatch.setattr(v3_cli.integrator_belt, "token_from_env", lambda name: "ghp_fake")
     monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "env-fallback-secret")
