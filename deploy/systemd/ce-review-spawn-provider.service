@@ -1,0 +1,16 @@
+[Unit]
+Description=Creator Engine governed reviewer spawn provider (default OFF)
+Documentation=docs/design/review-acting-spawn-provider.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+# This unit is intentionally not enabled or started by this carrier.  An
+# Operator must supply roots, reviewer registry, capacity, and ownership.
+EnvironmentFile=/etc/creator-engine/ce-review-spawn-provider.env
+ExecStart=/usr/bin/env ce review-spawn-provider --config /etc/creator-engine/ce-review-spawn-provider.env
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

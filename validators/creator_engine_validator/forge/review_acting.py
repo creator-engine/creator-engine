@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .review_spawn_provider import ProviderPolicy
+
 from ..pickup_search import GhRunner
 
 
@@ -64,6 +66,16 @@ _LEDGER_ACTIONS = frozenset({
     "reviewer_authority_invalid",
     "live_claim_mismatch",
     "comment_failed",
+    # M2 provider outcome vocabulary.  These remain durable, fail-closed
+    # evidence when an acting adapter is later wired behind the S3 seam.
+    "SPAWN_REFUSED",
+    "SPAWN_FAILED",
+    "TIMEOUT",
+    "STALE_HEAD",
+    "MALFORMED_RESULT",
+    "PARTIAL_OUTPUT",
+    "REVIEWER_EXIT_NONZERO",
+    "UNCERTAIN_COMMENT",
 })
 
 
@@ -291,7 +303,11 @@ def _reviewer_verdict(output: str, ctx: ActingContext) -> str | None:
     verdict = evidence.get("verdict")
     reviewer = str(evidence.get("reviewer") or "")
     authority = evidence.get("reviewer_authority")
-    if not isinstance(verdict, str) or not verdict.strip() or not isinstance(authority, Mapping):
+    # Dual-support transition: legacy evidence carries ``reviewer_authority``
+    # directly; M2 emits a versioned envelope with the same binding mapping.
+    if authority is None and evidence.get("version") == 1:
+        authority = evidence.get("authority")
+    if verdict not in {"COMMENT", "REQUEST_CHANGES"} or not isinstance(authority, Mapping):
         return None
     if not ctx.assigned_reviewer or not ctx.author or reviewer != ctx.assigned_reviewer:
         return None
@@ -444,7 +460,7 @@ def default_spawner(ctx: ActingContext, gh_runner: GhRunner) -> str:
         check=False,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=ProviderPolicy.from_env().timeout_seconds,
         shell=False,
     )
     if proc.returncode != 0:

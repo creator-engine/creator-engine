@@ -9,6 +9,12 @@ _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
 
+def test_advisory_review_provenance_never_inferrs_attestation():
+    assert queue.advisory_review_provenance({
+        "verdict": "COMMENT", "reviewer": "r", "head_sha": "a"
+    }) == {"verdict": "COMMENT", "reviewer": "r", "head_sha": "a"}
+
+
 def _candidate(number: int, *, state: str = "pending", enqueued_at: str = "2026-07-11T00:00:00Z"):
     return queue.RatifierCandidate(
         pr_number=number,
