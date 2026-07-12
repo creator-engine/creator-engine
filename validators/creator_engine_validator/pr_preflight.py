@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
-from . import brain_intent_xor_gate, brain_runtime
+from . import brain_intent_xor_gate, brain_runtime, image_build_smoke
 from .disk_headroom import DiskHeadroomError, check_headroom, effective_min_free_gb
 from .worktree_venv import (
     CE_VALIDATOR_PYTHON_ENV,
@@ -1355,6 +1355,22 @@ def run_preflight(
         _run_check(
             "baseline-diff test command",
             baseline_diff_gate,
+            out,
+            err,
+        )
+    )
+    if not checks[-1].ok:
+        _print_summary(checks, out, skipped_tests=skipped_tests.get("value", 0))
+        return 1
+    checks.append(
+        _run_check(
+            "Dockerfile image-build smoke tier",
+            lambda: image_build_smoke.run_image_build_smoke(
+                comparison_base["value"],
+                config.repo_root,
+                runner=runner,
+                out=out,
+            ),
             out,
             err,
         )
