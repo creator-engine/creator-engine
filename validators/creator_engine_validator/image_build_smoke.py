@@ -196,12 +196,11 @@ def _resolve_hadolint(*, provision: bool, hadolint_path: str | None) -> Path:
     )
 
 
-def _local_base_exemption(path: Path) -> str | None:
-    """Return a local prefix for literal or same-file-default ``FROM`` bases.
+def _buildx_exemption(path: Path) -> str | None:
+    """Classify local or unresolved/placeholder FROM bases in one Dockerfile.
 
-    This is intentionally limited to single-pass ``ARG NAME=default`` values in
-    the same Dockerfile. It does not implement nested substitutions or BuildKit
-    multi-stage ARG scoping; unresolved variables therefore receive no exemption.
+    Only same-file ``ARG NAME=default`` substitutions are supported; no shell,
+    nested expansion, or BuildKit stage scoping is evaluated.
     """
     arg_defaults: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -225,12 +224,28 @@ def _local_base_exemption(path: Path) -> str | None:
         if not image_parts:
             continue
         image = image_parts[0]
-        variable = re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", image)
-        if variable is not None:
-            image = arg_defaults.get(variable.group(1) or variable.group(2), image)
+        unresolved = False
+
+        def substitute(match: re.Match[str]) -> str:
+            nonlocal unresolved
+            name = match.group(1) or match.group(2)
+            if name not in arg_defaults:
+                unresolved = True
+                return match.group(0)
+            return arg_defaults[name]
+
+        image = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", substitute, image)
+        if unresolved:
+            return "unresolved/placeholder base"
         for prefix in LOCAL_IMAGE_PREFIXES:
             if image.startswith(prefix):
-                return prefix
+                return "local base"
+        reference, separator, digest = image.partition("@")
+        repository, colon, tag = reference.rpartition(":")
+        repository = repository if colon else reference
+        components = repository.split("/")
+        if "UNSET" in components or tag == "UNSET" or (separator and digest == "sha256:UNSET"):
+            return "unresolved/placeholder base"
     return None
 
 
@@ -265,10 +280,10 @@ def run_image_build_smoke(
     for path in files:
         relative = path.relative_to(repo_root).as_posix()
         _run_phase(f"hadolint {relative}", [str(hadolint), "--failure-threshold", "error", relative], repo_root, runner, out)
-        local_prefix = _local_base_exemption(path)
-        if local_prefix is not None:
+        exemption = _buildx_exemption(path)
+        if exemption is not None:
             print(
-                f"==> image smoke Buildx exemption {relative}: FROM base matches local prefix {local_prefix!r}; "
+                f"==> image smoke Buildx exemption {relative}: {exemption}; "
                 "hadolint completed and Docker Buildx --check is intentionally skipped",
                 file=out,
             )

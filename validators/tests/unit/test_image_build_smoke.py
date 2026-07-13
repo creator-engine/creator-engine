@@ -95,7 +95,7 @@ def test_local_creator_engine_base_runs_hadolint_and_reports_buildx_exemption(tm
     commands = [call[0] for call in runner.calls]
     assert ["/verified/hadolint", "--failure-threshold", "error", "deploy/local/Dockerfile"] in commands
     assert not any(command[:2] == ["docker", "buildx"] for command in commands)
-    assert "creator-engine/" in out.getvalue()
+    assert "local base" in out.getvalue()
     assert "exemption" in out.getvalue()
 
 
@@ -127,10 +127,58 @@ def test_arg_indirected_external_base_still_runs_buildx(tmp_path: Path, monkeypa
     assert ["docker", "buildx", "version"] in [call[0] for call in runner.calls]
 
 
-def test_unresolvable_arg_base_still_runs_buildx(tmp_path: Path, monkeypatch):
+def test_unresolvable_arg_base_is_hadolint_only_with_explicit_reason(tmp_path: Path, monkeypatch):
     dockerfile = _dockerfile(tmp_path, "arg-unset")
     dockerfile.write_text("FROM ${UNSET}\n", encoding="utf-8")
     runner = FakeRunner("M\0deploy/arg-unset/Dockerfile\0")
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    out = io.StringIO()
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=out)
+
+    assert not any(command[:2] == ["docker", "buildx"] for command in (call[0] for call in runner.calls))
+    assert "unresolved/placeholder base" in out.getvalue()
+
+
+def test_composite_unset_arg_defaults_are_hadolint_only(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "runtime-placeholder")
+    dockerfile.write_text(
+        "ARG SOURCE=UNSET\nARG VERSION=UNSET\nARG DIGEST=UNSET\n"
+        "FROM ${SOURCE}:${VERSION}@sha256:${DIGEST} AS build\n"
+        "FROM ${SOURCE}:${VERSION}@sha256:${DIGEST}\n",
+        encoding="utf-8",
+    )
+    runner = FakeRunner("M\0deploy/runtime-placeholder/Dockerfile\0")
+    out = io.StringIO()
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=out)
+
+    assert not any(command[:2] == ["docker", "buildx"] for command in (call[0] for call in runner.calls))
+    assert "unresolved/placeholder base" in out.getvalue()
+
+
+def test_sha256_unset_arg_default_is_hadolint_only(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "seat-placeholder")
+    dockerfile.write_text(
+        "ARG CE_CANONICAL_RUNTIME_IMAGE=ghcr.io/creator-engine/creator-engine/ce-runtime@sha256:UNSET\n"
+        "FROM ${CE_CANONICAL_RUNTIME_IMAGE}\n",
+        encoding="utf-8",
+    )
+    runner = FakeRunner("M\0deploy/seat-placeholder/Dockerfile\0")
+    out = io.StringIO()
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=out)
+
+    assert not any(command[:2] == ["docker", "buildx"] for command in (call[0] for call in runner.calls))
+    assert "unresolved/placeholder base" in out.getvalue()
+
+
+def test_unset_substring_in_legitimate_external_base_is_not_exempt(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "unset-lookalike")
+    dockerfile.write_text("FROM registry.example/not-UNSET-image:12\n", encoding="utf-8")
+    runner = FakeRunner("M\0deploy/unset-lookalike/Dockerfile\0")
     monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
 
     smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=io.StringIO())
