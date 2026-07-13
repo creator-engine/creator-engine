@@ -1,15 +1,10 @@
-# PR path manifest — ce-ops#239 — C2-A/B/D deployment readiness
+# PR path manifest — ce-ops#239 · C2-A/B/D deployment readiness
 
-Work class: `story`.
-
-This carrier keeps the approval wall dormant: it records only environment-driven
-deployment coordinates and operator documentation. It contains no secret or
-policy value, live environment/service action, wall-state change, or arming act.
-The separate lease-restart change is deliberately separate and must be
-serialized from this carrier because both touch the integrator unit; they must
-never be combined.
+This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-239-c2-abd-deployment-readiness` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
+
+- **Declared work class:** story
 
 AUTHORIZED_PATHS_COUNT=6
 

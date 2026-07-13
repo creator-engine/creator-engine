@@ -6,9 +6,6 @@ scope: approval-wall deployment readiness
 issue: ce-ops#239
 ---
 
-Add dormant, environment-driven approval-wall deployment coordinates to the
-integrator unit, plus OpenBao and bootstrap-fallback operator documentation.
-No secret or policy value, live environment action, service action, wall-state
-change, or arming act is included. The separate lease-restart change remains
-serialized from this carrier because both touch the integrator unit, and they
-must never be combined.
+**C2-A/B/D deployment readiness.**
+
+Add dormant, environment-driven approval-wall deployment coordinates to the integrator unit, plus OpenBao and bootstrap-fallback operator documentation. No secret or policy value, live environment action, service action, wall-state change, or arming act is included.
