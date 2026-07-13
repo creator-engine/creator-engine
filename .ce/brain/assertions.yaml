@@ -4489,7 +4489,7 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: b3bc40c7c4324c9f92d312e18bbec945cfa2ac05bede50336daafceb6f246e3f
+  content_hash: 39a842a805e03e37190effa768e20857e1d2d6d394fbe9ba53973d683c0294e5
   evidence_ref: validators/pyproject.toml
   id: brain-assertion-077ad4cbb40a07ce2a4870e4
   kind: brain-assertion
@@ -4499,8 +4499,8 @@ records:
   scope: doctrine/day1
   sequence: 172
   statement: doctrine-item asserts full-validator-long-running
-  status: superseded
-  superseded_by: brain-assertion-25ca04903c1e851822507d8f
+  status: active
+  superseded_by: null
   type: convention
   verification_method:
     evidence_ref: validators/pyproject.toml
@@ -4703,6 +4703,32 @@ records:
 - claim:
     details: The full validator includes slow and integration test surfaces; long-running
       execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: 82acbfb9d88b46c618dbee8b026ea8b1745c2ea5421884b329a4b71f45311b27
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: aef441c7b40bad243bb3182be985c606def2d60d5b60bf5d231d4d9532f8462d
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-077ad4cbb40a07ce2a4870e4
+  kind: brain-assertion
+  prev_hash: 99a8033ac859327cb627dd792a24dc378fac5dda8aa0a58c1d7f6e1bf244100c
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 180
+  statement: doctrine-item asserts full-validator-long-running
+  status: superseded
+  superseded_by: brain-assertion-49bfbe88f9462776fa485f14
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
     evidence_sha256: dd7747ac340574feeafe5326a26346c1a207ad5bd7559b60aa6666c70f05c169
     item: 39
     object: full-validator-long-running
@@ -4710,15 +4736,15 @@ records:
     refs:
     - validators/pyproject.toml
     subject: doctrine-item
-  content_hash: 96a50b6390c15e5ea1cff416aea280ebcb4be7dcd7c7bcc445f0dfbb08b7397f
+  content_hash: 92ba094ddc16bf7d0f305002028445e7096d26f2d5033894e0cd626488330fae
   evidence_ref: validators/pyproject.toml
-  id: brain-assertion-25ca04903c1e851822507d8f
+  id: brain-assertion-49bfbe88f9462776fa485f14
   kind: brain-assertion
-  prev_hash: b3bc40c7c4324c9f92d312e18bbec945cfa2ac05bede50336daafceb6f246e3f
+  prev_hash: aef441c7b40bad243bb3182be985c606def2d60d5b60bf5d231d4d9532f8462d
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1
-  sequence: 180
+  sequence: 181
   statement: doctrine-item asserts full-validator-long-running
   status: active
   superseded_by: null
