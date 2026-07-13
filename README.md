@@ -97,7 +97,7 @@ See the [CLI Reference](./docs/reference/cli.md) for every command and option.
 
 ## Project status
 
-Creator Engine v0.3.5 is the latest release, published July 11, 2026. See the
+Creator Engine v0.3.6 is the latest release, published July 12, 2026. See the
 [CHANGELOG](./CHANGELOG.md) for release notes and [GitHub Releases](https://github.com/creator-engine/creator-engine/releases)
 for downloadable release details. Creator Engine is in a public pilot phase,
 with the core local workflow ready to try while some team features continue to

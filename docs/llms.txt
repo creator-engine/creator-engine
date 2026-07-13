@@ -10,7 +10,7 @@ To install CE for an operator, fetch and follow the signed install playbook belo
 - [CE root trust root `ce-root-v1`](https://creator-engine.dev/keys/ce-root-v1): the pinned OpenSSH allowed_signers file — verify the install playbook's detached signature against it (stock `ssh-keygen -Y verify`, namespace `ce-spec-v1`) and bind the signing key to an out-of-band fingerprint anchor before executing any step; the `ce-root-v1` ed25519 fingerprint is `SHA256:mkX7cRfHNrx6mtK8Ek30CcRn6fbfIPK/SU/6KKc0AOQ` (published in this repository and via DNS TXT `_ce-root-v1.creator-engine.dev` — both are independent of creator-engine.dev)
 - [Trust anchor record](https://github.com/creator-engine/creator-engine/blob/main/docs/security/trust-anchors.md): in-repo out-of-band anchor — fingerprints for all CE signing keys, anchor channels, and trust model; this GitHub-served record is independent of creator-engine.dev
 - [Install bootstrap](https://creator-engine.dev/install.sh): the human one-liner; signed-spec plus out-of-band anchor verification before persistent mutation, offline wheel install, authenticated inventory, no sudo/apply
-- [0.3.5 downloads and hashes](https://creator-engine.dev/downloads/0.3.5/SHA256SUMS): Pages mirror hashes for `install.sh` and the offline wheelhouse
+- [0.3.6 downloads and hashes](https://creator-engine.dev/downloads/0.3.6/SHA256SUMS): Pages mirror hashes for `install.sh` and the offline wheelhouse
 
 ## Docs
 

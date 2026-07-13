@@ -13,65 +13,65 @@ signature:
   key_id: ce-root-v1
   algo: ssh-ed25519
   namespace: ce-spec-v1
-  value: LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdiOFNYdFNCQlkxdDhLL1N5ajQveDRSR0R5ZwphUkNxdm9lTzZhdHljd3Vra0FBQUFLWTJVdGMzQmxZeTEyTVFBQUFBQUFBQUFHYzJoaE5URXlBQUFBVXdBQUFBdHpjMmd0ClpXUXlOVFV4T1FBQUFFRG14dnNHOFcxLzE2VGJaWGRqU1NuWnpRdTcraFVNek1JSFdRNy9UTnVPK2J0RjhZRzFYeEVjbUcKVlp5MGNycDNmYXRjbEMrOVhBT0FZbW9EUGpKeU1BCi0tLS0tRU5EIFNTSCBTSUdOQVRVUkUtLS0tLQo=
-  content_sha256: 5d28d3a79a41e528f032fd84acfce3fd583d0e1903f156f90e89291011e96221
+  value: <RESIGN-REQUIRED-ce-root-v1>
+  content_sha256: 1d3f9a7d65e1a003667b59ff179f3492513c1ccabf2bf6bfa06d5931bb54edaf
 
 artifact_manifest:
   artifact_manifest_version: 1
   package_name: creator-engine-validator
-  package_version: 0.3.5
+  package_version: 0.3.6
   python_requires: >=3.14
-  artifact_base_url: https://creator-engine.dev/downloads/0.3.5
-  sha256s_url: https://creator-engine.dev/downloads/0.3.5/SHA256SUMS
-  sha256s_sha256: 0ef29246f9434fc2de92fde5691b52e3215d2fe76358cd4f0052991106806e47
+  artifact_base_url: https://creator-engine.dev/downloads/0.3.6
+  sha256s_url: https://creator-engine.dev/downloads/0.3.6/SHA256SUMS
+  sha256s_sha256: 3292b28c50a0a2d67f2bf050c1fbe12b2f29fd50099ce1144d766157d9870d95
   install_sh_url: https://creator-engine.dev/install.sh
   install_sh_sha256s_entry: install.sh
   answers_schema_url: https://creator-engine.dev/schemas/install-answers.schema.yaml
   answers_schema_sha256: 621a76f2768c71b48bbf3eac8aa4378aee97c2705dc2b6d82a6a5103cf023f71
-  app_wheel: creator_engine_validator-0.3.5-py3-none-any.whl
+  app_wheel: creator_engine_validator-0.3.6-py3-none-any.whl
   required_wheels:
     - filename: attrs-26.1.0-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.3.5/attrs-26.1.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.6/attrs-26.1.0-py3-none-any.whl
       sha256: c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
       platforms: all
-    - filename: creator_engine_validator-0.3.5-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.3.5/creator_engine_validator-0.3.5-py3-none-any.whl
-      sha256: c69c1b851f074cb6698ac55bb569a2917b634ff3522b8a8bffe1aadb6a2b9ad0
+    - filename: creator_engine_validator-0.3.6-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.6/creator_engine_validator-0.3.6-py3-none-any.whl
+      sha256: 0905d78218e436605cd18517932250eadc5e042295476d95768459c509b25e88
       platforms: all
     - filename: jsonschema-4.26.0-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.3.5/jsonschema-4.26.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.6/jsonschema-4.26.0-py3-none-any.whl
       sha256: d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
       platforms: all
     - filename: jsonschema_specifications-2025.9.1-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.3.5/jsonschema_specifications-2025.9.1-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.6/jsonschema_specifications-2025.9.1-py3-none-any.whl
       sha256: 98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
       platforms: all
     - filename: pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
-      url: https://creator-engine.dev/downloads/0.3.5/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.3.6/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       sha256: c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
       platforms: linux-x86_64-cp314
     - filename: pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
-      url: https://creator-engine.dev/downloads/0.3.5/pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.3.6/pyyaml-6.0.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
       sha256: 501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7
       platforms: linux-aarch64-cp314
     - filename: referencing-0.37.0-py3-none-any.whl
-      url: https://creator-engine.dev/downloads/0.3.5/referencing-0.37.0-py3-none-any.whl
+      url: https://creator-engine.dev/downloads/0.3.6/referencing-0.37.0-py3-none-any.whl
       sha256: 381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
       platforms: all
     - filename: rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      url: https://creator-engine.dev/downloads/0.3.5/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.3.6/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       sha256: 47e77dc9822d3ad616c3d5759ea5631a75e5809d5a28707744ef79d7a1bcfcad
       platforms: linux-x86_64-cp314
     - filename: rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
-      url: https://creator-engine.dev/downloads/0.3.5/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.3.6/rpds_py-0.30.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
       sha256: f251c812357a3fed308d684a5079ddfb9d933860fc6de89f2b7ab00da481e65f
       platforms: linux-aarch64-cp314
     - filename: uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      url: https://creator-engine.dev/downloads/0.3.5/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      url: https://creator-engine.dev/downloads/0.3.6/uv-0.11.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       sha256: b9ecdefa81db7e966d1655988cad6f840316228381dd69131ebc4ae9362bbccd
       platforms: linux-x86_64-cp314
     - filename: uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
-      url: https://creator-engine.dev/downloads/0.3.5/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
+      url: https://creator-engine.dev/downloads/0.3.6/uv-0.11.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64.whl
       sha256: 00193e4e077c27ee3d66da356744dbf0b3aa59356dfbd9a9efb1dc8469af8ad7
       platforms: linux-aarch64-cp314
   python_acquisition:
@@ -181,7 +181,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
 
 - **One-liner** — `curl --proto '=https' --tlsv1.2 -fsSL https://creator-engine.dev/install.sh | bash`.
   Transport integrity for the script body is **TLS** plus the published
-  `install.sh` hash in `https://creator-engine.dev/downloads/0.3.5/SHA256SUMS`.
+  `install.sh` hash in `https://creator-engine.dev/downloads/0.3.6/SHA256SUMS`.
   The script's first authority step is still this signed spec: it fetches
   `llms-install.md`, fetches the trust root, binds that root to an out-of-band
   anchor for the signature key, reconstructs the canonical bytes, verifies the
@@ -189,7 +189,7 @@ The public one-liner now performs the bootstrap; it is not a dry-run explainer.
   refusal. Only after that does it fetch the signed-manifest wheelhouse,
   `SHA256SUMS`, and answers schema, hash-verify every artifact, acquire CPython
   3.14 through the pinned uv artifact if needed, create/reuse a user-local venv,
-  install `creator-engine-validator==0.3.5` offline, and run authenticated
+  install `creator-engine-validator==0.3.6` offline, and run authenticated
   inventory:
 
   ```text
