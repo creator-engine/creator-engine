@@ -1,4 +1,4 @@
-# PR path manifest - ce-ops#557 deterministic controller no-inlining
+# PR path manifest - deterministic controller no-inlining
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed
 authorized path-set for this PR. CI runs `verify-path-manifest --base <sha>
@@ -22,7 +22,7 @@ path-set below; this carrier lists itself.
 Per-file purpose:
 
 - **`.ce/changelog/ce-557-deterministic-noninlining-w2.md`** *(A)* - changelog
-  fragment for the ce-ops#557 governed story and carrier repair evidence.
+  fragment for the governed story and carrier repair evidence.
 - **`.ce/pr-manifests/ce-557-deterministic-noninlining-w2.md`** *(A)* - this
   closed path-set carrier.
 - **`docs/operations/CONTROLLER_BOUNDARY_POLICY.md`** *(M)* - documents the
