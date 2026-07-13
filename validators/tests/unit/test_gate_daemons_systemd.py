@@ -6,6 +6,10 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from creator_engine_validator import v3_cli
+
 
 SERVICE_NAMES = (
     "ce-belt-daemon.service",
@@ -14,6 +18,17 @@ SERVICE_NAMES = (
     "ce-ratifier-queue.service",
 )
 SEAT_UNIT_NAME = "ce-codex-seat@.service"
+APPROVAL_WALL_ENV_PAIRS = (
+    ("--approval-wall-secret-backend", "CE_APPROVAL_WALL_SECRET_BACKEND"),
+    ("--approval-wall-secret-mount", "CE_APPROVAL_WALL_SECRET_MOUNT"),
+    ("--approval-wall-secret-path", "CE_APPROVAL_WALL_SECRET_PATH"),
+    ("--approval-wall-secret-field", "CE_APPROVAL_WALL_SECRET_FIELD"),
+    ("--approval-wall-secret-purpose", "CE_APPROVAL_WALL_SECRET_PURPOSE"),
+    ("--approval-wall-secret-owner-ref", "CE_APPROVAL_WALL_SECRET_OWNER_REF"),
+    ("--approval-wall-secret-ref-policy-sha", "CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA"),
+    ("--approval-wall-secret-target-ref", "CE_APPROVAL_WALL_SECRET_TARGET_REF"),
+    ("--approval-wall-policy-sha", "CE_APPROVAL_WALL_POLICY_SHA"),
+)
 
 
 def _read_unit(repo_root: Path, name: str) -> configparser.ConfigParser:
@@ -138,23 +153,64 @@ def test_integrator_approval_wall_wiring_is_dormant_and_parametric(repo_root: Pa
     ):
         assert unchanged_arg in exec_start
 
-    expected_pairs = (
-        ("--approval-wall-secret-backend", "CE_APPROVAL_WALL_SECRET_BACKEND"),
-        ("--approval-wall-secret-mount", "CE_APPROVAL_WALL_SECRET_MOUNT"),
-        ("--approval-wall-secret-path", "CE_APPROVAL_WALL_SECRET_PATH"),
-        ("--approval-wall-secret-field", "CE_APPROVAL_WALL_SECRET_FIELD"),
-        ("--approval-wall-secret-purpose", "CE_APPROVAL_WALL_SECRET_PURPOSE"),
-        ("--approval-wall-secret-owner-ref", "CE_APPROVAL_WALL_SECRET_OWNER_REF"),
-        ("--approval-wall-secret-ref-policy-sha", "CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA"),
-        ("--approval-wall-secret-target-ref", "CE_APPROVAL_WALL_SECRET_TARGET_REF"),
-        ("--approval-wall-policy-sha", "CE_APPROVAL_WALL_POLICY_SHA"),
-    )
-    for flag, env_name in expected_pairs:
-        assert f'{flag} "${env_name}"' in exec_start
+    for flag, env_name in APPROVAL_WALL_ENV_PAIRS:
+        assert f'{flag} "${{{env_name}}}"' in exec_start
+        assert f'{flag} "${env_name}"' not in exec_start
 
-    assert exec_start.count("--approval-wall-") == len(expected_pairs)
+    assert exec_start.count("--approval-wall-") == len(APPROVAL_WALL_ENV_PAIRS)
     assert "CE_APPROVAL_CAPABILITY_SECRET" not in exec_start
     assert "Environment" not in service
+
+
+def test_integrator_empty_approval_wall_argv_stays_dormant_and_partial_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    optional_argv = [item for flag, _ in APPROVAL_WALL_ENV_PAIRS for item in (flag, "")]
+    parser = v3_cli._build_parser()
+    args = parser.parse_args(
+        [
+            "queue-daemon",
+            "--repo",
+            "example/repo",
+            "--loop",
+            "--interval",
+            "120",
+            "--authorized-reviewer",
+            "reviewer",
+            *optional_argv,
+            "--json",
+        ]
+    )
+    args.root = tmp_path
+
+    parsed_values = tuple(
+        getattr(args, flag.removeprefix("--").replace("-", "_"))
+        for flag, _ in APPROVAL_WALL_ENV_PAIRS
+    )
+    assert parsed_values == ("",) * len(APPROVAL_WALL_ENV_PAIRS)
+    monkeypatch.delenv("CE_APPROVAL_CAPABILITY_SECRET", raising=False)
+    wall = v3_cli._approval_wall_runtime_from_args(args)
+    assert wall.dormant
+    assert wall.reason == "secret_not_configured"
+
+    partial_args = parser.parse_args(
+        [
+            "queue-daemon",
+            "--repo",
+            "example/repo",
+            "--loop",
+            *[
+                item
+                for flag, _ in APPROVAL_WALL_ENV_PAIRS
+                for item in (flag, "openbao" if flag == "--approval-wall-secret-backend" else "")
+            ],
+        ]
+    )
+    partial_args.root = tmp_path
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "bootstrap-must-not-be-used")
+    with pytest.raises(v3_cli.integrator_belt.IntegratorBeltError, match="configuration is partial"):
+        v3_cli._approval_wall_runtime_from_args(partial_args)
 
 
 def test_approval_wall_deployment_docs_keep_dormant_fail_closed_boundaries(repo_root: Path):
