@@ -186,6 +186,19 @@ def test_unset_substring_in_legitimate_external_base_is_not_exempt(tmp_path: Pat
     assert ["docker", "buildx", "version"] in [call[0] for call in runner.calls]
 
 
+def test_placeholder_repository_component_after_registry_port_is_hadolint_only(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "registry-port-placeholder")
+    dockerfile.write_text("FROM registry:5000/UNSET/image\n", encoding="utf-8")
+    runner = FakeRunner("M\0deploy/registry-port-placeholder/Dockerfile\0")
+    out = io.StringIO()
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=out)
+
+    assert not any(command[:2] == ["docker", "buildx"] for command in (call[0] for call in runner.calls))
+    assert "unresolved/placeholder base" in out.getvalue()
+
+
 def test_quoted_arg_default_is_resolved_for_local_base_exemption(tmp_path: Path, monkeypatch):
     dockerfile = _dockerfile(tmp_path, "arg-quoted")
     dockerfile.write_text("ARG BASE='creator-engine/runtime:dev'\nFROM ${BASE}\n", encoding="utf-8")

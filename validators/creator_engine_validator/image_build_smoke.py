@@ -241,8 +241,12 @@ def _buildx_exemption(path: Path) -> str | None:
             if image.startswith(prefix):
                 return "local base"
         reference, separator, digest = image.partition("@")
-        repository, colon, tag = reference.rpartition(":")
-        repository = repository if colon else reference
+        last_slash = reference.rfind("/")
+        tag_colon = reference.rfind(":")
+        if tag_colon > last_slash:
+            repository, tag = reference[:tag_colon], reference[tag_colon + 1 :]
+        else:
+            repository, tag = reference, ""
         components = repository.split("/")
         if "UNSET" in components or tag == "UNSET" or (separator and digest == "sha256:UNSET"):
             return "unresolved/placeholder base"
