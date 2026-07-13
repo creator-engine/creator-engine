@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -196,12 +197,26 @@ def _resolve_hadolint(*, provision: bool, hadolint_path: str | None) -> Path:
 
 
 def _local_base_exemption(path: Path) -> str | None:
-    """Return the matching local base prefix, if a Dockerfile ``FROM`` uses one."""
+    """Return a local prefix for literal or same-file-default ``FROM`` bases.
+
+    This is intentionally limited to single-pass ``ARG NAME=default`` values in
+    the same Dockerfile. It does not implement nested substitutions or BuildKit
+    multi-stage ARG scoping; unresolved variables therefore receive no exemption.
+    """
+    arg_defaults: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         parts = line.split()
+        if parts and parts[0].upper() == "ARG" and len(parts) >= 2 and "=" in parts[1]:
+            name, value = parts[1].split("=", 1)
+            if name and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                    value = value[1:-1]
+                arg_defaults[name] = value
+            continue
         if not parts or parts[0].upper() != "FROM":
             continue
         image_parts = parts[1:]
@@ -210,6 +225,9 @@ def _local_base_exemption(path: Path) -> str | None:
         if not image_parts:
             continue
         image = image_parts[0]
+        variable = re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", image)
+        if variable is not None:
+            image = arg_defaults.get(variable.group(1) or variable.group(2), image)
         for prefix in LOCAL_IMAGE_PREFIXES:
             if image.startswith(prefix):
                 return prefix
