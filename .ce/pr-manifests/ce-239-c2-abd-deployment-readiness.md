@@ -5,7 +5,9 @@ Work class: `story`.
 This carrier keeps the approval wall dormant: it records only environment-driven
 deployment coordinates and operator documentation. It contains no secret or
 policy value, live environment/service action, wall-state change, or arming act.
-ce-ops#554 lease-restart work is deliberately separate.
+The separate lease-restart change is deliberately separate and must be
+serialized from this carrier because both touch the integrator unit; they must
+never be combined.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 

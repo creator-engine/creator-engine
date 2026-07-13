@@ -9,5 +9,6 @@ issue: ce-ops#239
 Add dormant, environment-driven approval-wall deployment coordinates to the
 integrator unit, plus OpenBao and bootstrap-fallback operator documentation.
 No secret or policy value, live environment action, service action, wall-state
-change, or arming act is included. ce-ops#554 lease-restart work remains a
-separate change and must not be combined with this carrier.
+change, or arming act is included. The separate lease-restart change remains
+serialized from this carrier because both touch the integrator unit, and they
+must never be combined.
