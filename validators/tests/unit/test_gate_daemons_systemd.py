@@ -154,6 +154,26 @@ def test_gate_daemon_installer_is_valid_bash(repo_root: Path):
     assert result.returncode == 0, result.stderr
 
 
+def test_model_drift_watcher_uses_its_own_zero_token_environment(repo_root: Path):
+    unit_path = repo_root / "deploy" / "systemd" / "ce-model-drift-watcher.service"
+    unit = _read_unit_path(unit_path)
+    text = unit_path.read_text(encoding="utf-8")
+    installer = (repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh").read_text(encoding="utf-8")
+    service = unit["Service"]
+    assert service["EnvironmentFile"] == "/etc/creator-engine/ce-model-drift.env"
+    assert service["ExecStart"].endswith("-m creator_engine_validator.model_drift_watcher")
+    assert service["Restart"] == "on-failure"
+    assert service["NoNewPrivileges"] == "true"
+    assert service["ProtectSystem"] == "strict"
+    assert "gate-daemons.env" not in text
+    for forbidden in ("GH_TOKEN", "GITHUB_TOKEN", "BAO_TOKEN", "VAULT_TOKEN", "PAT", "CREDENTIAL"):
+        assert forbidden not in text
+    for allowed in ("CE_MODEL_DRIFT_CANON", "CE_MODEL_DRIFT_STATE_PATH", "CE_MODEL_DRIFT_LEASE_ROOT", "CE_MODEL_DRIFT_INBOX_PATH", "CE_MODEL_DRIFT_CADENCE_SECONDS"):
+        assert allowed in installer
+    assert "ce-model-drift-watcher.service)" in installer
+    assert "chmod 0600 \"$model_drift_env_file\"" in installer
+
+
 def test_materializer_unit_supervises_disarmed_dry_run_loop(repo_root: Path):
     unit_path = repo_root / "deploy" / "materializer" / "ce-materializer.service"
     unit = _read_unit_path(unit_path)

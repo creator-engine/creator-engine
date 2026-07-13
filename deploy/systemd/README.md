@@ -9,6 +9,8 @@ These units keep the autonomous gate daemons alive after host reboot:
 - `ce-ratifier-queue.service`: folds controller-supplied candidate/evidence
   snapshots into a durable, proposal-only ratifier queue; it cannot approve,
   enqueue, merge, sign, or remove the legacy session crons.
+- `ce-model-drift-watcher.service`: observes the tracked model canon in fixed
+  DGX/VPS containers and writes durable controller-inbox drift alarms.
 - `ce-codex-seat@.service`: clears any stale named Codex seat container, starts
   a fresh detached runsc container through the checked-in launcher, and keeps
   `docker wait <container>` in the foreground so systemd owns restart.
@@ -54,6 +56,16 @@ missing or empty config fails closed. Review pickup first uses
 `CE_PICKUP_TOKEN`; if it is absent, the CLI falls back to the configured
 reviewer seats' local credential files unless ambient `gh` auth is explicitly
 enabled.
+
+## Model drift observer
+
+`ce-model-drift-watcher.service` has a separate zero-token environment file:
+`~/.config/creator-engine/ce-model-drift.env` for user installs and
+`/etc/creator-engine/ce-model-drift.env` for system installs. The installer
+creates it owner-only with only canon, state, lease, inbox, and 60-second
+cadence settings. It does not carry GitHub, OpenBao, Vault, PAT, or credential
+file values. The watcher can only read each canon-pinned container TOML and
+`codex --version`; it never restarts a container or changes configuration.
 
 To source the review-pickup token through OpenBao, add the OpenBao client
 environment and the review-pickup SecretRef to the same env file:

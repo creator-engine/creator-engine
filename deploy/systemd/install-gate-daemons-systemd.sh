@@ -35,6 +35,7 @@ unit_dir=""
 env_file=""
 egress_broker_env_file=""
 egress_self_review_env_file=""
+model_drift_env_file=""
 start_services=1
 
 while [[ $# -gt 0 ]]; do
@@ -91,12 +92,14 @@ if [[ "$scope" == "system" ]]; then
   env_file="${env_file:-/etc/creator-engine/gate-daemons.env}"
   egress_broker_env_file="${egress_broker_env_file:-/etc/creator-engine/ce-egress-broker.env}"
   egress_self_review_env_file="${egress_self_review_env_file:-/etc/creator-engine/ce-egress-self-review.env}"
+  model_drift_env_file="${model_drift_env_file:-/etc/creator-engine/ce-model-drift.env}"
   systemctl_cmd=(systemctl)
 else
   unit_dir="${unit_dir:-$HOME/.config/systemd/user}"
   env_file="${env_file:-$HOME/.config/creator-engine/gate-daemons.env}"
   egress_broker_env_file="${egress_broker_env_file:-$HOME/.config/creator-engine/ce-egress-broker.env}"
   egress_self_review_env_file="${egress_self_review_env_file:-$HOME/.config/creator-engine/ce-egress-self-review.env}"
+  model_drift_env_file="${model_drift_env_file:-$HOME/.config/creator-engine/ce-model-drift.env}"
   systemctl_cmd=(systemctl --user)
 fi
 
@@ -116,6 +119,7 @@ services=(
   # file before starting.
   ce-egress-self-review.socket
   ce-egress-self-review.service
+  ce-model-drift-watcher.service
 )
 
 echo "scope: $scope"
@@ -124,6 +128,7 @@ echo "unit dir: $unit_dir"
 echo "gate env file: $env_file"
 echo "egress broker env file: $egress_broker_env_file"
 echo "egress self-review env file: $egress_self_review_env_file"
+echo "model drift env file: $model_drift_env_file"
 
 if [[ ! -d "$repo_root/.git" ]]; then
   echo "ERROR: repo root does not look like a git checkout: $repo_root" >&2
@@ -193,6 +198,21 @@ EOF
   exit 1
 fi
 
+# This observer is intentionally isolated from the credential-bearing gate
+# environment.  Its managed file contains only fixed, non-secret paths.
+if [[ ! -f "$model_drift_env_file" ]]; then
+  install -d -m 0700 "$(dirname -- "$model_drift_env_file")"
+  umask 077
+  cat > "$model_drift_env_file" <<EOF
+CE_MODEL_DRIFT_CANON=$repo_root/surfaces/model-canon.yaml
+CE_MODEL_DRIFT_STATE_PATH=/var/lib/creator-engine/model-drift/state.json
+CE_MODEL_DRIFT_LEASE_ROOT=/var/lib/creator-engine/model-drift/leases
+CE_MODEL_DRIFT_INBOX_PATH=/var/lib/creator-engine/controller-inbox/model-drift.ndjson
+CE_MODEL_DRIFT_CADENCE_SECONDS=60
+EOF
+  chmod 0600 "$model_drift_env_file"
+fi
+
 mkdir -p "$unit_dir"
 
 render_unit() {
@@ -240,6 +260,9 @@ env_file_for_service() {
       ;;
     ce-egress-self-review.service)
       printf '%s\n' "$egress_self_review_env_file"
+      ;;
+    ce-model-drift-watcher.service)
+      printf '%s\n' "$model_drift_env_file"
       ;;
     *.service)
       printf '%s\n' "$env_file"

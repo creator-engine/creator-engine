@@ -1,0 +1,16 @@
+# The tracked projection is the watcher runtime canon; ignored routing state is never read.
+schema_version: 1
+provenance_sha256: 59b9b8f2a8464dcb2050889cd557e669f9fe9212c9e346c5221b8cf722972fba
+seats:
+  - id: ce-dgx-codex
+    container: ce-dgx-codex
+    config_path: /home/cedev4/.codex/config.toml
+    model: gpt-5.6-terra
+    model_reasoning_effort: high
+    codex_version: 0.144.1
+  - id: ce-vps-codex
+    container: ce-vps-codex
+    config_path: /home/ce/.codex/config.toml
+    model: gpt-5.6-terra
+    model_reasoning_effort: high
+    codex_version: 0.144.1
