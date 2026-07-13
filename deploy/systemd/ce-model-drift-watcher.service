@@ -17,6 +17,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
+StateDirectory=creator-engine/model-drift creator-engine/controller-inbox
+StateDirectoryMode=0700
 ReadWritePaths=/var/lib/creator-engine/model-drift /var/lib/creator-engine/controller-inbox
 UMask=0077
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -151,43 +152,154 @@ class ModelDriftWatcher:
             raise ModelCanonError("observation pass must contain exactly one record per canon seat")
         alarms: list[dict[str, Any]] = []
         seats = self.state.setdefault("seats", {})
+        # A persisted alarm has priority over a new observation.  This prevents
+        # a restart (or a temporarily unavailable inbox) from advancing an
+        # episode beyond its delivery threshold.
+        for seat_id, state in seats.items():
+            if state.get("alarm_pending"):
+                self._deliver_pending(seat_id, state)
+
+        canon_by_id = {seat.id: seat for seat in self.canon.seats}
         for observation in observations:
-            updated, alarm = _advance(dict(seats.get(observation.seat_id, {})), observation)
+            updated, alarm = _advance(
+                dict(seats.get(observation.seat_id, {})),
+                canon_by_id[observation.seat_id],
+                observation,
+            )
             seats[observation.seat_id] = updated
             if alarm:
                 alarms.append(alarm)
         self.state["last_success_at"] = max(item.observed_at for item in observations)
         _atomic_json(self.state_path, self.state)
         for alarm in alarms:
-            _append_ndjson(self.inbox_path, alarm)
-            self.journal_sink(alarm)
+            self._deliver_pending(alarm["seat_id"], self.state["seats"][alarm["seat_id"]])
         return alarms
 
+    def _deliver_pending(self, seat_id: str, state: dict[str, Any]) -> None:
+        """Complete one durable delivery without ever losing the pending fact."""
+        record = state.get("pending_alarm")
+        if not state.get("alarm_pending") or not isinstance(record, dict):
+            raise ModelCanonError("model drift state has an invalid pending alarm")
+        event_id = record.get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            raise ModelCanonError("model drift state has a pending alarm without an event id")
+        already_delivered = _inbox_has_event_id(self.inbox_path, event_id)
+        if not already_delivered:
+            _append_ndjson(self.inbox_path, record)
+        delivered = dict(state)
+        delivered.update(alarm_pending=False, alarm_delivered=True, pending_alarm=None)
+        self.state["seats"][seat_id] = delivered
+        _atomic_json(self.state_path, self.state)
+        if not already_delivered:
+            self.journal_sink(record)
 
-def _advance(prior: dict[str, Any], observation: Observation) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    state = {"first_seen": None, "acknowledged": False, "active": False, "mismatch_count": 0, "match_count": 0, "drift_observations": 0, **prior}
-    state["last_observation"] = asdict(observation)
+
+def _advance(prior: dict[str, Any], seat: CanonSeat, observation: Observation) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    state = {
+        "first_seen": None,
+        "acknowledged": False,
+        "active": False,
+        "mismatch_count": 0,
+        "match_count": 0,
+        "drift_observations": 0,
+        "fingerprint": None,
+        "event_id": None,
+        "alarm_pending": False,
+        "alarm_delivered": False,
+        "pending_alarm": None,
+        **prior,
+    }
     if observation.state.startswith("unknown_"):
         return state, None  # Unknown cannot reset an alert or masquerade as recovery.
+    state["last_observation"] = asdict(observation)
     if observation.state == "match":
         state["match_count"] += 1
         state["mismatch_count"] = 0
         if state["active"] and state["match_count"] >= 2:
-            state.update(active=False, first_seen=None, acknowledged=False, drift_observations=0)
+            state.update(
+                active=False,
+                first_seen=None,
+                acknowledged=False,
+                drift_observations=0,
+                fingerprint=None,
+                event_id=None,
+                alarm_pending=False,
+                alarm_delivered=False,
+                pending_alarm=None,
+            )
+        return state, None
+    fingerprint = _drift_fingerprint(seat, observation)
+    if fingerprint != state["fingerprint"]:
+        state.update(
+            first_seen=observation.observed_at,
+            acknowledged=False,
+            active=False,
+            mismatch_count=1,
+            match_count=0,
+            drift_observations=1,
+            fingerprint=fingerprint,
+            event_id=_event_id(seat.id, fingerprint, observation.observed_at),
+            alarm_pending=False,
+            alarm_delivered=False,
+            pending_alarm=None,
+        )
         return state, None
     prior_observation = prior.get("last_observation", {})
     prior_at = prior_observation.get("observed_at") if prior_observation.get("state") != "match" else None
     if prior_at is None or observation.observed_at - float(prior_at) >= CADENCE_SECONDS:
         state["mismatch_count"] += 1
+        state["drift_observations"] += 1
     state["match_count"] = 0
     if state["mismatch_count"] >= 2:
         if not state["active"]:
-            state.update(active=True, first_seen=observation.observed_at, drift_observations=2)
-        else:
-            state["drift_observations"] += 1
-    if state["active"] and not state["acknowledged"] and state["drift_observations"] == 3:
-        return state, {"event": "model_drift_alarm", "journal_identifier": JOURNAL_IDENTIFIER, "seat_id": observation.seat_id, "state": observation.state, "first_seen": state["first_seen"], "observed_at": observation.observed_at, "observation": asdict(observation)}
+            state["active"] = True
+    if state["active"] and not state["acknowledged"] and state["drift_observations"] == 3 and not state["alarm_delivered"]:
+        alarm = {
+            "event": "model_drift_alarm",
+            "event_id": state["event_id"],
+            "journal_identifier": JOURNAL_IDENTIFIER,
+            "seat_id": observation.seat_id,
+            "state": observation.state,
+            "first_seen": state["first_seen"],
+            "observed_at": observation.observed_at,
+            "fingerprint": state["fingerprint"],
+            "observation": asdict(observation),
+        }
+        state.update(alarm_pending=True, pending_alarm=alarm)
+        return state, alarm
     return state, None
+
+
+def _drift_fingerprint(seat: CanonSeat, observation: Observation) -> str:
+    """Canonicalize all observed mismatch dimensions; ordering cannot matter."""
+    if observation.model is None and observation.effort is None and observation.version is None:
+        payload = json.dumps([("state", observation.state)], separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    dimensions = {
+        "effort": (seat.model_reasoning_effort, observation.effort),
+        "model": (seat.model, observation.model),
+        "version": (seat.codex_version, observation.version),
+    }
+    mismatch = sorted(
+        (name, expected, observed)
+        for name, (expected, observed) in dimensions.items()
+        if observed != expected
+    )
+    # A manually supplied observation may have values that happen to match even
+    # though its state declares drift; keep that declared dimension explicit.
+    if not mismatch:
+        mismatch = [("state", observation.state, observation.state)]
+    payload = json.dumps(mismatch, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _event_id(seat_id: str, fingerprint: str, first_seen: float) -> str:
+    payload = json.dumps(
+        {"seat_id": seat_id, "fingerprint": fingerprint, "first_seen": first_seen},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "model-drift-" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _load_state(path: Path) -> dict[str, Any]:
@@ -199,7 +311,33 @@ def _load_state(path: Path) -> dict[str, Any]:
         raise ModelCanonError(f"cannot read model drift state: {exc}") from exc
     if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("seats"), dict):
         raise ModelCanonError("model drift state is malformed")
+    for seat in data["seats"].values():
+        _validate_seat_state(seat)
     return data
+
+
+def _validate_seat_state(state: Any) -> None:
+    if not isinstance(state, dict):
+        raise ModelCanonError("model drift state has a non-object seat")
+    allowed = {
+        "first_seen", "acknowledged", "active", "mismatch_count", "match_count",
+        "drift_observations", "last_observation", "fingerprint", "event_id",
+        "alarm_pending", "alarm_delivered", "pending_alarm",
+    }
+    if set(state) - allowed:
+        raise ModelCanonError("model drift state has unknown seat fields")
+    for key in ("acknowledged", "active", "alarm_pending", "alarm_delivered"):
+        if key in state and not isinstance(state[key], bool):
+            raise ModelCanonError("model drift state has invalid boolean fields")
+    for key in ("mismatch_count", "match_count", "drift_observations"):
+        if key in state and (not isinstance(state[key], int) or state[key] < 0):
+            raise ModelCanonError("model drift state has invalid counters")
+    if state.get("alarm_pending"):
+        pending, event_id = state.get("pending_alarm"), state.get("event_id")
+        if not isinstance(pending, dict) or pending.get("event_id") != event_id or not isinstance(event_id, str):
+            raise ModelCanonError("model drift state has an invalid pending alarm")
+    if state.get("alarm_pending") and state.get("alarm_delivered"):
+        raise ModelCanonError("model drift state cannot be both pending and delivered")
 
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -224,6 +362,22 @@ def _append_ndjson(path: Path, record: Mapping[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True); path.parent.chmod(0o700)
     with path.open("a", encoding="utf-8") as handle:
         os.chmod(path, 0o600); handle.write(json.dumps(dict(record), sort_keys=True, separators=(",", ":")) + "\n"); handle.flush(); os.fsync(handle.fileno())
+
+
+def _inbox_has_event_id(path: Path, event_id: str) -> bool:
+    if not path.exists():
+        return False
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ValueError("inbox line is not an object")
+                if record.get("event_id") == event_id:
+                    return True
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ModelCanonError(f"cannot inspect model drift inbox: {exc}") from exc
+    return False
 
 
 def _stderr_journal(record: Mapping[str, Any]) -> None:

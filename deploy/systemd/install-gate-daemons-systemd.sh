@@ -19,8 +19,7 @@ Defaults:
   egress self-review env file:
     ~/.config/creator-engine/ce-egress-self-review.env (user)
     /etc/creator-engine/ce-egress-self-review.env (--system)
-  model drift env file:
-    ~/.config/creator-engine/ce-model-drift.env (user)
+  model drift env file (system watcher only):
     /etc/creator-engine/ce-model-drift.env (--system)
 
 The script copies rendered units, runs daemon-reload, enables the services, and
@@ -106,7 +105,7 @@ else
   env_file="${env_file:-$HOME/.config/creator-engine/gate-daemons.env}"
   egress_broker_env_file="${egress_broker_env_file:-$HOME/.config/creator-engine/ce-egress-broker.env}"
   egress_self_review_env_file="${egress_self_review_env_file:-$HOME/.config/creator-engine/ce-egress-self-review.env}"
-  model_drift_env_file="${model_drift_env_file:-$HOME/.config/creator-engine/ce-model-drift.env}"
+  model_drift_env_file="${model_drift_env_file:-}"
   systemctl_cmd=(systemctl --user)
 fi
 
@@ -126,8 +125,11 @@ services=(
   # file before starting.
   ce-egress-self-review.socket
   ce-egress-self-review.service
-  ce-model-drift-watcher.service
 )
+
+if [[ "$scope" == "system" ]]; then
+  services+=(ce-model-drift-watcher.service)
+fi
 
 echo "scope: $scope"
 echo "repo root: $repo_root"
@@ -135,7 +137,11 @@ echo "unit dir: $unit_dir"
 echo "gate env file: $env_file"
 echo "egress broker env file: $egress_broker_env_file"
 echo "egress self-review env file: $egress_self_review_env_file"
-echo "model drift env file: $model_drift_env_file"
+if [[ "$scope" == "system" ]]; then
+  echo "model drift env file: $model_drift_env_file"
+else
+  echo "skipped: ce-model-drift-watcher.service (system-only: fixed service identity, docker group, protected /var/lib state/inbox)"
+fi
 
 if [[ ! -d "$repo_root/.git" ]]; then
   echo "ERROR: repo root does not look like a git checkout: $repo_root" >&2
@@ -206,9 +212,36 @@ EOF
 fi
 
 # This observer is intentionally isolated from the credential-bearing gate
-# environment.  Its managed file contains only fixed, non-secret paths.
-if [[ ! -f "$model_drift_env_file" ]]; then
-  install -d -m 0700 "$(dirname -- "$model_drift_env_file")"
+# environment. Its managed file contains only fixed, non-secret paths and it
+# is system-only because it requires a fixed service account, Docker group,
+# and protected /var/lib state and controller-inbox directories.
+ensure_model_drift_directory() {
+  local path="$1"
+  case "$path" in
+    /var/lib/creator-engine/model-drift|/var/lib/creator-engine/controller-inbox)
+      ;;
+    *)
+      echo "ERROR: refusing unsafe model drift runtime path: $path" >&2
+      exit 1
+      ;;
+  esac
+  local component=""
+  for component in /var /var/lib /var/lib/creator-engine "$path"; do
+    if [[ -L "$component" ]]; then
+      echo "ERROR: refusing symlinked model drift runtime path: $component" >&2
+      exit 1
+    fi
+  done
+  install -d -o creator-engine -g creator-engine -m 0700 "$path"
+}
+
+if [[ "$scope" == "system" && ( -L "$model_drift_env_file" || -L "$(dirname -- "$model_drift_env_file")" ) ]]; then
+  echo "ERROR: refusing symlinked model drift env path: $model_drift_env_file" >&2
+  exit 1
+fi
+
+if [[ "$scope" == "system" && ! -f "$model_drift_env_file" ]]; then
+  install -d -o creator-engine -g creator-engine -m 0700 "$(dirname -- "$model_drift_env_file")"
   umask 077
   cat > "$model_drift_env_file" <<EOF
 CE_MODEL_DRIFT_CANON=$repo_root/surfaces/model-canon.yaml
@@ -218,6 +251,21 @@ CE_MODEL_DRIFT_INBOX_PATH=/var/lib/creator-engine/controller-inbox/model-drift.n
 CE_MODEL_DRIFT_CADENCE_SECONDS=60
 EOF
   chmod 0600 "$model_drift_env_file"
+fi
+
+if [[ "$scope" == "system" ]]; then
+  ensure_model_drift_directory /var/lib/creator-engine/model-drift
+  ensure_model_drift_directory /var/lib/creator-engine/controller-inbox
+  if [[ -L /var/lib/creator-engine/controller-inbox/model-drift.ndjson ]]; then
+    echo "ERROR: refusing symlinked model drift inbox file" >&2
+    exit 1
+  fi
+  if [[ ! -e /var/lib/creator-engine/controller-inbox/model-drift.ndjson ]]; then
+    install -o creator-engine -g creator-engine -m 0600 /dev/null /var/lib/creator-engine/controller-inbox/model-drift.ndjson
+  else
+    chown creator-engine:creator-engine /var/lib/creator-engine/controller-inbox/model-drift.ndjson
+    chmod 0600 /var/lib/creator-engine/controller-inbox/model-drift.ndjson
+  fi
 fi
 
 mkdir -p "$unit_dir"

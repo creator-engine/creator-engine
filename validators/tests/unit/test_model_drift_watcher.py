@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import creator_engine_validator.model_drift_watcher as watcher_module
 from creator_engine_validator.model_drift_watcher import (
     CANON_PROVENANCE_SHA256,
     CanonSeat,
@@ -27,8 +28,15 @@ def _canon() -> ModelCanon:
     )
 
 
-def _observation(state: str, at: float) -> Observation:
-    return Observation("ce-vps-codex", state, at)
+def _observation(
+    state: str,
+    at: float,
+    *,
+    model: str | None = None,
+    effort: str | None = None,
+    version: str | None = None,
+) -> Observation:
+    return Observation("ce-vps-codex", state, at, model=model, effort=effort, version=version)
 
 
 def test_tracked_canon_is_schema_valid_and_provenance_bound(repo_root: Path, tmp_path: Path):
@@ -91,3 +99,71 @@ def test_dedicated_environment_rejects_credentials_unknowns_and_relative_paths()
     with pytest.raises(ModelDriftConfigError): load_config({**env, "GH_TOKEN": "no"})
     with pytest.raises(ModelDriftConfigError): load_config({**env, "CE_MODEL_DRIFT_UNSAFE": "x"})
     with pytest.raises(ModelDriftConfigError): load_config({**env, "CE_MODEL_DRIFT_CANON": "relative"})
+
+
+def test_pending_alarm_survives_append_failure_and_retries_once_after_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    state, inbox = tmp_path / "state.json", tmp_path / "inbox.ndjson"
+    watcher = ModelDriftWatcher(_canon(), state_path=state, inbox_path=inbox, journal_sink=lambda _: None)
+    watcher.observe([_observation("model_drift", 0)])
+    watcher.observe([_observation("model_drift", 60)])
+    original = watcher_module._append_ndjson
+    monkeypatch.setattr(watcher_module, "_append_ndjson", lambda *_: (_ for _ in ()).throw(OSError("inbox unavailable")))
+    with pytest.raises(OSError, match="inbox unavailable"):
+        watcher.observe([_observation("model_drift", 120)])
+    pending = watcher.state["seats"]["ce-vps-codex"]
+    assert pending["alarm_pending"] is True
+    event_id = pending["event_id"]
+    assert pending["pending_alarm"]["event_id"] == event_id
+
+    monkeypatch.setattr(watcher_module, "_append_ndjson", original)
+    restarted = ModelDriftWatcher(_canon(), state_path=state, inbox_path=inbox, journal_sink=lambda _: None)
+    assert restarted.observe([_observation("model_drift", 180)]) == []
+    assert restarted.state["seats"]["ce-vps-codex"]["alarm_delivered"] is True
+    records = [__import__("json").loads(line) for line in inbox.read_text(encoding="utf-8").splitlines()]
+    assert [record["event_id"] for record in records] == [event_id]
+    restarted.observe([_observation("model_drift", 240)])
+    assert inbox.read_text(encoding="utf-8").count(event_id) == 1
+
+
+def test_crash_after_append_is_deduplicated_and_pending_failure_does_not_clear(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    state, inbox = tmp_path / "state.json", tmp_path / "inbox.ndjson"
+    watcher = ModelDriftWatcher(_canon(), state_path=state, inbox_path=inbox, journal_sink=lambda _: None)
+    watcher.observe([_observation("model_drift", 0)])
+    watcher.observe([_observation("model_drift", 60)])
+    original = watcher_module._append_ndjson
+    monkeypatch.setattr(watcher_module, "_append_ndjson", lambda *_: (_ for _ in ()).throw(OSError("append failed")))
+    with pytest.raises(OSError):
+        watcher.observe([_observation("model_drift", 120)])
+    pending = watcher.state["seats"]["ce-vps-codex"]
+    with pytest.raises(OSError):
+        watcher.observe([_observation("match", 180)])
+    assert watcher.state["seats"]["ce-vps-codex"]["alarm_pending"] is True
+    monkeypatch.setattr(watcher_module, "_append_ndjson", original)
+
+    # Simulate a process death after the fsynced append but before its state ack.
+    original(inbox, pending["pending_alarm"])
+    restarted = ModelDriftWatcher(_canon(), state_path=state, inbox_path=inbox, journal_sink=lambda _: None)
+    restarted.observe([_observation("model_drift", 180)])
+    assert restarted.state["seats"]["ce-vps-codex"]["alarm_delivered"] is True
+    assert len(inbox.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_fingerprint_starts_immediately_and_resets_for_different_drift(tmp_path: Path):
+    watcher = ModelDriftWatcher(_canon(), state_path=tmp_path / "state.json", inbox_path=tmp_path / "inbox.ndjson", journal_sink=lambda _: None)
+    model = _observation("model_drift", 0, model="other", effort="high", version="0.144.1")
+    effort = _observation("effort_drift", 60, model="gpt-5.6-terra", effort="low", version="0.144.1")
+    watcher.observe([model])
+    first = dict(watcher.state["seats"]["ce-vps-codex"])
+    assert first["mismatch_count"] == 1 and first["first_seen"] == 0
+    watcher.observe([effort])
+    second = watcher.state["seats"]["ce-vps-codex"]
+    assert second["mismatch_count"] == 1 and second["first_seen"] == 60
+    assert second["fingerprint"] != first["fingerprint"]
+    watcher.observe([_observation("unknown_timeout", 120)])
+    assert watcher.state["seats"]["ce-vps-codex"]["fingerprint"] == second["fingerprint"]
+    watcher.observe([_observation("effort_drift", 180, model="gpt-5.6-terra", effort="low", version="0.144.1")])
+    watcher.observe([_observation("effort_drift", 240, model="gpt-5.6-terra", effort="low", version="0.144.1")])
+    assert watcher.state["seats"]["ce-vps-codex"]["alarm_delivered"] is True
+    watcher.observe([_observation("match", 300)])
+    watcher.observe([_observation("match", 360)])
+    assert watcher.state["seats"]["ce-vps-codex"]["active"] is False

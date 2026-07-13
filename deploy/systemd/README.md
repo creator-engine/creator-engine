@@ -9,8 +9,9 @@ These units keep the autonomous gate daemons alive after host reboot:
 - `ce-ratifier-queue.service`: folds controller-supplied candidate/evidence
   snapshots into a durable, proposal-only ratifier queue; it cannot approve,
   enqueue, merge, sign, or remove the legacy session crons.
-- `ce-model-drift-watcher.service`: observes the tracked model canon in fixed
-  DGX/VPS containers and writes durable controller-inbox drift alarms.
+- `ce-model-drift-watcher.service`: system-only observer for the tracked model
+  canon in fixed DGX/VPS containers; it writes durable controller-inbox drift
+  alarms.
 - `ce-codex-seat@.service`: clears any stale named Codex seat container, starts
   a fresh detached runsc container through the checked-in launcher, and keeps
   `docker wait <container>` in the foreground so systemd owns restart.
@@ -25,7 +26,8 @@ The default install target is the user systemd manager at
 `~/.config/systemd/user`. Use `--system` to install into `/etc/systemd/system`.
 The installer renders the checked-in unit templates with the current source
 checkout path, runs `daemon-reload`, enables the gate daemon services, and
-starts them.
+starts them. User installs handle the user-capable sibling gate daemons but
+deterministically skip the model-drift watcher.
 Use `--no-start` to render/enable without starting.
 
 Create the env file before starting services. Defaults:
@@ -59,19 +61,25 @@ enabled.
 
 ## Model drift observer
 
-`ce-model-drift-watcher.service` has a separate zero-token environment file:
-`~/.config/creator-engine/ce-model-drift.env` for user installs and
-`/etc/creator-engine/ce-model-drift.env` for system installs. The installer
-creates it owner-only with only canon, state, lease, inbox, and 60-second
-cadence settings. It does not carry GitHub, OpenBao, Vault, PAT, or credential
-file values. The watcher can only read each canon-pinned container TOML and
-`codex --version`; it never restarts a container or changes configuration.
+`ce-model-drift-watcher.service` is system-only. It runs under the fixed
+`creator-engine` identity with Docker observation-group access and needs its
+protected `/var/lib/creator-engine/model-drift` state and
+`/var/lib/creator-engine/controller-inbox` delivery paths; those constraints
+are intentionally not offered through a user manager. For `--system`, the
+installer creates those directories and the owner-only, zero-token
+`/etc/creator-engine/ce-model-drift.env` with only canon, state, lease, inbox,
+and 60-second cadence settings. It does not carry GitHub, OpenBao, Vault, PAT,
+or credential-file values. The watcher can only read each canon-pinned
+container TOML and `codex --version`; it never restarts a container or changes
+configuration.
 
-A drift alarm is emitted once when the same drift reaches its third consecutive
-drift observation. The watcher emits no duplicate while that episode remains
-active, and clears the episode only after two consecutive matching
-observations. Monitor controller-inbox consumer liveness independently: silence
-after the initial alarm does not prove that the consumer processed it.
+A drift alarm is emitted once when the same normalized drift reaches its third
+consecutive observation. Its stable episode ID is persisted before inbox
+delivery, so a restart retries the same alarm without duplication; a completed
+episode emits no second semantic alarm. The watcher clears an episode only
+after two consecutive matching observations. Monitor controller-inbox consumer
+liveness independently: silence after the initial alarm does not prove that the
+consumer processed it.
 
 ## Review-pickup OpenBao token sourcing
 
