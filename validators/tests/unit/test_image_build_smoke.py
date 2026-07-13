@@ -99,6 +99,56 @@ def test_local_creator_engine_base_runs_hadolint_and_reports_buildx_exemption(tm
     assert "exemption" in out.getvalue()
 
 
+def test_arg_indirected_local_base_runs_hadolint_and_skips_buildx(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "arg-local")
+    dockerfile.write_text(
+        "ARG CE_CANONICAL_RUNTIME_IMAGE=creator-engine/ce-validator:0.3.6\n"
+        "FROM ${CE_CANONICAL_RUNTIME_IMAGE}\n",
+        encoding="utf-8",
+    )
+    runner = FakeRunner("M\0deploy/arg-local/Dockerfile\0")
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=io.StringIO())
+
+    commands = [call[0] for call in runner.calls]
+    assert ["/verified/hadolint", "--failure-threshold", "error", "deploy/arg-local/Dockerfile"] in commands
+    assert not any(command[:2] == ["docker", "buildx"] for command in commands)
+
+
+def test_arg_indirected_external_base_still_runs_buildx(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "arg-external")
+    dockerfile.write_text("ARG BASE=debian:12\nFROM $BASE\n", encoding="utf-8")
+    runner = FakeRunner("M\0deploy/arg-external/Dockerfile\0")
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=io.StringIO())
+
+    assert ["docker", "buildx", "version"] in [call[0] for call in runner.calls]
+
+
+def test_unresolvable_arg_base_still_runs_buildx(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "arg-unset")
+    dockerfile.write_text("FROM ${UNSET}\n", encoding="utf-8")
+    runner = FakeRunner("M\0deploy/arg-unset/Dockerfile\0")
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=io.StringIO())
+
+    assert ["docker", "buildx", "version"] in [call[0] for call in runner.calls]
+
+
+def test_quoted_arg_default_is_resolved_for_local_base_exemption(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "arg-quoted")
+    dockerfile.write_text("ARG BASE='creator-engine/runtime:dev'\nFROM ${BASE}\n", encoding="utf-8")
+    runner = FakeRunner("M\0deploy/arg-quoted/Dockerfile\0")
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=io.StringIO())
+
+    assert not any(command[:2] == ["docker", "buildx"] for command in (call[0] for call in runner.calls))
+
+
 @pytest.mark.parametrize("base", ["ubuntu:24.04", "registry.example/creator-engine/runtime:dev"])
 def test_nonmatching_base_still_runs_buildx_check(tmp_path: Path, monkeypatch, base: str):
     dockerfile = _dockerfile(tmp_path, "normal")
