@@ -82,6 +82,39 @@ def test_smoke_uses_exact_hadolint_and_buildx_check_argv_without_publish_flags(t
     assert all(call[3] == smoke.DEFAULT_SMOKE_TIMEOUT_SECONDS for call in runner.calls[1:])
 
 
+def test_local_creator_engine_base_runs_hadolint_and_reports_buildx_exemption(tmp_path: Path, monkeypatch):
+    dockerfile = _dockerfile(tmp_path, "local")
+    dockerfile.write_text("FROM creator-engine/runtime:dev\n", encoding="utf-8")
+    runner = FakeRunner("M\0deploy/local/Dockerfile\0")
+    out = io.StringIO()
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    detail = smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=out)
+
+    assert detail.startswith("passed for 1")
+    commands = [call[0] for call in runner.calls]
+    assert ["/verified/hadolint", "--failure-threshold", "error", "deploy/local/Dockerfile"] in commands
+    assert not any(command[:2] == ["docker", "buildx"] for command in commands)
+    assert "creator-engine/" in out.getvalue()
+    assert "exemption" in out.getvalue()
+
+
+@pytest.mark.parametrize("base", ["ubuntu:24.04", "registry.example/creator-engine/runtime:dev"])
+def test_nonmatching_base_still_runs_buildx_check(tmp_path: Path, monkeypatch, base: str):
+    dockerfile = _dockerfile(tmp_path, "normal")
+    dockerfile.write_text(f"FROM {base}\n", encoding="utf-8")
+    runner = FakeRunner("M\0deploy/normal/Dockerfile\0")
+    monkeypatch.setattr(smoke, "_resolve_hadolint", lambda **_kwargs: Path("/verified/hadolint"))
+
+    smoke.run_image_build_smoke("base", tmp_path, runner=runner, out=io.StringIO())
+
+    commands = [call[0] for call in runner.calls]
+    assert ["docker", "buildx", "version"] in commands
+    assert [
+        "docker", "buildx", "build", "--check", "--progress=plain", "-f", "deploy/normal/Dockerfile", str(tmp_path)
+    ] in commands
+
+
 def test_existing_hadolint_must_be_an_executable_with_exact_pinned_bytes(tmp_path: Path, monkeypatch):
     binary = tmp_path / "hadolint"
     binary.write_bytes(b"pinned")
