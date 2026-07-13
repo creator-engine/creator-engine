@@ -122,6 +122,92 @@ def test_integrator_unit_execstart(repo_root: Path):
     assert exec_start.endswith(" --json")
 
 
+def test_integrator_approval_wall_wiring_is_dormant_and_parametric(repo_root: Path):
+    unit = _read_unit(repo_root, "ce-integrator-daemon.service")
+    service = unit["Service"]
+    exec_start = service["ExecStart"]
+
+    # Preserve the existing queue behavior while attaching only named env inputs.
+    for unchanged_arg in (
+        ' --repo "$CE_GATE_REPO" ',
+        " --loop ",
+        " --interval 120 ",
+        ' --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" ',
+        " --json",
+    ):
+        assert unchanged_arg in exec_start
+
+    expected_pairs = (
+        ("--approval-wall-secret-backend", "CE_APPROVAL_WALL_SECRET_BACKEND"),
+        ("--approval-wall-secret-mount", "CE_APPROVAL_WALL_SECRET_MOUNT"),
+        ("--approval-wall-secret-path", "CE_APPROVAL_WALL_SECRET_PATH"),
+        ("--approval-wall-secret-field", "CE_APPROVAL_WALL_SECRET_FIELD"),
+        ("--approval-wall-secret-purpose", "CE_APPROVAL_WALL_SECRET_PURPOSE"),
+        ("--approval-wall-secret-owner-ref", "CE_APPROVAL_WALL_SECRET_OWNER_REF"),
+        ("--approval-wall-secret-ref-policy-sha", "CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA"),
+        ("--approval-wall-secret-target-ref", "CE_APPROVAL_WALL_SECRET_TARGET_REF"),
+        ("--approval-wall-policy-sha", "CE_APPROVAL_WALL_POLICY_SHA"),
+    )
+    for flag, env_name in expected_pairs:
+        assert f'{flag} "${env_name}"' in exec_start
+
+    assert exec_start.count("--approval-wall-") == len(expected_pairs)
+    assert "CE_APPROVAL_CAPABILITY_SECRET" not in exec_start
+    assert "Environment" not in service
+
+
+def test_approval_wall_deployment_docs_keep_dormant_fail_closed_boundaries(repo_root: Path):
+    systemd_readme = (repo_root / "deploy" / "systemd" / "README.md").read_text(encoding="utf-8")
+    installer = (
+        repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"
+    ).read_text(encoding="utf-8")
+
+    approval_env_names = (
+        "BAO_ADDR",
+        "BAO_TOKEN",
+        "BAO_CACERT",
+        "CE_OPENBAO_ALLOWED_REFS",
+        "CE_APPROVAL_WALL_SECRET_BACKEND",
+        "CE_APPROVAL_WALL_SECRET_MOUNT",
+        "CE_APPROVAL_WALL_SECRET_PATH",
+        "CE_APPROVAL_WALL_SECRET_FIELD",
+        "CE_APPROVAL_WALL_SECRET_PURPOSE",
+        "CE_APPROVAL_WALL_SECRET_OWNER_REF",
+        "CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA",
+        "CE_APPROVAL_WALL_SECRET_TARGET_REF",
+        "CE_APPROVAL_WALL_POLICY_SHA",
+    )
+    for text in (systemd_readme, installer):
+        for env_name in approval_env_names:
+            assert env_name in text
+        assert "forge/approval-capability/wall" in text
+        assert "file:/run/user/<uid>/creator-engine/approval-wall-secret" in text
+        assert "fork-readable" in text
+        assert "fail closed" in text
+        assert "bootstrap fallback only" in text
+        assert "does not arm" in text
+        assert "never committed" in text
+
+    assert "forge/reviewer/gh-token" in systemd_readme
+    assert "reviewer-token" in systemd_readme
+    assert "signing-secret" in systemd_readme
+    assert "`env:` delivery" in systemd_readme
+    assert "no backend is configured" in systemd_readme
+
+
+def test_approval_wall_docs_contain_no_concrete_runtime_secret_or_policy_values(repo_root: Path):
+    systemd_readme = (repo_root / "deploy" / "systemd" / "README.md").read_text(encoding="utf-8")
+    installer = (
+        repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"
+    ).read_text(encoding="utf-8")
+
+    for text in (systemd_readme, installer):
+        assert "BAO_TOKEN=<operator-supplied-runtime-token>" in text
+        assert "policy_sha=<operator-supplied-64-hex>" in text
+        assert "CE_APPROVAL_WALL_POLICY_SHA=<operator-supplied-policy-sha-or-id>" in text
+        assert "signing_secret=" not in text
+
+
 def test_review_pickup_unit_execstart(repo_root: Path):
     unit = _read_unit(repo_root, "ce-review-pickup-daemon.service")
     exec_start = unit["Service"]["ExecStart"]
