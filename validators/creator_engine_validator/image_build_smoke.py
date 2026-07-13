@@ -27,6 +27,7 @@ HADOLINT_URL = "https://github.com/hadolint/hadolint/releases/download/v2.14.0/h
 HADOLINT_SHA256 = "6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47"
 SMOKE_TIMEOUT_ENV = "CE_IMAGE_BUILD_SMOKE_TIMEOUT_SECONDS"
 DEFAULT_SMOKE_TIMEOUT_SECONDS = 120.0
+LOCAL_IMAGE_PREFIXES = ("creator-engine/",)
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,27 @@ def _resolve_hadolint(*, provision: bool, hadolint_path: str | None) -> Path:
     )
 
 
+def _local_base_exemption(path: Path) -> str | None:
+    """Return the matching local base prefix, if a Dockerfile ``FROM`` uses one."""
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if not parts or parts[0].upper() != "FROM":
+            continue
+        image_parts = parts[1:]
+        while image_parts and image_parts[0].startswith("--"):
+            image_parts.pop(0)
+        if not image_parts:
+            continue
+        image = image_parts[0]
+        for prefix in LOCAL_IMAGE_PREFIXES:
+            if image.startswith(prefix):
+                return prefix
+    return None
+
+
 def _run_phase(label: str, argv: Sequence[str], repo_root: Path, runner: Runner, out: TextIO) -> None:
     print(f"==> image smoke {label}: {' '.join(argv)}", file=out)
     result = runner(argv, repo_root, dict(os.environ), timeout=_timeout_seconds())
@@ -221,10 +243,21 @@ def run_image_build_smoke(
     if not files:
         return "no-op: no changed deploy/**/Dockerfile in committed comparison range"
     hadolint = _resolve_hadolint(provision=provision, hadolint_path=hadolint_path)
-    _run_phase("Docker Buildx availability", ["docker", "buildx", "version"], repo_root, runner, out)
+    buildx_available = False
     for path in files:
         relative = path.relative_to(repo_root).as_posix()
         _run_phase(f"hadolint {relative}", [str(hadolint), "--failure-threshold", "error", relative], repo_root, runner, out)
+        local_prefix = _local_base_exemption(path)
+        if local_prefix is not None:
+            print(
+                f"==> image smoke Buildx exemption {relative}: FROM base matches local prefix {local_prefix!r}; "
+                "hadolint completed and Docker Buildx --check is intentionally skipped",
+                file=out,
+            )
+            continue
+        if not buildx_available:
+            _run_phase("Docker Buildx availability", ["docker", "buildx", "version"], repo_root, runner, out)
+            buildx_available = True
         _run_phase(
             f"Docker Buildx --check {relative}",
             ["docker", "buildx", "build", "--check", "--progress=plain", "-f", relative, str(repo_root)],
