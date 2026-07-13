@@ -95,7 +95,9 @@ credential variables.
 BAO_ADDR=<openbao-url>
 BAO_TOKEN=<openbao-token>
 BAO_CACERT=<optional-ca-cert-path>
-CE_OPENBAO_ALLOWED_REFS=path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+# When both OpenBao paths below are configured, keep this as one comma-separated
+# allowlist; `gate-daemons.env` has one effective value per environment name.
+CE_OPENBAO_ALLOWED_REFS=path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982,path=forge/approval-capability/wall;field=signing_secret;purpose=approval-capability-wall;owner_ref=controller:integrator;policy_sha=<operator-supplied-64-hex>
 CE_PICKUP_TOKEN_SECRET_BACKEND=openbao
 CE_PICKUP_TOKEN_SECRET_MOUNT=ce-kv
 CE_PICKUP_TOKEN_SECRET_PATH=forge/reviewer/gh-token
@@ -122,7 +124,6 @@ to `gate-daemons.env` only when preparing that transition:
 BAO_ADDR=<openbao-url>
 BAO_TOKEN=<operator-supplied-runtime-token>
 BAO_CACERT=<optional-ca-cert-path>
-CE_OPENBAO_ALLOWED_REFS=path=forge/approval-capability/wall;field=signing_secret;purpose=approval-capability-wall;owner_ref=controller:integrator;policy_sha=<operator-supplied-64-hex>
 CE_APPROVAL_WALL_SECRET_BACKEND=openbao
 CE_APPROVAL_WALL_SECRET_MOUNT=ce-kv
 CE_APPROVAL_WALL_SECRET_PATH=forge/approval-capability/wall
@@ -138,7 +139,9 @@ CE_APPROVAL_WALL_POLICY_SHA=<operator-supplied-policy-sha-or-id>
 Policy values are runtime inputs: do not invent or derive them. The
 review-pickup `forge/reviewer/gh-token` path above remains a reviewer-token path;
 the `forge/approval-capability/wall` path here is a distinct integrator
-signing-secret path.
+signing-secret path. When both are enabled, the single
+`CE_OPENBAO_ALLOWED_REFS` assignment above carries both refs; do not add a
+second assignment that would overwrite the reviewer-token ref.
 
 The target ref must use `file:` delivery on tmpfs under `/run`, or an
 Operator-verified `%t` equivalent. It must never use persistent storage or

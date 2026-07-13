@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -193,6 +194,29 @@ def test_approval_wall_deployment_docs_keep_dormant_fail_closed_boundaries(repo_
     assert "signing-secret" in systemd_readme
     assert "`env:` delivery" in systemd_readme
     assert "no backend is configured" in systemd_readme
+
+
+def test_openbao_allowed_refs_are_one_combined_non_overwriting_allowlist(repo_root: Path):
+    expected_reviewer_ref = (
+        "path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;"
+        "owner_ref=controller:reviewer;"
+        "policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982"
+    )
+    expected_approval_ref = (
+        "path=forge/approval-capability/wall;field=signing_secret;"
+        "purpose=approval-capability-wall;owner_ref=controller:integrator;"
+        "policy_sha=<operator-supplied-64-hex>"
+    )
+    for path in (
+        repo_root / "deploy" / "systemd" / "README.md",
+        repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh",
+    ):
+        text = path.read_text(encoding="utf-8")
+        assignments = re.findall(r"^\s*CE_OPENBAO_ALLOWED_REFS=(.+)$", text, re.MULTILINE)
+        assert assignments == [f"{expected_reviewer_ref},{expected_approval_ref}"]
+        allowlist = assignments[0]
+        assert allowlist.count(expected_reviewer_ref) == 1
+        assert allowlist.count(expected_approval_ref) == 1
 
 
 def test_approval_wall_docs_contain_no_concrete_runtime_secret_or_policy_values(repo_root: Path):
