@@ -15,9 +15,9 @@ path-set below; this carrier lists itself.
   paths, authority-bound systems, validator semantics, waivers, PR approval,
   merge, push, deploy, credential movement, or service mutation are authorized
   by this repair.
-- **Evidence:** predecessor focused enforcement tests reported 263 passed; this
-  carrier repair is validated by the focused path-manifest check and one full
-  governed validator run after the repair commit.
+- **Evidence:** rework focused tests reported `test_hook_check.py` 200 passed
+  and `test_runner_ring1_tool_guard.py` 22 passed; this branch is validated by
+  one full governed validator run after the rework commit.
 
 Per-file purpose:
 
@@ -26,20 +26,24 @@ Per-file purpose:
 - **`.ce/pr-manifests/ce-557-deterministic-noninlining-w2.md`** *(A)* - this
   closed path-set carrier.
 - **`docs/operations/CONTROLLER_BOUNDARY_POLICY.md`** *(M)* - documents the
-  deterministic controller no-inlining refusal boundary and worker dispatch hint.
+  deterministic controller no-inlining refusal boundary, worker dispatch hint,
+  and fail-closed launch-pinned identity requirement.
 - **`validators/creator_engine_validator/hook_check.py`** *(M)* - classifies and
-  refuses controller execution-plane primitives unless a launch-pinned governed
-  implementer worker record is present.
+  refuses controller execution-plane primitives unless a launcher-pinned
+  governed implementer worker context validates against the current worker
+  record.
 - **`validators/creator_engine_validator/runner/ring1_tool_guard.py`** *(M)* -
-  hardens the Codex/FACE tool shim's Python resolver before execution-plane
-  primitive enforcement.
+  guards the concrete Ring-1 command entry points and propagates authenticated
+  worker context from launcher-controlled configuration.
 - **`validators/creator_engine_validator/seat_class.py`** *(M)* - expands the
   foreman delegation denial reason with the governed implementer dispatch hint.
-- **`validators/tests/unit/test_hook_check.py`** *(M)* - covers controller
-  primitive denial, launch-pinned worker allowance, stale/malformed worker
-  fail-closed behavior, and updated worker-context expectations.
+- **`validators/tests/unit/test_hook_check.py`** *(M)* - covers hard denial
+  across missing/ungoverned context, launch-pinned worker allowance,
+  replay/mismatch/stale/malformed fail-closed behavior, parsed command
+  primitive classification, and Agent/Task spawn denial.
 - **`validators/tests/unit/test_runner_ring1_tool_guard.py`** *(M)* - covers
-  Ring-1 shim refusal for controller execution-plane primitive commands.
+  Ring-1 shim refusal for controller execution-plane primitive commands,
+  default governed entry points, and worker-context propagation.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.

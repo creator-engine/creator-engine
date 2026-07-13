@@ -47,6 +47,22 @@ pathlib.Path(os.environ["CE_FAKE_HOOK_CAPTURE"]).write_text(sys.stdin.read(), en
 argv_capture = os.environ.get("CE_FAKE_HOOK_ARGV_CAPTURE")
 if argv_capture:
     pathlib.Path(argv_capture).write_text(json.dumps(sys.argv[1:]), encoding="utf-8")
+env_capture = os.environ.get("CE_FAKE_HOOK_ENV_CAPTURE")
+if env_capture:
+    keys = [
+        "CE_WORKER_ID",
+        "CE_WORKER_RECORD_REF",
+        "CE_WORKER_ROLE",
+        "CE_WORKER_LANE_KIND",
+        "CE_WORKER_SCOPE_ID",
+        "CE_WORKER_SEAT_ID",
+        "CE_WORKER_ACTOR",
+        "CE_WORKER_PROCESS_ID",
+    ]
+    pathlib.Path(env_capture).write_text(
+        json.dumps({key: os.environ.get(key) for key in keys}, sort_keys=True),
+        encoding="utf-8",
+    )
 exit_code = os.environ.get("CE_FAKE_HOOK_EXIT")
 if exit_code:
     print("fake hook-check failed", file=sys.stderr)
@@ -147,6 +163,67 @@ def test_rendered_shim_maps_git_push_to_bash_pretooluse_event(tmp_path):
     assert "--posture-root" in hook_argv
     assert str(workdir) in hook_argv
     assert "--ledger-root" not in hook_argv
+
+
+def test_default_guard_surface_includes_execution_plane_entrypoints():
+    config = Ring1ToolGuardConfig()
+
+    assert set(config.tools) >= {"git", "gh", "ce", "tar", "python", "python3", "carrier-gen", "carrier_gen"}
+    real = dict(config.real_binaries)
+    for tool in config.tools:
+        assert real[tool]
+
+
+def test_rendered_shim_propagates_launcher_pinned_worker_context(tmp_path):
+    hook = _fake_hook_check(tmp_path / "fake-hook-check")
+    real_ce = _fake_real_tool(tmp_path / "real-ce")
+    config = Ring1ToolGuardConfig(
+        tools=("ce",),
+        real_binaries=(("ce", str(real_ce)),),
+        validator_argv=(str(hook),),
+        base_path=os.environ.get("PATH", ""),
+        worker_context={
+            "worker_id": "worker-impl",
+            "record_ref": "/runtime/worktree/.ce/state/workers/worker-impl/worker.yaml",
+            "role": "implementer",
+            "lane_kind": "implementation",
+            "scope_id": "ce-ops#557",
+            "seat_id": "seat-impl",
+            "actor": "actor-impl",
+        },
+    )
+    shim_dir = _install(tmp_path, config)
+    capture = tmp_path / "event.json"
+    env_capture = tmp_path / "env.json"
+    marker = tmp_path / "real-ce-ran"
+    env = {
+        **os.environ,
+        "CE_FAKE_HOOK_CAPTURE": str(capture),
+        "CE_FAKE_HOOK_ENV_CAPTURE": str(env_capture),
+        "CE_REAL_TOOL_MARKER": str(marker),
+    }
+
+    completed = subprocess.run(
+        [str(shim_dir / "ce"), "validate-pr", "--declared-work-class", "story"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    event = json.loads(capture.read_text(encoding="utf-8"))
+    worker_context = event["ce"]["authenticated_worker_context"]
+    assert worker_context["worker_id"] == "worker-impl"
+    assert worker_context["role"] == "implementer"
+    assert worker_context["process_id"].isdigit()
+
+    hook_env = json.loads(env_capture.read_text(encoding="utf-8"))
+    assert hook_env["CE_WORKER_ID"] == "worker-impl"
+    assert hook_env["CE_WORKER_RECORD_REF"].endswith("/worker-impl/worker.yaml")
+    assert hook_env["CE_WORKER_ROLE"] == "implementer"
+    assert hook_env["CE_WORKER_PROCESS_ID"] == worker_context["process_id"]
+    assert marker.read_text(encoding="utf-8").strip() == "validate-pr --declared-work-class story"
 
 
 def test_raw_deny_exits_nonzero_without_execing_real_binary(tmp_path):

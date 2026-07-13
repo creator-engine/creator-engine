@@ -139,8 +139,11 @@ implementer --brief <brief> --worktree <allocated-worktree> (or ce lane launch
 
 Documentation is not the enforcement. The capability-bearing route is a
 launch-pinned governed worker record under `.ce/state/workers/<worker>/worker.yaml`
-whose role and worktree binding match the current context. Missing, malformed,
-stale, or unpinned worker context fails closed to the same refusal.
+whose role, lane, scope, worktree, seat, actor, and current process pins match
+the launcher-controlled `CE_WORKER_*` context. Hook events and tool input do not
+select the worker record. Missing, malformed, stale, mismatched, or unpinned
+worker context fails closed to the same refusal, including when posture
+discovery resolves to `ungoverned`.
 Tracked-file writes remain denied by the foreman-delegation rule, which carries
 the same `ce worker run --role implementer ...` dispatch hint.
 

@@ -10,6 +10,11 @@ issue: ce-ops#557
 
 - Adds the required path-manifest and changelog carriers for this governed
   story on branch `ce-557-deterministic-noninlining-w2`.
-- Records predecessor evidence from commit `3f451a284becebdc44672d84194e49cb949e1e00`:
-  focused enforcement tests reported 263 passed, with the full validator
-  previously blocked only on the missing path-manifest PR-diff gate.
+- Hardens the review-blocked enforcement seams: execution-plane primitives
+  fail closed without launch-pinned worker identity, worker records are bound
+  to launcher-controlled `CE_WORKER_*` pins, Ring-1 defaults cover the concrete
+  guarded entry points, and primitive classification uses parsed command
+  entry points instead of substring regexes.
+- Records focused rework evidence: `test_hook_check.py` reported 200 passed
+  and `test_runner_ring1_tool_guard.py` reported 22 passed before the full
+  governed validator run.

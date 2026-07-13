@@ -72,6 +72,16 @@ EXECUTION_PLANE_DISPATCH_HINT = (
     "ce worker run --role {role} --brief <brief> --worktree <allocated-worktree> "
     "(or ce lane launch --role {role} ...)"
 )
+WORKER_CONTEXT_ENV_KEYS = {
+    "worker_id": "CE_WORKER_ID",
+    "record_ref": "CE_WORKER_RECORD_REF",
+    "role": "CE_WORKER_ROLE",
+    "lane_kind": "CE_WORKER_LANE_KIND",
+    "scope_id": "CE_WORKER_SCOPE_ID",
+    "seat_id": "CE_WORKER_SEAT_ID",
+    "actor": "CE_WORKER_ACTOR",
+    "process_id": "CE_WORKER_PROCESS_ID",
+}
 
 _EXECUTION_PLANE_ROLE_HINTS: dict[str, str] = {
     "worktree_mutation": "implementer",
@@ -79,12 +89,14 @@ _EXECUTION_PLANE_ROLE_HINTS: dict[str, str] = {
     "carrier_regeneration": "implementer",
     "bundle_extraction": "implementer",
     "harvest_push": "implementer",
+    "agent_spawn": "implementer",
 }
 
 _EXECUTION_PLANE_ALLOWED_WORKERS: dict[str, frozenset[tuple[str, str]]] = {
     name: frozenset({("implementer", "implementation")})
     for name in _EXECUTION_PLANE_ROLE_HINTS
 }
+_SPAWN_TOOL_NAMES = frozenset({"agent", "task", "subagent", "multiagent", "multi_agent"})
 
 
 # --------------------------------------------------------------------------
@@ -233,39 +245,6 @@ _MECHANIC_RULES_NONVOCAB: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bwget\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b"), "toolchain_self_update"),
 )
 
-_EXECUTION_PLANE_REGEX_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (
-        re.compile(
-            r"\bgit\b(?:(?![;&|]).)*\bpush\b(?:(?![;&|]).)*(?:harvest|push-for-harvest)",
-            re.IGNORECASE,
-        ),
-        "harvest_push",
-    ),
-    (
-        re.compile(
-            r"\bgit\b(?:(?![;&|]).)*\bworktree\s+(?:add|remove|rm|move|prune|repair)\b",
-            re.IGNORECASE,
-        ),
-        "worktree_mutation",
-    ),
-    (
-        re.compile(
-            r"(?:\bce\s+validate-pr\b|\bce-preflight\.sh\b|scripts/ce-preflight\.sh|"
-            r"creator_engine_validator\.(?:ce_cli\s+validate-pr|pr_preflight)\b)",
-            re.IGNORECASE,
-        ),
-        "full_preflight",
-    ),
-    (
-        re.compile(r"(?:\bcarrier-gen\b|creator_engine_validator\.carrier_gen\b|\bcarrier_gen\b)"),
-        "carrier_regeneration",
-    ),
-    (
-        re.compile(r"(?:\btar\b\s+(?:-[A-Za-z]*x[A-Za-z]*|--extract)\b|\bunzip\b)", re.IGNORECASE),
-        "bundle_extraction",
-    ),
-)
-
 _GIT_OPAQUE_MECHANIC = "git_opaque"
 _GIT_GLOBAL_OPTIONS_WITH_VALUE = frozenset(
     {
@@ -308,6 +287,7 @@ _GIT_GLOBAL_OPTIONS_NO_VALUE = frozenset(
     }
 )
 _SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "(", ")"})
+_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 _GIT_SAFE_READONLY_SUBCOMMANDS = frozenset(
     {
         "status",
@@ -670,6 +650,48 @@ _PYTHON_EXECUTABLES = frozenset({"python", "python3"})
 def _is_python_executable(token: str) -> bool:
     name = PurePosixPath(token).name
     return name in _PYTHON_EXECUTABLES or bool(re.fullmatch(r"python3?\.\d+", name))
+
+
+def _command_segments(command: str) -> list[tuple[str, ...]]:
+    try:
+        tokens = _shell_tokens(command)
+    except ValueError:
+        return []
+    segments: list[tuple[str, ...]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in _SHELL_SEPARATORS:
+            if current:
+                segments.append(tuple(current))
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(tuple(current))
+    return segments
+
+
+def _strip_env_prefix(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    if not tokens:
+        return tokens
+    index = 0
+    if PurePosixPath(tokens[index]).name == "env":
+        index += 1
+        while index < len(tokens):
+            token = tokens[index]
+            if token == "-u":
+                index += 2
+                continue
+            if token.startswith("-"):
+                index += 1
+                continue
+            if _SHELL_ASSIGNMENT_RE.match(token):
+                index += 1
+                continue
+            break
+    while index < len(tokens) and _SHELL_ASSIGNMENT_RE.match(tokens[index]):
+        index += 1
+    return tokens[index:]
 
 
 def _classify_ce_forge_tokens(tokens: tuple[str, ...]) -> str | None:
@@ -1107,6 +1129,166 @@ def classify_mechanics(command: Any) -> str | None:
     return None
 
 
+_GIT_WORKTREE_MUTATING_VERBS = frozenset(
+    {"add", "remove", "rm", "move", "prune", "repair", "lock", "unlock"}
+)
+
+
+def _first_positional(args: tuple[str, ...]) -> str | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token == "--":
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token
+    return None
+
+
+def _git_subcommand_and_args_from_tokens(
+    tokens: tuple[str, ...],
+    aliases: dict[str, str] | None = None,
+) -> tuple[str, tuple[str, ...]] | None:
+    aliases = aliases or {}
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token.startswith("-c") and token != "-c":
+            _record_git_alias(token[2:], aliases)
+            index += 1
+            continue
+        if token == "-c":
+            if index + 1 >= len(tokens):
+                return None
+            _record_git_alias(tokens[index + 1], aliases)
+            index += 2
+            continue
+        if any(token.startswith(prefix) for prefix in _GIT_GLOBAL_OPTIONS_WITH_EQUALS):
+            index += 1
+            continue
+        if token in _GIT_GLOBAL_OPTIONS_WITH_VALUE:
+            if index + 1 >= len(tokens):
+                return None
+            index += 2
+            continue
+        if token in _GIT_GLOBAL_OPTIONS_NO_VALUE:
+            index += 1
+            continue
+        if token == "--":
+            index += 1
+            continue
+        if token.startswith("-"):
+            return None
+
+        subcommand = token
+        args = tuple(tokens[index + 1 :])
+        seen: set[str] = set()
+        while subcommand not in _GIT_BUILTINS:
+            alias = aliases.get(subcommand)
+            if alias is None or subcommand in seen or not alias or alias.startswith("!"):
+                return subcommand, args
+            seen.add(subcommand)
+            try:
+                alias_tokens = tuple(_shell_tokens(alias))
+            except ValueError:
+                return None
+            if not alias_tokens:
+                return None
+            if _is_git_executable(alias_tokens[0]):
+                nested = _git_subcommand_and_args_from_tokens(tuple(alias_tokens[1:]), aliases)
+                if nested is None:
+                    return None
+                nested_subcommand, nested_args = nested
+                return nested_subcommand, (*nested_args, *args)
+            if alias_tokens[0].startswith("-"):
+                return None
+            subcommand = alias_tokens[0]
+            args = (*alias_tokens[1:], *args)
+        return subcommand, args
+    return None
+
+
+def _git_push_targets_harvest(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        lowered = arg.lower()
+        if "push-for-harvest" in lowered:
+            return True
+        if "harvest/" in lowered or "refs/heads/harvest" in lowered:
+            return True
+    return False
+
+
+def _classify_git_execution_plane(tokens: tuple[str, ...]) -> str | None:
+    if not tokens or not _is_git_executable(tokens[0]):
+        return None
+    parsed = _git_subcommand_and_args_from_tokens(tokens[1:])
+    if parsed is None:
+        return None
+    subcommand, args = parsed
+    if subcommand == "worktree":
+        verb = _first_positional(args)
+        if verb in _GIT_WORKTREE_MUTATING_VERBS:
+            return "worktree_mutation"
+    if subcommand == "push" and _git_push_targets_harvest(args):
+        return "harvest_push"
+    return None
+
+
+def _classify_ce_execution_plane(tokens: tuple[str, ...]) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable == "ce" and len(tokens) >= 2 and tokens[1] == "validate-pr":
+        return "full_preflight"
+    if executable in {"ce-preflight.sh", "ce-preflight"}:
+        return "full_preflight"
+    if executable in {"carrier-gen", "carrier_gen"}:
+        return "carrier_regeneration"
+    if _is_python_executable(tokens[0]) and len(tokens) >= 3 and tokens[1] == "-m":
+        module = tokens[2]
+        if module == "creator_engine_validator.pr_preflight":
+            return "full_preflight"
+        if module == "creator_engine_validator.carrier_gen":
+            return "carrier_regeneration"
+        if module == "creator_engine_validator.ce_cli" and len(tokens) >= 4:
+            if tokens[3] == "validate-pr":
+                return "full_preflight"
+        if module == "creator_engine_validator" and len(tokens) >= 4:
+            if tokens[3] == "validate-pr":
+                return "full_preflight"
+    return None
+
+
+def _tar_extracts(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg == "--extract" or arg.startswith("--extract="):
+            return True
+        if arg.startswith("--"):
+            continue
+        option = arg[1:] if arg.startswith("-") else arg
+        if "x" in option:
+            return True
+    return False
+
+
+def _classify_bundle_extraction(tokens: tuple[str, ...]) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable in {"tar", "bsdtar", "gtar"} and _tar_extracts(tuple(tokens[1:])):
+        return "bundle_extraction"
+    if executable == "unzip":
+        return "bundle_extraction"
+    return None
+
+
 def classify_execution_plane_primitive(command: Any) -> str | None:
     """Return a #557 execution-plane primitive label, or ``None``.
 
@@ -1116,9 +1298,18 @@ def classify_execution_plane_primitive(command: Any) -> str | None:
     """
     if not isinstance(command, str):
         return None
-    for pattern, primitive in _EXECUTION_PLANE_REGEX_RULES:
-        if pattern.search(command):
-            return primitive
+    for segment in _command_segments(command):
+        tokens = _strip_env_prefix(segment)
+        if not tokens:
+            continue
+        for classifier in (
+            _classify_git_execution_plane,
+            _classify_ce_execution_plane,
+            _classify_bundle_extraction,
+        ):
+            primitive = classifier(tokens)
+            if primitive is not None:
+                return primitive
     return None
 
 
@@ -1315,6 +1506,7 @@ def _worker_delegation_allows_implementation(context: HookContext) -> bool:
         isinstance(record, dict)
         and record.get("role") == "implementer"
         and record.get("lane_kind") == "implementation"
+        and isinstance(record.get("authenticated_worker_context"), dict)
     )
 
 
@@ -1325,7 +1517,10 @@ def _execution_plane_worker_allows(context: HookContext, primitive: str) -> bool
     key = (str(record.get("role") or ""), str(record.get("lane_kind") or ""))
     if key not in _EXECUTION_PLANE_ALLOWED_WORKERS.get(primitive, frozenset()):
         return False
-    return record.get("launch_state") == "launched"
+    return (
+        record.get("launch_state") == "launched"
+        and isinstance(record.get("authenticated_worker_context"), dict)
+    )
 
 
 def _execution_plane_denial_reason(primitive: str) -> str:
@@ -1345,6 +1540,8 @@ def _execution_plane_would_deny(event: dict, context: HookContext) -> str | None
     primitive: str | None = None
     if tool == "Bash":
         primitive = classify_execution_plane_primitive(tool_input.get("command"))
+    elif str(tool).strip().lower() in _SPAWN_TOOL_NAMES:
+        primitive = "agent_spawn"
     if primitive is None or _execution_plane_worker_allows(context, primitive):
         return None
     return _execution_plane_denial_reason(primitive)
@@ -1389,10 +1586,38 @@ def _resolve_path_ref(ref: str, root: str | None) -> Path:
     return Path(root) / path
 
 
+def _current_worker_context_from_env(environ: Mapping[str, str] | None = None) -> dict | None:
+    source = environ if environ is not None else os.environ
+    values: dict[str, str] = {}
+    for key, env_name in WORKER_CONTEXT_ENV_KEYS.items():
+        raw = source.get(env_name)
+        if isinstance(raw, str) and raw.strip():
+            values[key] = raw.strip()
+    required = {
+        "worker_id",
+        "record_ref",
+        "role",
+        "lane_kind",
+        "scope_id",
+        "seat_id",
+        "actor",
+        "process_id",
+    }
+    if not required.issubset(values):
+        return None
+    try:
+        process_id = int(values["process_id"])
+        if process_id not in {os.getpid(), os.getppid()}:
+            return None
+    except ValueError:
+        return None
+    return values
+
+
 def _valid_worker_delegation_record(
     path: Path,
     *,
-    worker_id: str | None,
+    worker_context: Mapping[str, str],
     posture_root: str | None,
 ) -> dict | None:
     try:
@@ -1416,12 +1641,16 @@ def _valid_worker_delegation_record(
     allowed = set().union(*_EXECUTION_PLANE_ALLOWED_WORKERS.values())
     if role_lane not in allowed:
         return None
+    if role_lane != (worker_context.get("role"), worker_context.get("lane_kind")):
+        return None
     if record.get("launch_state") != "launched":
         return None
     record_worker_id = record.get("worker_id")
     if not isinstance(record_worker_id, str) or not record_worker_id:
         return None
-    if worker_id is not None and worker_id != record_worker_id:
+    if worker_context.get("worker_id") != record_worker_id:
+        return None
+    if worker_context.get("scope_id") != record.get("scope_id"):
         return None
     record_path = record.get("record_path")
     if not isinstance(record_path, str) or not record_path:
@@ -1444,29 +1673,45 @@ def _valid_worker_delegation_record(
             return None
         if actual != expected:
             return None
+    record["authenticated_worker_context"] = {
+        key: worker_context[key]
+        for key in (
+            "worker_id",
+            "role",
+            "lane_kind",
+            "scope_id",
+            "seat_id",
+            "actor",
+            "process_id",
+        )
+    }
     return record
 
 
-def _resolve_worker_delegation(ce: dict, posture_root: str | None) -> dict | None:
-    """Resolve a worker-spawn record for delegated implementation, failing closed.
+def _resolve_worker_delegation(
+    ce: dict,
+    posture_root: str | None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> dict | None:
+    """Resolve the current launch-pinned worker record, failing closed.
 
-    The hook does not scan for workers. It accepts either an explicit record ref
-    or a launch-pinned worker id that deterministically maps to the merged
-    worker-spawn state file under the current worktree.
+    Worker capability is intentionally not selected by hook-event fields. The
+    only accepted selector is the launcher-controlled current-process worker
+    context exported in ``CE_WORKER_*`` variables; event-supplied
+    ``ce.worker_id`` / ``ce.worker_record_ref`` are ignored so a controller
+    cannot replay an authentic worker record.
     """
-    ref = ce.get("worker_record_ref")
-    worker_id = ce.get("worker_id")
-    if not isinstance(worker_id, str) or not worker_id.strip():
-        worker_id = None
-    else:
-        worker_id = worker_id.strip()
-    if isinstance(ref, str) and ref.strip():
-        path = _resolve_path_ref(ref.strip(), posture_root)
-    elif worker_id and posture_root:
-        path = Path(posture_root) / WORKER_RECORD_REL / worker_id / "worker.yaml"
-    else:
+    del ce
+    worker_context = _current_worker_context_from_env(environ)
+    if worker_context is None:
         return None
-    return _valid_worker_delegation_record(path, worker_id=worker_id, posture_root=posture_root)
+    path = _resolve_path_ref(worker_context["record_ref"], posture_root)
+    return _valid_worker_delegation_record(
+        path,
+        worker_context=worker_context,
+        posture_root=posture_root,
+    )
 
 
 
@@ -1709,7 +1954,8 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
     # denies under governed posture. Branch on the reason so only manifest
     # mismatches are relaxed.
     manifest_mismatch = would_deny_reason == OUT_OF_MANIFEST_REASON
-    if context.posture == "governed" and not manifest_mismatch:
+    execution_plane_deny = would_deny_reason.startswith(EXECUTION_PLANE_DENY_PREFIX)
+    if (context.posture == "governed" and not manifest_mismatch) or execution_plane_deny:
         return HookDecision(
             ok=True,
             hook_event_name="PreToolUse",
@@ -1988,6 +2234,7 @@ def build_context(
     evidence_root: str | None = None,
     closeout_file: str | None = None,
     completion_report: str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> HookContext:
     """Build a :class:`HookContext` from a hook event plus optional overrides.
 
@@ -2009,7 +2256,7 @@ def build_context(
     seat_class_policy = _resolve_seat_class_policy(ce, posture_root)
     policy_seat_class = seat_class_policy.get("seat_class") if isinstance(seat_class_policy, dict) else None
     seat_class = resolve_seat_class(ce.get("seat_class") or policy_seat_class)
-    worker_delegation = _resolve_worker_delegation(ce, posture_root)
+    worker_delegation = _resolve_worker_delegation(ce, posture_root, environ=environ)
 
     closeout_text = ce.get("closeout_text")
     if closeout_file:

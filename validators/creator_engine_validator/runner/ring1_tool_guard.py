@@ -39,7 +39,27 @@ DEFAULT_BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 DEFAULT_EVIDENCE_ROOT = ".ce/state/ring1"
 DEFAULT_POSTURE = "governed"
 DEFAULT_VALIDATOR_ARGV = ("python", "-m", "creator_engine_validator")
-DEFAULT_REAL_BINARIES = (("git", "/usr/bin/git"), ("gh", "/usr/bin/gh"))
+DEFAULT_GUARDED_TOOLS = ("git", "gh", "ce", "tar", "python", "python3", "carrier-gen", "carrier_gen")
+DEFAULT_REAL_BINARIES = (
+    ("git", "/usr/bin/git"),
+    ("gh", "/usr/bin/gh"),
+    ("ce", "/usr/local/bin/ce"),
+    ("tar", "/usr/bin/tar"),
+    ("python", "/usr/bin/python"),
+    ("python3", "/usr/bin/python3"),
+    ("carrier-gen", "/usr/local/bin/carrier-gen"),
+    ("carrier_gen", "/usr/local/bin/carrier_gen"),
+)
+WORKER_CONTEXT_ENV_KEYS = {
+    "worker_id": "CE_WORKER_ID",
+    "record_ref": "CE_WORKER_RECORD_REF",
+    "role": "CE_WORKER_ROLE",
+    "lane_kind": "CE_WORKER_LANE_KIND",
+    "scope_id": "CE_WORKER_SCOPE_ID",
+    "seat_id": "CE_WORKER_SEAT_ID",
+    "actor": "CE_WORKER_ACTOR",
+    "process_id": "CE_WORKER_PROCESS_ID",
+}
 # A deliberately non-standard exit code so a CE Ring-1 denial is observably
 # distinct from shell exit 126 ("command found but not executable"), which a
 # real exec failure would emit. Observability only — the deny semantics are
@@ -75,9 +95,10 @@ class Ring1ToolGuardConfig:
     ledger_root_env: str = "CE_LEDGER_ROOT"
     reviewer_authority_ref_env: str = "CE_REVIEWER_AUTHORITY_REF"
     base_path: str = DEFAULT_BASE_PATH
-    tools: tuple[str, ...] = ("git", "gh")
+    tools: tuple[str, ...] = DEFAULT_GUARDED_TOOLS
     real_binaries: tuple[tuple[str, str], ...] = DEFAULT_REAL_BINARIES
     validator_argv: tuple[str, ...] = DEFAULT_VALIDATOR_ARGV
+    worker_context: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         if self.posture != DEFAULT_POSTURE:
@@ -110,6 +131,15 @@ class Ring1ToolGuardConfig:
         ):
             if not name or "=" in name:
                 raise ValueError(f"invalid environment variable name {name!r}")
+        if self.worker_context is not None:
+            if not isinstance(self.worker_context, dict):
+                raise ValueError("worker_context must be a mapping when provided")
+            unknown = set(self.worker_context) - set(WORKER_CONTEXT_ENV_KEYS)
+            if unknown:
+                raise ValueError(f"unknown worker_context key(s): {sorted(unknown)!r}")
+            for key, value in self.worker_context.items():
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"worker_context {key!r} must be a non-empty string")
 
 
 @dataclass(frozen=True)
@@ -243,6 +273,8 @@ def render_posix_tool_shim(
         "evidence_root_env": config.evidence_root_env,
         "ledger_root": config.ledger_root or "",
         "reviewer_authority_ref_env": config.reviewer_authority_ref_env,
+        "worker_context": dict(config.worker_context or {}),
+        "worker_context_env_keys": WORKER_CONTEXT_ENV_KEYS,
         "deny_exit_code": DENY_EXIT_CODE,
     }
     constants_json = json.dumps(constants, sort_keys=True)
@@ -299,6 +331,10 @@ event = {{
         "evidence_root": evidence_root,
     }},
 }}
+worker_context = dict(CFG["worker_context"])
+if worker_context:
+    worker_context["process_id"] = str(os.getpid())
+    event["ce"]["authenticated_worker_context"] = dict(worker_context)
 
 argv = [
     *CFG["validator_argv"],
@@ -321,12 +357,18 @@ if reviewer_ref:
     argv.extend(["--reviewer-authority-ref", reviewer_ref])
 
 try:
+    hook_env = os.environ.copy()
+    for key, env_name in CFG["worker_context_env_keys"].items():
+        value = worker_context.get(key)
+        if value:
+            hook_env[env_name] = value
     completed = subprocess.run(
         argv,
         input=json.dumps(event),
         capture_output=True,
         text=True,
         check=False,
+        env=hook_env,
     )
 except OSError as exc:
     _fail(f"hook-check CLI could not be executed for {{CFG['tool']}}: {{exc}}")
