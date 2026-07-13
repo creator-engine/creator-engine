@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 76
+Schema files: 77
 
 ## Index
 
@@ -47,6 +47,7 @@ Schema files: 76
 | `schemas/install-answers.schema.yaml` | Creator Engine Install Answers File | `object` |
 | `schemas/integration-queue-dry-run.schema.yaml` | Creator Engine Integration Queue Dry-Run Landing Preview | `object` |
 | `schemas/mission-brief.schema.yaml` | Creator Engine Mission-Brief record substrate | `object` |
+| `schemas/model-canon.schema.yaml` | Creator Engine model observation canon | `object` |
 | `schemas/mutation-class.schema.yaml` | Creator Engine Mutation Class Declaration List | `array` |
 | `schemas/operating-mode-policy.schema.yaml` | Creator Engine v2 Operating Mode Policy | `object` |
 | `schemas/orchestrator-checkpoint.schema.yaml` | Creator Engine Orchestrator Checkpoint Record | `object` |
@@ -1367,6 +1368,28 @@ Definitions:
 | `hash` | string | no | pattern `^[0-9a-f]{64}$` |  |
 | `timestamp` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` |  |
 | `brief` | object | no | additionalProperties `false` |  |
+
+### `schemas/model-canon.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine model observation canon |
+| `$id` | `https://creator-engine.local/schemas/model-canon.schema.yaml` |
+| Root type | `object` |
+
+Reviewable, non-secret expectations for fixed contained-seat model observations.
+
+Required fields:
+
+`schema_version`, `provenance_sha256`, `seats`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `schema_version` | integer | yes | const `1` |  |
+| `provenance_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `seats` | array | yes | minItems `1` |  |
 
 ### `schemas/mutation-class.schema.yaml`
 

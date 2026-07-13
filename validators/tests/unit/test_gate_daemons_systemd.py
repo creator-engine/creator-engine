@@ -154,6 +154,65 @@ def test_gate_daemon_installer_is_valid_bash(repo_root: Path):
     assert result.returncode == 0, result.stderr
 
 
+def test_model_drift_watcher_uses_its_own_zero_token_environment(repo_root: Path):
+    unit_path = repo_root / "deploy" / "systemd" / "ce-model-drift-watcher.service"
+    unit = _read_unit_path(unit_path)
+    text = unit_path.read_text(encoding="utf-8")
+    installer = (repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh").read_text(encoding="utf-8")
+    service = unit["Service"]
+    assert service["EnvironmentFile"] == "/etc/creator-engine/ce-model-drift.env"
+    assert service["ExecStart"].endswith("-m creator_engine_validator.model_drift_watcher")
+    assert service["Restart"] == "on-failure"
+    assert service["NoNewPrivileges"] == "true"
+    assert service["ProtectSystem"] == "strict"
+    assert "gate-daemons.env" not in text
+    for forbidden in ("GH_TOKEN", "GITHUB_TOKEN", "BAO_TOKEN", "VAULT_TOKEN", "PAT", "CREDENTIAL"):
+        assert forbidden not in text
+    for allowed in ("CE_MODEL_DRIFT_CANON", "CE_MODEL_DRIFT_STATE_PATH", "CE_MODEL_DRIFT_LEASE_ROOT", "CE_MODEL_DRIFT_INBOX_PATH", "CE_MODEL_DRIFT_CADENCE_SECONDS"):
+        assert allowed in installer
+    assert "ce-model-drift-watcher.service)" in installer
+    assert "chmod 0600 \"$model_drift_env_file\"" in installer
+    assert "services+=(ce-model-drift-watcher.service)" in installer
+    assert "ensure_model_drift_directory /var/lib/creator-engine/model-drift" in installer
+    assert "ensure_model_drift_directory /var/lib/creator-engine/controller-inbox" in installer
+    assert "refusing symlinked model drift runtime path" in installer
+    assert "-o creator-engine -g creator-engine -m 0700" in installer
+
+
+def test_model_drift_watcher_is_system_only_and_user_installs_skip_it(tmp_path: Path, repo_root: Path):
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").mkdir()
+    fake_python = fake_repo / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    env_dir = tmp_path / "env"
+    env_dir.mkdir()
+    gate_env = env_dir / "gate-daemons.env"
+    broker_env = env_dir / "broker.env"
+    review_env = env_dir / "review.env"
+    for path in (gate_env, broker_env, review_env):
+        path.write_text("ok\n", encoding="utf-8")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "systemctl").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (fake_bin / "systemctl").chmod(0o755)
+    result = subprocess.run(
+        [
+            "bash", str(repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"),
+            "--repo-root", str(fake_repo), "--unit-dir", str(tmp_path / "units"),
+            "--env-file", str(gate_env), "--egress-broker-env-file", str(broker_env),
+            "--egress-self-review-env-file", str(review_env), "--no-start",
+        ],
+        check=False, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "skipped: ce-model-drift-watcher.service (system-only:" in result.stdout
+    assert not (tmp_path / "units" / "ce-model-drift-watcher.service").exists()
+
+
 def test_materializer_unit_supervises_disarmed_dry_run_loop(repo_root: Path):
     unit_path = repo_root / "deploy" / "materializer" / "ce-materializer.service"
     unit = _read_unit_path(unit_path)

@@ -1,0 +1,26 @@
+[Unit]
+Description=Creator Engine model drift observer
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=creator-engine
+Group=creator-engine
+SupplementaryGroups=docker
+EnvironmentFile=/etc/creator-engine/ce-model-drift.env
+WorkingDirectory=/workspace/creator-engine
+ExecStart=/workspace/creator-engine/.venv/bin/python -m creator_engine_validator.model_drift_watcher
+Restart=on-failure
+RestartSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StateDirectory=creator-engine/model-drift creator-engine/controller-inbox
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/creator-engine/model-drift /var/lib/creator-engine/controller-inbox
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

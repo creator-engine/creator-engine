@@ -9,6 +9,9 @@ These units keep the autonomous gate daemons alive after host reboot:
 - `ce-ratifier-queue.service`: folds controller-supplied candidate/evidence
   snapshots into a durable, proposal-only ratifier queue; it cannot approve,
   enqueue, merge, sign, or remove the legacy session crons.
+- `ce-model-drift-watcher.service`: system-only observer for the tracked model
+  canon in fixed DGX/VPS containers; it writes durable controller-inbox drift
+  alarms.
 - `ce-codex-seat@.service`: clears any stale named Codex seat container, starts
   a fresh detached runsc container through the checked-in launcher, and keeps
   `docker wait <container>` in the foreground so systemd owns restart.
@@ -23,7 +26,8 @@ The default install target is the user systemd manager at
 `~/.config/systemd/user`. Use `--system` to install into `/etc/systemd/system`.
 The installer renders the checked-in unit templates with the current source
 checkout path, runs `daemon-reload`, enables the gate daemon services, and
-starts them.
+starts them. User installs handle the user-capable sibling gate daemons but
+deterministically skip the model-drift watcher.
 Use `--no-start` to render/enable without starting.
 
 Create the env file before starting services. Defaults:
@@ -55,8 +59,37 @@ missing or empty config fails closed. Review pickup first uses
 reviewer seats' local credential files unless ambient `gh` auth is explicitly
 enabled.
 
+## Model drift observer
+
+`ce-model-drift-watcher.service` is system-only. It runs under the fixed
+`creator-engine` identity with Docker observation-group access and needs its
+protected `/var/lib/creator-engine/model-drift` state and
+`/var/lib/creator-engine/controller-inbox` delivery paths; those constraints
+are intentionally not offered through a user manager. For `--system`, the
+installer creates those directories and the owner-only, zero-token
+`/etc/creator-engine/ce-model-drift.env` with only canon, state, lease, inbox,
+and 60-second cadence settings. It does not carry GitHub, OpenBao, Vault, PAT,
+or credential-file values. The watcher can only read each canon-pinned
+container TOML and `codex --version`; it never restarts a container or changes
+configuration.
+
+A drift alarm is emitted once when the same normalized drift reaches its third
+consecutive observation. Its stable episode ID is persisted before inbox
+delivery, so a restart retries the same alarm without duplication; a completed
+episode emits no second semantic alarm. The watcher clears an episode only
+after two consecutive matching observations. Monitor controller-inbox consumer
+liveness independently: silence after the initial alarm does not prove that the
+consumer processed it.
+
+## Review-pickup OpenBao token sourcing
+
 To source the review-pickup token through OpenBao, add the OpenBao client
-environment and the review-pickup SecretRef to the same env file:
+environment and the review-pickup SecretRef to the gate-daemon environment
+file: `~/.config/creator-engine/gate-daemons.env` for user installs or
+`/etc/creator-engine/gate-daemons.env` for system installs. Do **not** put
+these values in `ce-model-drift.env`: it remains the dedicated zero-token
+watcher environment and rejects `BAO_*`, token, PAT, Vault, GitHub, and other
+credential variables.
 
 ```sh
 BAO_ADDR=<openbao-url>
@@ -76,7 +109,8 @@ CE_PICKUP_TOKEN_SECRET_TARGET_REF=file:/run/user/<uid>/creator-engine/review-pic
 The unit keeps the static `CE_PICKUP_TOKEN` path active by default. Its template
 includes a commented OpenBao-ready `ExecStart` replacement with the
 `--pickup-token-secret-*` flags wired to env-file values; switch to that command
-only after the OpenBao delivery path has been verified live.
+only after the OpenBao delivery path has been verified live. Those flags belong
+to the review-pickup unit, not the model-drift watcher.
 
 The belt daemon requires `CE_BELT_IDENTITY` because `ce pickup poll` resolves
 credentials from `CE_PICKUP_TOKEN` or `~/.ce-keys/<identity>.pat` by default.
