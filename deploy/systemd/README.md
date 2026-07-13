@@ -95,7 +95,9 @@ credential variables.
 BAO_ADDR=<openbao-url>
 BAO_TOKEN=<openbao-token>
 BAO_CACERT=<optional-ca-cert-path>
-CE_OPENBAO_ALLOWED_REFS=path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+# When both OpenBao paths below are configured, keep this as one comma-separated
+# allowlist; `gate-daemons.env` has one effective value per environment name.
+CE_OPENBAO_ALLOWED_REFS=path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982,path=forge/approval-capability/wall;field=signing_secret;purpose=approval-capability-wall;owner_ref=controller:integrator;policy_sha=<operator-supplied-64-hex>
 CE_PICKUP_TOKEN_SECRET_BACKEND=openbao
 CE_PICKUP_TOKEN_SECRET_MOUNT=ce-kv
 CE_PICKUP_TOKEN_SECRET_PATH=forge/reviewer/gh-token
@@ -111,6 +113,54 @@ includes a commented OpenBao-ready `ExecStart` replacement with the
 `--pickup-token-secret-*` flags wired to env-file values; switch to that command
 only after the OpenBao delivery path has been verified live. Those flags belong
 to the review-pickup unit, not the model-drift watcher.
+
+## Integrator Approval-Wall Deployment Readiness
+
+The integrator approval wall remains dormant until an Operator completes a
+separate, authorized runtime transition. Add these operator-managed placeholders
+to `gate-daemons.env` only when preparing that transition:
+
+```sh
+BAO_ADDR=<openbao-url>
+BAO_TOKEN=<operator-supplied-runtime-token>
+BAO_CACERT=<optional-ca-cert-path>
+CE_APPROVAL_WALL_SECRET_BACKEND=openbao
+CE_APPROVAL_WALL_SECRET_MOUNT=ce-kv
+CE_APPROVAL_WALL_SECRET_PATH=forge/approval-capability/wall
+CE_APPROVAL_WALL_SECRET_FIELD=signing_secret
+CE_APPROVAL_WALL_SECRET_PURPOSE=approval-capability-wall
+CE_APPROVAL_WALL_SECRET_OWNER_REF=controller:integrator
+CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA=<operator-supplied-64-hex>
+CE_APPROVAL_WALL_SECRET_TARGET_REF=file:/run/user/<uid>/creator-engine/approval-wall-secret
+CE_APPROVAL_WALL_POLICY_SHA=<operator-supplied-policy-sha-or-id>
+```
+
+`BAO_TOKEN` comes only from the approved runtime secret channel and is never committed.
+Policy values are runtime inputs: do not invent or derive them. The
+review-pickup `forge/reviewer/gh-token` path above remains a reviewer-token path;
+the `forge/approval-capability/wall` path here is a distinct integrator
+signing-secret path. When both are enabled, the single
+`CE_OPENBAO_ALLOWED_REFS` assignment above carries both refs; do not add a
+second assignment that would overwrite the reviewer-token ref.
+
+The target ref must use `file:` delivery on tmpfs under `/run`, or an
+Operator-verified `%t` equivalent. It must never use persistent storage or
+`env:` delivery. Delivery is revoke-after-read: partial configuration, backend
+failure, empty material, or a disallowed ref must fail closed without environment
+fallback.
+
+`CE_APPROVAL_CAPABILITY_SECRET` is bootstrap fallback only. The existing
+`--approval-wall-secret-env` default selects it only when no backend is configured;
+it is not the production OpenBao path. This repository change neither supplies the bootstrap secret nor performs a runtime transition, so it does not arm the wall.
+If an Operator supplies the bootstrap secret through `CE_APPROVAL_CAPABILITY_SECRET`
+with no backend configured, the existing runtime arms the wall and persists wall state
+as `armed: true`. Environment custody is fork-readable and fork-forge unsafe compared
+with scoped OpenBao. Once a backend is configured, partial configuration, failure,
+empty material, or an invalid target refuses fallback.
+
+Landing these coordinates does not authorize live env edits, installer execution
+against live directories, daemon reload or restart, marker minting, wall-state
+editing, or arming.
 
 The belt daemon requires `CE_BELT_IDENTITY` because `ce pickup poll` resolves
 credentials from `CE_PICKUP_TOKEN` or `~/.ce-keys/<identity>.pat` by default.

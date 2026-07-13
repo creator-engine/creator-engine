@@ -9,7 +9,7 @@ Type=simple
 EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
 WorkingDirectory=/workspace/creator-engine
 ExecStartPre=/usr/bin/mkdir -p %h/.local/state/creator-engine/daemon-heartbeats
-ExecStart=/usr/bin/env ce queue-daemon --repo "$CE_GATE_REPO" --loop --interval 120 --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" --json
+ExecStart=/usr/bin/env ce queue-daemon --repo "$CE_GATE_REPO" --loop --interval 120 --authorized-reviewer "$CE_GATE_AUTHORIZED_REVIEWERS" --approval-wall-secret-backend "${CE_APPROVAL_WALL_SECRET_BACKEND}" --approval-wall-secret-mount "${CE_APPROVAL_WALL_SECRET_MOUNT}" --approval-wall-secret-path "${CE_APPROVAL_WALL_SECRET_PATH}" --approval-wall-secret-field "${CE_APPROVAL_WALL_SECRET_FIELD}" --approval-wall-secret-purpose "${CE_APPROVAL_WALL_SECRET_PURPOSE}" --approval-wall-secret-owner-ref "${CE_APPROVAL_WALL_SECRET_OWNER_REF}" --approval-wall-secret-ref-policy-sha "${CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA}" --approval-wall-secret-target-ref "${CE_APPROVAL_WALL_SECRET_TARGET_REF}" --approval-wall-policy-sha "${CE_APPROVAL_WALL_POLICY_SHA}" --json
 Restart=on-failure
 RestartSec=30s
 

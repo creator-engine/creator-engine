@@ -166,9 +166,42 @@ Optional for review pickup:
   BAO_ADDR=...
   BAO_TOKEN=...
   BAO_CACERT=...
-  CE_OPENBAO_ALLOWED_REFS=path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+  CE_OPENBAO_ALLOWED_REFS=path=forge/reviewer/gh-token;field=token;purpose=review-pickup-token;owner_ref=controller:reviewer;policy_sha=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982,path=forge/approval-capability/wall;field=signing_secret;purpose=approval-capability-wall;owner_ref=controller:integrator;policy_sha=<operator-supplied-64-hex>
   CE_PICKUP_TOKEN_SECRET_TARGET_REF=file:/run/user/<uid>/creator-engine/review-pickup-token
   CE_PICKUP_TOKEN_SECRET_REF_POLICY_SHA=ab4769424e205eb53ee31d61da0c386ae9a418682e9bc0a6636f82de708c8982
+Optional approval-wall OpenBao readiness (operator-managed placeholders only;
+this does not authorize a live env edit, install, reload/restart, marker mint,
+wall-state edit, or arming):
+  BAO_ADDR=<openbao-url>
+  BAO_TOKEN=<operator-supplied-runtime-token>
+  BAO_CACERT=<optional-ca-cert-path>
+  CE_APPROVAL_WALL_SECRET_BACKEND=openbao
+  CE_APPROVAL_WALL_SECRET_MOUNT=ce-kv
+  CE_APPROVAL_WALL_SECRET_PATH=forge/approval-capability/wall
+  CE_APPROVAL_WALL_SECRET_FIELD=signing_secret
+  CE_APPROVAL_WALL_SECRET_PURPOSE=approval-capability-wall
+  CE_APPROVAL_WALL_SECRET_OWNER_REF=controller:integrator
+  CE_APPROVAL_WALL_SECRET_REF_POLICY_SHA=<operator-supplied-64-hex>
+  CE_APPROVAL_WALL_SECRET_TARGET_REF=file:/run/user/<uid>/creator-engine/approval-wall-secret
+  CE_APPROVAL_WALL_POLICY_SHA=<operator-supplied-policy-sha-or-id>
+  BAO_TOKEN comes only from the approved runtime secret channel and is never committed.
+  Policy values are runtime inputs; do not invent or derive them. The approval-wall
+  signing-secret path is distinct from the review-pickup reviewer-token path.
+  When both are enabled, the single CE_OPENBAO_ALLOWED_REFS assignment above
+  carries both refs; do not add a second assignment that would overwrite the
+  reviewer-token ref.
+  Target refs must use file: delivery on tmpfs under /run, or an Operator-verified
+  %t equivalent; never persistent storage or env:. Delivery is revoke-after-read:
+  partial config, backend failure, empty material, or disallowed refs fail closed
+  without environment fallback.
+  CE_APPROVAL_CAPABILITY_SECRET is bootstrap fallback only via the existing
+  --approval-wall-secret-env default when no backend is configured. It is not the
+  production OpenBao path. This repository change neither supplies the bootstrap secret nor performs a runtime transition, so it does not arm the wall.
+  If an Operator supplies the bootstrap secret through CE_APPROVAL_CAPABILITY_SECRET
+  with no backend configured, the existing runtime arms the wall and persists wall state
+  as armed: true. Environment custody is fork-readable/fork-forge unsafe compared
+  with scoped OpenBao. A configured backend that is partial, fails, returns empty
+  material, or has an invalid target refuses fallback.
 Optional for work-pickup belt:
   CE_BELT_INTERVAL_SECONDS=120
   CE_BELT_LABELS=enhancement
