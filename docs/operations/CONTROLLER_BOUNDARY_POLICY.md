@@ -119,6 +119,31 @@ them is a governance violation per Feature 001 FR-007 and Feature 002
 FR-018, and MUST be halted before mechanics regardless of mechanical
 convenience.
 
+### d.1 Deterministic no-inlining refusal
+
+Governed controller harnesses MUST lack execution-plane primitives in
+controller context. The Claude PreToolUse hook path and the Codex/FACE
+governed exec wrapper refuse these command primitive families before execution:
+
+- worktree mutation;
+- full local PR preflight (`ce validate-pr` / `ce-preflight.sh`);
+- path-manifest carrier regeneration;
+- harvest or press-merge bundle extraction;
+- harvest-shaped branch push.
+
+The refusal reason is stable and actionable:
+`execution-plane primitive (<primitive>) denied for controller/unpinned context;
+dispatch through a launch-pinned governed worker: ce worker run --role
+implementer --brief <brief> --worktree <allocated-worktree> (or ce lane launch
+--role implementer ...)`.
+
+Documentation is not the enforcement. The capability-bearing route is a
+launch-pinned governed worker record under `.ce/state/workers/<worker>/worker.yaml`
+whose role and worktree binding match the current context. Missing, malformed,
+stale, or unpinned worker context fails closed to the same refusal.
+Tracked-file writes remain denied by the foreman-delegation rule, which carries
+the same `ce worker run --role implementer ...` dispatch hint.
+
 ## e. The controller-seat-edit anti-pattern
 
 The single highest-likelihood violation of §d is the controller

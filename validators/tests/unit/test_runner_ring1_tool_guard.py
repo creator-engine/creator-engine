@@ -6,6 +6,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,9 @@ from creator_engine_validator.runner.ring1_tool_guard import (
     guarded_env,
     render_install_script,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _write_executable(path: Path, body: str) -> Path:
@@ -168,6 +172,53 @@ def test_raw_deny_exits_nonzero_without_execing_real_binary(tmp_path):
     assert completed.returncode == DENY_EXIT_CODE
     assert "git deny by hook-check (posture=governed)" in completed.stderr
     assert "restricted mechanic (deploy)" in completed.stderr
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "primitive"),
+    [
+        ("ce", ["validate-pr", "--declared-work-class", "story"], "full_preflight"),
+        ("tar", ["-xf", "harvest-bundle.tar"], "bundle_extraction"),
+        (
+            "python3",
+            ["-m", "creator_engine_validator.carrier_gen", "--check"],
+            "carrier_regeneration",
+        ),
+    ],
+)
+def test_codex_ring1_shim_refuses_controller_execution_plane_primitives(
+    tmp_path, tool, args, primitive
+):
+    real_tool = _fake_real_tool(tmp_path / f"real-{tool}")
+    tools = ("ce", "tar", "python3")
+    config = Ring1ToolGuardConfig(
+        tools=tools,
+        real_binaries=tuple((name, str(real_tool)) for name in tools),
+        validator_argv=(sys.executable, "-m", "creator_engine_validator"),
+        base_path=os.environ.get("PATH", ""),
+        posture_root=str(tmp_path),
+    )
+    shim_dir = _install(tmp_path, config)
+    marker = tmp_path / "real-tool-ran"
+    env = {
+        **os.environ,
+        "CE_REAL_TOOL_MARKER": str(marker),
+        "PYTHONPATH": f"{REPO_ROOT / 'validators'}:{os.environ.get('PYTHONPATH', '')}",
+    }
+
+    completed = subprocess.run(
+        [str(shim_dir / tool), *args],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == DENY_EXIT_CODE
+    assert f"execution-plane primitive ({primitive})" in completed.stderr
+    assert "ce worker run --role implementer" in completed.stderr
     assert not marker.exists()
 
 

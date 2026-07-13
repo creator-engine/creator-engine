@@ -66,6 +66,25 @@ NO_WRITE_AUTHORITY_NOTE = "no write authority provisioned (envelope_ref=none)"
 FOREMAN_DELEGATION_REASON = FOREMAN_DELEGATION_REQUIRED_REASON
 DEFAULT_FOREMAN_MUTATION_CLASS = "code"
 WORKER_RECORD_REL = Path(".ce/state/workers")
+EXECUTION_PLANE_DENY_PREFIX = "execution-plane primitive"
+EXECUTION_PLANE_DISPATCH_HINT = (
+    "dispatch through a launch-pinned governed worker: "
+    "ce worker run --role {role} --brief <brief> --worktree <allocated-worktree> "
+    "(or ce lane launch --role {role} ...)"
+)
+
+_EXECUTION_PLANE_ROLE_HINTS: dict[str, str] = {
+    "worktree_mutation": "implementer",
+    "full_preflight": "implementer",
+    "carrier_regeneration": "implementer",
+    "bundle_extraction": "implementer",
+    "harvest_push": "implementer",
+}
+
+_EXECUTION_PLANE_ALLOWED_WORKERS: dict[str, frozenset[tuple[str, str]]] = {
+    name: frozenset({("implementer", "implementation")})
+    for name in _EXECUTION_PLANE_ROLE_HINTS
+}
 
 
 # --------------------------------------------------------------------------
@@ -212,6 +231,39 @@ _MECHANIC_RULES_NONVOCAB: tuple[tuple[re.Pattern[str], str], ...] = (
     # Pipe-to-shell installer patterns (curl|sh, wget|sh).
     (re.compile(r"\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b"), "toolchain_self_update"),
     (re.compile(r"\bwget\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b"), "toolchain_self_update"),
+)
+
+_EXECUTION_PLANE_REGEX_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"\bgit\b(?:(?![;&|]).)*\bpush\b(?:(?![;&|]).)*(?:harvest|push-for-harvest)",
+            re.IGNORECASE,
+        ),
+        "harvest_push",
+    ),
+    (
+        re.compile(
+            r"\bgit\b(?:(?![;&|]).)*\bworktree\s+(?:add|remove|rm|move|prune|repair)\b",
+            re.IGNORECASE,
+        ),
+        "worktree_mutation",
+    ),
+    (
+        re.compile(
+            r"(?:\bce\s+validate-pr\b|\bce-preflight\.sh\b|scripts/ce-preflight\.sh|"
+            r"creator_engine_validator\.(?:ce_cli\s+validate-pr|pr_preflight)\b)",
+            re.IGNORECASE,
+        ),
+        "full_preflight",
+    ),
+    (
+        re.compile(r"(?:\bcarrier-gen\b|creator_engine_validator\.carrier_gen\b|\bcarrier_gen\b)"),
+        "carrier_regeneration",
+    ),
+    (
+        re.compile(r"(?:\btar\b\s+(?:-[A-Za-z]*x[A-Za-z]*|--extract)\b|\bunzip\b)", re.IGNORECASE),
+        "bundle_extraction",
+    ),
 )
 
 _GIT_OPAQUE_MECHANIC = "git_opaque"
@@ -1055,6 +1107,21 @@ def classify_mechanics(command: Any) -> str | None:
     return None
 
 
+def classify_execution_plane_primitive(command: Any) -> str | None:
+    """Return a #557 execution-plane primitive label, or ``None``.
+
+    This is capability classification, not intent inference: it recognizes the
+    repository's concrete primitive surfaces and leaves ordinary coordination
+    reads/probes alone.
+    """
+    if not isinstance(command, str):
+        return None
+    for pattern, primitive in _EXECUTION_PLANE_REGEX_RULES:
+        if pattern.search(command):
+            return primitive
+    return None
+
+
 # --------------------------------------------------------------------------
 # Scope (PreToolUse Edit / Write / MultiEdit)
 # --------------------------------------------------------------------------
@@ -1251,6 +1318,38 @@ def _worker_delegation_allows_implementation(context: HookContext) -> bool:
     )
 
 
+def _execution_plane_worker_allows(context: HookContext, primitive: str) -> bool:
+    record = context.worker_delegation
+    if not isinstance(record, dict):
+        return False
+    key = (str(record.get("role") or ""), str(record.get("lane_kind") or ""))
+    if key not in _EXECUTION_PLANE_ALLOWED_WORKERS.get(primitive, frozenset()):
+        return False
+    return record.get("launch_state") == "launched"
+
+
+def _execution_plane_denial_reason(primitive: str) -> str:
+    role = _EXECUTION_PLANE_ROLE_HINTS.get(primitive, "implementer")
+    hint = EXECUTION_PLANE_DISPATCH_HINT.format(role=role)
+    return (
+        f"{EXECUTION_PLANE_DENY_PREFIX} ({primitive}) denied for controller/unpinned "
+        f"context; {hint}"
+    )
+
+
+def _execution_plane_would_deny(event: dict, context: HookContext) -> str | None:
+    tool = event.get("tool_name") or event.get("toolName") or ""
+    tool_input = event.get("tool_input") or event.get("toolInput") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    primitive: str | None = None
+    if tool == "Bash":
+        primitive = classify_execution_plane_primitive(tool_input.get("command"))
+    if primitive is None or _execution_plane_worker_allows(context, primitive):
+        return None
+    return _execution_plane_denial_reason(primitive)
+
+
 def _foreman_would_deny(event: dict, context: HookContext) -> str | None:
     tool = event.get("tool_name") or event.get("toolName") or ""
     tool_input = event.get("tool_input") or event.get("toolInput") or {}
@@ -1313,9 +1412,9 @@ def _valid_worker_delegation_record(
         return None
     if str(record.get("schema_version") or "") != "1":
         return None
-    if record.get("role") != "implementer":
-        return None
-    if record.get("lane_kind") != "implementation":
+    role_lane = (record.get("role"), record.get("lane_kind"))
+    allowed = set().union(*_EXECUTION_PLANE_ALLOWED_WORKERS.values())
+    if role_lane not in allowed:
         return None
     if record.get("launch_state") != "launched":
         return None
@@ -1653,7 +1752,9 @@ def _evaluate_pre_tool_use(event: dict, context: HookContext) -> HookDecision:
     tool_input = event.get("tool_input") or event.get("toolInput") or {}
     if not isinstance(tool_input, dict):
         tool_input = {}
-    would_deny_reason: str | None = None
+    would_deny_reason = _execution_plane_would_deny(event, context)
+    if would_deny_reason is not None:
+        return _pre_tool_use_decision(would_deny_reason, context)
     if tool in SCOPE_TOOLS:
         would_deny_reason = _scope_would_deny(tool_input.get("file_path"), context)
     elif tool == "Read":

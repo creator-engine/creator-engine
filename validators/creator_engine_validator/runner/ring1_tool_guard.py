@@ -253,7 +253,13 @@ def render_posix_tool_shim(
 # PATH resets, and non-shell filesystem access; hardening is a later gate.
 set -eu
 
-if command -v python3 >/dev/null 2>&1; then
+if [ -x /usr/bin/python3 ]; then
+    _ce_ring1_python=/usr/bin/python3
+elif [ -x /usr/local/bin/python3 ]; then
+    _ce_ring1_python=/usr/local/bin/python3
+elif [ -x /usr/bin/python ]; then
+    _ce_ring1_python=/usr/bin/python
+elif command -v python3 >/dev/null 2>&1; then
     _ce_ring1_python=$(command -v python3)
 elif command -v python >/dev/null 2>&1; then
     _ce_ring1_python=$(command -v python)

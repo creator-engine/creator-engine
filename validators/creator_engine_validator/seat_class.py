@@ -46,7 +46,9 @@ DEFAULT_DELEGATION_REQUIRED_MUTATION_CLASSES: Final[frozenset[str]] = frozenset(
 )
 FOREMAN_DELEGATION_REQUIRED_REASON: Final[str] = (
     "ce-ops#163 REQ-3 foreman_delegation_required: "
-    "implementation work requires worker delegation"
+    "implementation work requires worker delegation; dispatch through "
+    "ce worker run --role implementer --brief <brief> --worktree <allocated-worktree> "
+    "(or ce lane launch --role implementer ...)"
 )
 
 _COORDINATION_TOOLS: Final[frozenset[str]] = frozenset({"read", "grep", "glob"})

@@ -58,6 +58,35 @@ def _read_event(file_path: str, tool_input_extra: dict | None = None) -> dict:
 MANIFEST = ("validators/creator_engine_validator/hook_check.py", "schemas/completion-report.schema.yaml")
 
 
+def _launched_implementer_record(repo: Path | None = None, worker_id: str = "worker-impl") -> dict:
+    root = repo or REPO_ROOT
+    record_path = root / ".ce" / "state" / "workers" / worker_id / "worker.yaml"
+    return {
+        "kind": "ce-worker-spawn-record",
+        "schema_version": "1",
+        "worker_id": worker_id,
+        "role": "implementer",
+        "lane_kind": "implementation",
+        "harness": "claude",
+        "scope_id": "ce-ops#557",
+        "parent_id": "controller",
+        "worktree_path": str(root),
+        "prompt": {"kind": "file", "ref": "prompt.md", "sha256": "a" * 64},
+        "depth": 1,
+        "max_depth": 3,
+        "record_path": str(record_path),
+        "launch_command": ["ce", "lane", "launch", "--role", "implementer"],
+        "launch_command_sha256": "b" * 64,
+        "scrubbed_env_names": [],
+        "child_env_names": [],
+        "dry_run": False,
+        "launch_state": "launched",
+        "seat_refs": {},
+        "governed_worker_contract": worker_spawn.governed_worker_contract(role="implementer"),
+    }
+
+
+
 # --- Scope (PreToolUse Edit/Write/MultiEdit) -------------------------------
 
 
@@ -78,7 +107,10 @@ def test_governed_out_of_manifest_edit_is_advisory_allow():
 
 def test_governed_in_manifest_edit_allows():
     ctx = hook_check.HookContext(
-        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
     )
     decision = hook_check.evaluate(
         _edit_event("validators/creator_engine_validator/hook_check.py"), ctx
@@ -89,7 +121,10 @@ def test_governed_in_manifest_edit_allows():
 
 def test_governed_write_in_manifest_allows():
     ctx = hook_check.HookContext(
-        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
     )
     decision = hook_check.evaluate(
         _edit_event("schemas/completion-report.schema.yaml", tool="Write"), ctx
@@ -137,6 +172,114 @@ def test_governed_bash_git_push_denies():
     decision = hook_check.evaluate(_bash_event("git push origin main"), ctx)
     assert decision.decision == "deny"
     assert decision.hook_specific_output["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    ("event", "primitive"),
+    [
+        pytest.param(_bash_event("git worktree add ../wt HEAD"), "worktree_mutation", id="worktree"),
+        pytest.param(_bash_event("ce validate-pr --declared-work-class story"), "full_preflight", id="preflight"),
+        pytest.param(
+            _bash_event("python -m creator_engine_validator.carrier_gen --check"),
+            "carrier_regeneration",
+            id="carrier",
+        ),
+        pytest.param(_bash_event("tar -xf harvest-bundle.tar -C out"), "bundle_extraction", id="bundle"),
+        pytest.param(
+            _bash_event("git push origin HEAD:refs/heads/harvest/ce-557"),
+            "harvest_push",
+            id="harvest_push",
+        ),
+    ],
+)
+def test_controller_execution_plane_primitives_deny_with_dispatch_hint(event, primitive):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "deny"
+    assert f"execution-plane primitive ({primitive})" in decision.reason
+    assert "ce worker run --role implementer" in decision.reason
+    assert "ce lane launch --role implementer" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ce validate-pr --declared-work-class story",
+        "git worktree add ../wt HEAD",
+        "python -m creator_engine_validator.carrier_gen --check",
+        "tar -xf harvest-bundle.tar -C out",
+        "git push origin HEAD:refs/heads/harvest/ce-557",
+    ],
+)
+def test_execution_plane_primitives_allow_launched_worker_context(command):
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
+    )
+
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+
+    if "git push" in command:
+        # The worker record opens execution-plane capability only; push authority
+        # remains governed by the existing credential/reviewer-venue wall.
+        assert decision.decision == "deny"
+        assert "restricted mechanic (deploy)" in decision.reason
+    else:
+        assert decision.decision == "allow"
+
+
+def test_unpinned_worker_label_cannot_acquire_execution_plane_capability():
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+    )
+
+    decision = hook_check.evaluate(_bash_event("ce validate-pr --declared-work-class story"), ctx)
+
+    assert decision.decision == "deny"
+    assert "controller/unpinned context" in decision.reason
+
+
+def test_malformed_worker_record_cannot_acquire_execution_plane_capability():
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation={"role": "implementer", "lane_kind": "implementation"},
+    )
+
+    decision = hook_check.evaluate(_bash_event("ce validate-pr --declared-work-class story"), ctx)
+
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
+
+
+def test_stale_worker_record_ref_fails_closed(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".claude" / "agents").mkdir(parents=True)
+    (repo / ".claude" / "agents" / "implementer.md").write_text(
+        "---\nname: implementer\n---\n# Implementer\n",
+        encoding="utf-8",
+    )
+    stale_worktree = tmp_path / "other"
+    stale_worktree.mkdir()
+    record_path = _write_worker_record(repo, worktree_path=stale_worktree)
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["cwd"] = str(repo)
+    event["ce"] = {"seat_class": "worker", "worker_record_ref": str(record_path)}
+
+    ctx = hook_check.build_context(event, posture="governed", posture_root=str(repo))
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
 
 
 @pytest.mark.parametrize(
@@ -226,7 +369,10 @@ def test_non_governed_controller_context_allows_forge_ops(command):
 )
 def test_git_grammar_local_subcommands_allow(command):
     ctx = hook_check.HookContext(
-        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
     )
     assert hook_check.classify_mechanics(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
