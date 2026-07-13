@@ -6,19 +6,113 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
+## v0.3.6 — NIGHT-6: heartbeat ladders + checkpoint protocol + forge spawn + ratifier queue (train 2, 2026-07-12)
+
+### Highlights
+
+- Complete the **daemon heartbeat ladder** (S1 schema → S2 belt/integrator → S3 review-pickup → S4 alarm consumer): every background daemon now emits bounded, non-secret liveness records and stale/failed daemons raise structured alarms without changing service authority.
+- Ship the **`ce checkpoint` verb** and the controller continuity checkpoint protocol: redaction-safe, SHA-verified resume-state handoff for durable controller sessions.
+- Add the **M2 governed review-acting spawn provider** (default-OFF, Operator-armed): a flock-claimed, sequenced provider primitive that hands caller-owned reviewer evidence to the M4 ratifier queue without forge or gate authority.
+- Wire the **M4 ratifier-queue to the CLI** (SL-DAY-2 P1, NIGHT-6 W1): proposal-only queue, CLI surface, systemd unit, and reversible controller handoff path.
+- Block double-assignment at the **work-claims layer (M6)**: fresh foreign claims at acquire are now hard-blocked with structured evidence.
+- Fix the **install-answers schema mirror drift** that caused every fresh install to fail with `INSTALL_REFUSED artifact_hash_mismatch`; the docs mirror is now byte-identical to the canonical validators copy and a CI guard prevents future drift.
+- Add a **Dockerfile image-build smoke tier** to PR validation: sha-verified `hadolint` + Docker Buildx `--check` for committed Dockerfile changes.
+
+_Selected 19 changelog fragment(s) since release/v0.3.5._
+
 ### Added
 
-- Default-OFF review-pickup acting chain: an explicitly armed, durable
-  comment-only reviewer verdict path with an Operator-provided spawn template.
-- Review-pickup dry-run daemon slice 1: `forge.review_dry_run` module adds
-  `run_dry_run_pass` / `run_dry_run_loop` (wrapping `forge.review_pickup` with
-  `dry_run=True`), the Operator-held gate (label + held-list file), and a named
-  WOULD_ASSIGN / WOULD_SKIP JSONL feed. Read-only; no GitHub writes. Slice 2 will
-  add the `cev3 review-dry-run` CLI surface.
+- **ce-539-checkpoint-skill**: **Add a redaction-safe controller checkpoint skill.**
+
+  - Requires an untracked, SHA-256-verified resume-state file containing only
+    delta since the prior checkpoint.
+  - Separates probed, asserted, and unknown facts while preserving authority and
+    role boundaries.
+  - Provides deterministic completeness and safe resume procedures without
+    creating readiness, forge, or gate side effects.
+- **ce-daemon-heartbeat-contract-s1** (none; shared daemon heartbeat schema and passive emitter): Add a bounded, non-secret daemon heartbeat schema with deterministic validation.
+  - Add atomic latest-state emission plus an injected structured-journal and periodic-running seam.
+  - Cover identity, timestamp, status, monotonic pass, atomic-replacement, and confidentiality behavior.
+- **ce-daemon-heartbeat-review-s3** (none; review-pickup daemon liveness): **feat(daemons): review-pickup heartbeat adoption (S3).**
+
+  - Adopt the passive daemon-heartbeat contract in review pickup with a user-state latest record.
+  - Emit startup, pass lifecycle, and bounded wait-seam liveness records without changing review routing behavior.
+- **ce-539-checkpoint-verb-protocol**: **Add a deterministic local-only checkpoint verb and agent protocol.**
+
+  - Validate labeled, redaction-safe handoff facts before atomically persisting an owner-only resume record.
+  - Report the exact persisted-byte hash without asserting authority, gate status, or `/clear` completion.
+- **ce-541-unresolved-connection-surface**: **Surface unresolved onboarding connection.**
+
+  - Add a fail-closed, read-only projection of the most recent onboarding ledger invocation.
+  - Surface an unresolved forge identity connection in `ce status`, an advisory red/FAIL doctor
+    line without changing doctor exits, and a stderr-only `ce launch` warning that preserves JSON.
+  - Cover exact-cascade recognition, clearing, unknown ledger states, and pre-spawn behavior.
+- **ce-543-image-smoke-tier**: **Add a pinned Dockerfile image-build smoke tier to PR validation.**
+
+  - Check committed `deploy/**/Dockerfile` changes with sha-verified hadolint and Docker Buildx `--check` only.
+  - Keep unchanged carriers as a no-tooling no-op and prohibit image publication flags.
+- **ce-550-brain-reconcile-verb**: **brain reconcile verb.**
+
+  - Add deterministic plan-gated static evidence reconciliation.
+- **ce-daemon-heartbeat-belt-integrator-s2** (none; belt and integrator daemon liveness): **feat(daemons): belt and integrator heartbeat adoption (S2).**
+
+  - Adopt the passive daemon-heartbeat contract for the belt and integrator daemons, including startup, running, pass-complete, and terminal lifecycle records.
+  - Keep the belt as its existing per-invocation systemd loop: each invocation resumes the prior heartbeat index, avoiding a broader CLI-loop redesign.
+  - Record stopping or failed terminal heartbeats for belt, integrator, and review-pickup exits without changing their operational authority.
+- **ce-m2-review-spawn-provider** (M2; forge): **Governed review-acting spawn provider — core (M2 part 1).**
+
+  - Adds a default-OFF, flock-claimed, strict JSON provider primitive without forge, queue, or attestation authority.
+  - Defaulted pending Operator policy: capacity=0, timeout=180 seconds, retention=86400 seconds, and sandbox attestation is disabled until explicitly configured.
+  - Production deployment, alert routing, and recovery ownership remain unassigned pending Operator policy.
+  - Retry budget remains the existing shared acting budget; the provider records per-failure outcome codes without allocating a new retry budget.
+- **ce-m2-spawn-provider-integration** (M2; forge): **Governed review-acting spawn provider — sequenced integration.**
+
+  - Adds the default-OFF ce review-spawn-provider forwarding seam and reports explicit policy without launching a reviewer.
+  - Folds all M2 provider terminal outcomes before the adapter can append them, preserving no-duplicate handling for UNCERTAIN_COMMENT.
+  - Adds tailored structural coverage for the oneshot systemd unit without imposing daemon restart invariants.
+- **ce-s4-heartbeat-alarms** (none; daemon liveness alarms): **feat(daemons): add heartbeat alarm consumer (S4).**
+
+  - Classify validated daemon heartbeat records and emit bounded, secret-free alarm evidence for stale or failed daemons.
+  - Add a five-minute user timer without changing long-running gate-daemon supervision.
+- **ce-m6-claims-double-assignment-block**: **Work-claim acquisition now blocks fresh foreign claims at the claims layer.**
+- **ce-m4-ratifier-queue-cli-wiring** (ce-m4-ratifier-queue-cli-wiring; M4 ratifier queue CLI wiring): **M4 ratifier queue CLI wiring.**
+
+  Proposal-only runtime, CLI, systemd wiring, reversible controller handoff, and ratified brain evidence supersession.
 
 ### Changed
 
-- **Acceptance-Evidence autoclose enforcement.** Directive-labeled ce-ops issues now stay open with a structured warning comment when a merged PR lacks an `Acceptance-Evidence:` field; missing cross-repo token configuration now exits nonzero with a GitHub Actions error instead of silently skipping closures.
+- **ce-544-seat-image-signing-strip**: **Disable inherited Git signing in the DGX seat image.**
+
+  Set the DGX seat image's system Git configuration to disable commit signing for
+  all container users and remove stale signing-key and signing-format selectors.
+
+  The image must be rebuilt before this source-only change takes effect. Roll it
+  out through the 0.144.1 pin canon, one seat and the canary first.
+- **ce-548-schema-gen-constraints**: **Render direct numeric schema constraints in the generated reference.**
+
+  - Include `exclusiveMinimum`, `exclusiveMaximum`, and `multipleOf` when they occur directly on a projected field.
+  - Cover the three keywords with a copied-schema generation regression test.
+
+### Fixed
+
+- **ce-538-hookpack-delivery**: **Ship the tenant Claude hook-pack.**
+
+  - Packages the Claude hook scripts and settings template in the validator wheel.
+  - Materializes the hook-pack during fresh workspace onboarding without overwriting incompatible tenant settings.
+  - Preserves default Claude resume behavior when additional harness arguments are supplied.
+- **ce-install-schema-mirror-sync** (none; install / docs schema mirror / parity guard): **fix(install): sync docs/schemas install-answers mirror to canonical + parity guard.**
+
+  - Copy `validators/creator_engine_validator/schemas/install-answers.schema.yaml` (sha256 `621a76f2…`) to `docs/schemas/install-answers.schema.yaml`, restoring byte-parity with the signed spec pin.
+  - Add a CI parity guard (`test_docs_schemas_install_answers_mirror_is_byte_identical_to_validators_canonical`) that fails on drift and passes only when the mirror equals the canonical validators copy.
+  - Root cause: PR #924 updated the canonical schema but did not sync the docs mirror, leaving the mirror at hash `be67d554…` while the 0.3.5 signed spec pin references `621a76f2…`. Result: `INSTALL_REFUSED artifact_hash_mismatch` on every fresh install.
+- **ce-546-preflight-fail-closed**: **PR preflight now refuses incomplete pytest baseline-diff evidence.**
+
+### Design
+
+- **ce-m2-review-spawn-provider-design** (M2 governed review-acting spawn provider): Adds the ratification-ready, default-OFF contract for a provider which obtains
+  an immutable PR-head reviewer worktree, collects a bounded reviewer finding,
+  and hands caller-owned evidence to the pure M4 ratifier queue. This carrier is
+  design only: it makes no provider, deployment, or ratifier-state change.
 
 ## v0.3.5 — docs + CLI parity + reliability (train 1, 2026-07-11)
 
