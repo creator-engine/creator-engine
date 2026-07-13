@@ -67,8 +67,21 @@ cadence settings. It does not carry GitHub, OpenBao, Vault, PAT, or credential
 file values. The watcher can only read each canon-pinned container TOML and
 `codex --version`; it never restarts a container or changes configuration.
 
+A drift alarm is emitted once when the same drift reaches its third consecutive
+drift observation. The watcher emits no duplicate while that episode remains
+active, and clears the episode only after two consecutive matching
+observations. Monitor controller-inbox consumer liveness independently: silence
+after the initial alarm does not prove that the consumer processed it.
+
+## Review-pickup OpenBao token sourcing
+
 To source the review-pickup token through OpenBao, add the OpenBao client
-environment and the review-pickup SecretRef to the same env file:
+environment and the review-pickup SecretRef to the gate-daemon environment
+file: `~/.config/creator-engine/gate-daemons.env` for user installs or
+`/etc/creator-engine/gate-daemons.env` for system installs. Do **not** put
+these values in `ce-model-drift.env`: it remains the dedicated zero-token
+watcher environment and rejects `BAO_*`, token, PAT, Vault, GitHub, and other
+credential variables.
 
 ```sh
 BAO_ADDR=<openbao-url>
@@ -88,7 +101,8 @@ CE_PICKUP_TOKEN_SECRET_TARGET_REF=file:/run/user/<uid>/creator-engine/review-pic
 The unit keeps the static `CE_PICKUP_TOKEN` path active by default. Its template
 includes a commented OpenBao-ready `ExecStart` replacement with the
 `--pickup-token-secret-*` flags wired to env-file values; switch to that command
-only after the OpenBao delivery path has been verified live.
+only after the OpenBao delivery path has been verified live. Those flags belong
+to the review-pickup unit, not the model-drift watcher.
 
 The belt daemon requires `CE_BELT_IDENTITY` because `ce pickup poll` resolves
 credentials from `CE_PICKUP_TOKEN` or `~/.ce-keys/<identity>.pat` by default.

@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-gate-daemons-systemd.sh [--system] [--repo-root PATH] [--env-file PATH] [--egress-broker-env-file PATH] [--egress-self-review-env-file PATH] [--unit-dir PATH] [--no-start]
+Usage: install-gate-daemons-systemd.sh [--system] [--repo-root PATH] [--env-file PATH] [--egress-broker-env-file PATH] [--egress-self-review-env-file PATH] [--model-drift-env-file PATH] [--unit-dir PATH] [--no-start]
 
 Installs Creator Engine gate daemon systemd units from this source checkout.
 
@@ -19,6 +19,9 @@ Defaults:
   egress self-review env file:
     ~/.config/creator-engine/ce-egress-self-review.env (user)
     /etc/creator-engine/ce-egress-self-review.env (--system)
+  model drift env file:
+    ~/.config/creator-engine/ce-model-drift.env (user)
+    /etc/creator-engine/ce-model-drift.env (--system)
 
 The script copies rendered units, runs daemon-reload, enables the services, and
 starts them unless --no-start is supplied. It does not create or overwrite the
@@ -62,6 +65,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --egress-self-review-env-file)
       egress_self_review_env_file="${2:?--egress-self-review-env-file requires a path}"
+      shift 2
+      ;;
+    --model-drift-env-file)
+      model_drift_env_file="${2:?--model-drift-env-file requires a path}"
       shift 2
       ;;
     --no-start)
