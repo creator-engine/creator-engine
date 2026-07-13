@@ -196,10 +196,12 @@ wall-state edit, or arming):
   without environment fallback.
   CE_APPROVAL_CAPABILITY_SECRET is bootstrap fallback only via the existing
   --approval-wall-secret-env default when no backend is configured. It is not the
-  production OpenBao path and does not arm automatically; environment custody is
-  fork-readable/fork-forge unsafe compared with scoped OpenBao. A configured
-  backend that is partial, fails, returns empty material, or has an invalid target
-  refuses fallback.
+  production OpenBao path. This repository change neither supplies the bootstrap secret nor performs a runtime transition, so it does not arm the wall.
+  If an Operator supplies the bootstrap secret through CE_APPROVAL_CAPABILITY_SECRET
+  with no backend configured, the existing runtime arms the wall and persists wall state
+  as armed: true. Environment custody is fork-readable/fork-forge unsafe compared
+  with scoped OpenBao. A configured backend that is partial, fails, returns empty
+  material, or has an invalid target refuses fallback.
 Optional for work-pickup belt:
   CE_BELT_INTERVAL_SECONDS=120
   CE_BELT_LABELS=enhancement

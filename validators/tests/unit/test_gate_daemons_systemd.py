@@ -162,7 +162,7 @@ def test_integrator_approval_wall_wiring_is_dormant_and_parametric(repo_root: Pa
     assert "Environment" not in service
 
 
-def test_integrator_empty_approval_wall_argv_stays_dormant_and_partial_refuses(
+def test_integrator_empty_approval_wall_argv_honors_bootstrap_secret_and_partial_refuses(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -193,6 +193,12 @@ def test_integrator_empty_approval_wall_argv_stays_dormant_and_partial_refuses(
     wall = v3_cli._approval_wall_runtime_from_args(args)
     assert wall.dormant
     assert wall.reason == "secret_not_configured"
+
+    monkeypatch.setenv("CE_APPROVAL_CAPABILITY_SECRET", "operator-bootstrap-secret")
+    wall = v3_cli._approval_wall_runtime_from_args(args)
+    assert wall.armed
+    assert wall.state_path == v3_cli.approval_capability.approval_wall_state_path(tmp_path)
+    assert v3_cli.approval_capability.load_approval_wall_state(wall.state_path).armed is True
 
     partial_args = parser.parse_args(
         [
@@ -242,7 +248,11 @@ def test_approval_wall_deployment_docs_keep_dormant_fail_closed_boundaries(repo_
         assert "fork-readable" in text
         assert "fail closed" in text
         assert "bootstrap fallback only" in text
-        assert "does not arm" in text
+        assert "neither supplies the bootstrap secret nor performs a runtime transition" in text
+        assert "does not arm the wall" in text
+        assert "Operator supplies the bootstrap secret" in text
+        assert "existing runtime arms the wall and persists wall state" in text
+        assert "armed: true" in text
         assert "never committed" in text
 
     assert "forge/reviewer/gh-token" in systemd_readme

@@ -151,10 +151,12 @@ fallback.
 
 `CE_APPROVAL_CAPABILITY_SECRET` is bootstrap fallback only. The existing
 `--approval-wall-secret-env` default selects it only when no backend is configured;
-it is not the production OpenBao path and does not arm the wall
-automatically. Environment custody is fork-readable and fork-forge unsafe
-compared with scoped OpenBao. Once a backend is configured, partial
-configuration, failure, empty material, or an invalid target refuses fallback.
+it is not the production OpenBao path. This repository change neither supplies the bootstrap secret nor performs a runtime transition, so it does not arm the wall.
+If an Operator supplies the bootstrap secret through `CE_APPROVAL_CAPABILITY_SECRET`
+with no backend configured, the existing runtime arms the wall and persists wall state
+as `armed: true`. Environment custody is fork-readable and fork-forge unsafe compared
+with scoped OpenBao. Once a backend is configured, partial configuration, failure,
+empty material, or an invalid target refuses fallback.
 
 Landing these coordinates does not authorize live env edits, installer execution
 against live directories, daemon reload or restart, marker minting, wall-state
