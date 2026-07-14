@@ -223,6 +223,7 @@ exec_with_queue_daemon_lease() {
   exec "$lease_python" - "$@" <<'PY'
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
@@ -231,7 +232,12 @@ import sys
 import time
 from pathlib import Path
 
-from creator_engine_validator.daemon_lease import DaemonLeaseError, acquire
+from creator_engine_validator import daemon_lease
+from creator_engine_validator.daemon_lease import DaemonLeaseError, DaemonLeaseStale, acquire
+
+
+_QUEUE_STARTUP_RECOVERY_REASON = "automatic queue-daemon same-host dead-pid recovery"
+_LEASE_FIELDS = {"holder_id", "pid", "host", "acquired_at", "heartbeat_at"}
 
 
 def _float_env(name: str, default: float) -> float:
@@ -247,6 +253,66 @@ def _float_env(name: str, default: float) -> float:
     return value
 
 
+def _same_host_dead_pid_lease(payload: object) -> bool:
+    """Return true only for the bounded automatic queue-startup recovery case."""
+
+    if not isinstance(payload, dict) or set(payload) != _LEASE_FIELDS:
+        return False
+    pid = payload.get("pid")
+    if (
+        payload.get("host") != socket.gethostname()
+        or isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+    ):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except (PermissionError, OSError):
+        return False
+    return False
+
+
+def _recover_same_host_dead_pid_lease(
+    lease_path: Path,
+    *,
+    holder_id: str,
+) -> daemon_lease.DaemonLease:
+    """Audit-and-replace only the exact stale record validated under the lease lock."""
+
+    with daemon_lease._operation_lock(lease_path, daemon_name="queue-daemon", wait=False):
+        try:
+            raw_payload = json.loads(lease_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise DaemonLeaseStale("queue-daemon lease is not eligible for automatic recovery") from exc
+        if not _same_host_dead_pid_lease(raw_payload):
+            raise DaemonLeaseStale("queue-daemon lease is not eligible for automatic recovery")
+
+        existing = daemon_lease._read_payload(lease_path)
+        if existing.as_dict() != raw_payload:
+            raise DaemonLeaseStale("queue-daemon lease changed during automatic recovery")
+
+        timestamp = daemon_lease._acquisition_timestamp(None)
+        replacement = daemon_lease.DaemonLeasePayload(
+            holder_id=holder_id,
+            pid=os.getpid(),
+            host=socket.gethostname(),
+            acquired_at=timestamp,
+            heartbeat_at=timestamp,
+        )
+        daemon_lease._takeover_stale_lease(
+            lease_path=lease_path,
+            daemon_name="queue-daemon",
+            old_payload=existing,
+            new_payload=replacement,
+            reason=_QUEUE_STARTUP_RECOVERY_REASON,
+            now=timestamp,
+        )
+        return daemon_lease.DaemonLease("queue-daemon", holder_id, lease_path, replacement)
+
+
 cmd = sys.argv[1:]
 if not cmd:
     raise SystemExit("ERROR: queue-daemon singleton lease supervisor received no command")
@@ -255,7 +321,7 @@ lease_root = Path(os.environ["CE_DAEMON_LEASE_ROOT"])
 ttl_seconds = _float_env("CE_DAEMON_LEASE_TTL_SECONDS", 300.0)
 heartbeat_seconds = min(_float_env("CE_DAEMON_LEASE_HEARTBEAT_SECONDS", 30.0), ttl_seconds / 2.0)
 holder_id = os.environ.get("CE_DAEMON_HOLDER_ID") or f"queue-daemon:{socket.gethostname()}:{os.getpid()}"
-takeover_reason = os.environ.get("CE_DAEMON_LEASE_TAKEOVER_REASON") or None
+lease_path = lease_root / "queue-daemon.lease"
 
 try:
     lease = acquire(
@@ -263,9 +329,16 @@ try:
         holder_id,
         state_root=lease_root,
         ttl_seconds=ttl_seconds,
-        allow_takeover=takeover_reason is not None,
-        takeover_reason=takeover_reason,
     )
+except DaemonLeaseStale:
+    try:
+        lease = _recover_same_host_dead_pid_lease(
+            lease_path,
+            holder_id=holder_id,
+        )
+    except DaemonLeaseError as exc:
+        print(f"ERROR: queue-daemon singleton lease refused: {exc}", file=sys.stderr)
+        raise SystemExit(73)
 except DaemonLeaseError as exc:
     print(f"ERROR: queue-daemon singleton lease refused: {exc}", file=sys.stderr)
     raise SystemExit(73)

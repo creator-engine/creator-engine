@@ -65,8 +65,12 @@ as a best-effort symlink to the latest attempt instead of being appended to.
 Lease mutation is serialized by adjacent `.lease.op.lock` files. If a host
 crashes while holding an operation lock, verify no launcher or daemon process is
 still running for that lease, then remove only the orphaned `.lease.op.lock`
-file. Do not delete a `.lease` payload to force takeover; use the audited
-takeover path with `CE_DAEMON_LEASE_TAKEOVER_REASON`.
+file. Do not delete a `.lease` payload to force takeover. On queue startup only,
+the launcher automatically performs the existing audited takeover when it can
+prove the current lease belongs to this host and its positive integer PID no
+longer exists. Malformed records, permission-denied or live PIDs, and every
+cross-host lease remain refused; `CE_DAEMON_LEASE_TAKEOVER_REASON` cannot widen
+that recovery rule.
 
 `Dockerfile` is only a thin label layer over the canonical runtime image. Release
 automation should set `CE_CANONICAL_RUNTIME_IMAGE` or `CE_DAEMON_IMAGE` to the
