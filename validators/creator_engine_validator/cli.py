@@ -296,6 +296,16 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_signed_artifact_pins.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
     verify_signed_artifact_pins.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_release_smoke_evidence = sub.add_parser(
+        "verify-release-smoke-evidence",
+        help=(
+            "release-class PR-diff gate (requires exact signed hermetic smoke evidence when "
+            "both docs/llms-install.md and docs/release-finalize-manifest.yml change)"
+        ),
+    )
+    verify_release_smoke_evidence.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
+    verify_release_smoke_evidence.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
     verify_dual_format_sync = sub.add_parser(
         "verify-dual-format-sync",
         help=(
@@ -941,6 +951,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .checks.signed_artifact_pins import run_with_base as _run_signed_artifact_pins
 
         result = _run_signed_artifact_pins([Path(p) for p in args.paths], args.base)
+        return _emit_results([result], args.json_output)
+    if subcommand == "verify-release-smoke-evidence":
+        from .checks.release_smoke_evidence import run_with_base as _run_release_smoke_evidence
+
+        result = _run_release_smoke_evidence([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
     if subcommand == "verify-dual-format-sync":
         from .checks.dual_format_sync import run_with_base as _run_dual_format_sync
