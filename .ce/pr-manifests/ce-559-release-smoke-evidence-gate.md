@@ -2,17 +2,18 @@
 
 This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed authorized path-set for this PR. CI runs `verify-path-manifest --base <sha> --manifest-dir .ce/pr-manifests --head-ref ce-559-release-smoke-evidence-gate` and requires this PR's `base..HEAD` diff to equal exactly the authorized path-set below; this carrier lists itself.
 
-- **Declared work class:** S
-
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=9
+- **Declared work class:** S
 
-AUTHORIZED_PATHS_SHA256=3f4c83a402169ad17d762fd9742b453360378539b0200a9046d88cee70afb557
+AUTHORIZED_PATHS_COUNT=10
+
+AUTHORIZED_PATHS_SHA256=b0acbe2b3719c0e70496fce5fa1e63bc22cffb30577e41a96ab93d1522b0253a
 
 ```text
 .ce/changelog/ce-559-release-smoke-evidence-gate.md
 .ce/pr-manifests/ce-559-release-smoke-evidence-gate.md
+.ce/reference/schemas.generated.md
 .github/workflows/validate.yml
 validators/creator_engine_validator/checks/release_smoke_evidence.py
 validators/creator_engine_validator/cli.py
