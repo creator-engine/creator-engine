@@ -29,3 +29,6 @@ issue: ce-ops#557
   execution-shaped clean parses, and allowing only archive list/test output
   captures while command-substituted extraction and governed execution remain
   opaque-denied.
+- Corrects the PR #1014 CI fixture regression by giving the Ring-1 codex-push
+  integration harness a pinned real `ce` binary path alongside the existing
+  pinned `git` and `gh` binaries, with the affected module reporting `3 passed`.
