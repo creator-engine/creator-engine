@@ -66,6 +66,43 @@ NO_WRITE_AUTHORITY_NOTE = "no write authority provisioned (envelope_ref=none)"
 FOREMAN_DELEGATION_REASON = FOREMAN_DELEGATION_REQUIRED_REASON
 DEFAULT_FOREMAN_MUTATION_CLASS = "code"
 WORKER_RECORD_REL = Path(".ce/state/workers")
+EXECUTION_PLANE_DENY_PREFIX = "execution-plane primitive"
+EXECUTION_PLANE_DISPATCH_HINT = (
+    "dispatch through a launch-pinned governed worker: "
+    "ce worker run --role {role} --brief <brief> --worktree <allocated-worktree> "
+    "(or ce lane launch --role {role} ...)"
+)
+WORKER_CONTEXT_ENV_KEYS = {
+    "worker_id": "CE_WORKER_ID",
+    "record_ref": "CE_WORKER_RECORD_REF",
+    "role": "CE_WORKER_ROLE",
+    "lane_kind": "CE_WORKER_LANE_KIND",
+    "scope_id": "CE_WORKER_SCOPE_ID",
+    "worktree_path": "CE_WORKER_WORKTREE_PATH",
+    "seat_id": "CE_WORKER_SEAT_ID",
+    "actor": "CE_WORKER_ACTOR",
+    "process_id": "CE_WORKER_PROCESS_ID",
+}
+
+_EXECUTION_PLANE_ROLE_HINTS: dict[str, str] = {
+    "worktree_mutation": "implementer",
+    "full_preflight": "implementer",
+    "carrier_regeneration": "implementer",
+    "bundle_extraction": "implementer",
+    "harvest_push": "implementer",
+    "agent_spawn": "implementer",
+    "execution_plane_opaque": "implementer",
+}
+
+_EXECUTION_PLANE_ALLOWED_WORKERS: dict[str, frozenset[tuple[str, str]]] = {
+    name: frozenset({("implementer", "implementation")})
+    for name in _EXECUTION_PLANE_ROLE_HINTS
+    if name != "execution_plane_opaque"
+}
+_SPAWN_TOOL_NAMES = frozenset(
+    {"agent", "task", "subagent", "multiagent", "multi_agent", "spawn_agent"}
+)
+_OPAQUE_EXECUTION_PLANE = "execution_plane_opaque"
 
 
 # --------------------------------------------------------------------------
@@ -255,7 +292,12 @@ _GIT_GLOBAL_OPTIONS_NO_VALUE = frozenset(
         "--help",
     }
 )
-_SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "(", ")"})
+_SHELL_SEPARATORS = frozenset({";", ";;", "&&", "||", "|", "&", "(", ")"})
+_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+_SHELL_VARIABLE_TOKEN_RE = re.compile(r"^\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})$")
+_SAFE_ARCHIVE_CAPTURE_RE = re.compile(
+    r"\b(?P<name>[A-Za-z_][A-Za-z0-9_]*)=\$\((?P<body>[^()`$]*)\)"
+)
 _GIT_SAFE_READONLY_SUBCOMMANDS = frozenset(
     {
         "status",
@@ -354,6 +396,20 @@ def _shell_tokens(command: str) -> list[str]:
     lexer.whitespace_split = True
     lexer.commenters = ""
     return list(lexer)
+
+
+def _shell_assignment_parts(token: str) -> tuple[str, str] | None:
+    if not _SHELL_ASSIGNMENT_RE.match(token):
+        return None
+    name, _, value = token.partition("=")
+    return name, value
+
+
+def _shell_variable_name(token: str) -> str | None:
+    match = _SHELL_VARIABLE_TOKEN_RE.match(token)
+    if match is None:
+        return None
+    return match.group(1) or match.group(2)
 
 
 def _is_git_executable(token: str) -> bool:
@@ -618,6 +674,198 @@ _PYTHON_EXECUTABLES = frozenset({"python", "python3"})
 def _is_python_executable(token: str) -> bool:
     name = PurePosixPath(token).name
     return name in _PYTHON_EXECUTABLES or bool(re.fullmatch(r"python3?\.\d+", name))
+
+
+_SHELL_EXECUTABLES = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
+_NON_EXECUTION_SURFACE_READERS = frozenset(
+    {
+        "awk",
+        "cat",
+        "cut",
+        "echo",
+        "egrep",
+        "fgrep",
+        "find",
+        "grep",
+        "head",
+        "less",
+        "ls",
+        "more",
+        "nl",
+        "printf",
+        "rg",
+        "sed",
+        "sort",
+        "tail",
+        "tr",
+        "uniq",
+        "wc",
+    }
+)
+
+
+def _contains_execution_plane_surface(command: str) -> bool:
+    lowered = command.lower()
+    patterns = (
+        r"(?:^|[^\w.-])git\s+[^;&|`$]*\bworktree\b",
+        r"(?:^|[^\w.-])git\s+[^;&|`$]*\bpush\b[^;&|`$]*(?:harvest/|refs/heads/harvest|push-for-harvest)",
+        r"(?:^|[^\w.-])ce\s+validate-pr\b",
+        r"(?:^|[^\w.-])ce-preflight(?:\.sh)?\b",
+        r"(?:^|[^\w.-])carrier[-_]gen\b",
+        r"(?:^|[^\w.-])python3?(?:\.\d+)?\s+[^;&|`$]*-m\s+creator_engine_validator\.(?:ce_cli|pr_preflight|carrier_gen)\b",
+        r"(?:^|[^\w.-])(?:tar|bsdtar|gtar|unzip)\b",
+    )
+    return any(re.search(pattern, lowered) for pattern in patterns)
+
+
+def _surface_fallthrough_is_opaque(segments: list[tuple[str, ...]]) -> bool:
+    for segment in segments:
+        segment_command = " ".join(segment)
+        if not _contains_execution_plane_surface(segment_command):
+            continue
+        tokens = _strip_env_prefix(segment)
+        if not tokens:
+            continue
+        executable = PurePosixPath(tokens[0]).name
+        if _archive_read_only(tokens):
+            continue
+        if executable in _NON_EXECUTION_SURFACE_READERS:
+            continue
+        return True
+    return False
+
+
+def _command_segments(command: str) -> list[tuple[str, ...]] | None:
+    try:
+        tokens = _shell_tokens(command.replace("\n", " ; "))
+    except ValueError:
+        return None
+    segments: list[tuple[str, ...]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in _SHELL_SEPARATORS:
+            if current:
+                segments.append(tuple(current))
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(tuple(current))
+    return segments
+
+
+def _strip_env_prefix(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    if not tokens:
+        return tokens
+    index = 0
+    if PurePosixPath(tokens[index]).name == "env":
+        index += 1
+        while index < len(tokens):
+            token = tokens[index]
+            if token == "-u":
+                index += 2
+                continue
+            if token.startswith("-"):
+                index += 1
+                continue
+            if _SHELL_ASSIGNMENT_RE.match(token):
+                index += 1
+                continue
+            break
+    while index < len(tokens) and _SHELL_ASSIGNMENT_RE.match(tokens[index]):
+        index += 1
+    return tokens[index:]
+
+
+def _record_shell_segment_state(
+    tokens: tuple[str, ...], env: dict[str, str], aliases: dict[str, str]
+) -> None:
+    if not tokens:
+        return
+    if all(_shell_assignment_parts(token) is not None for token in tokens):
+        for token in tokens:
+            parts = _shell_assignment_parts(token)
+            if parts is not None:
+                env[parts[0]] = parts[1]
+        return
+    if tokens[0] == "export":
+        for token in tokens[1:]:
+            parts = _shell_assignment_parts(token)
+            if parts is not None:
+                env[parts[0]] = parts[1]
+        return
+    if tokens[0] == "alias":
+        for token in tokens[1:]:
+            parts = _shell_assignment_parts(token)
+            if parts is not None:
+                aliases[parts[0]] = parts[1]
+
+
+def _resolve_shell_first_token(
+    tokens: tuple[str, ...], env: dict[str, str], aliases: dict[str, str]
+) -> tuple[str, ...]:
+    if not tokens:
+        return tokens
+    variable_name = _shell_variable_name(tokens[0])
+    if variable_name is not None and variable_name in env:
+        try:
+            resolved = tuple(_shell_tokens(env[variable_name]))
+        except ValueError:
+            return tokens
+        if resolved:
+            tokens = (*resolved, *tokens[1:])
+    alias = aliases.get(tokens[0])
+    if alias is not None:
+        try:
+            resolved = tuple(_shell_tokens(alias))
+        except ValueError:
+            return tokens
+        if resolved:
+            tokens = (*resolved, *tokens[1:])
+    return tokens
+
+
+def _shell_c_payload(tokens: tuple[str, ...]) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable not in _SHELL_EXECUTABLES:
+        return None
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token == "-c":
+            if index + 1 >= len(tokens):
+                return ""
+            return tokens[index + 1]
+        if token.startswith("-c") and token != "-c":
+            return token[2:]
+        if token == "--":
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return None
+    return None
+
+
+def _classify_shell_wrapper(tokens: tuple[str, ...], depth: int) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable == "eval":
+        if len(tokens) == 1:
+            return None
+        return _classify_execution_plane_command(" ".join(tokens[1:]), depth + 1)
+    payload = _shell_c_payload(tokens)
+    if payload is None:
+        return None
+    if not payload:
+        return _OPAQUE_EXECUTION_PLANE
+    return _classify_execution_plane_command(payload, depth + 1)
 
 
 def _classify_ce_forge_tokens(tokens: tuple[str, ...]) -> str | None:
@@ -1055,6 +1303,382 @@ def classify_mechanics(command: Any) -> str | None:
     return None
 
 
+_GIT_WORKTREE_MUTATING_VERBS = frozenset(
+    {"add", "remove", "rm", "move", "prune", "repair", "lock", "unlock"}
+)
+
+
+def _first_positional(args: tuple[str, ...]) -> str | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token == "--":
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token
+    return None
+
+
+def _git_subcommand_and_args_from_tokens(
+    tokens: tuple[str, ...],
+    aliases: dict[str, str] | None = None,
+) -> tuple[str, tuple[str, ...]] | None:
+    aliases = aliases or {}
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token.startswith("-c") and token != "-c":
+            _record_git_alias(token[2:], aliases)
+            index += 1
+            continue
+        if token == "-c":
+            if index + 1 >= len(tokens):
+                return None
+            _record_git_alias(tokens[index + 1], aliases)
+            index += 2
+            continue
+        if any(token.startswith(prefix) for prefix in _GIT_GLOBAL_OPTIONS_WITH_EQUALS):
+            index += 1
+            continue
+        if token in _GIT_GLOBAL_OPTIONS_WITH_VALUE:
+            if index + 1 >= len(tokens):
+                return None
+            index += 2
+            continue
+        if token in _GIT_GLOBAL_OPTIONS_NO_VALUE:
+            index += 1
+            continue
+        if token == "--":
+            index += 1
+            continue
+        if token.startswith("-"):
+            return None
+
+        subcommand = token
+        args = tuple(tokens[index + 1 :])
+        seen: set[str] = set()
+        while subcommand not in _GIT_BUILTINS:
+            alias = aliases.get(subcommand)
+            if alias is None or subcommand in seen or not alias or alias.startswith("!"):
+                return subcommand, args
+            seen.add(subcommand)
+            try:
+                alias_tokens = tuple(_shell_tokens(alias))
+            except ValueError:
+                return None
+            if not alias_tokens:
+                return None
+            if _is_git_executable(alias_tokens[0]):
+                nested = _git_subcommand_and_args_from_tokens(tuple(alias_tokens[1:]), aliases)
+                if nested is None:
+                    return None
+                nested_subcommand, nested_args = nested
+                return nested_subcommand, (*nested_args, *args)
+            if alias_tokens[0].startswith("-"):
+                return None
+            subcommand = alias_tokens[0]
+            args = (*alias_tokens[1:], *args)
+        return subcommand, args
+    return None
+
+
+def _git_push_targets_harvest(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        lowered = arg.lower()
+        if "push-for-harvest" in lowered:
+            return True
+        if "harvest/" in lowered or "refs/heads/harvest" in lowered:
+            return True
+    return False
+
+
+def _classify_git_execution_plane(tokens: tuple[str, ...]) -> str | None:
+    if not tokens or not _is_git_executable(tokens[0]):
+        return None
+    parsed = _git_subcommand_and_args_from_tokens(tokens[1:])
+    if parsed is None:
+        return None
+    subcommand, args = parsed
+    if subcommand == "worktree":
+        verb = _first_positional(args)
+        if verb in _GIT_WORKTREE_MUTATING_VERBS:
+            return "worktree_mutation"
+    if subcommand == "push" and _git_push_targets_harvest(args):
+        return "harvest_push"
+    return None
+
+
+def _classify_ce_execution_plane(tokens: tuple[str, ...]) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable == "ce" and len(tokens) >= 2 and tokens[1] == "validate-pr":
+        return "full_preflight"
+    if executable in {"ce-preflight.sh", "ce-preflight"}:
+        return "full_preflight"
+    if executable in {"carrier-gen", "carrier_gen"}:
+        return "carrier_regeneration"
+    if _is_python_executable(tokens[0]) and len(tokens) >= 3 and tokens[1] == "-m":
+        module = tokens[2]
+        if module == "creator_engine_validator.pr_preflight":
+            return "full_preflight"
+        if module == "creator_engine_validator.carrier_gen":
+            return "carrier_regeneration"
+        if module == "creator_engine_validator.ce_cli" and len(tokens) >= 4:
+            if tokens[3] == "validate-pr":
+                return "full_preflight"
+        if module == "creator_engine_validator" and len(tokens) >= 4:
+            if tokens[3] == "validate-pr":
+                return "full_preflight"
+    return None
+
+
+_TAR_OPERATIONS = frozenset({"c", "r", "t", "u", "x", "A", "d"})
+_TAR_EXTRACT_LONG_OPTIONS = frozenset({"--extract", "--get"})
+_TAR_READ_LONG_OPTIONS = frozenset({"--list", "--test-label"})
+
+
+def _tar_option_operation(option: str) -> str | None:
+    for char in option:
+        if char in _TAR_OPERATIONS:
+            return char
+    return None
+
+
+def _tar_operation(args: tuple[str, ...]) -> str | None:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if arg in _TAR_EXTRACT_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_EXTRACT_LONG_OPTIONS
+        ):
+            return "x"
+        if arg in _TAR_READ_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_READ_LONG_OPTIONS
+        ):
+            return "t"
+        if arg.startswith("--"):
+            index += 1
+            continue
+        if arg.startswith("-") and len(arg) > 1:
+            operation = _tar_option_operation(arg[1:])
+            if operation is not None:
+                return operation
+            index += 1
+            continue
+        if index == 0 and re.fullmatch(r"[A-Za-z]+", arg):
+            operation = _tar_option_operation(arg)
+            if operation is not None:
+                return operation
+        index += 1
+    return None
+
+
+def _tar_extracts(args: tuple[str, ...]) -> bool:
+    return _tar_operation(args) == "x"
+
+
+def _tar_mutates_or_extracts(args: tuple[str, ...]) -> bool:
+    operation = _tar_operation(args)
+    return operation is not None and operation != "t"
+
+
+def _unzip_extracts(args: tuple[str, ...]) -> bool:
+    saw_read_mode = False
+    for arg in args:
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if not arg.startswith("-") or arg == "-":
+            continue
+        if arg in {"-l", "-t", "-v", "-z", "-Z", "--list", "--test"}:
+            saw_read_mode = True
+            continue
+        if arg.startswith("--"):
+            continue
+        options = arg[1:]
+        if any(flag in options for flag in ("l", "t", "v", "z", "Z")):
+            saw_read_mode = True
+    return not saw_read_mode
+
+
+def _archive_read_only(tokens: tuple[str, ...]) -> bool:
+    if not tokens:
+        return False
+    executable = PurePosixPath(tokens[0]).name
+    if executable in {"tar", "bsdtar", "gtar"}:
+        return _tar_operation(tuple(tokens[1:])) == "t"
+    if executable == "unzip":
+        return not _unzip_extracts(tuple(tokens[1:]))
+    return False
+
+
+def _tar_mutating_option_shape(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if arg in _TAR_EXTRACT_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_EXTRACT_LONG_OPTIONS
+        ):
+            return True
+        if arg.startswith("-") and len(arg) > 1 and not arg.startswith("--"):
+            operation = _tar_option_operation(arg[1:])
+            return operation is not None and operation != "t"
+    return False
+
+
+def _tar_extract_option_shape(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if arg in _TAR_EXTRACT_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_EXTRACT_LONG_OPTIONS
+        ):
+            return True
+        if arg.startswith("-") and len(arg) > 1 and not arg.startswith("--"):
+            return _tar_option_operation(arg[1:]) == "x"
+    return False
+
+
+def _classify_bundle_extraction(tokens: tuple[str, ...]) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable in {"tar", "bsdtar", "gtar"} and _tar_mutates_or_extracts(tuple(tokens[1:])):
+        return "bundle_extraction"
+    if executable == "unzip" and _unzip_extracts(tuple(tokens[1:])):
+        return "bundle_extraction"
+    return None
+
+
+def _opaque_first_token_execution_shape(tokens: tuple[str, ...]) -> bool:
+    if not tokens:
+        return False
+    executable = PurePosixPath(tokens[0]).name
+    execution_names = {
+        "git",
+        "ce",
+        "cev3",
+        "ce-preflight",
+        "ce-preflight.sh",
+        "carrier-gen",
+        "carrier_gen",
+        "tar",
+        "bsdtar",
+        "gtar",
+        "unzip",
+    }
+    if executable.lower() in execution_names and executable != executable.lower():
+        return True
+    variable_first_token = _shell_variable_name(tokens[0]) is not None
+    known_first_token = (
+        executable in execution_names
+        or _is_python_executable(tokens[0])
+        or executable in _NON_EXECUTION_SURFACE_READERS
+    )
+    if not variable_first_token and known_first_token:
+        return False
+    args = tuple(tokens[1:])
+    if not variable_first_token and not args:
+        return False
+    if any(arg == "validate-pr" for arg in args):
+        return True
+    if len(args) >= 2 and args[0] == "-m" and args[1].startswith("creator_engine_validator."):
+        return True
+    if variable_first_token:
+        return _tar_mutating_option_shape(args)
+    return _tar_extract_option_shape(args)
+
+
+def _strip_safe_archive_read_captures(command: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        body = match.group("body").strip()
+        segments = _command_segments(body)
+        if segments is None or len(segments) != 1:
+            return match.group(0)
+        tokens = _strip_env_prefix(segments[0])
+        if _archive_read_only(tokens):
+            return f"{match.group('name')}=__CE_SAFE_ARCHIVE_READ_CAPTURE__"
+        return match.group(0)
+
+    return _SAFE_ARCHIVE_CAPTURE_RE.sub(replace, command)
+
+
+def _classify_execution_plane_segment(
+    tokens: tuple[str, ...], depth: int, env: dict[str, str], aliases: dict[str, str]
+) -> str | None:
+    tokens = _strip_env_prefix(tokens)
+    if not tokens:
+        return None
+    tokens = _resolve_shell_first_token(tokens, env, aliases)
+    nested = _classify_shell_wrapper(tokens, depth)
+    if nested is not None:
+        return nested
+    for classifier in (
+        _classify_git_execution_plane,
+        _classify_ce_execution_plane,
+        _classify_bundle_extraction,
+    ):
+        primitive = classifier(tokens)
+        if primitive is not None:
+            return primitive
+    if _opaque_first_token_execution_shape(tokens):
+        return _OPAQUE_EXECUTION_PLANE
+    return None
+
+
+def _classify_execution_plane_command(command: str, depth: int = 0) -> str | None:
+    if depth > 4:
+        return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(command) else None
+    surface_command = _strip_safe_archive_read_captures(command)
+    if ("$(" in command or "`" in command) and _contains_execution_plane_surface(surface_command):
+        return _OPAQUE_EXECUTION_PLANE
+    segments = _command_segments(command)
+    if segments is None:
+        return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(command) else None
+    env: dict[str, str] = {}
+    aliases: dict[str, str] = {}
+    for segment in segments:
+        primitive = _classify_execution_plane_segment(segment, depth, env, aliases)
+        if primitive is not None:
+            return primitive
+        _record_shell_segment_state(segment, env, aliases)
+    surface_segments = _command_segments(surface_command)
+    if surface_segments is None:
+        return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(surface_command) else None
+    if _surface_fallthrough_is_opaque(surface_segments):
+        return _OPAQUE_EXECUTION_PLANE
+    return None
+
+
+def classify_execution_plane_primitive(command: Any) -> str | None:
+    """Return a #557 execution-plane primitive label, or ``None``.
+
+    This is capability classification, not intent inference: it recognizes the
+    repository's concrete primitive surfaces and leaves ordinary coordination
+    reads/probes alone. Capability-shaped opaque shell composition fails closed.
+    """
+    if not isinstance(command, str):
+        return None
+    return _classify_execution_plane_command(command)
+
+
 # --------------------------------------------------------------------------
 # Scope (PreToolUse Edit / Write / MultiEdit)
 # --------------------------------------------------------------------------
@@ -1248,7 +1872,61 @@ def _worker_delegation_allows_implementation(context: HookContext) -> bool:
         isinstance(record, dict)
         and record.get("role") == "implementer"
         and record.get("lane_kind") == "implementation"
+        and isinstance(record.get("authenticated_worker_context"), dict)
     )
+
+
+def _execution_plane_worker_allows(context: HookContext, primitive: str) -> bool:
+    record = context.worker_delegation
+    if not isinstance(record, dict):
+        return False
+    key = (str(record.get("role") or ""), str(record.get("lane_kind") or ""))
+    if key not in _EXECUTION_PLANE_ALLOWED_WORKERS.get(primitive, frozenset()):
+        return False
+    worker_context = record.get("authenticated_worker_context")
+    return (
+        record.get("launch_state") == "launched"
+        and isinstance(worker_context, dict)
+        and worker_context.get("auth_level", "launcher_env") == "launcher_env"
+    )
+
+
+def _execution_plane_denial_reason(primitive: str) -> str:
+    role = _EXECUTION_PLANE_ROLE_HINTS.get(primitive, "implementer")
+    hint = EXECUTION_PLANE_DISPATCH_HINT.format(role=role)
+    return (
+        f"{EXECUTION_PLANE_DENY_PREFIX} ({primitive}) denied for controller/unpinned "
+        f"context; {hint}"
+    )
+
+
+def _is_spawn_tool_identifier(tool: Any) -> bool:
+    raw = str(tool or "").strip().lower().replace("-", "_")
+    if not raw:
+        return False
+    parts = tuple(part for part in re.split(r"[.:/]+", raw) if part)
+    if not parts:
+        return False
+    if parts[-1] in _SPAWN_TOOL_NAMES:
+        return True
+    if parts[0] in {"multiagent", "multi_agent"} and len(parts) > 1:
+        return True
+    return False
+
+
+def _execution_plane_would_deny(event: dict, context: HookContext) -> str | None:
+    tool = event.get("tool_name") or event.get("toolName") or ""
+    tool_input = event.get("tool_input") or event.get("toolInput") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    primitive: str | None = None
+    if tool == "Bash":
+        primitive = classify_execution_plane_primitive(tool_input.get("command"))
+    elif _is_spawn_tool_identifier(tool):
+        primitive = "agent_spawn"
+    if primitive is None or _execution_plane_worker_allows(context, primitive):
+        return None
+    return _execution_plane_denial_reason(primitive)
 
 
 def _foreman_would_deny(event: dict, context: HookContext) -> str | None:
@@ -1290,10 +1968,40 @@ def _resolve_path_ref(ref: str, root: str | None) -> Path:
     return Path(root) / path
 
 
+def _current_worker_context_from_env(environ: Mapping[str, str] | None = None) -> dict | None:
+    source = environ if environ is not None else os.environ
+    values: dict[str, str] = {}
+    for key, env_name in WORKER_CONTEXT_ENV_KEYS.items():
+        raw = source.get(env_name)
+        if isinstance(raw, str) and raw.strip():
+            values[key] = raw.strip()
+    required = {
+        "worker_id",
+        "record_ref",
+        "role",
+        "lane_kind",
+        "scope_id",
+        "worktree_path",
+        "seat_id",
+        "actor",
+        "process_id",
+    }
+    if not required.issubset(values):
+        return None
+    try:
+        process_id = int(values["process_id"])
+        if process_id not in {os.getpid(), os.getppid()}:
+            return None
+    except ValueError:
+        return None
+    values["auth_level"] = "launcher_env"
+    return values
+
+
 def _valid_worker_delegation_record(
     path: Path,
     *,
-    worker_id: str | None,
+    worker_context: Mapping[str, str],
     posture_root: str | None,
 ) -> dict | None:
     try:
@@ -1313,16 +2021,20 @@ def _valid_worker_delegation_record(
         return None
     if str(record.get("schema_version") or "") != "1":
         return None
-    if record.get("role") != "implementer":
+    role_lane = (record.get("role"), record.get("lane_kind"))
+    allowed = set().union(*_EXECUTION_PLANE_ALLOWED_WORKERS.values())
+    if role_lane not in allowed:
         return None
-    if record.get("lane_kind") != "implementation":
+    if role_lane != (worker_context.get("role"), worker_context.get("lane_kind")):
         return None
     if record.get("launch_state") != "launched":
         return None
     record_worker_id = record.get("worker_id")
     if not isinstance(record_worker_id, str) or not record_worker_id:
         return None
-    if worker_id is not None and worker_id != record_worker_id:
+    if worker_context.get("worker_id") != record_worker_id:
+        return None
+    if worker_context.get("scope_id") != record.get("scope_id"):
         return None
     record_path = record.get("record_path")
     if not isinstance(record_path, str) or not record_path:
@@ -1337,37 +2049,79 @@ def _valid_worker_delegation_record(
     worktree_path = record.get("worktree_path")
     if not isinstance(worktree_path, str) or not worktree_path:
         return None
+    try:
+        context_worktree = Path(worker_context["worktree_path"]).expanduser().resolve(strict=False)
+        record_worktree = Path(worktree_path).expanduser().resolve(strict=False)
+    except OSError:
+        return None
+    if context_worktree != record_worktree:
+        return None
     if posture_root is not None:
         try:
             expected = Path(posture_root).expanduser().resolve(strict=False)
-            actual = Path(worktree_path).expanduser().resolve(strict=False)
         except OSError:
             return None
-        if actual != expected:
+        if record_worktree != expected:
             return None
+    authoritative_context = record.get("authenticated_worker_context")
+    if not isinstance(authoritative_context, dict):
+        return None
+    for key in (
+        "worker_id",
+        "role",
+        "lane_kind",
+        "scope_id",
+        "worktree_path",
+        "seat_id",
+        "actor",
+        "process_id",
+    ):
+        expected = authoritative_context.get(key)
+        if expected is not None and str(expected) != worker_context.get(key):
+            return None
+    record["authenticated_worker_context"] = {
+        key: worker_context[key]
+        for key in (
+            "worker_id",
+            "role",
+            "lane_kind",
+            "scope_id",
+            "worktree_path",
+            "seat_id",
+            "actor",
+            "process_id",
+        )
+    }
+    auth_level = worker_context.get("auth_level")
+    if isinstance(auth_level, str) and auth_level:
+        record["authenticated_worker_context"]["auth_level"] = auth_level
     return record
 
 
-def _resolve_worker_delegation(ce: dict, posture_root: str | None) -> dict | None:
-    """Resolve a worker-spawn record for delegated implementation, failing closed.
+def _resolve_worker_delegation(
+    ce: dict,
+    posture_root: str | None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> dict | None:
+    """Resolve the current launch-pinned worker record, failing closed.
 
-    The hook does not scan for workers. It accepts either an explicit record ref
-    or a launch-pinned worker id that deterministically maps to the merged
-    worker-spawn state file under the current worktree.
+    Worker capability is intentionally not selected by hook-event fields. The
+    only accepted selector is the launcher-controlled current-process worker
+    context exported in a complete ``CE_WORKER_*`` variable set; event-supplied
+    ``ce.worker_id`` / ``ce.worker_record_ref`` are ignored so a controller
+    cannot replay an authentic worker record or synthesize seat/actor fields.
     """
-    ref = ce.get("worker_record_ref")
-    worker_id = ce.get("worker_id")
-    if not isinstance(worker_id, str) or not worker_id.strip():
-        worker_id = None
-    else:
-        worker_id = worker_id.strip()
-    if isinstance(ref, str) and ref.strip():
-        path = _resolve_path_ref(ref.strip(), posture_root)
-    elif worker_id and posture_root:
-        path = Path(posture_root) / WORKER_RECORD_REL / worker_id / "worker.yaml"
-    else:
+    del ce
+    worker_context = _current_worker_context_from_env(environ)
+    if worker_context is None:
         return None
-    return _valid_worker_delegation_record(path, worker_id=worker_id, posture_root=posture_root)
+    path = _resolve_path_ref(worker_context["record_ref"], posture_root)
+    return _valid_worker_delegation_record(
+        path,
+        worker_context=worker_context,
+        posture_root=posture_root,
+    )
 
 
 
@@ -1610,7 +2364,8 @@ def _pre_tool_use_decision(would_deny_reason: str | None, context: HookContext) 
     # denies under governed posture. Branch on the reason so only manifest
     # mismatches are relaxed.
     manifest_mismatch = would_deny_reason == OUT_OF_MANIFEST_REASON
-    if context.posture == "governed" and not manifest_mismatch:
+    execution_plane_deny = would_deny_reason.startswith(EXECUTION_PLANE_DENY_PREFIX)
+    if (context.posture == "governed" and not manifest_mismatch) or execution_plane_deny:
         return HookDecision(
             ok=True,
             hook_event_name="PreToolUse",
@@ -1653,7 +2408,9 @@ def _evaluate_pre_tool_use(event: dict, context: HookContext) -> HookDecision:
     tool_input = event.get("tool_input") or event.get("toolInput") or {}
     if not isinstance(tool_input, dict):
         tool_input = {}
-    would_deny_reason: str | None = None
+    would_deny_reason = _execution_plane_would_deny(event, context)
+    if would_deny_reason is not None:
+        return _pre_tool_use_decision(would_deny_reason, context)
     if tool in SCOPE_TOOLS:
         would_deny_reason = _scope_would_deny(tool_input.get("file_path"), context)
     elif tool == "Read":
@@ -1887,6 +2644,7 @@ def build_context(
     evidence_root: str | None = None,
     closeout_file: str | None = None,
     completion_report: str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> HookContext:
     """Build a :class:`HookContext` from a hook event plus optional overrides.
 
@@ -1908,7 +2666,7 @@ def build_context(
     seat_class_policy = _resolve_seat_class_policy(ce, posture_root)
     policy_seat_class = seat_class_policy.get("seat_class") if isinstance(seat_class_policy, dict) else None
     seat_class = resolve_seat_class(ce.get("seat_class") or policy_seat_class)
-    worker_delegation = _resolve_worker_delegation(ce, posture_root)
+    worker_delegation = _resolve_worker_delegation(ce, posture_root, environ=environ)
 
     closeout_text = ce.get("closeout_text")
     if closeout_file:

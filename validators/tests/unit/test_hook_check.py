@@ -14,6 +14,7 @@ never write ``.claude/**``, and never read real credential bytes.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -44,6 +45,14 @@ def _bash_event(command: str) -> dict:
     }
 
 
+def _agent_event(tool: str = "Agent") -> dict:
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool,
+        "tool_input": {"prompt": "do implementation work"},
+    }
+
+
 def _read_event(file_path: str, tool_input_extra: dict | None = None) -> dict:
     tool_input = {"file_path": file_path}
     if tool_input_extra:
@@ -56,6 +65,45 @@ def _read_event(file_path: str, tool_input_extra: dict | None = None) -> dict:
 
 
 MANIFEST = ("validators/creator_engine_validator/hook_check.py", "schemas/completion-report.schema.yaml")
+
+
+def _launched_implementer_record(repo: Path | None = None, worker_id: str = "worker-impl") -> dict:
+    root = repo or REPO_ROOT
+    record_path = root / ".ce" / "state" / "workers" / worker_id / "worker.yaml"
+    return {
+        "kind": "ce-worker-spawn-record",
+        "schema_version": "1",
+        "worker_id": worker_id,
+        "role": "implementer",
+        "lane_kind": "implementation",
+        "harness": "claude",
+        "scope_id": "ce-ops#557",
+        "parent_id": "controller",
+        "worktree_path": str(root),
+        "prompt": {"kind": "file", "ref": "prompt.md", "sha256": "a" * 64},
+        "depth": 1,
+        "max_depth": 3,
+        "record_path": str(record_path),
+        "launch_command": ["ce", "lane", "launch", "--role", "implementer"],
+        "launch_command_sha256": "b" * 64,
+        "scrubbed_env_names": [],
+        "child_env_names": [],
+        "dry_run": False,
+        "launch_state": "launched",
+        "seat_refs": {},
+        "authenticated_worker_context": {
+            "worker_id": worker_id,
+            "role": "implementer",
+            "lane_kind": "implementation",
+            "scope_id": "ce-ops#557",
+            "worktree_path": str(root),
+            "seat_id": "seat-impl",
+            "actor": "actor-impl",
+            "process_id": str(os.getpid()),
+        },
+        "governed_worker_contract": worker_spawn.governed_worker_contract(role="implementer"),
+    }
+
 
 
 # --- Scope (PreToolUse Edit/Write/MultiEdit) -------------------------------
@@ -78,7 +126,10 @@ def test_governed_out_of_manifest_edit_is_advisory_allow():
 
 def test_governed_in_manifest_edit_allows():
     ctx = hook_check.HookContext(
-        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
     )
     decision = hook_check.evaluate(
         _edit_event("validators/creator_engine_validator/hook_check.py"), ctx
@@ -89,7 +140,10 @@ def test_governed_in_manifest_edit_allows():
 
 def test_governed_write_in_manifest_allows():
     ctx = hook_check.HookContext(
-        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
     )
     decision = hook_check.evaluate(
         _edit_event("schemas/completion-report.schema.yaml", tool="Write"), ctx
@@ -137,6 +191,449 @@ def test_governed_bash_git_push_denies():
     decision = hook_check.evaluate(_bash_event("git push origin main"), ctx)
     assert decision.decision == "deny"
     assert decision.hook_specific_output["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    ("event", "primitive"),
+    [
+        pytest.param(_bash_event("git worktree add ../wt HEAD"), "worktree_mutation", id="worktree"),
+        pytest.param(_bash_event("ce validate-pr --declared-work-class story"), "full_preflight", id="preflight"),
+        pytest.param(
+            _bash_event("python -m creator_engine_validator.carrier_gen --check"),
+            "carrier_regeneration",
+            id="carrier",
+        ),
+        pytest.param(_bash_event("tar -xf harvest-bundle.tar -C out"), "bundle_extraction", id="bundle"),
+        pytest.param(
+            _bash_event("git push origin HEAD:refs/heads/harvest/ce-557"),
+            "harvest_push",
+            id="harvest_push",
+        ),
+    ],
+)
+def test_controller_execution_plane_primitives_deny_with_dispatch_hint(event, primitive):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "deny"
+    assert f"execution-plane primitive ({primitive})" in decision.reason
+    assert "ce worker run --role implementer" in decision.reason
+    assert "ce lane launch --role implementer" in decision.reason
+
+
+@pytest.mark.parametrize(
+    ("ctx", "event"),
+    [
+        pytest.param(
+            hook_check.HookContext(posture="ungoverned", manifest_paths=MANIFEST),
+            _bash_event("ce validate-pr --declared-work-class story"),
+            id="explicit_ungoverned",
+        ),
+        pytest.param(
+            hook_check.build_context(
+                _bash_event("ce validate-pr --declared-work-class story"),
+                posture_root="/no/such/posture-root",
+            ),
+            _bash_event("ce validate-pr --declared-work-class story"),
+            id="missing_launch_context",
+        ),
+        pytest.param(
+            hook_check.HookContext(
+                posture="ungoverned",
+                manifest_paths=MANIFEST,
+                seat_class="worker",
+                worker_delegation={"role": "implementer", "lane_kind": "implementation"},
+            ),
+            _bash_event("ce validate-pr --declared-work-class story"),
+            id="malformed_worker_context",
+        ),
+    ],
+)
+def test_execution_plane_missing_or_ungoverned_context_hard_denies(ctx, event):
+    decision = hook_check.evaluate(event, ctx)
+
+    assert decision.decision == "deny"
+    assert decision.advisory is False
+    assert decision.hook_specific_output["permissionDecision"] == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
+
+
+def test_agent_task_spawn_without_launch_pinned_context_hard_denies():
+    ctx = hook_check.HookContext(posture="ungoverned", manifest_paths=MANIFEST)
+
+    decision = hook_check.evaluate(_agent_event("Task"), ctx)
+
+    assert decision.decision == "deny"
+    assert decision.advisory is False
+    assert "execution-plane primitive (agent_spawn)" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        "spawn_agent",
+        "multi_agent.spawn_agent",
+        "functions.spawn_agent",
+        "multi_agent.implementer",
+        "tool/subagent",
+    ],
+)
+def test_spawn_capability_identifiers_without_launch_pinned_context_hard_deny(tool):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+
+    decision = hook_check.evaluate(_agent_event(tool), ctx)
+
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (agent_spawn)" in decision.reason
+
+
+@pytest.mark.parametrize("tool", ["agent_status", "tasklist", "spawn_report"])
+def test_spawn_near_name_controls_do_not_classify(tool):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST, seat_class="worker")
+
+    decision = hook_check.evaluate(_agent_event(tool), ctx)
+
+    assert decision.decision == "allow"
+
+
+@pytest.mark.parametrize(
+    ("command", "primitive"),
+    [
+        pytest.param("/usr/bin/git worktree lock ../wt", "worktree_mutation", id="worktree_lock"),
+        pytest.param("git worktree unlock ../wt", "worktree_mutation", id="worktree_unlock"),
+        pytest.param("git -C . -c alias.wt='worktree add' wt ../wt", "worktree_mutation", id="alias_worktree"),
+        pytest.param("tar -C out -xf harvest-bundle.tar", "bundle_extraction", id="tar_C_xf"),
+        pytest.param("tar xf harvest-bundle.tar -C out", "bundle_extraction", id="tar_xf"),
+        pytest.param("/usr/bin/tar --file bundle.tar --extract", "bundle_extraction", id="tar_long"),
+        pytest.param("tar --get --file bundle.tar", "bundle_extraction", id="tar_get"),
+        pytest.param("tar -cf bundle.tar validators", "bundle_extraction", id="tar_create"),
+        pytest.param("bsdtar -xf bundle.tar", "bundle_extraction", id="bsdtar"),
+        pytest.param("gtar -xf bundle.tar", "bundle_extraction", id="gtar"),
+        pytest.param("unzip bundle.zip -d out", "bundle_extraction", id="unzip_extract"),
+        pytest.param("echo ok && ce validate-pr --declared-work-class story", "full_preflight", id="separator"),
+        pytest.param("echo ok\nce validate-pr --declared-work-class story", "full_preflight", id="newline"),
+        pytest.param("sleep 1 & ce validate-pr --declared-work-class story", "full_preflight", id="background"),
+        pytest.param("bash -c 'ce validate-pr --declared-work-class story'", "full_preflight", id="bash_c"),
+        pytest.param("sh -eu -c 'ce validate-pr --declared-work-class story'", "full_preflight", id="sh_c_options"),
+        pytest.param("eval 'ce validate-pr --declared-work-class story'", "full_preflight", id="eval"),
+        pytest.param("/usr/bin/env python3 -m creator_engine_validator.ce_cli validate-pr", "full_preflight", id="env_python"),
+        pytest.param("/usr/local/bin/carrier-gen --check", "carrier_regeneration", id="carrier_path"),
+        pytest.param("VAR=/usr/bin/tar; $VAR -xf bundle.tar", "bundle_extraction", id="var_tar_extract"),
+        pytest.param("export VAR=/usr/bin/tar; ${VAR} -xf bundle.tar", "bundle_extraction", id="braced_var_tar_extract"),
+        pytest.param("VAR=ce; $VAR validate-pr --declared-work-class story", "full_preflight", id="var_ce_validate"),
+        pytest.param(
+            "export VAR=ce; ${VAR} validate-pr --declared-work-class story",
+            "full_preflight",
+            id="braced_var_ce_validate",
+        ),
+        pytest.param("alias extract=/usr/bin/tar; extract -xf bundle.tar", "bundle_extraction", id="alias_tar_extract"),
+        pytest.param(
+            "alias vp='ce validate-pr'; vp --declared-work-class story",
+            "full_preflight",
+            id="alias_ce_validate",
+        ),
+        pytest.param("$VAR -xf bundle.tar", "execution_plane_opaque", id="unresolved_var_tar_extract"),
+        pytest.param("${VAR} validate-pr --declared-work-class story", "execution_plane_opaque", id="unresolved_var_validate"),
+        pytest.param("extract -xf bundle.tar", "execution_plane_opaque", id="unrecognized_tar_extract"),
+        pytest.param("vp validate-pr --declared-work-class story", "execution_plane_opaque", id="unrecognized_validate"),
+        pytest.param("Tar -xf bundle.tar", "execution_plane_opaque", id="unusual_case_tar"),
+        pytest.param("Ce validate-pr --declared-work-class story", "execution_plane_opaque", id="unusual_case_ce"),
+    ],
+)
+def test_execution_plane_parsed_command_bypasses_deny(command, primitive):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+
+    assert hook_check.classify_execution_plane_primitive(command) == primitive
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+
+    assert decision.decision == "deny"
+    assert f"execution-plane primitive ({primitive})" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("echo $(ce validate-pr --declared-work-class story)", id="substitution"),
+        pytest.param("output=$(tar -xf archive.tar)", id="captured_tar_extract"),
+        pytest.param("output=$(tar -cf archive.tar validators)", id="captured_tar_create"),
+        pytest.param("ce validate-pr 'unterminated", id="malformed_quote"),
+    ],
+)
+def test_execution_plane_opaque_shell_shapes_fail_closed(command):
+    ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST)
+
+    assert hook_check.classify_execution_plane_primitive(command) == "execution_plane_opaque"
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (execution_plane_opaque)" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("tar -tf report.xlsx", id="tar_list_x_filename"),
+        pytest.param("tar --list --file report.xlsx", id="tar_long_list"),
+        pytest.param("bsdtar -tf report.xlsx", id="bsdtar_list"),
+        pytest.param("gtar -tf report.xlsx", id="gtar_list"),
+        pytest.param("unzip -l bundle.zip", id="unzip_list"),
+        pytest.param("unzip -t bundle.zip", id="unzip_test"),
+    ],
+)
+def test_archive_read_modes_do_not_classify_as_extraction(command):
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
+    )
+
+    assert hook_check.classify_execution_plane_primitive(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("output=$(tar -tf archive.tar)", id="captured_tar_list_short"),
+        pytest.param("output=$(tar --list --file archive.tar)", id="captured_tar_list_long"),
+        pytest.param("output=$(tar --test-label --file archive.tar)", id="captured_tar_test_label"),
+        pytest.param("output=$(unzip -l archive.zip)", id="captured_unzip_list"),
+        pytest.param("output=$(unzip -t archive.zip)", id="captured_unzip_test"),
+    ],
+)
+def test_output_captured_archive_read_modes_remain_allowed_for_launched_worker(command):
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
+    )
+
+    assert hook_check.classify_execution_plane_primitive(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+def test_execution_plane_parser_does_not_deny_read_only_search():
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+    )
+    command = "rg carrier_gen validators/creator_engine_validator"
+
+    assert hook_check.classify_execution_plane_primitive(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+def test_execution_plane_parser_does_not_blanket_deny_unrelated_command():
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+    )
+    command = "printf '%s\\n' ordinary-coordination-probe"
+
+    assert hook_check.classify_execution_plane_primitive(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ce validate-pr --declared-work-class story",
+        "git worktree add ../wt HEAD",
+        "python -m creator_engine_validator.carrier_gen --check",
+        "tar -xf harvest-bundle.tar -C out",
+        "git push origin HEAD:refs/heads/harvest/ce-557",
+    ],
+)
+def test_execution_plane_primitives_allow_launched_worker_context(command):
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
+    )
+
+    decision = hook_check.evaluate(_bash_event(command), ctx)
+
+    if "git push" in command:
+        # The worker record opens execution-plane capability only; push authority
+        # remains governed by the existing credential/reviewer-venue wall.
+        assert decision.decision == "deny"
+        assert "restricted mechanic (deploy)" in decision.reason
+    else:
+        assert decision.decision == "allow"
+
+
+def test_unpinned_worker_label_cannot_acquire_execution_plane_capability():
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+    )
+
+    decision = hook_check.evaluate(_bash_event("ce validate-pr --declared-work-class story"), ctx)
+
+    assert decision.decision == "deny"
+    assert "controller/unpinned context" in decision.reason
+
+
+def test_malformed_worker_record_cannot_acquire_execution_plane_capability():
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation={"role": "implementer", "lane_kind": "implementation"},
+    )
+
+    decision = hook_check.evaluate(_bash_event("ce validate-pr --declared-work-class story"), ctx)
+
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
+
+
+def test_event_selected_worker_record_replay_fails_closed(tmp_path):
+    worker_ref = _write_worker_record(tmp_path)
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["ce"] = {
+        "posture": "governed",
+        "seat_class": "worker",
+        "worker_id": "worker-implementer-123",
+        "worker_record_ref": str(worker_ref),
+    }
+
+    ctx = hook_check.build_context(event, posture="governed", posture_root=str(tmp_path), environ={})
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "controller/unpinned context" in decision.reason
+
+
+@pytest.mark.parametrize(
+    ("env_updates", "reason"),
+    [
+        pytest.param({"CE_WORKER_ID": "other-worker"}, "worker_id", id="worker_id"),
+        pytest.param({"CE_WORKER_ROLE": "reviewer"}, "role", id="role"),
+        pytest.param({"CE_WORKER_LANE_KIND": "review"}, "lane", id="lane"),
+        pytest.param({"CE_WORKER_SCOPE_ID": "ce-ops#999"}, "scope", id="scope"),
+        pytest.param({"CE_WORKER_WORKTREE_PATH": "/tmp/not-this-worktree"}, "worktree", id="worktree"),
+        pytest.param({"CE_WORKER_SEAT_ID": "other-seat"}, "seat", id="seat_wrong"),
+        pytest.param({"CE_WORKER_SEAT_ID": ""}, "seat", id="seat_missing"),
+        pytest.param({"CE_WORKER_ACTOR": "other-actor"}, "actor", id="actor_wrong"),
+        pytest.param({"CE_WORKER_ACTOR": ""}, "actor", id="actor_missing"),
+        pytest.param({"CE_WORKER_PROCESS_ID": "1"}, "process", id="process"),
+    ],
+)
+def test_worker_launch_pin_mismatches_fail_closed(tmp_path, env_updates, reason):
+    del reason
+    worker_ref = _write_worker_record(tmp_path)
+    env = _worker_env(worker_ref)
+    env.update(env_updates)
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["ce"] = {"posture": "governed", "seat_class": "worker"}
+
+    ctx = hook_check.build_context(
+        event,
+        posture="governed",
+        posture_root=str(tmp_path),
+        environ=env,
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+
+
+def test_cross_worker_authentic_record_replay_fails_closed(tmp_path):
+    worker_a = _write_worker_record(tmp_path, worker_id="worker-a")
+    worker_b = _write_worker_record(tmp_path, worker_id="worker-b")
+    env = _worker_env(worker_b, worker_id="worker-a")
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["ce"] = {"posture": "governed", "seat_class": "worker"}
+
+    ctx = hook_check.build_context(
+        event,
+        posture="governed",
+        posture_root=str(tmp_path),
+        environ=env,
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert worker_a.exists()
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
+
+
+@pytest.mark.parametrize("record_text", [None, "kind: [not valid enough\n"])
+def test_worker_record_pin_missing_or_malformed_fails_closed(tmp_path, record_text):
+    worker_ref = tmp_path / ".ce" / "state" / "workers" / "worker-implementer-123" / "worker.yaml"
+    if record_text is not None:
+        worker_ref.parent.mkdir(parents=True)
+        worker_ref.write_text(record_text, encoding="utf-8")
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["ce"] = {"posture": "governed", "seat_class": "worker"}
+
+    ctx = hook_check.build_context(
+        event,
+        posture="governed",
+        posture_root=str(tmp_path),
+        environ=_worker_env(worker_ref),
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+
+
+def test_worker_launch_pins_exact_record_allow_execution_plane(tmp_path):
+    worker_ref = _write_worker_record(tmp_path)
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["ce"] = {"posture": "governed", "seat_class": "worker"}
+
+    ctx = hook_check.build_context(
+        event,
+        posture="governed",
+        posture_root=str(tmp_path),
+        environ=_worker_env(worker_ref),
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is not None
+    assert ctx.worker_delegation["authenticated_worker_context"]["worker_id"] == "worker-implementer-123"
+    assert decision.decision == "allow"
+
+
+def test_stale_worker_record_ref_fails_closed(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".claude" / "agents").mkdir(parents=True)
+    (repo / ".claude" / "agents" / "implementer.md").write_text(
+        "---\nname: implementer\n---\n# Implementer\n",
+        encoding="utf-8",
+    )
+    stale_worktree = tmp_path / "other"
+    stale_worktree.mkdir()
+    record_path = _write_worker_record(repo, worktree_path=stale_worktree)
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["cwd"] = str(repo)
+    event["ce"] = {"seat_class": "worker", "worker_record_ref": str(record_path)}
+
+    ctx = hook_check.build_context(
+        event,
+        posture="governed",
+        posture_root=str(repo),
+        environ=_worker_env(record_path),
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
 
 
 @pytest.mark.parametrize(
@@ -226,7 +723,10 @@ def test_non_governed_controller_context_allows_forge_ops(command):
 )
 def test_git_grammar_local_subcommands_allow(command):
     ctx = hook_check.HookContext(
-        posture="governed", manifest_paths=MANIFEST, seat_class="worker"
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
     )
     assert hook_check.classify_mechanics(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
@@ -661,12 +1161,47 @@ def _write_worker_record(
         "launch_state": launch_state,
         "seat_refs": {"seat_lifecycle_state": "active"},
     }
+    record["authenticated_worker_context"] = {
+        "worker_id": worker_id,
+        "role": role,
+        "lane_kind": lane_kind,
+        "scope_id": "ce-ops#163",
+        "worktree_path": str(worktree_path or root),
+        "seat_id": "seat-impl",
+        "actor": "actor-impl",
+        "process_id": str(os.getpid()),
+    }
     if include_contract:
         contract = worker_spawn.governed_worker_contract(role=role, max_depth=3)
         if contract is not None:
             record["governed_worker_contract"] = contract
     path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
     return path
+
+
+def _worker_env(
+    record_ref: Path,
+    *,
+    worker_id: str = "worker-implementer-123",
+    role: str = "implementer",
+    lane_kind: str = "implementation",
+    scope_id: str = "ce-ops#163",
+    seat_id: str = "seat-impl",
+    actor: str = "actor-impl",
+    worktree_path: Path | None = None,
+    process_id: str | None = None,
+) -> dict[str, str]:
+    return {
+        "CE_WORKER_ID": worker_id,
+        "CE_WORKER_RECORD_REF": str(record_ref),
+        "CE_WORKER_ROLE": role,
+        "CE_WORKER_LANE_KIND": lane_kind,
+        "CE_WORKER_SCOPE_ID": scope_id,
+        "CE_WORKER_WORKTREE_PATH": str(worktree_path or record_ref.parents[4]),
+        "CE_WORKER_SEAT_ID": seat_id,
+        "CE_WORKER_ACTOR": actor,
+        "CE_WORKER_PROCESS_ID": process_id or str(os.getpid()),
+    }
 
 
 def test_foreman_implementation_work_denies_with_refusal_record(tmp_path):
@@ -745,7 +1280,11 @@ def test_foreman_worker_routed_implementation_allows_with_valid_worker_artifact(
         "worker_record_ref": str(worker_ref),
     }
 
-    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    ctx = hook_check.build_context(
+        event,
+        posture_root=str(tmp_path),
+        environ=_worker_env(worker_ref),
+    )
     decision = hook_check.evaluate(event, ctx)
 
     assert ctx.worker_delegation is not None
@@ -757,6 +1296,28 @@ def test_foreman_worker_routed_implementation_allows_with_valid_worker_artifact(
 
 
 def test_foreman_worker_routed_implementation_allows_with_worker_id_state_ref(tmp_path):
+    worker_ref = _write_worker_record(tmp_path, worker_id="worker-from-env")
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+        "seat_class": "foreman",
+        "worker_id": "worker-from-env",
+    }
+
+    ctx = hook_check.build_context(
+        event,
+        posture_root=str(tmp_path),
+        environ=_worker_env(worker_ref, worker_id="worker-from-env"),
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is not None
+    assert decision.decision == "allow"
+
+
+def test_partial_worker_env_id_does_not_unlock_worker_record(tmp_path):
     _write_worker_record(tmp_path, worker_id="worker-from-env")
     event = _edit_event("validators/creator_engine_validator/hook_check.py")
     event["ce"] = {
@@ -767,11 +1328,34 @@ def test_foreman_worker_routed_implementation_allows_with_worker_id_state_ref(tm
         "worker_id": "worker-from-env",
     }
 
-    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    ctx = hook_check.build_context(
+        event,
+        posture_root=str(tmp_path),
+        environ={"CE_WORKER_ID": "worker-from-env"},
+    )
     decision = hook_check.evaluate(event, ctx)
 
-    assert ctx.worker_delegation is not None
-    assert decision.decision == "allow"
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "foreman_delegation_required" in decision.reason
+
+
+def test_partial_worker_env_id_does_not_unlock_execution_plane(tmp_path):
+    _write_worker_record(tmp_path, worker_id="worker-from-env")
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["ce"] = {"posture": "governed", "seat_class": "worker"}
+
+    ctx = hook_check.build_context(
+        event,
+        posture="governed",
+        posture_root=str(tmp_path),
+        environ={"CE_WORKER_ID": "worker-from-env"},
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is None
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
 
 
 def test_foreman_worker_routed_implementation_missing_worker_contract_fails_closed(tmp_path):
@@ -785,7 +1369,11 @@ def test_foreman_worker_routed_implementation_missing_worker_contract_fails_clos
         "worker_record_ref": str(worker_ref),
     }
 
-    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    ctx = hook_check.build_context(
+        event,
+        posture_root=str(tmp_path),
+        environ=_worker_env(worker_ref),
+    )
     decision = hook_check.evaluate(event, ctx)
 
     assert ctx.worker_delegation is None
@@ -815,7 +1403,11 @@ def test_foreman_worker_context_missing_or_invalid_fails_closed(tmp_path, record
         "worker_record_ref": str(worker_ref),
     }
 
-    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    ctx = hook_check.build_context(
+        event,
+        posture_root=str(tmp_path),
+        environ=_worker_env(worker_ref),
+    )
     decision = hook_check.evaluate(event, ctx)
 
     assert ctx.worker_delegation is None
@@ -836,7 +1428,11 @@ def test_foreman_malformed_worker_context_fails_closed(tmp_path):
         "worker_record_ref": str(worker_ref),
     }
 
-    ctx = hook_check.build_context(event, posture_root=str(tmp_path))
+    ctx = hook_check.build_context(
+        event,
+        posture_root=str(tmp_path),
+        environ=_worker_env(worker_ref, worker_id="broken"),
+    )
     decision = hook_check.evaluate(event, ctx)
 
     assert ctx.worker_delegation is None

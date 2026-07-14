@@ -1,12 +1,11 @@
 """Runner-owned Ring-1 PATH shims for shell-level git/gh mediation.
 
-This increment is deliberately narrow: it proves harness-agnostic shell-level
-``git``/``gh`` denial by putting CE-rendered shims first on ``PATH`` inside a
-runner sandbox. It pins governed posture in the rendered shim, so a child
-process cannot downgrade hard-denies by rewriting posture environment. It does
-not harden absolute binary paths, bundled binaries, libgit2/JGit, raw HTTPS API
-clients, PATH resets, or arbitrary filesystem syscalls. Those escape-hardening
-layers are later gates.
+This runner surface puts CE-rendered shims first on ``PATH`` inside a sandbox
+and pins governed posture plus launcher-owned worker context in the rendered
+shim, so a child process cannot downgrade hard-denies by rewriting posture or
+``CE_WORKER_*`` environment. Absolute/bundled executable spelling is mediated by
+the hook-check command classifier before shell execution; the shim layer covers
+the default runtime command names.
 
 The shims call the public ``creator_engine_validator hook-check`` CLI seam and
 parse its raw JSON decision. Runner code must not import the v1 ``hook_check``
@@ -39,7 +38,47 @@ DEFAULT_BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 DEFAULT_EVIDENCE_ROOT = ".ce/state/ring1"
 DEFAULT_POSTURE = "governed"
 DEFAULT_VALIDATOR_ARGV = ("python", "-m", "creator_engine_validator")
-DEFAULT_REAL_BINARIES = (("git", "/usr/bin/git"), ("gh", "/usr/bin/gh"))
+DEFAULT_GUARDED_TOOLS = (
+    "git",
+    "gh",
+    "ce",
+    "ce-preflight.sh",
+    "ce-preflight",
+    "tar",
+    "bsdtar",
+    "gtar",
+    "unzip",
+    "python",
+    "python3",
+    "carrier-gen",
+    "carrier_gen",
+)
+DEFAULT_REAL_BINARIES = (
+    ("git", "/usr/bin/git"),
+    ("gh", "/usr/bin/gh"),
+    ("ce", "/usr/local/bin/ce"),
+    ("ce-preflight.sh", "/usr/local/bin/ce-preflight.sh"),
+    ("ce-preflight", "/usr/local/bin/ce-preflight"),
+    ("tar", "/usr/bin/tar"),
+    ("bsdtar", "/usr/bin/bsdtar"),
+    ("gtar", "/usr/bin/gtar"),
+    ("unzip", "/usr/bin/unzip"),
+    ("python", "/usr/bin/python"),
+    ("python3", "/usr/bin/python3"),
+    ("carrier-gen", "/usr/local/bin/carrier-gen"),
+    ("carrier_gen", "/usr/local/bin/carrier_gen"),
+)
+WORKER_CONTEXT_ENV_KEYS = {
+    "worker_id": "CE_WORKER_ID",
+    "record_ref": "CE_WORKER_RECORD_REF",
+    "role": "CE_WORKER_ROLE",
+    "lane_kind": "CE_WORKER_LANE_KIND",
+    "scope_id": "CE_WORKER_SCOPE_ID",
+    "worktree_path": "CE_WORKER_WORKTREE_PATH",
+    "seat_id": "CE_WORKER_SEAT_ID",
+    "actor": "CE_WORKER_ACTOR",
+    "process_id": "CE_WORKER_PROCESS_ID",
+}
 # A deliberately non-standard exit code so a CE Ring-1 denial is observably
 # distinct from shell exit 126 ("command found but not executable"), which a
 # real exec failure would emit. Observability only — the deny semantics are
@@ -75,9 +114,10 @@ class Ring1ToolGuardConfig:
     ledger_root_env: str = "CE_LEDGER_ROOT"
     reviewer_authority_ref_env: str = "CE_REVIEWER_AUTHORITY_REF"
     base_path: str = DEFAULT_BASE_PATH
-    tools: tuple[str, ...] = ("git", "gh")
+    tools: tuple[str, ...] = DEFAULT_GUARDED_TOOLS
     real_binaries: tuple[tuple[str, str], ...] = DEFAULT_REAL_BINARIES
     validator_argv: tuple[str, ...] = DEFAULT_VALIDATOR_ARGV
+    worker_context: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         if self.posture != DEFAULT_POSTURE:
@@ -110,6 +150,19 @@ class Ring1ToolGuardConfig:
         ):
             if not name or "=" in name:
                 raise ValueError(f"invalid environment variable name {name!r}")
+        if self.worker_context is not None:
+            if not isinstance(self.worker_context, dict):
+                raise ValueError("worker_context must be a mapping when provided")
+            unknown = set(self.worker_context) - set(WORKER_CONTEXT_ENV_KEYS)
+            if unknown:
+                raise ValueError(f"unknown worker_context key(s): {sorted(unknown)!r}")
+            required = set(WORKER_CONTEXT_ENV_KEYS) - {"process_id"}
+            missing = required - set(self.worker_context)
+            if missing:
+                raise ValueError(f"incomplete worker_context missing key(s): {sorted(missing)!r}")
+            for key, value in self.worker_context.items():
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"worker_context {key!r} must be a non-empty string")
 
 
 @dataclass(frozen=True)
@@ -243,17 +296,24 @@ def render_posix_tool_shim(
         "evidence_root_env": config.evidence_root_env,
         "ledger_root": config.ledger_root or "",
         "reviewer_authority_ref_env": config.reviewer_authority_ref_env,
+        "worker_context": dict(config.worker_context or {}),
+        "worker_context_env_keys": WORKER_CONTEXT_ENV_KEYS,
         "deny_exit_code": DENY_EXIT_CODE,
     }
     constants_json = json.dumps(constants, sort_keys=True)
     return f"""#!/usr/bin/env sh
 # Generated by creator_engine_validator.runner.ring1_tool_guard.
-# Increment 1 coverage: PATH-precedence shell shims for git/gh only. This is
-# bypassable via absolute binaries, bundled clients, libgit2/JGit, raw HTTPS,
-# PATH resets, and non-shell filesystem access; hardening is a later gate.
+# Default runtime coverage: governed PATH shims for Ring-1 command names.
+# Absolute/bundled spelling is classified by hook-check before shell exec.
 set -eu
 
-if command -v python3 >/dev/null 2>&1; then
+if [ -x /usr/bin/python3 ]; then
+    _ce_ring1_python=/usr/bin/python3
+elif [ -x /usr/local/bin/python3 ]; then
+    _ce_ring1_python=/usr/local/bin/python3
+elif [ -x /usr/bin/python ]; then
+    _ce_ring1_python=/usr/bin/python
+elif command -v python3 >/dev/null 2>&1; then
     _ce_ring1_python=$(command -v python3)
 elif command -v python >/dev/null 2>&1; then
     _ce_ring1_python=$(command -v python)
@@ -293,6 +353,10 @@ event = {{
         "evidence_root": evidence_root,
     }},
 }}
+worker_context = dict(CFG["worker_context"])
+if worker_context:
+    worker_context["process_id"] = str(os.getpid())
+    event["ce"]["authenticated_worker_context"] = dict(worker_context)
 
 argv = [
     *CFG["validator_argv"],
@@ -315,12 +379,22 @@ if reviewer_ref:
     argv.extend(["--reviewer-authority-ref", reviewer_ref])
 
 try:
+    hook_env = {{
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("CE_WORKER_")
+    }}
+    for key, env_name in CFG["worker_context_env_keys"].items():
+        value = worker_context.get(key)
+        if value:
+            hook_env[env_name] = value
     completed = subprocess.run(
         argv,
         input=json.dumps(event),
         capture_output=True,
         text=True,
         check=False,
+        env=hook_env,
     )
 except OSError as exc:
     _fail(f"hook-check CLI could not be executed for {{CFG['tool']}}: {{exc}}")
@@ -364,10 +438,21 @@ def render_install_script(config: Ring1ToolGuardConfig, target_dir: str) -> str:
     """Render a POSIX install script that writes all configured tool shims."""
 
     shims: list[tuple[str, str]] = []
+    execution_plane_shims: list[tuple[str, str]] = []
     for tool in config.tools:
         shim = render_posix_tool_shim(tool, _real_binary_for(tool, config), config)
-        shims.append((tool, shim))
-    payload = json.dumps({"target_dir": target_dir, "shims": shims}, sort_keys=True)
+        if tool in {"git", "gh"}:
+            shims.append((tool, shim))
+        else:
+            execution_plane_shims.append((tool, shim))
+    payload = json.dumps(
+        {
+            "target_dir": target_dir,
+            "shims": shims,
+            "execution_plane_shims": execution_plane_shims,
+        },
+        sort_keys=True,
+    )
     return f"""#!/usr/bin/env sh
 set -eu
 
@@ -434,7 +519,7 @@ else:
     os.mkdir(target_dir, 0o700)
 validate_private_dir(target_dir, "shim directory")
 
-for tool, content in PAYLOAD["shims"]:
+for tool, content in [*PAYLOAD["shims"], *PAYLOAD.get("execution_plane_shims", [])]:
     if not tool or os.path.sep in tool or tool in (".", ".."):
         fail(f"invalid shim name {{tool!r}}")
     target = os.path.join(target_dir, tool)

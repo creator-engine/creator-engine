@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from creator_engine_validator import fs_mediation as fm
 from creator_engine_validator.runner import (
     ExecOutcome,
     OpenShellBackend,
@@ -25,7 +26,11 @@ from creator_engine_validator.runner import (
     RunRequest,
     SandboxCreateSpec,
 )
-from creator_engine_validator.runner.ring1_tool_guard import Ring1ToolGuardConfig
+import creator_engine_validator.runner.ring1_tool_guard as ring1_tool_guard_module
+from creator_engine_validator.runner.ring1_tool_guard import (
+    DEFAULT_REAL_BINARIES,
+    Ring1ToolGuardConfig,
+)
 pytestmark = pytest.mark.slow
 
 
@@ -34,6 +39,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VALIDATORS_ROOT = REPO_ROOT / "validators"
 _POLICY_SHA = "a" * 64
 _IMAGE_SHA = "sha256:" + "b" * 64
+
+
+@pytest.fixture(autouse=True)
+def _local_harness_landlock_runtime(monkeypatch):
+    monkeypatch.setattr(fm, "landlock_abi_version", lambda: 8)
+    monkeypatch.setattr(ring1_tool_guard_module, "landlock_preexec", lambda confinement: None)
 
 
 class LocalSandboxClient:
@@ -93,6 +104,47 @@ def _write_executable(path: Path, body: str) -> Path:
     path.write_text(body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return path
+
+
+def _test_real_binaries(*, git: Path, gh: Path, ce: Path) -> tuple[tuple[str, str], ...]:
+    real_binaries = dict(DEFAULT_REAL_BINARIES)
+    real_binaries.update(
+        {
+            "git": str(git),
+            "gh": str(gh),
+            "ce": str(ce),
+        }
+    )
+    return tuple(real_binaries.items())
+
+
+def _assert_ce_real_binary_is_pinned(
+    guard: Ring1ToolGuardConfig,
+    *,
+    real_ce: Path,
+    real_bin: Path,
+) -> None:
+    ce_real_path = Path(dict(guard.real_binaries)["ce"])
+
+    assert "ce" in guard.tools
+    assert ce_real_path == real_ce
+    assert ce_real_path.is_absolute()
+    assert ce_real_path.exists()
+    assert ce_real_path.parent == real_bin
+    assert str(real_bin) not in guard.base_path.split(os.pathsep)
+
+
+def _assert_runner_uses_shims_without_real_bin_path_lookup(
+    client: LocalSandboxClient,
+    *,
+    real_bin: Path,
+) -> None:
+    run_env = client.exec_environments[-1]
+    assert run_env is not None
+    path_entries = run_env["PATH"].split(os.pathsep)
+    assert Path(path_entries[0], "git").exists()
+    assert Path(path_entries[0], "ce").exists()
+    assert str(real_bin) not in path_entries
 
 
 def _write_governed_ledger(root: Path) -> None:
@@ -201,18 +253,21 @@ set -eu
 printf 'real git reached\\n' > {real_git_marker}
 """,
     )
-    _write_executable(real_bin / "gh-real", "#!/usr/bin/env sh\nexit 0\n")
+    real_gh = _write_executable(real_bin / "gh-real", "#!/usr/bin/env sh\nexit 0\n")
+    real_ce = _write_executable(real_bin / "ce-real", "#!/usr/bin/env sh\nexit 0\n")
 
     guard = Ring1ToolGuardConfig(
         base_path=f"{harness_bin}:{os.environ.get('PATH', '')}",
         posture_root=str(sandbox_dir),
         extra_read_roots=(str(VALIDATORS_ROOT),),
-        real_binaries=(
-            ("git", str(real_bin / "git-real")),
-            ("gh", str(real_bin / "gh-real")),
+        real_binaries=_test_real_binaries(
+            git=real_bin / "git-real",
+            gh=real_gh,
+            ce=real_ce,
         ),
         validator_argv=(sys.executable, "-m", "creator_engine_validator"),
     )
+    _assert_ce_real_binary_is_pinned(guard, real_ce=real_ce, real_bin=real_bin)
     client = LocalSandboxClient(sandbox_dir)
     backend = OpenShellBackend(client=client, ring1_guard=guard)
     handle = backend.provision(ProvisionRequest(runtime_policy=_valid_policy(), run_id="ring1-codex"))
@@ -220,6 +275,7 @@ printf 'real git reached\\n' > {real_git_marker}
     result = backend.run(handle, RunRequest(command=("codex",)))
 
     assert client.exec_calls[-1] == ("local-openshell-sandbox", ("codex",))
+    _assert_runner_uses_shims_without_real_bin_path_lookup(client, real_bin=real_bin)
     assert codex_marker.exists(), "fake codex child process did not run"
     assert result.exit_code == 121
     assert "by hook-check" in result.stderr
@@ -258,24 +314,28 @@ set -eu
 printf '%s\\n' "$*" > {real_git_marker}
 """,
     )
-    _write_executable(real_bin / "gh-real", "#!/usr/bin/env sh\nexit 0\n")
+    real_gh = _write_executable(real_bin / "gh-real", "#!/usr/bin/env sh\nexit 0\n")
+    real_ce = _write_executable(real_bin / "ce-real", "#!/usr/bin/env sh\nexit 0\n")
 
     guard = Ring1ToolGuardConfig(
         base_path=f"{harness_bin}:{os.environ.get('PATH', '')}",
         posture_root=str(sandbox_dir),
         extra_read_roots=(str(VALIDATORS_ROOT),),
-        real_binaries=(
-            ("git", str(real_bin / "git-real")),
-            ("gh", str(real_bin / "gh-real")),
+        real_binaries=_test_real_binaries(
+            git=real_bin / "git-real",
+            gh=real_gh,
+            ce=real_ce,
         ),
         validator_argv=(sys.executable, "-m", "creator_engine_validator"),
     )
+    _assert_ce_real_binary_is_pinned(guard, real_ce=real_ce, real_bin=real_bin)
     client = LocalSandboxClient(sandbox_dir)
     backend = OpenShellBackend(client=client, ring1_guard=guard)
     handle = backend.provision(ProvisionRequest(runtime_policy=_valid_policy(), run_id="ring1-codex"))
 
     result = backend.run(handle, RunRequest(command=("codex",)))
 
+    _assert_runner_uses_shims_without_real_bin_path_lookup(client, real_bin=real_bin)
     assert result.exit_code == 0, result.stderr
     assert codex_marker.exists(), "fake codex child process did not run"
     assert real_git_marker.read_text(encoding="utf-8").strip() == "status"
