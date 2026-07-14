@@ -8,16 +8,17 @@ path-set below; this carrier lists itself.
 
 - **Branch:** `ce-557-deterministic-noninlining-w2`
 - **Base:** `be0e8cbe66acea9998553f2cec59144397029694`
-- **Predecessor commit:** `3f451a284becebdc44672d84194e49cb949e1e00`
+- **Predecessor commit:** `2b357a8a5dac8e3b010384cf5afdf397864b12dc`
 - **Declared work class:** story
 - **Authority boundary:** implementation is limited to deterministic controller
   no-inlining enforcement and these two required carrier files; no implementation
   paths, authority-bound systems, validator semantics, waivers, PR approval,
   merge, push, deploy, credential movement, or service mutation are authorized
   by this repair.
-- **Evidence:** rework focused tests reported `test_hook_check.py` 200 passed
-  and `test_runner_ring1_tool_guard.py` 22 passed; this branch is validated by
-  one full governed validator run after the rework commit.
+- **Evidence:** final-review rework focused tests reported
+  `test_hook_check.py` plus `test_runner_ring1_tool_guard.py` as `264 passed`;
+  this branch is validated by one full governed validator run after the rework
+  commit.
 
 Per-file purpose:
 
@@ -29,21 +30,24 @@ Per-file purpose:
   deterministic controller no-inlining refusal boundary, worker dispatch hint,
   and fail-closed launch-pinned identity requirement.
 - **`validators/creator_engine_validator/hook_check.py`** *(M)* - classifies and
-  refuses controller execution-plane primitives unless a launcher-pinned
+  refuses controller execution-plane primitives unless a complete launcher-pinned
   governed implementer worker context validates against the current worker
-  record.
+  record; parses shell composition and archive operation grammar fail-closed.
 - **`validators/creator_engine_validator/runner/ring1_tool_guard.py`** *(M)* -
-  guards the concrete Ring-1 command entry points and propagates authenticated
-  worker context from launcher-controlled configuration.
+  guards the concrete Ring-1 command entry points, scrubs inherited
+  `CE_WORKER_*`, and propagates authenticated worker context from
+  launcher-controlled configuration.
 - **`validators/creator_engine_validator/seat_class.py`** *(M)* - expands the
   foreman delegation denial reason with the governed implementer dispatch hint.
 - **`validators/tests/unit/test_hook_check.py`** *(M)* - covers hard denial
   across missing/ungoverned context, launch-pinned worker allowance,
   replay/mismatch/stale/malformed fail-closed behavior, parsed command
-  primitive classification, and Agent/Task spawn denial.
+  primitive classification, archive read-vs-extract seams, and closed spawn
+  capability identifiers.
 - **`validators/tests/unit/test_runner_ring1_tool_guard.py`** *(M)* - covers
   Ring-1 shim refusal for controller execution-plane primitive commands,
-  default governed entry points, and worker-context propagation.
+  default governed entry points, hostile inherited env scrubbing, and
+  worker-context propagation.
 
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.

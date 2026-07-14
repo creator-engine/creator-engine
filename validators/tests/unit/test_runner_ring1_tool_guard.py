@@ -55,6 +55,7 @@ if env_capture:
         "CE_WORKER_ROLE",
         "CE_WORKER_LANE_KIND",
         "CE_WORKER_SCOPE_ID",
+        "CE_WORKER_WORKTREE_PATH",
         "CE_WORKER_SEAT_ID",
         "CE_WORKER_ACTOR",
         "CE_WORKER_PROCESS_ID",
@@ -168,7 +169,21 @@ def test_rendered_shim_maps_git_push_to_bash_pretooluse_event(tmp_path):
 def test_default_guard_surface_includes_execution_plane_entrypoints():
     config = Ring1ToolGuardConfig()
 
-    assert set(config.tools) >= {"git", "gh", "ce", "tar", "python", "python3", "carrier-gen", "carrier_gen"}
+    assert set(config.tools) >= {
+        "git",
+        "gh",
+        "ce",
+        "ce-preflight.sh",
+        "ce-preflight",
+        "tar",
+        "bsdtar",
+        "gtar",
+        "unzip",
+        "python",
+        "python3",
+        "carrier-gen",
+        "carrier_gen",
+    }
     real = dict(config.real_binaries)
     for tool in config.tools:
         assert real[tool]
@@ -188,6 +203,7 @@ def test_rendered_shim_propagates_launcher_pinned_worker_context(tmp_path):
             "role": "implementer",
             "lane_kind": "implementation",
             "scope_id": "public-scope",
+            "worktree_path": "/runtime/worktree",
             "seat_id": "seat-impl",
             "actor": "actor-impl",
         },
@@ -201,6 +217,15 @@ def test_rendered_shim_propagates_launcher_pinned_worker_context(tmp_path):
         "CE_FAKE_HOOK_CAPTURE": str(capture),
         "CE_FAKE_HOOK_ENV_CAPTURE": str(env_capture),
         "CE_REAL_TOOL_MARKER": str(marker),
+        "CE_WORKER_ID": "attacker-worker",
+        "CE_WORKER_RECORD_REF": "/attacker/worker.yaml",
+        "CE_WORKER_ROLE": "reviewer",
+        "CE_WORKER_LANE_KIND": "review",
+        "CE_WORKER_SCOPE_ID": "attacker-scope",
+        "CE_WORKER_WORKTREE_PATH": "/attacker/worktree",
+        "CE_WORKER_SEAT_ID": "attacker-seat",
+        "CE_WORKER_ACTOR": "attacker-actor",
+        "CE_WORKER_PROCESS_ID": "1",
     }
 
     completed = subprocess.run(
@@ -222,8 +247,24 @@ def test_rendered_shim_propagates_launcher_pinned_worker_context(tmp_path):
     assert hook_env["CE_WORKER_ID"] == "worker-impl"
     assert hook_env["CE_WORKER_RECORD_REF"].endswith("/worker-impl/worker.yaml")
     assert hook_env["CE_WORKER_ROLE"] == "implementer"
+    assert hook_env["CE_WORKER_LANE_KIND"] == "implementation"
+    assert hook_env["CE_WORKER_SCOPE_ID"] == "public-scope"
+    assert hook_env["CE_WORKER_WORKTREE_PATH"] == "/runtime/worktree"
+    assert hook_env["CE_WORKER_SEAT_ID"] == "seat-impl"
+    assert hook_env["CE_WORKER_ACTOR"] == "actor-impl"
     assert hook_env["CE_WORKER_PROCESS_ID"] == worker_context["process_id"]
     assert marker.read_text(encoding="utf-8").strip() == "validate-pr --declared-work-class story"
+
+
+def test_guard_config_rejects_partial_worker_context():
+    with pytest.raises(ValueError, match="incomplete worker_context"):
+        Ring1ToolGuardConfig(
+            worker_context={
+                "worker_id": "worker-impl",
+                "record_ref": "/runtime/worktree/.ce/state/workers/worker-impl/worker.yaml",
+                "role": "implementer",
+            }
+        )
 
 
 def test_raw_deny_exits_nonzero_without_execing_real_binary(tmp_path):
@@ -256,19 +297,46 @@ def test_raw_deny_exits_nonzero_without_execing_real_binary(tmp_path):
     ("tool", "args", "primitive"),
     [
         ("ce", ["validate-pr", "--declared-work-class", "story"], "full_preflight"),
+        ("ce-preflight.sh", ["--declared-work-class", "story"], "full_preflight"),
+        ("ce-preflight", ["--declared-work-class", "story"], "full_preflight"),
+        (
+            "python",
+            ["-m", "creator_engine_validator.ce_cli", "validate-pr"],
+            "full_preflight",
+        ),
         ("tar", ["-xf", "harvest-bundle.tar"], "bundle_extraction"),
+        ("bsdtar", ["-xf", "harvest-bundle.tar"], "bundle_extraction"),
+        ("gtar", ["-xf", "harvest-bundle.tar"], "bundle_extraction"),
+        ("unzip", ["harvest-bundle.zip", "-d", "out"], "bundle_extraction"),
         (
             "python3",
             ["-m", "creator_engine_validator.carrier_gen", "--check"],
             "carrier_regeneration",
         ),
+        ("carrier-gen", ["--check"], "carrier_regeneration"),
+        ("carrier_gen", ["--check"], "carrier_regeneration"),
+        ("git", ["worktree", "add", "../wt", "HEAD"], "worktree_mutation"),
+        ("git", ["push", "origin", "HEAD:refs/heads/harvest/ce-557"], "harvest_push"),
     ],
 )
 def test_codex_ring1_shim_refuses_controller_execution_plane_primitives(
     tmp_path, tool, args, primitive
 ):
     real_tool = _fake_real_tool(tmp_path / f"real-{tool}")
-    tools = ("ce", "tar", "python3")
+    tools = (
+        "ce",
+        "ce-preflight.sh",
+        "ce-preflight",
+        "tar",
+        "bsdtar",
+        "gtar",
+        "unzip",
+        "python",
+        "python3",
+        "carrier-gen",
+        "carrier_gen",
+        "git",
+    )
     config = Ring1ToolGuardConfig(
         tools=tools,
         real_binaries=tuple((name, str(real_tool)) for name in tools),

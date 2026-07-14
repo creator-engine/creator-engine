@@ -126,9 +126,12 @@ controller context. The Claude PreToolUse hook path and the Codex/FACE
 governed exec wrapper refuse these command primitive families before execution:
 
 - worktree mutation;
-- full local PR preflight (`ce validate-pr` / `ce-preflight.sh`);
-- path-manifest carrier regeneration;
-- harvest or press-merge bundle extraction;
+- full local PR preflight (`ce validate-pr`, `ce-preflight.sh`, `ce-preflight`,
+  and the validator module entry points);
+- path-manifest carrier regeneration (`carrier-gen`, `carrier_gen`, and the
+  validator module entry point);
+- harvest or press-merge bundle extraction (`tar`, `bsdtar`, `gtar`, and
+  extraction-mode `unzip`; archive list/test modes remain coordination reads);
 - harvest-shaped branch push.
 
 The refusal reason is stable and actionable:
@@ -139,11 +142,16 @@ implementer --brief <brief> --worktree <allocated-worktree> (or ce lane launch
 
 Documentation is not the enforcement. The capability-bearing route is a
 launch-pinned governed worker record under `.ce/state/workers/<worker>/worker.yaml`
-whose role, lane, scope, worktree, seat, actor, and current process pins match
-the launcher-controlled `CE_WORKER_*` context. Hook events and tool input do not
-select the worker record. Missing, malformed, stale, mismatched, or unpinned
-worker context fails closed to the same refusal, including when posture
-discovery resolves to `ungoverned`.
+whose worker id, record ref, role, lane, scope, worktree, seat, actor, and live
+process pins match the complete launcher-controlled `CE_WORKER_*` context. Hook
+events and tool input do not select the worker record, and inherited
+`CE_WORKER_*` variables are scrubbed at the governed-exec boundary before the
+launcher-pinned context is supplied. Missing, partial, malformed, stale,
+mismatched, replayed, or unpinned worker context fails closed to the same
+refusal, including when posture discovery resolves to `ungoverned`. Shell
+composition is parsed across separators, newlines, background operators, nested
+`sh -c`/`bash -c`, and `eval`; capability-shaped opaque or malformed shell input
+fails closed instead of being treated as coordination.
 Tracked-file writes remain denied by the foreman-delegation rule, which carries
 the same `ce worker run --role implementer ...` dispatch hint.
 

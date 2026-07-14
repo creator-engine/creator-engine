@@ -78,6 +78,7 @@ WORKER_CONTEXT_ENV_KEYS = {
     "role": "CE_WORKER_ROLE",
     "lane_kind": "CE_WORKER_LANE_KIND",
     "scope_id": "CE_WORKER_SCOPE_ID",
+    "worktree_path": "CE_WORKER_WORKTREE_PATH",
     "seat_id": "CE_WORKER_SEAT_ID",
     "actor": "CE_WORKER_ACTOR",
     "process_id": "CE_WORKER_PROCESS_ID",
@@ -90,13 +91,18 @@ _EXECUTION_PLANE_ROLE_HINTS: dict[str, str] = {
     "bundle_extraction": "implementer",
     "harvest_push": "implementer",
     "agent_spawn": "implementer",
+    "execution_plane_opaque": "implementer",
 }
 
 _EXECUTION_PLANE_ALLOWED_WORKERS: dict[str, frozenset[tuple[str, str]]] = {
     name: frozenset({("implementer", "implementation")})
     for name in _EXECUTION_PLANE_ROLE_HINTS
+    if name != "execution_plane_opaque"
 }
-_SPAWN_TOOL_NAMES = frozenset({"agent", "task", "subagent", "multiagent", "multi_agent"})
+_SPAWN_TOOL_NAMES = frozenset(
+    {"agent", "task", "subagent", "multiagent", "multi_agent", "spawn_agent"}
+)
+_OPAQUE_EXECUTION_PLANE = "execution_plane_opaque"
 
 
 # --------------------------------------------------------------------------
@@ -286,7 +292,7 @@ _GIT_GLOBAL_OPTIONS_NO_VALUE = frozenset(
         "--help",
     }
 )
-_SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "(", ")"})
+_SHELL_SEPARATORS = frozenset({";", ";;", "&&", "||", "|", "&", "(", ")"})
 _SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 _GIT_SAFE_READONLY_SUBCOMMANDS = frozenset(
     {
@@ -652,11 +658,28 @@ def _is_python_executable(token: str) -> bool:
     return name in _PYTHON_EXECUTABLES or bool(re.fullmatch(r"python3?\.\d+", name))
 
 
-def _command_segments(command: str) -> list[tuple[str, ...]]:
+_SHELL_EXECUTABLES = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
+
+
+def _contains_execution_plane_surface(command: str) -> bool:
+    lowered = command.lower()
+    patterns = (
+        r"(?:^|[^\w.-])git\s+[^;&|`$]*\bworktree\b",
+        r"(?:^|[^\w.-])git\s+[^;&|`$]*\bpush\b[^;&|`$]*(?:harvest/|refs/heads/harvest|push-for-harvest)",
+        r"(?:^|[^\w.-])ce\s+validate-pr\b",
+        r"(?:^|[^\w.-])ce-preflight(?:\.sh)?\b",
+        r"(?:^|[^\w.-])carrier[-_]gen\b",
+        r"(?:^|[^\w.-])python3?(?:\.\d+)?\s+[^;&|`$]*-m\s+creator_engine_validator\.(?:ce_cli|pr_preflight|carrier_gen)\b",
+        r"(?:^|[^\w.-])(?:tar|bsdtar|gtar|unzip)\b",
+    )
+    return any(re.search(pattern, lowered) for pattern in patterns)
+
+
+def _command_segments(command: str) -> list[tuple[str, ...]] | None:
     try:
-        tokens = _shell_tokens(command)
+        tokens = _shell_tokens(command.replace("\n", " ; "))
     except ValueError:
-        return []
+        return None
     segments: list[tuple[str, ...]] = []
     current: list[str] = []
     for token in tokens:
@@ -692,6 +715,49 @@ def _strip_env_prefix(tokens: tuple[str, ...]) -> tuple[str, ...]:
     while index < len(tokens) and _SHELL_ASSIGNMENT_RE.match(tokens[index]):
         index += 1
     return tokens[index:]
+
+
+def _shell_c_payload(tokens: tuple[str, ...]) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable not in _SHELL_EXECUTABLES:
+        return None
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token == "-c":
+            if index + 1 >= len(tokens):
+                return ""
+            return tokens[index + 1]
+        if token.startswith("-c") and token != "-c":
+            return token[2:]
+        if token == "--":
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return None
+    return None
+
+
+def _classify_shell_wrapper(tokens: tuple[str, ...], depth: int) -> str | None:
+    if not tokens:
+        return None
+    executable = PurePosixPath(tokens[0]).name
+    if executable == "eval":
+        if len(tokens) == 1:
+            return None
+        return _classify_execution_plane_command(" ".join(tokens[1:]), depth + 1)
+    payload = _shell_c_payload(tokens)
+    if payload is None:
+        return None
+    if not payload:
+        return _OPAQUE_EXECUTION_PLANE
+    return _classify_execution_plane_command(payload, depth + 1)
 
 
 def _classify_ce_forge_tokens(tokens: tuple[str, ...]) -> str | None:
@@ -1266,16 +1332,73 @@ def _classify_ce_execution_plane(tokens: tuple[str, ...]) -> str | None:
     return None
 
 
+_TAR_OPERATIONS = frozenset({"c", "r", "t", "u", "x", "A", "d"})
+_TAR_EXTRACT_LONG_OPTIONS = frozenset({"--extract", "--get"})
+_TAR_READ_LONG_OPTIONS = frozenset({"--list", "--test-label"})
+
+
+def _tar_option_operation(option: str) -> str | None:
+    for char in option:
+        if char in _TAR_OPERATIONS:
+            return char
+    return None
+
+
+def _tar_operation(args: tuple[str, ...]) -> str | None:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if arg in _TAR_EXTRACT_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_EXTRACT_LONG_OPTIONS
+        ):
+            return "x"
+        if arg in _TAR_READ_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_READ_LONG_OPTIONS
+        ):
+            return "t"
+        if arg.startswith("--"):
+            index += 1
+            continue
+        if arg.startswith("-") and len(arg) > 1:
+            operation = _tar_option_operation(arg[1:])
+            if operation is not None:
+                return operation
+            index += 1
+            continue
+        if index == 0 and re.fullmatch(r"[A-Za-z]+", arg):
+            operation = _tar_option_operation(arg)
+            if operation is not None:
+                return operation
+        index += 1
+    return None
+
+
 def _tar_extracts(args: tuple[str, ...]) -> bool:
+    return _tar_operation(args) == "x"
+
+
+def _unzip_extracts(args: tuple[str, ...]) -> bool:
+    saw_read_mode = False
     for arg in args:
-        if arg == "--extract" or arg.startswith("--extract="):
-            return True
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if not arg.startswith("-") or arg == "-":
+            continue
+        if arg in {"-l", "-t", "-v", "-z", "-Z", "--list", "--test"}:
+            saw_read_mode = True
+            continue
         if arg.startswith("--"):
             continue
-        option = arg[1:] if arg.startswith("-") else arg
-        if "x" in option:
-            return True
-    return False
+        options = arg[1:]
+        if any(flag in options for flag in ("l", "t", "v", "z", "Z")):
+            saw_read_mode = True
+    return not saw_read_mode
 
 
 def _classify_bundle_extraction(tokens: tuple[str, ...]) -> str | None:
@@ -1284,8 +1407,41 @@ def _classify_bundle_extraction(tokens: tuple[str, ...]) -> str | None:
     executable = PurePosixPath(tokens[0]).name
     if executable in {"tar", "bsdtar", "gtar"} and _tar_extracts(tuple(tokens[1:])):
         return "bundle_extraction"
-    if executable == "unzip":
+    if executable == "unzip" and _unzip_extracts(tuple(tokens[1:])):
         return "bundle_extraction"
+    return None
+
+
+def _classify_execution_plane_segment(tokens: tuple[str, ...], depth: int) -> str | None:
+    tokens = _strip_env_prefix(tokens)
+    if not tokens:
+        return None
+    nested = _classify_shell_wrapper(tokens, depth)
+    if nested is not None:
+        return nested
+    for classifier in (
+        _classify_git_execution_plane,
+        _classify_ce_execution_plane,
+        _classify_bundle_extraction,
+    ):
+        primitive = classifier(tokens)
+        if primitive is not None:
+            return primitive
+    return None
+
+
+def _classify_execution_plane_command(command: str, depth: int = 0) -> str | None:
+    if depth > 4:
+        return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(command) else None
+    if ("$(" in command or "`" in command) and _contains_execution_plane_surface(command):
+        return _OPAQUE_EXECUTION_PLANE
+    segments = _command_segments(command)
+    if segments is None:
+        return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(command) else None
+    for segment in segments:
+        primitive = _classify_execution_plane_segment(segment, depth)
+        if primitive is not None:
+            return primitive
     return None
 
 
@@ -1294,23 +1450,11 @@ def classify_execution_plane_primitive(command: Any) -> str | None:
 
     This is capability classification, not intent inference: it recognizes the
     repository's concrete primitive surfaces and leaves ordinary coordination
-    reads/probes alone.
+    reads/probes alone. Capability-shaped opaque shell composition fails closed.
     """
     if not isinstance(command, str):
         return None
-    for segment in _command_segments(command):
-        tokens = _strip_env_prefix(segment)
-        if not tokens:
-            continue
-        for classifier in (
-            _classify_git_execution_plane,
-            _classify_ce_execution_plane,
-            _classify_bundle_extraction,
-        ):
-            primitive = classifier(tokens)
-            if primitive is not None:
-                return primitive
-    return None
+    return _classify_execution_plane_command(command)
 
 
 # --------------------------------------------------------------------------
@@ -1534,6 +1678,20 @@ def _execution_plane_denial_reason(primitive: str) -> str:
     )
 
 
+def _is_spawn_tool_identifier(tool: Any) -> bool:
+    raw = str(tool or "").strip().lower().replace("-", "_")
+    if not raw:
+        return False
+    parts = tuple(part for part in re.split(r"[.:/]+", raw) if part)
+    if not parts:
+        return False
+    if parts[-1] in _SPAWN_TOOL_NAMES:
+        return True
+    if parts[0] in {"multiagent", "multi_agent"} and len(parts) > 1:
+        return True
+    return False
+
+
 def _execution_plane_would_deny(event: dict, context: HookContext) -> str | None:
     tool = event.get("tool_name") or event.get("toolName") or ""
     tool_input = event.get("tool_input") or event.get("toolInput") or {}
@@ -1542,7 +1700,7 @@ def _execution_plane_would_deny(event: dict, context: HookContext) -> str | None
     primitive: str | None = None
     if tool == "Bash":
         primitive = classify_execution_plane_primitive(tool_input.get("command"))
-    elif str(tool).strip().lower() in _SPAWN_TOOL_NAMES:
+    elif _is_spawn_tool_identifier(tool):
         primitive = "agent_spawn"
     if primitive is None or _execution_plane_worker_allows(context, primitive):
         return None
@@ -1601,6 +1759,7 @@ def _current_worker_context_from_env(environ: Mapping[str, str] | None = None) -
         "role",
         "lane_kind",
         "scope_id",
+        "worktree_path",
         "seat_id",
         "actor",
         "process_id",
@@ -1615,48 +1774,6 @@ def _current_worker_context_from_env(environ: Mapping[str, str] | None = None) -
         return None
     values["auth_level"] = "launcher_env"
     return values
-
-
-def _canonical_worker_context_from_env(
-    posture_root: str | None,
-    environ: Mapping[str, str] | None = None,
-) -> tuple[Path, dict[str, str]] | None:
-    source = environ if environ is not None else os.environ
-    worker_id = source.get(WORKER_CONTEXT_ENV_KEYS["worker_id"])
-    if not isinstance(worker_id, str) or not worker_id.strip() or posture_root is None:
-        return None
-    for key, env_name in WORKER_CONTEXT_ENV_KEYS.items():
-        if key == "worker_id":
-            continue
-        if env_name in source:
-            return None
-    worker_id = worker_id.strip()
-    if any(part in {".", ".."} for part in PurePosixPath(worker_id).parts) or "/" in worker_id:
-        return None
-    record_path = Path(posture_root) / WORKER_RECORD_REL / worker_id / "worker.yaml"
-    try:
-        record = _yaml_safe_load_text(record_path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if not isinstance(record, dict):
-        return None
-    role = record.get("role")
-    lane_kind = record.get("lane_kind")
-    scope_id = record.get("scope_id")
-    if not all(isinstance(value, str) and value for value in (role, lane_kind, scope_id)):
-        return None
-    context = {
-        "worker_id": worker_id,
-        "record_ref": str(record_path),
-        "role": role,
-        "lane_kind": lane_kind,
-        "scope_id": scope_id,
-        "seat_id": "canonical-record",
-        "actor": "canonical-record",
-        "process_id": str(os.getpid()),
-        "auth_level": "canonical_record",
-    }
-    return record_path, context
 
 
 def _valid_worker_delegation_record(
@@ -1710,13 +1827,35 @@ def _valid_worker_delegation_record(
     worktree_path = record.get("worktree_path")
     if not isinstance(worktree_path, str) or not worktree_path:
         return None
+    try:
+        context_worktree = Path(worker_context["worktree_path"]).expanduser().resolve(strict=False)
+        record_worktree = Path(worktree_path).expanduser().resolve(strict=False)
+    except OSError:
+        return None
+    if context_worktree != record_worktree:
+        return None
     if posture_root is not None:
         try:
             expected = Path(posture_root).expanduser().resolve(strict=False)
-            actual = Path(worktree_path).expanduser().resolve(strict=False)
         except OSError:
             return None
-        if actual != expected:
+        if record_worktree != expected:
+            return None
+    authoritative_context = record.get("authenticated_worker_context")
+    if not isinstance(authoritative_context, dict):
+        return None
+    for key in (
+        "worker_id",
+        "role",
+        "lane_kind",
+        "scope_id",
+        "worktree_path",
+        "seat_id",
+        "actor",
+        "process_id",
+    ):
+        expected = authoritative_context.get(key)
+        if expected is not None and str(expected) != worker_context.get(key):
             return None
     record["authenticated_worker_context"] = {
         key: worker_context[key]
@@ -1725,6 +1864,7 @@ def _valid_worker_delegation_record(
             "role",
             "lane_kind",
             "scope_id",
+            "worktree_path",
             "seat_id",
             "actor",
             "process_id",
@@ -1746,19 +1886,15 @@ def _resolve_worker_delegation(
 
     Worker capability is intentionally not selected by hook-event fields. The
     only accepted selector is the launcher-controlled current-process worker
-    context exported in ``CE_WORKER_*`` variables; event-supplied
+    context exported in a complete ``CE_WORKER_*`` variable set; event-supplied
     ``ce.worker_id`` / ``ce.worker_record_ref`` are ignored so a controller
-    cannot replay an authentic worker record.
+    cannot replay an authentic worker record or synthesize seat/actor fields.
     """
     del ce
     worker_context = _current_worker_context_from_env(environ)
     if worker_context is None:
-        canonical = _canonical_worker_context_from_env(posture_root, environ)
-        if canonical is None:
-            return None
-        path, worker_context = canonical
-    else:
-        path = _resolve_path_ref(worker_context["record_ref"], posture_root)
+        return None
+    path = _resolve_path_ref(worker_context["record_ref"], posture_root)
     return _valid_worker_delegation_record(
         path,
         worker_context=worker_context,
