@@ -9,7 +9,7 @@ path-set below; this carrier lists itself.
 - **Branch:** `ce-557-deterministic-noninlining-w2`
 - **Base:** `be0e8cbe66acea9998553f2cec59144397029694`
 - **Predecessor commit:** `1e6764ee6f6f7585b25fca35b721a63d45d14cbc`
-- **Declared work class:** feature
+- **Declared work class:** epic
 - **Authority boundary:** this follow-up is limited to the blocking PR #1014
   execution-plane classifier correction, focused hook-check regressions, and
   carrier wording for that bounded rework; no authority-bound systems, waivers,
@@ -28,7 +28,7 @@ path-set below; this carrier lists itself.
 Per-file purpose:
 
 - **`.ce/changelog/ce-557-deterministic-noninlining-w2.md`** *(A)* - changelog
-  fragment for the governed feature and carrier repair evidence.
+  fragment for the governed epic and carrier repair evidence.
 - **`.ce/pr-manifests/ce-557-deterministic-noninlining-w2.md`** *(A)* - this
   closed path-set carrier.
 - **`docs/operations/CONTROLLER_BOUNDARY_POLICY.md`** *(M)* - documents the
