@@ -307,6 +307,7 @@ def test_spawn_near_name_controls_do_not_classify(tool):
         pytest.param("tar xf harvest-bundle.tar -C out", "bundle_extraction", id="tar_xf"),
         pytest.param("/usr/bin/tar --file bundle.tar --extract", "bundle_extraction", id="tar_long"),
         pytest.param("tar --get --file bundle.tar", "bundle_extraction", id="tar_get"),
+        pytest.param("tar -cf bundle.tar validators", "bundle_extraction", id="tar_create"),
         pytest.param("bsdtar -xf bundle.tar", "bundle_extraction", id="bsdtar"),
         pytest.param("gtar -xf bundle.tar", "bundle_extraction", id="gtar"),
         pytest.param("unzip bundle.zip -d out", "bundle_extraction", id="unzip_extract"),
@@ -318,6 +319,26 @@ def test_spawn_near_name_controls_do_not_classify(tool):
         pytest.param("eval 'ce validate-pr --declared-work-class story'", "full_preflight", id="eval"),
         pytest.param("/usr/bin/env python3 -m creator_engine_validator.ce_cli validate-pr", "full_preflight", id="env_python"),
         pytest.param("/usr/local/bin/carrier-gen --check", "carrier_regeneration", id="carrier_path"),
+        pytest.param("VAR=/usr/bin/tar; $VAR -xf bundle.tar", "bundle_extraction", id="var_tar_extract"),
+        pytest.param("export VAR=/usr/bin/tar; ${VAR} -xf bundle.tar", "bundle_extraction", id="braced_var_tar_extract"),
+        pytest.param("VAR=ce; $VAR validate-pr --declared-work-class story", "full_preflight", id="var_ce_validate"),
+        pytest.param(
+            "export VAR=ce; ${VAR} validate-pr --declared-work-class story",
+            "full_preflight",
+            id="braced_var_ce_validate",
+        ),
+        pytest.param("alias extract=/usr/bin/tar; extract -xf bundle.tar", "bundle_extraction", id="alias_tar_extract"),
+        pytest.param(
+            "alias vp='ce validate-pr'; vp --declared-work-class story",
+            "full_preflight",
+            id="alias_ce_validate",
+        ),
+        pytest.param("$VAR -xf bundle.tar", "execution_plane_opaque", id="unresolved_var_tar_extract"),
+        pytest.param("${VAR} validate-pr --declared-work-class story", "execution_plane_opaque", id="unresolved_var_validate"),
+        pytest.param("extract -xf bundle.tar", "execution_plane_opaque", id="unrecognized_tar_extract"),
+        pytest.param("vp validate-pr --declared-work-class story", "execution_plane_opaque", id="unrecognized_validate"),
+        pytest.param("Tar -xf bundle.tar", "execution_plane_opaque", id="unusual_case_tar"),
+        pytest.param("Ce validate-pr --declared-work-class story", "execution_plane_opaque", id="unusual_case_ce"),
     ],
 )
 def test_execution_plane_parsed_command_bypasses_deny(command, primitive):
@@ -334,6 +355,8 @@ def test_execution_plane_parsed_command_bypasses_deny(command, primitive):
     "command",
     [
         pytest.param("echo $(ce validate-pr --declared-work-class story)", id="substitution"),
+        pytest.param("output=$(tar -xf archive.tar)", id="captured_tar_extract"),
+        pytest.param("output=$(tar -cf archive.tar validators)", id="captured_tar_create"),
         pytest.param("ce validate-pr 'unterminated", id="malformed_quote"),
     ],
 )
@@ -370,6 +393,28 @@ def test_archive_read_modes_do_not_classify_as_extraction(command):
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("output=$(tar -tf archive.tar)", id="captured_tar_list_short"),
+        pytest.param("output=$(tar --list --file archive.tar)", id="captured_tar_list_long"),
+        pytest.param("output=$(tar --test-label --file archive.tar)", id="captured_tar_test_label"),
+        pytest.param("output=$(unzip -l archive.zip)", id="captured_unzip_list"),
+        pytest.param("output=$(unzip -t archive.zip)", id="captured_unzip_test"),
+    ],
+)
+def test_output_captured_archive_read_modes_remain_allowed_for_launched_worker(command):
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+        worker_delegation=_launched_implementer_record(),
+    )
+
+    assert hook_check.classify_execution_plane_primitive(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
 def test_execution_plane_parser_does_not_deny_read_only_search():
     ctx = hook_check.HookContext(
         posture="governed",
@@ -377,6 +422,18 @@ def test_execution_plane_parser_does_not_deny_read_only_search():
         seat_class="worker",
     )
     command = "rg carrier_gen validators/creator_engine_validator"
+
+    assert hook_check.classify_execution_plane_primitive(command) is None
+    assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"
+
+
+def test_execution_plane_parser_does_not_blanket_deny_unrelated_command():
+    ctx = hook_check.HookContext(
+        posture="governed",
+        manifest_paths=MANIFEST,
+        seat_class="worker",
+    )
+    command = "printf '%s\\n' ordinary-coordination-probe"
 
     assert hook_check.classify_execution_plane_primitive(command) is None
     assert hook_check.evaluate(_bash_event(command), ctx).decision == "allow"

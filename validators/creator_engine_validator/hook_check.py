@@ -294,6 +294,10 @@ _GIT_GLOBAL_OPTIONS_NO_VALUE = frozenset(
 )
 _SHELL_SEPARATORS = frozenset({";", ";;", "&&", "||", "|", "&", "(", ")"})
 _SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+_SHELL_VARIABLE_TOKEN_RE = re.compile(r"^\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})$")
+_SAFE_ARCHIVE_CAPTURE_RE = re.compile(
+    r"\b(?P<name>[A-Za-z_][A-Za-z0-9_]*)=\$\((?P<body>[^()`$]*)\)"
+)
 _GIT_SAFE_READONLY_SUBCOMMANDS = frozenset(
     {
         "status",
@@ -392,6 +396,20 @@ def _shell_tokens(command: str) -> list[str]:
     lexer.whitespace_split = True
     lexer.commenters = ""
     return list(lexer)
+
+
+def _shell_assignment_parts(token: str) -> tuple[str, str] | None:
+    if not _SHELL_ASSIGNMENT_RE.match(token):
+        return None
+    name, _, value = token.partition("=")
+    return name, value
+
+
+def _shell_variable_name(token: str) -> str | None:
+    match = _SHELL_VARIABLE_TOKEN_RE.match(token)
+    if match is None:
+        return None
+    return match.group(1) or match.group(2)
 
 
 def _is_git_executable(token: str) -> bool:
@@ -659,6 +677,31 @@ def _is_python_executable(token: str) -> bool:
 
 
 _SHELL_EXECUTABLES = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
+_NON_EXECUTION_SURFACE_READERS = frozenset(
+    {
+        "awk",
+        "cat",
+        "cut",
+        "echo",
+        "egrep",
+        "fgrep",
+        "find",
+        "grep",
+        "head",
+        "less",
+        "ls",
+        "more",
+        "nl",
+        "printf",
+        "rg",
+        "sed",
+        "sort",
+        "tail",
+        "tr",
+        "uniq",
+        "wc",
+    }
+)
 
 
 def _contains_execution_plane_surface(command: str) -> bool:
@@ -673,6 +716,23 @@ def _contains_execution_plane_surface(command: str) -> bool:
         r"(?:^|[^\w.-])(?:tar|bsdtar|gtar|unzip)\b",
     )
     return any(re.search(pattern, lowered) for pattern in patterns)
+
+
+def _surface_fallthrough_is_opaque(segments: list[tuple[str, ...]]) -> bool:
+    for segment in segments:
+        segment_command = " ".join(segment)
+        if not _contains_execution_plane_surface(segment_command):
+            continue
+        tokens = _strip_env_prefix(segment)
+        if not tokens:
+            continue
+        executable = PurePosixPath(tokens[0]).name
+        if _archive_read_only(tokens):
+            continue
+        if executable in _NON_EXECUTION_SURFACE_READERS:
+            continue
+        return True
+    return False
 
 
 def _command_segments(command: str) -> list[tuple[str, ...]] | None:
@@ -715,6 +775,54 @@ def _strip_env_prefix(tokens: tuple[str, ...]) -> tuple[str, ...]:
     while index < len(tokens) and _SHELL_ASSIGNMENT_RE.match(tokens[index]):
         index += 1
     return tokens[index:]
+
+
+def _record_shell_segment_state(
+    tokens: tuple[str, ...], env: dict[str, str], aliases: dict[str, str]
+) -> None:
+    if not tokens:
+        return
+    if all(_shell_assignment_parts(token) is not None for token in tokens):
+        for token in tokens:
+            parts = _shell_assignment_parts(token)
+            if parts is not None:
+                env[parts[0]] = parts[1]
+        return
+    if tokens[0] == "export":
+        for token in tokens[1:]:
+            parts = _shell_assignment_parts(token)
+            if parts is not None:
+                env[parts[0]] = parts[1]
+        return
+    if tokens[0] == "alias":
+        for token in tokens[1:]:
+            parts = _shell_assignment_parts(token)
+            if parts is not None:
+                aliases[parts[0]] = parts[1]
+
+
+def _resolve_shell_first_token(
+    tokens: tuple[str, ...], env: dict[str, str], aliases: dict[str, str]
+) -> tuple[str, ...]:
+    if not tokens:
+        return tokens
+    variable_name = _shell_variable_name(tokens[0])
+    if variable_name is not None and variable_name in env:
+        try:
+            resolved = tuple(_shell_tokens(env[variable_name]))
+        except ValueError:
+            return tokens
+        if resolved:
+            tokens = (*resolved, *tokens[1:])
+    alias = aliases.get(tokens[0])
+    if alias is not None:
+        try:
+            resolved = tuple(_shell_tokens(alias))
+        except ValueError:
+            return tokens
+        if resolved:
+            tokens = (*resolved, *tokens[1:])
+    return tokens
 
 
 def _shell_c_payload(tokens: tuple[str, ...]) -> str | None:
@@ -1381,6 +1489,11 @@ def _tar_extracts(args: tuple[str, ...]) -> bool:
     return _tar_operation(args) == "x"
 
 
+def _tar_mutates_or_extracts(args: tuple[str, ...]) -> bool:
+    operation = _tar_operation(args)
+    return operation is not None and operation != "t"
+
+
 def _unzip_extracts(args: tuple[str, ...]) -> bool:
     saw_read_mode = False
     for arg in args:
@@ -1401,21 +1514,119 @@ def _unzip_extracts(args: tuple[str, ...]) -> bool:
     return not saw_read_mode
 
 
+def _archive_read_only(tokens: tuple[str, ...]) -> bool:
+    if not tokens:
+        return False
+    executable = PurePosixPath(tokens[0]).name
+    if executable in {"tar", "bsdtar", "gtar"}:
+        return _tar_operation(tuple(tokens[1:])) == "t"
+    if executable == "unzip":
+        return not _unzip_extracts(tuple(tokens[1:]))
+    return False
+
+
+def _tar_mutating_option_shape(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if arg in _TAR_EXTRACT_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_EXTRACT_LONG_OPTIONS
+        ):
+            return True
+        if arg.startswith("-") and len(arg) > 1 and not arg.startswith("--"):
+            operation = _tar_option_operation(arg[1:])
+            return operation is not None and operation != "t"
+    return False
+
+
+def _tar_extract_option_shape(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg in _SHELL_SEPARATORS:
+            break
+        if arg == "--":
+            break
+        if arg in _TAR_EXTRACT_LONG_OPTIONS or any(
+            arg.startswith(f"{option}=") for option in _TAR_EXTRACT_LONG_OPTIONS
+        ):
+            return True
+        if arg.startswith("-") and len(arg) > 1 and not arg.startswith("--"):
+            return _tar_option_operation(arg[1:]) == "x"
+    return False
+
+
 def _classify_bundle_extraction(tokens: tuple[str, ...]) -> str | None:
     if not tokens:
         return None
     executable = PurePosixPath(tokens[0]).name
-    if executable in {"tar", "bsdtar", "gtar"} and _tar_extracts(tuple(tokens[1:])):
+    if executable in {"tar", "bsdtar", "gtar"} and _tar_mutates_or_extracts(tuple(tokens[1:])):
         return "bundle_extraction"
     if executable == "unzip" and _unzip_extracts(tuple(tokens[1:])):
         return "bundle_extraction"
     return None
 
 
-def _classify_execution_plane_segment(tokens: tuple[str, ...], depth: int) -> str | None:
+def _opaque_first_token_execution_shape(tokens: tuple[str, ...]) -> bool:
+    if not tokens:
+        return False
+    executable = PurePosixPath(tokens[0]).name
+    execution_names = {
+        "git",
+        "ce",
+        "cev3",
+        "ce-preflight",
+        "ce-preflight.sh",
+        "carrier-gen",
+        "carrier_gen",
+        "tar",
+        "bsdtar",
+        "gtar",
+        "unzip",
+    }
+    if executable.lower() in execution_names and executable != executable.lower():
+        return True
+    variable_first_token = _shell_variable_name(tokens[0]) is not None
+    known_first_token = (
+        executable in execution_names
+        or _is_python_executable(tokens[0])
+        or executable in _NON_EXECUTION_SURFACE_READERS
+    )
+    if not variable_first_token and known_first_token:
+        return False
+    args = tuple(tokens[1:])
+    if not variable_first_token and not args:
+        return False
+    if any(arg == "validate-pr" for arg in args):
+        return True
+    if len(args) >= 2 and args[0] == "-m" and args[1].startswith("creator_engine_validator."):
+        return True
+    if variable_first_token:
+        return _tar_mutating_option_shape(args)
+    return _tar_extract_option_shape(args)
+
+
+def _strip_safe_archive_read_captures(command: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        body = match.group("body").strip()
+        segments = _command_segments(body)
+        if segments is None or len(segments) != 1:
+            return match.group(0)
+        tokens = _strip_env_prefix(segments[0])
+        if _archive_read_only(tokens):
+            return f"{match.group('name')}=__CE_SAFE_ARCHIVE_READ_CAPTURE__"
+        return match.group(0)
+
+    return _SAFE_ARCHIVE_CAPTURE_RE.sub(replace, command)
+
+
+def _classify_execution_plane_segment(
+    tokens: tuple[str, ...], depth: int, env: dict[str, str], aliases: dict[str, str]
+) -> str | None:
     tokens = _strip_env_prefix(tokens)
     if not tokens:
         return None
+    tokens = _resolve_shell_first_token(tokens, env, aliases)
     nested = _classify_shell_wrapper(tokens, depth)
     if nested is not None:
         return nested
@@ -1427,21 +1638,32 @@ def _classify_execution_plane_segment(tokens: tuple[str, ...], depth: int) -> st
         primitive = classifier(tokens)
         if primitive is not None:
             return primitive
+    if _opaque_first_token_execution_shape(tokens):
+        return _OPAQUE_EXECUTION_PLANE
     return None
 
 
 def _classify_execution_plane_command(command: str, depth: int = 0) -> str | None:
     if depth > 4:
         return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(command) else None
-    if ("$(" in command or "`" in command) and _contains_execution_plane_surface(command):
+    surface_command = _strip_safe_archive_read_captures(command)
+    if ("$(" in command or "`" in command) and _contains_execution_plane_surface(surface_command):
         return _OPAQUE_EXECUTION_PLANE
     segments = _command_segments(command)
     if segments is None:
         return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(command) else None
+    env: dict[str, str] = {}
+    aliases: dict[str, str] = {}
     for segment in segments:
-        primitive = _classify_execution_plane_segment(segment, depth)
+        primitive = _classify_execution_plane_segment(segment, depth, env, aliases)
         if primitive is not None:
             return primitive
+        _record_shell_segment_state(segment, env, aliases)
+    surface_segments = _command_segments(surface_command)
+    if surface_segments is None:
+        return _OPAQUE_EXECUTION_PLANE if _contains_execution_plane_surface(surface_command) else None
+    if _surface_fallthrough_is_opaque(surface_segments):
+        return _OPAQUE_EXECUTION_PLANE
     return None
 
 

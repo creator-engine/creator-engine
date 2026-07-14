@@ -24,3 +24,8 @@ issue: ce-ops#557
 - Corrects the stale full-validator integration expectation so partial
   `CE_WORKER_ID` plus event-selected worker identity remains denied while the
   complete launcher-owned worker environment path stays allowed.
+- Corrects the PR #1014 blocking gate findings by resolving deterministic
+  first-token env/alias indirection, failing closed on unresolved
+  execution-shaped clean parses, and allowing only archive list/test output
+  captures while command-substituted extraction and governed execution remain
+  opaque-denied.

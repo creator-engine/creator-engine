@@ -203,6 +203,46 @@ def test_hook_check_cli_allows_foreman_implementation_with_launcher_worker_env(c
     assert payload["advisory"] is False
 
 
+@pytest.mark.parametrize(
+    ("command", "decision", "reason_fragment"),
+    [
+        ("output=$(tar -tf archive.tar)", "allow", None),
+        ("output=$(tar -xf archive.tar)", "deny", "execution_plane_opaque"),
+        ("echo $(ce validate-pr --declared-work-class story)", "deny", "execution_plane_opaque"),
+    ],
+)
+def test_hook_check_cli_output_capture_execution_plane_boundary(
+    command, decision, reason_fragment, capsys, tmp_path, monkeypatch
+):
+    worker_ref = _write_worker_record(tmp_path, "worker-from-env")
+    for name, value in _worker_env(worker_ref, "worker-from-env").items():
+        monkeypatch.setenv(name, value)
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "seat_class": "worker",
+            "worker_id": "worker-from-env",
+        },
+    }
+
+    code, out = _run(
+        ["hook-check", "--stdin", "--posture-root", str(tmp_path)],
+        capsys,
+        json.dumps(event),
+        monkeypatch,
+    )
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision"] == decision
+    if reason_fragment is not None:
+        assert reason_fragment in payload["reason"]
+
+
 def test_hook_check_input_json_file(capsys, tmp_path, monkeypatch):
     _pin_bootstrap_seat_class(monkeypatch, tmp_path, "worker")
     event = {
