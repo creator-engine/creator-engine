@@ -1517,9 +1517,11 @@ def _execution_plane_worker_allows(context: HookContext, primitive: str) -> bool
     key = (str(record.get("role") or ""), str(record.get("lane_kind") or ""))
     if key not in _EXECUTION_PLANE_ALLOWED_WORKERS.get(primitive, frozenset()):
         return False
+    worker_context = record.get("authenticated_worker_context")
     return (
         record.get("launch_state") == "launched"
-        and isinstance(record.get("authenticated_worker_context"), dict)
+        and isinstance(worker_context, dict)
+        and worker_context.get("auth_level", "launcher_env") == "launcher_env"
     )
 
 
@@ -1611,7 +1613,50 @@ def _current_worker_context_from_env(environ: Mapping[str, str] | None = None) -
             return None
     except ValueError:
         return None
+    values["auth_level"] = "launcher_env"
     return values
+
+
+def _canonical_worker_context_from_env(
+    posture_root: str | None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[Path, dict[str, str]] | None:
+    source = environ if environ is not None else os.environ
+    worker_id = source.get(WORKER_CONTEXT_ENV_KEYS["worker_id"])
+    if not isinstance(worker_id, str) or not worker_id.strip() or posture_root is None:
+        return None
+    for key, env_name in WORKER_CONTEXT_ENV_KEYS.items():
+        if key == "worker_id":
+            continue
+        if env_name in source:
+            return None
+    worker_id = worker_id.strip()
+    if any(part in {".", ".."} for part in PurePosixPath(worker_id).parts) or "/" in worker_id:
+        return None
+    record_path = Path(posture_root) / WORKER_RECORD_REL / worker_id / "worker.yaml"
+    try:
+        record = _yaml_safe_load_text(record_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(record, dict):
+        return None
+    role = record.get("role")
+    lane_kind = record.get("lane_kind")
+    scope_id = record.get("scope_id")
+    if not all(isinstance(value, str) and value for value in (role, lane_kind, scope_id)):
+        return None
+    context = {
+        "worker_id": worker_id,
+        "record_ref": str(record_path),
+        "role": role,
+        "lane_kind": lane_kind,
+        "scope_id": scope_id,
+        "seat_id": "canonical-record",
+        "actor": "canonical-record",
+        "process_id": str(os.getpid()),
+        "auth_level": "canonical_record",
+    }
+    return record_path, context
 
 
 def _valid_worker_delegation_record(
@@ -1685,6 +1730,9 @@ def _valid_worker_delegation_record(
             "process_id",
         )
     }
+    auth_level = worker_context.get("auth_level")
+    if isinstance(auth_level, str) and auth_level:
+        record["authenticated_worker_context"]["auth_level"] = auth_level
     return record
 
 
@@ -1705,8 +1753,12 @@ def _resolve_worker_delegation(
     del ce
     worker_context = _current_worker_context_from_env(environ)
     if worker_context is None:
-        return None
-    path = _resolve_path_ref(worker_context["record_ref"], posture_root)
+        canonical = _canonical_worker_context_from_env(posture_root, environ)
+        if canonical is None:
+            return None
+        path, worker_context = canonical
+    else:
+        path = _resolve_path_ref(worker_context["record_ref"], posture_root)
     return _valid_worker_delegation_record(
         path,
         worker_context=worker_context,

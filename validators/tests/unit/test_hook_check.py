@@ -1146,6 +1146,48 @@ def test_foreman_worker_routed_implementation_allows_with_worker_id_state_ref(tm
     assert decision.decision == "allow"
 
 
+def test_foreman_worker_routed_implementation_allows_with_canonical_env_record(tmp_path):
+    _write_worker_record(tmp_path, worker_id="worker-from-env")
+    event = _edit_event("validators/creator_engine_validator/hook_check.py")
+    event["ce"] = {
+        "posture": "governed",
+        "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+        "mutation_class": "code",
+        "seat_class": "foreman",
+        "worker_id": "worker-from-env",
+    }
+
+    ctx = hook_check.build_context(
+        event,
+        posture_root=str(tmp_path),
+        environ={"CE_WORKER_ID": "worker-from-env"},
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is not None
+    assert ctx.worker_delegation["authenticated_worker_context"]["auth_level"] == "canonical_record"
+    assert decision.decision == "allow"
+
+
+def test_canonical_env_record_does_not_unlock_execution_plane(tmp_path):
+    _write_worker_record(tmp_path, worker_id="worker-from-env")
+    event = _bash_event("ce validate-pr --declared-work-class story")
+    event["ce"] = {"posture": "governed", "seat_class": "worker"}
+
+    ctx = hook_check.build_context(
+        event,
+        posture="governed",
+        posture_root=str(tmp_path),
+        environ={"CE_WORKER_ID": "worker-from-env"},
+    )
+    decision = hook_check.evaluate(event, ctx)
+
+    assert ctx.worker_delegation is not None
+    assert ctx.worker_delegation["authenticated_worker_context"]["auth_level"] == "canonical_record"
+    assert decision.decision == "deny"
+    assert "execution-plane primitive (full_preflight)" in decision.reason
+
+
 def test_foreman_worker_routed_implementation_missing_worker_contract_fails_closed(tmp_path):
     worker_ref = _write_worker_record(tmp_path, include_contract=False)
     event = _edit_event("validators/creator_engine_validator/hook_check.py")

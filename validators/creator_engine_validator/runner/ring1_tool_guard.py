@@ -412,10 +412,21 @@ def render_install_script(config: Ring1ToolGuardConfig, target_dir: str) -> str:
     """Render a POSIX install script that writes all configured tool shims."""
 
     shims: list[tuple[str, str]] = []
+    execution_plane_shims: list[tuple[str, str]] = []
     for tool in config.tools:
         shim = render_posix_tool_shim(tool, _real_binary_for(tool, config), config)
-        shims.append((tool, shim))
-    payload = json.dumps({"target_dir": target_dir, "shims": shims}, sort_keys=True)
+        if tool in {"git", "gh"}:
+            shims.append((tool, shim))
+        else:
+            execution_plane_shims.append((tool, shim))
+    payload = json.dumps(
+        {
+            "target_dir": target_dir,
+            "shims": shims,
+            "execution_plane_shims": execution_plane_shims,
+        },
+        sort_keys=True,
+    )
     return f"""#!/usr/bin/env sh
 set -eu
 
@@ -482,7 +493,7 @@ else:
     os.mkdir(target_dir, 0o700)
 validate_private_dir(target_dir, "shim directory")
 
-for tool, content in PAYLOAD["shims"]:
+for tool, content in [*PAYLOAD["shims"], *PAYLOAD.get("execution_plane_shims", [])]:
     if not tool or os.path.sep in tool or tool in (".", ".."):
         fail(f"invalid shim name {{tool!r}}")
     target = os.path.join(target_dir, tool)

@@ -187,7 +187,7 @@ def test_rendered_shim_propagates_launcher_pinned_worker_context(tmp_path):
             "record_ref": "/runtime/worktree/.ce/state/workers/worker-impl/worker.yaml",
             "role": "implementer",
             "lane_kind": "implementation",
-            "scope_id": "ce-ops#557",
+            "scope_id": "public-scope",
             "seat_id": "seat-impl",
             "actor": "actor-impl",
         },
