@@ -18,7 +18,6 @@ from typing import Any
 
 import yaml
 
-from .. import v3_installer
 from ..reporting import CheckResult, ValidationError, make_error
 from . import install_spec_signature_guard
 from .git_helpers import repo_root_for, run_git
@@ -135,10 +134,10 @@ def _validate_finalize_manifest(
             errors.append(_error(FINALIZE_MANIFEST, field, f"must match the checked-out signed install spec ({expected})"))
 
     try:
-        signature = v3_installer.parse_embedded_signature_block(spec)
+        signature = install_spec_signature_guard.parse_embedded_signature_block(spec)
         package_version = _signed_spec_package_version(spec)
         signature_sha256 = hashlib.sha256(signature["value"].encode("ascii")).hexdigest()
-    except (UnicodeDecodeError, UnicodeEncodeError, ValueError, v3_installer.InstallRefused) as exc:
+    except (UnicodeDecodeError, UnicodeEncodeError, ValueError) as exc:
         return errors + [_error(FINALIZE_MANIFEST, "", f"could not derive finalize bindings from signed install spec: {exc}")]
 
     for field, expected in (
@@ -178,10 +177,32 @@ def _validate_finalize_manifest(
 
 
 def _default_verifier() -> Verifier:
-    return v3_installer.ssh_ed25519_verifier(
-        install_spec_signature_guard._ssh_keygen_verify_runner,
-        namespace=SSH_SIG_NAMESPACE,
-    )
+    def _verify(algo: str, raw: bytes, value: Any, key_material: Any) -> bool:
+        if algo != install_spec_signature_guard.SSH_ED25519_ALGO:
+            return False
+        if not isinstance(value, str) or not isinstance(key_material, str):
+            return False
+        try:
+            signature = base64.b64decode(value.encode("ascii"), validate=True)
+        except (UnicodeEncodeError, binascii.Error, ValueError):
+            return False
+        fields = key_material.split()
+        if len(fields) < 3:
+            return False
+        try:
+            return bool(
+                install_spec_signature_guard._ssh_keygen_verify_runner(
+                    message=raw,
+                    signature=signature,
+                    allowed_signers=key_material,
+                    identity=fields[0].split(",")[0],
+                    namespace=SSH_SIG_NAMESPACE,
+                )
+            )
+        except Exception:
+            return False
+
+    return _verify
 
 
 def _validate_evidence(
@@ -221,7 +242,7 @@ def _validate_evidence(
         spec = spec_path.read_bytes()
     except OSError as exc:
         return [_error(spec_path, "", f"could not read checked-out signed install spec: {exc}")]
-    actual_canonical = hashlib.sha256(v3_installer.canonical_spec_bytes(spec)).hexdigest()
+    actual_canonical = hashlib.sha256(install_spec_signature_guard.canonical_spec_bytes(spec)).hexdigest()
     actual_signed = hashlib.sha256(spec).hexdigest()
     for field, expected in (("canonical_spec_sha256", actual_canonical), ("signed_spec_sha256", actual_signed)):
         value = _string(record, field)
@@ -262,9 +283,9 @@ def _validate_evidence(
     algo = _string(signature, "algo")
     namespace = _string(signature, "namespace")
     value = _string(signature, "value")
-    if key_id not in v3_installer.PINNED_KEYS:
+    if key_id not in install_spec_signature_guard.PINNED_KEYS:
         errors.append(_error(evidence_path, "signature.key_id", "must name an existing pinned trust-root key"))
-    if algo != v3_installer.SSH_ED25519_ALGO:
+    if algo != install_spec_signature_guard.SSH_ED25519_ALGO:
         errors.append(_error(evidence_path, "signature.algo", "must be ssh-ed25519"))
     if namespace != SSH_SIG_NAMESPACE:
         errors.append(_error(evidence_path, "signature.namespace", f"must be {SSH_SIG_NAMESPACE!r}"))
@@ -277,7 +298,7 @@ def _validate_evidence(
             errors.append(_error(evidence_path, "signature.value", "must be valid base64"))
     if not errors:
         verify = verifier or _default_verifier()
-        if not verify(algo, _canonical_record_bytes(record), value, v3_installer.PINNED_KEYS[key_id]):
+        if not verify(algo, _canonical_record_bytes(record), value, install_spec_signature_guard.PINNED_KEYS[key_id]):
             errors.append(_error(evidence_path, "signature", "detached SSHSIG did not verify in ce-release-smoke-v1 namespace"))
     return errors
 
