@@ -20,7 +20,13 @@ from pathlib import Path
 from typing import Protocol, TextIO
 
 from . import brain_intent_xor_gate, brain_runtime, image_build_smoke
-from .disk_headroom import DiskHeadroomError, check_headroom, effective_min_free_gb
+from .disk_headroom import DEFAULT_MIN_FREE_GB, DiskHeadroomError, check_headroom, effective_min_free_gb
+from .high_disk_validation_consumer import (
+    AtomicFileDropHighDiskValidationConsumer,
+    HighDiskValidationConsumer,
+)
+from .high_disk_validation_lane import HighDiskValidationSubmission
+from .loader import LoaderError, load_yaml
 from .worktree_venv import (
     CE_VALIDATOR_PYTHON_ENV,
     ensure_worktree_python,
@@ -77,6 +83,8 @@ CONTAINED_SEAT_CARRIER_NOTICE = (
 BRAIN_LEDGER_PATH = ".ce/brain/assertions.yaml"
 DISK_HEADROOM_CHECK_NAME = "disk_headroom (suite pre-flight)"
 DISK_HEADROOM_GATE_DISABLED_ENV = "CE_SUITE_HEADROOM_GATE_DISABLED"
+VALIDATION_POLICY_RELATIVE_PATH = Path("governance/policies/worker-container/podman-verification-v1.yaml")
+HIGH_DISK_VENUE_ID = "dgx-validation-lane"
 BRAIN_LEDGER_RECHAIN_TOOL_HINT = (
     "rebase onto the current base and re-run the brain re-chain tool "
     "(`ce brain assert` for appends, or `ce brain correct` for supersede/re-pin cascades)"
@@ -960,6 +968,67 @@ def _run_path_manifest_gate(
     raise RuntimeError(f"Creator Engine validator - path-manifest PR-diff gate failed with exit code {result.returncode}")
 
 
+def _canonical_repository_from_origin(repo_root: Path, runner: Runner) -> str:
+    remote = _git_capture(["remote", "get-url", "origin"], repo_root, runner).strip()
+    match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?", remote)
+    if match is None:
+        raise RuntimeError("high-disk validation requires an origin URL with canonical github.com owner/name identity")
+    return match.group(1)
+
+
+def _require_full_sha(value: str, *, field_name: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise RuntimeError(f"high-disk validation could not resolve lowercase full {field_name} SHA")
+    return value
+
+
+def _high_disk_submission(
+    config: PreflightConfig,
+    comparison_base: str,
+    runner: Runner,
+) -> HighDiskValidationSubmission:
+    from .checks.path_manifest_fidelity import MANIFEST_DIR, branch_slug, parse_carrier_file
+
+    if config.allow_dirty:
+        raise RuntimeError("high-disk validation refuses --allow-dirty because the submitted candidate must be committed")
+    if config.head_ref is None:
+        raise RuntimeError("high-disk validation requires a head ref")
+    carrier_path = config.repo_root / MANIFEST_DIR / f"{branch_slug(config.head_ref)}.md"
+    carrier = parse_carrier_file(carrier_path)
+    if carrier is None or not carrier.consistent:
+        raise RuntimeError("high-disk validation requires a consistent committed path-manifest carrier")
+    try:
+        policy = load_yaml(config.repo_root / VALIDATION_POLICY_RELATIVE_PATH)
+    except LoaderError as exc:
+        raise RuntimeError(f"high-disk validation cannot load verification policy: {exc}") from exc
+    if not isinstance(policy, dict):
+        raise RuntimeError("high-disk validation verification policy must be a mapping")
+    image_ref = policy.get("image_ref")
+    if not isinstance(image_ref, dict):
+        raise RuntimeError("high-disk validation verification policy has no image reference")
+    policy_digest = policy.get("policy_sha")
+    image_digest = image_ref.get("sha")
+    if not isinstance(policy_digest, str) or not isinstance(image_digest, str):
+        raise RuntimeError("high-disk validation verification policy has invalid policy or image digest")
+    head_sha = _require_full_sha(_git_capture(["rev-parse", "HEAD"], config.repo_root, runner), field_name="head")
+    tree_sha = _require_full_sha(
+        _git_capture(["rev-parse", "HEAD^{tree}"], config.repo_root, runner), field_name="tree"
+    )
+    return HighDiskValidationSubmission(
+        repository=_canonical_repository_from_origin(config.repo_root, runner),
+        base_sha=_require_full_sha(comparison_base, field_name="base"),
+        head_sha=head_sha,
+        expected_tree_sha=tree_sha,
+        sorted_carrier_digest=carrier.normalized_sha256,
+        validator_command=("ce", "validate-pr", "--base", comparison_base),
+        validator_profile="default",
+        policy_digest=policy_digest,
+        image_digest=image_digest,
+        minimum_headroom_gib=effective_min_free_gb(),
+        venue_id=HIGH_DISK_VENUE_ID,
+    )
+
+
 def _normalize_changed_path(path: str) -> str:
     return path.strip().replace(os.sep, "/")
 
@@ -1115,6 +1184,7 @@ def run_preflight(
     config: PreflightConfig,
     *,
     runner: Runner = default_runner,
+    high_disk_consumer: HighDiskValidationConsumer | None = None,
     out: TextIO = sys.stdout,
     err: TextIO = sys.stderr,
 ) -> int:
@@ -1144,6 +1214,7 @@ def run_preflight(
     comparison_base: dict[str, str] = {}
     declared_work_class: dict[str, str] = {}
     skipped_tests: dict[str, int] = {}
+    high_disk_validated: dict[str, bool] = {}
     py_env = _python_env(config.repo_root)
 
     def test_coupling_gate() -> str:
@@ -1277,7 +1348,21 @@ def run_preflight(
                 "(nested test harness context; headroom enforced only at top-level suite launch)"
             )
         threshold = effective_min_free_gb()
-        measured = check_headroom(config.repo_root, threshold)
+        try:
+            measured = check_headroom(config.repo_root, threshold)
+        except DiskHeadroomError as admission_error:
+            if threshold < DEFAULT_MIN_FREE_GB or config.profile is not None:
+                raise
+            try:
+                submission = _high_disk_submission(config, comparison_base["value"], runner)
+                success = (high_disk_consumer or AtomicFileDropHighDiskValidationConsumer()).submit(submission)
+            except Exception as exc:
+                raise RuntimeError(f"{admission_error}; high-disk validation failed closed: {exc}") from exc
+            high_disk_validated["value"] = True
+            return (
+                "disk_headroom: local admission unavailable; verified high-disk validation succeeded "
+                f"at {success.venue_id} for tree {success.tree_sha}"
+            )
         return (
             f"disk_headroom: {measured:.1f} GiB free >= {threshold:.1f} GiB required on {config.repo_root}"
         )
@@ -1351,6 +1436,9 @@ def run_preflight(
     if not checks[-1].ok:
         _print_summary(checks, out)
         return 1
+    if high_disk_validated.get("value"):
+        _print_summary(checks, out)
+        return 0
     checks.append(
         _run_check(
             "baseline-diff test command",

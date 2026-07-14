@@ -16,6 +16,10 @@ import pytest
 
 from creator_engine_validator import disk_headroom as dh
 from creator_engine_validator import pr_preflight
+from creator_engine_validator.high_disk_validation_lane import (
+    HighDiskValidationSubmission,
+    HighDiskValidationSuccess,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +243,88 @@ def test_preflight_passes_headroom_check_when_disk_sufficient(tmp_path: Path, mo
     assert "50.0 GiB free" in output
     # Suite was allowed to proceed (runner saw pytest)
     assert runner.pytest_called
+
+
+class _SuccessfulHighDiskConsumer:
+    def __init__(self) -> None:
+        self.submissions: list[HighDiskValidationSubmission] = []
+
+    def submit(self, submission: HighDiskValidationSubmission) -> HighDiskValidationSuccess:
+        self.submissions.append(submission)
+        return HighDiskValidationSuccess(
+            repository=submission.repository,
+            base_sha=submission.base_sha,
+            head_sha=submission.head_sha,
+            tree_sha=submission.expected_tree_sha,
+            sorted_carrier_digest=submission.sorted_carrier_digest,
+            validator_command=submission.validator_command,
+            validator_profile=submission.validator_profile,
+            policy_digest=submission.policy_digest,
+            image_digest=submission.image_digest,
+            minimum_headroom_gib=submission.minimum_headroom_gib,
+            venue_id=submission.venue_id,
+            allocation_id="test-allocation",
+            receipt_bytes=b"already verified by injected consumer",
+            receipt_sha256="0" * 64,
+        )
+
+
+def test_preflight_routes_9_4_gib_to_verified_high_disk_consumer(tmp_path: Path, monkeypatch) -> None:
+    """Low local headroom must route the committed candidate without a local fallback."""
+    _stub_all_heavy_gates(monkeypatch)
+    runner = _MinimalFakeRunner(tmp_path)
+    config = _config_for_headroom(tmp_path)
+    out = io.StringIO()
+    err = io.StringIO()
+    submission = HighDiskValidationSubmission(
+        repository="creator-engine/creator-engine",
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        expected_tree_sha="c" * 40,
+        sorted_carrier_digest="d" * 64,
+        validator_command=("ce", "validate-pr", "--base", "a" * 40),
+        validator_profile="default",
+        policy_digest="e" * 64,
+        image_digest="sha256:" + "f" * 64,
+        minimum_headroom_gib=30.0,
+        venue_id="dgx-validation-lane",
+    )
+    consumer = _SuccessfulHighDiskConsumer()
+    monkeypatch.setattr(pr_preflight, "_high_disk_submission", lambda *_a, **_k: submission)
+
+    with patch.object(dh, "free_gb", return_value=9.4):
+        rc = pr_preflight.run_preflight(
+            config,
+            runner=runner,
+            high_disk_consumer=consumer,
+            out=out,
+            err=err,
+        )
+
+    assert rc == 0
+    assert consumer.submissions == [submission]
+    assert not runner.pytest_called
+    assert "verified high-disk validation succeeded" in out.getvalue()
+
+
+def test_preflight_does_not_lower_the_30_gib_high_disk_floor(tmp_path: Path, monkeypatch) -> None:
+    _stub_all_heavy_gates(monkeypatch)
+    runner = _MinimalFakeRunner(tmp_path)
+    consumer = _SuccessfulHighDiskConsumer()
+    monkeypatch.setenv(dh.MIN_FREE_GB_ENV, "20")
+
+    with patch.object(dh, "free_gb", return_value=9.4):
+        rc = pr_preflight.run_preflight(
+            _config_for_headroom(tmp_path),
+            runner=runner,
+            high_disk_consumer=consumer,
+            out=io.StringIO(),
+            err=io.StringIO(),
+        )
+
+    assert rc == 1
+    assert consumer.submissions == []
+    assert not runner.pytest_called
 
 
 def test_disk_headroom_error_is_distinct_runtime_error(tmp_path: Path) -> None:
