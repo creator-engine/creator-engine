@@ -9,7 +9,7 @@ issue: ce-ops#557
 **Deterministic controller no-inlining enforcement.**
 
 - Adds the required path-manifest and changelog carriers for this governed
-  story on branch `ce-557-deterministic-noninlining-w2`.
+  feature on branch `ce-557-deterministic-noninlining-w2`.
 - Hardens the review-blocked enforcement seams: execution-plane primitives
   fail closed without complete launch-pinned worker identity, inherited
   `CE_WORKER_*` values are scrubbed at the Ring-1 boundary, worker records are
