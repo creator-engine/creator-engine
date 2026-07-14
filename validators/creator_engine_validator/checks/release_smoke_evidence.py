@@ -35,6 +35,20 @@ SCHEMA_VERSION = "1"
 SSH_SIG_NAMESPACE = "ce-release-smoke-v1"
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_RE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+PACKAGE_VERSION_RE = re.compile(r"^  package_version: (\S+)$")
+FINALIZE_MANIFEST_FIELDS = {
+    "kind",
+    "schema_version",
+    "package_version",
+    "canonical_spec_sha256",
+    "signed_spec_sha256",
+    "signature_sha256",
+    "signing_key_id",
+    "signing_namespace",
+    "artifacts",
+}
+FINALIZE_ARTIFACT_FIELDS = {"path", "sha256", "size"}
+FINALIZE_MANIFEST_KIND = "ce-release-finalize-manifest"
 
 Verifier = Callable[[str, bytes, Any, Any], bool]
 
@@ -73,6 +87,94 @@ def _read_manifest(path: Path) -> tuple[dict[str, object] | None, str | None]:
     if not isinstance(value, dict):
         return None, "release finalize manifest must be a mapping"
     return value, None
+
+
+def _signed_spec_package_version(spec: bytes) -> str:
+    """Read the producer's one artifact-manifest package version scalar."""
+    in_artifact_manifest = False
+    for line in spec.decode("utf-8").splitlines():
+        if line.strip() == "artifact_manifest:":
+            in_artifact_manifest = True
+            continue
+        if not in_artifact_manifest:
+            continue
+        match = PACKAGE_VERSION_RE.fullmatch(line)
+        if match is not None:
+            return match.group(1)
+        if line.strip() and not line.startswith("  "):
+            break
+    raise ValueError("signed install spec artifact_manifest is missing package_version")
+
+
+def _validate_finalize_manifest(
+    manifest: dict[str, object],
+    spec: bytes,
+    *,
+    canonical_spec_sha256: str,
+    signed_spec_sha256: str,
+) -> list[ValidationError]:
+    """Validate every value emitted by the release-finalize producer.
+
+    The manifest is part of the release binding, not merely a convenient place
+    to repeat the two spec digests.  Require its complete, typed contract so a
+    truncated mapping cannot turn a release-class diff into an accept.
+    """
+    errors: list[ValidationError] = []
+    if set(manifest) != FINALIZE_MANIFEST_FIELDS:
+        errors.append(_error(FINALIZE_MANIFEST, "", "must contain exactly the release finalize contract fields"))
+
+    if manifest.get("kind") != FINALIZE_MANIFEST_KIND:
+        errors.append(_error(FINALIZE_MANIFEST, "kind", f"must be {FINALIZE_MANIFEST_KIND!r}"))
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        errors.append(_error(FINALIZE_MANIFEST, "schema_version", f"must be {SCHEMA_VERSION!r}"))
+    for field, expected in (
+        ("canonical_spec_sha256", canonical_spec_sha256),
+        ("signed_spec_sha256", signed_spec_sha256),
+    ):
+        if _string(manifest, field) != expected:
+            errors.append(_error(FINALIZE_MANIFEST, field, f"must match the checked-out signed install spec ({expected})"))
+
+    try:
+        signature = v3_installer.parse_embedded_signature_block(spec)
+        package_version = _signed_spec_package_version(spec)
+        signature_sha256 = hashlib.sha256(signature["value"].encode("ascii")).hexdigest()
+    except (UnicodeDecodeError, UnicodeEncodeError, ValueError, v3_installer.InstallRefused) as exc:
+        return errors + [_error(FINALIZE_MANIFEST, "", f"could not derive finalize bindings from signed install spec: {exc}")]
+
+    for field, expected in (
+        ("package_version", package_version),
+        ("signature_sha256", signature_sha256),
+        ("signing_key_id", signature["key_id"]),
+        ("signing_namespace", signature["namespace"]),
+    ):
+        if _string(manifest, field) != expected:
+            errors.append(_error(FINALIZE_MANIFEST, field, f"must match the checked-out signed install spec ({expected})"))
+
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        errors.append(_error(FINALIZE_MANIFEST, "artifacts", "must be a non-empty artifact set"))
+    else:
+        paths: set[str] = set()
+        for index, artifact in enumerate(artifacts):
+            field = f"artifacts[{index}]"
+            if not _exact_keys(artifact, FINALIZE_ARTIFACT_FIELDS):
+                errors.append(_error(FINALIZE_MANIFEST, field, "must contain exactly path, sha256, and size"))
+                continue
+            assert isinstance(artifact, dict)
+            path = _string(artifact, "path")
+            sha256 = _string(artifact, "sha256")
+            size = artifact.get("size")
+            if path is None or not path or path.startswith("/") or ".." in Path(path).parts:
+                errors.append(_error(FINALIZE_MANIFEST, f"{field}.path", "must be a non-empty relative artifact path"))
+            elif path in paths:
+                errors.append(_error(FINALIZE_MANIFEST, f"{field}.path", "must not duplicate another artifact path"))
+            else:
+                paths.add(path)
+            if sha256 is None or not HEX64_RE.fullmatch(sha256):
+                errors.append(_error(FINALIZE_MANIFEST, f"{field}.sha256", "must be a lowercase SHA-256 digest"))
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                errors.append(_error(FINALIZE_MANIFEST, f"{field}.size", "must be a non-negative integer"))
+    return errors
 
 
 def _default_verifier() -> Verifier:
@@ -131,9 +233,14 @@ def _validate_evidence(
         errors.append(_error(FINALIZE_MANIFEST, "", manifest_error))
     else:
         assert manifest is not None
-        for field, expected in (("canonical_spec_sha256", actual_canonical), ("signed_spec_sha256", actual_signed)):
-            if _string(manifest, field) != expected:
-                errors.append(_error(FINALIZE_MANIFEST, field, f"must match the checked-out signed install spec ({expected})"))
+        errors.extend(
+            _validate_finalize_manifest(
+                manifest,
+                spec,
+                canonical_spec_sha256=actual_canonical,
+                signed_spec_sha256=actual_signed,
+            )
+        )
 
     summary = record.get("summary")
     if not _exact_keys(summary, {"failed", "stubbed"}) or summary.get("failed") != 0 or summary.get("stubbed") != 0:

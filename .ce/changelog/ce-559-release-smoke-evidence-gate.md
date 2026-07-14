@@ -11,5 +11,5 @@ issue: ce-ops#559
 Implement the fail-closed release smoke-evidence PR-diff gate.
 
 - Detect release-class changes only when the signed install spec and release-finalize manifest both change.
-- Require one canonical, detached-SSHSIG-verified evidence record bound to the checked-out spec.
+- Require one canonical, detached-SSHSIG-verified evidence record and the complete typed finalize-manifest contract, both bound to the checked-out spec.
 - Wire the gate into both CI merge-queue/PR validation and local preflight, with hermetic focused tests.

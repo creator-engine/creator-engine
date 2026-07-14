@@ -27,7 +27,11 @@ signature:
   value: {value}
   content_sha256: <published-with-this-spec>
 -->
-# install\n""".format(value=value)
+# install
+
+artifact_manifest:
+  package_version: 0.3.6
+""".format(value=value)
     canonical = hashlib.sha256(v3_installer.canonical_spec_bytes(draft)).hexdigest()
     return draft.replace("<published-with-this-spec>", canonical)
 
@@ -53,36 +57,43 @@ def _record(repo: Path, **overrides: object) -> dict[str, object]:
     return record
 
 
+def _finalize_manifest(repo: Path, **overrides: object) -> dict[str, object]:
+    spec = (repo / "docs/llms-install.md").read_bytes()
+    signature = v3_installer.parse_embedded_signature_block(spec)
+    manifest: dict[str, object] = {
+        "kind": "ce-release-finalize-manifest",
+        "schema_version": "1",
+        "package_version": gate._signed_spec_package_version(spec),
+        "canonical_spec_sha256": hashlib.sha256(v3_installer.canonical_spec_bytes(spec)).hexdigest(),
+        "signed_spec_sha256": hashlib.sha256(spec).hexdigest(),
+        "signature_sha256": hashlib.sha256(signature["value"].encode("ascii")).hexdigest(),
+        "signing_key_id": signature["key_id"],
+        "signing_namespace": signature["namespace"],
+        "artifacts": [{"path": "downloads/0.3.6/SHA256SUMS", "sha256": "b" * 64, "size": 123}],
+    }
+    manifest.update(overrides)
+    return manifest
+
+
+def _write_finalize_manifest(root: Path, **overrides: object) -> None:
+    (root / "docs/release-finalize-manifest.yml").write_text(
+        json.dumps(_finalize_manifest(root, **overrides), sort_keys=True), encoding="utf-8"
+    )
+
+
 def _repo(tmp_path: Path) -> Path:
     root = tmp_path
     (root / "docs").mkdir()
     (root / ".ce/release-evidence").mkdir(parents=True)
     spec = _spec()
     (root / "docs/llms-install.md").write_text(spec, encoding="utf-8")
-    canonical = hashlib.sha256(v3_installer.canonical_spec_bytes(spec)).hexdigest()
-    signed = hashlib.sha256(spec.encode()).hexdigest()
-    (root / "docs/release-finalize-manifest.yml").write_text(
-        "kind: ce-release-finalize-manifest\n"
-        'schema_version: "1"\n'
-        f"canonical_spec_sha256: {canonical}\n"
-        f"signed_spec_sha256: {signed}\n",
-        encoding="utf-8",
-    )
+    _write_finalize_manifest(root)
     _git(root, "init")
     _git(root, "add", ".")
     _commit(root, "base")
     # A release-class PR changes both binding files.
     (root / "docs/llms-install.md").write_text(_spec("changed-signed-spec"), encoding="utf-8")
-    changed = (root / "docs/llms-install.md").read_bytes()
-    canonical = hashlib.sha256(v3_installer.canonical_spec_bytes(changed)).hexdigest()
-    signed = hashlib.sha256(changed).hexdigest()
-    (root / "docs/release-finalize-manifest.yml").write_text(
-        "kind: ce-release-finalize-manifest\n"
-        'schema_version: "1"\n'
-        f"canonical_spec_sha256: {canonical}\n"
-        f"signed_spec_sha256: {signed}\n",
-        encoding="utf-8",
-    )
+    _write_finalize_manifest(root)
     _git(root, "add", ".")
     _commit(root, "release candidate")
     return root
@@ -151,4 +162,29 @@ def test_release_evidence_refuses_unverified_or_multiple_records(tmp_path: Path)
     _write_record(evidence / "one.json", record)
     assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: False)) == {gate.CODE_INVALID}
     _write_record(evidence / "two.json", record)
+    assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)) == {gate.CODE_INVALID}
+
+
+def test_release_evidence_refuses_truncated_or_altered_finalize_contract(tmp_path: Path):
+    root = _repo(tmp_path)
+    _write_record(root / ".ce/release-evidence/smoke.json", _record(root))
+
+    cases = (
+        {"kind": "not-a-finalize-manifest"},
+        {"schema_version": "2"},
+        {"package_version": "99.0.0"},
+        {"signature_sha256": "0" * 64},
+        {"signing_key_id": "ce-dev1-root-v1"},
+        {"signing_namespace": "wrong"},
+        {"artifacts": []},
+        {"artifacts": [{"path": "../escape", "sha256": "b" * 64, "size": 1}]},
+    )
+    for index, overrides in enumerate(cases):
+        _write_finalize_manifest(root, **overrides)
+        result = gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)
+        assert _codes(result) == {gate.CODE_INVALID}, index
+
+    truncated = _finalize_manifest(root)
+    del truncated["artifacts"]
+    (root / "docs/release-finalize-manifest.yml").write_text(json.dumps(truncated), encoding="utf-8")
     assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)) == {gate.CODE_INVALID}
