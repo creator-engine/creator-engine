@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -91,10 +92,34 @@ def _write_worker_record(root: Path, worker_id: str) -> Path:
         "dry_run": False,
         "launch_state": "launched",
         "seat_refs": {"seat_lifecycle_state": "active"},
+        "authenticated_worker_context": {
+            "worker_id": worker_id,
+            "role": role,
+            "lane_kind": "implementation",
+            "scope_id": "ce-ops#163",
+            "worktree_path": str(root),
+            "seat_id": "seat-impl",
+            "actor": "actor-impl",
+            "process_id": str(os.getpid()),
+        },
         "governed_worker_contract": worker_spawn.governed_worker_contract(role=role, max_depth=3),
     }
     path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
     return path
+
+
+def _worker_env(record_ref: Path, worker_id: str) -> dict[str, str]:
+    return {
+        "CE_WORKER_ID": worker_id,
+        "CE_WORKER_RECORD_REF": str(record_ref),
+        "CE_WORKER_ROLE": "implementer",
+        "CE_WORKER_LANE_KIND": "implementation",
+        "CE_WORKER_SCOPE_ID": "ce-ops#163",
+        "CE_WORKER_WORKTREE_PATH": str(record_ref.parents[4]),
+        "CE_WORKER_SEAT_ID": "seat-impl",
+        "CE_WORKER_ACTOR": "actor-impl",
+        "CE_WORKER_PROCESS_ID": str(os.getpid()),
+    }
 
 
 def test_hook_check_stdin_governed_out_of_manifest_advisory(capsys, monkeypatch):
@@ -116,9 +141,41 @@ def test_hook_check_stdin_governed_out_of_manifest_advisory(capsys, monkeypatch)
     assert payload["posture"] == "governed"
 
 
-def test_hook_check_cli_allows_foreman_implementation_with_worker_record_env(capsys, tmp_path, monkeypatch):
+def test_hook_check_cli_denies_foreman_implementation_with_partial_worker_env(capsys, tmp_path, monkeypatch):
     _write_worker_record(tmp_path, "worker-from-env")
     monkeypatch.setenv("CE_WORKER_ID", "worker-from-env")
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "validators/creator_engine_validator/hook_check.py"},
+        "ce": {
+            "posture": "governed",
+            "manifest_paths": ["validators/creator_engine_validator/hook_check.py"],
+            "mutation_class": "code",
+            "seat_class": "foreman",
+            "worker_id": "worker-from-env",
+        },
+    }
+
+    code, out = _run(
+        ["hook-check", "--stdin", "--posture-root", str(tmp_path)],
+        capsys,
+        json.dumps(event),
+        monkeypatch,
+    )
+
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["posture"] == "governed"
+    assert payload["decision"] == "deny"
+    assert payload["advisory"] is False
+    assert "foreman_delegation_required" in payload["reason"]
+
+
+def test_hook_check_cli_allows_foreman_implementation_with_launcher_worker_env(capsys, tmp_path, monkeypatch):
+    worker_ref = _write_worker_record(tmp_path, "worker-from-env")
+    for name, value in _worker_env(worker_ref, "worker-from-env").items():
+        monkeypatch.setenv(name, value)
     event = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Edit",

@@ -10,15 +10,17 @@ path-set below; this carrier lists itself.
 - **Base:** `be0e8cbe66acea9998553f2cec59144397029694`
 - **Predecessor commit:** `2b357a8a5dac8e3b010384cf5afdf397864b12dc`
 - **Declared work class:** story
-- **Authority boundary:** implementation is limited to deterministic controller
-  no-inlining enforcement and these two required carrier files; no implementation
-  paths, authority-bound systems, validator semantics, waivers, PR approval,
-  merge, push, deploy, credential movement, or service mutation are authorized
-  by this repair.
+- **Authority boundary:** this follow-up is limited to the stale integration
+  expectation correction and the two required carrier files; no production
+  implementation paths, authority-bound systems, validator semantics, waivers,
+  PR approval, merge, push, deploy, credential movement, or service mutation are
+  authorized by this repair.
 - **Evidence:** final-review rework focused tests reported
   `test_hook_check.py` plus `test_runner_ring1_tool_guard.py` as `264 passed`;
-  this branch is validated by one full governed validator run after the rework
-  commit.
+  stale integration follow-up focused tests reported the affected
+  `test_hook_check_cli.py` nodes plus `test_hook_check.py` as `233 passed`;
+  this branch is validated by one full governed validator run after the
+  follow-up commit.
 
 Per-file purpose:
 
@@ -44,6 +46,9 @@ Per-file purpose:
   replay/mismatch/stale/malformed fail-closed behavior, parsed command
   primitive classification, archive read-vs-extract seams, and closed spawn
   capability identifiers.
+- **`validators/tests/integration/test_hook_check_cli.py`** *(M)* - corrects
+  the CLI integration seam so partial inherited worker identity stays denied
+  while complete launcher-owned worker context remains allowed.
 - **`validators/tests/unit/test_runner_ring1_tool_guard.py`** *(M)* - covers
   Ring-1 shim refusal for controller execution-plane primitive commands,
   default governed entry points, hostile inherited env scrubbing, and
@@ -52,9 +57,9 @@ Per-file purpose:
 Canonicalization:
 `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-AUTHORIZED_PATHS_COUNT=8
+AUTHORIZED_PATHS_COUNT=9
 
-AUTHORIZED_PATHS_SHA256=83a11b9a88c276c9b6235a49aa3b6ab4720d97557a6177d55a656faa0af268c6
+AUTHORIZED_PATHS_SHA256=3764d9b418d824ac2ad9a83e56a7dda90f0b45c3b03c241979ae0e17d67706ff
 
 ```text
 .ce/changelog/ce-557-deterministic-noninlining-w2.md
@@ -63,6 +68,7 @@ docs/operations/CONTROLLER_BOUNDARY_POLICY.md
 validators/creator_engine_validator/hook_check.py
 validators/creator_engine_validator/runner/ring1_tool_guard.py
 validators/creator_engine_validator/seat_class.py
+validators/tests/integration/test_hook_check_cli.py
 validators/tests/unit/test_hook_check.py
 validators/tests/unit/test_runner_ring1_tool_guard.py
 ```

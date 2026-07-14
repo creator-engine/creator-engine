@@ -21,3 +21,6 @@ issue: ce-ops#557
 - Records focused rework evidence: `test_hook_check.py` plus
   `test_runner_ring1_tool_guard.py` reported `264 passed` before the full
   governed validator run.
+- Corrects the stale full-validator integration expectation so partial
+  `CE_WORKER_ID` plus event-selected worker identity remains denied while the
+  complete launcher-owned worker environment path stays allowed.
