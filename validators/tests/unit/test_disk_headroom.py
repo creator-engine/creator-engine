@@ -271,6 +271,7 @@ class _SuccessfulHighDiskConsumer:
 
 def test_preflight_routes_9_4_gib_to_verified_high_disk_consumer(tmp_path: Path, monkeypatch) -> None:
     """Low local headroom must route the committed candidate without a local fallback."""
+    monkeypatch.delenv(pr_preflight.DISK_HEADROOM_GATE_DISABLED_ENV, raising=False)
     _stub_all_heavy_gates(monkeypatch)
     runner = _MinimalFakeRunner(tmp_path)
     config = _config_for_headroom(tmp_path)
@@ -308,6 +309,7 @@ def test_preflight_routes_9_4_gib_to_verified_high_disk_consumer(tmp_path: Path,
 
 
 def test_preflight_does_not_lower_the_30_gib_high_disk_floor(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv(pr_preflight.DISK_HEADROOM_GATE_DISABLED_ENV, raising=False)
     _stub_all_heavy_gates(monkeypatch)
     runner = _MinimalFakeRunner(tmp_path)
     consumer = _SuccessfulHighDiskConsumer()
