@@ -46,8 +46,9 @@ CE_BELT_LABELS=enhancement
 GH_TOKEN=<integrator-token>
 CE_PICKUP_TOKEN=<review-pickup-token>
 CE_RATIFIER_QUEUE_CANDIDATES_PATH=/owner-only/path/ratifier-candidates.json
-# Optional; the unit default is %h/.local/state/creator-engine/ratifier-queue/state.json
+# Optional; the unit default is %h/.local/state/creator-engine/ratifier-queue/state.json.
 CE_RATIFIER_QUEUE_STATE_PATH=/owner-only/path/ratifier-state.json
+# Optional; the unit default is 120 seconds.
 CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120
 ```
 
@@ -179,6 +180,13 @@ operator-created, owner-only candidate document named by
 state, and emits `PENDING`, `STALE`, `BLOCKED`, or `ATTESTED` evidence. An
 `ATTESTED` row is never an approval, enqueue, merge, signature, or ratification
 act. The service has no forge or credential configuration.
+
+The unit sets non-secret defaults before reading `gate-daemons.env`:
+`CE_RATIFIER_QUEUE_STATE_PATH` defaults to
+`%h/.local/state/creator-engine/ratifier-queue/state.json` and
+`CE_RATIFIER_QUEUE_INTERVAL_SECONDS` defaults to `120`. Set either value in the
+env file to override that default; the candidates path remains required and has
+no unit default.
 
 The candidate document is strict JSON with `version: 1` and a `candidates`
 array. Each candidate supplies immutable PR/head identity plus the complete

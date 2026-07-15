@@ -476,6 +476,17 @@ only handoff for deployment-specific credentials and daemon configuration:
   OpenBao delivery.
 - `CE_BELT_INTERVAL_SECONDS` — optional belt poll interval.
 - `CE_BELT_LABELS` — optional single work-pickup label filter.
+- `CE_RATIFIER_QUEUE_CANDIDATES_PATH` — required owner-only candidate document
+  for the proposal-only ratifier queue.
+- `CE_RATIFIER_QUEUE_STATE_PATH` — optional owner-only ratifier state path;
+  defaults to `%h/.local/state/creator-engine/ratifier-queue/state.json`.
+- `CE_RATIFIER_QUEUE_INTERVAL_SECONDS` — optional ratifier polling interval;
+  defaults to `120` seconds.
+
+The ratifier unit supplies the non-secret state-path and interval defaults with
+`Environment=` before it reads the deployment-specific `EnvironmentFile`.
+Values set in that env file override the defaults; the candidates path is never
+defaulted and must be supplied by the operator.
 
 The OpenBao-backed review-pickup path is armed only when the env file carries
 the OpenBao client variables, `CE_OPENBAO_ALLOWED_REFS`, and the full

@@ -55,7 +55,8 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
         )
         assert unit["Service"]["Restart"] == "on-failure"
         assert unit["Service"]["RestartSec"]
-        assert "Environment" not in unit["Service"]
+        if name not in {"ce-belt-daemon.service", "ce-ratifier-queue.service"}:
+            assert "Environment" not in unit["Service"]
         assert unit["Service"]["ExecStart"].startswith(("/usr/bin/env ce ", "/usr/bin/env bash "))
         assert "PYTHONPATH=validators" not in unit["Service"]["ExecStart"]
         assert "creator_engine_validator.v3_cli" not in unit["Service"]["ExecStart"]
@@ -69,7 +70,7 @@ def test_belt_daemon_unit_execstart_is_observe_only_poll_loop(repo_root: Path):
     assert ' --identity "$CE_BELT_IDENTITY" ' in exec_start
     assert ' --repo "$CE_GATE_REPO" ' in exec_start
     assert ' ${CE_BELT_LABELS:+--label "$CE_BELT_LABELS"} ' in exec_start
-    assert exec_start.endswith('sleep "${CE_BELT_INTERVAL_SECONDS:-120}"; done\'')
+    assert exec_start.endswith('sleep "$CE_BELT_INTERVAL_SECONDS"; done\'')
     assert " --json;" in exec_start
     assert "--claim" not in exec_start
     assert "--enable-launch" not in exec_start
@@ -85,8 +86,89 @@ def test_ratifier_queue_unit_is_proposal_only_and_restart_supervised(repo_root: 
     assert "ce ratifier-queue" in service["ExecStart"]
     assert "--loop" in service["ExecStart"]
     assert "CE_RATIFIER_QUEUE_CANDIDATES_PATH" in service["ExecStart"]
+    unit_text = (repo_root / "deploy" / "systemd" / "ce-ratifier-queue.service").read_text(
+        encoding="utf-8"
+    )
+    assert "Environment=CE_RATIFIER_QUEUE_STATE_PATH=" in unit_text
+    assert "Environment=CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120" in unit_text
     assert "GH_TOKEN" not in service["ExecStart"]
     assert "--apply" not in service["ExecStart"]
+
+
+def test_gate_daemon_execstarts_use_explicit_systemd_defaults_and_installer_keeps_them(
+    tmp_path: Path, repo_root: Path
+):
+    defaulted_units = {
+        "ce-belt-daemon.service": (
+            ("Environment=CE_BELT_INTERVAL_SECONDS=120",),
+            ('sleep "$CE_BELT_INTERVAL_SECONDS"',),
+        ),
+        "ce-ratifier-queue.service": (
+            (
+                "Environment=CE_RATIFIER_QUEUE_STATE_PATH=%h/.local/state/creator-engine/ratifier-queue/state.json",
+                "Environment=CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120",
+            ),
+            (
+                ' --state-path "$CE_RATIFIER_QUEUE_STATE_PATH" ',
+                ' --interval "$CE_RATIFIER_QUEUE_INTERVAL_SECONDS" ',
+            ),
+        ),
+    }
+    for name in SERVICE_NAMES:
+        unit_path = repo_root / "deploy" / "systemd" / name
+        exec_start = _read_unit_path(unit_path)["Service"]["ExecStart"]
+        assert re.search(r"\$\{[^}]*:-[^}]*\}", exec_start) is None
+        if name in defaulted_units:
+            defaults, exec_references = defaulted_units[name]
+            unit_text = unit_path.read_text(encoding="utf-8")
+            for default in defaults:
+                assert default in unit_text
+                assert unit_text.index(default) < unit_text.index("EnvironmentFile=")
+            for exec_reference in exec_references:
+                assert exec_reference in exec_start
+
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").mkdir()
+    fake_python = fake_repo / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    env_file = tmp_path / "gate-daemons.env"
+    env_file.write_text(
+        "CE_RATIFIER_QUEUE_CANDIDATES_PATH=/owner-only/candidates.json\n",
+        encoding="utf-8",
+    )
+    broker_env_file = tmp_path / "ce-egress-broker.env"
+    review_env_file = tmp_path / "ce-egress-self-review.env"
+    broker_env_file.write_text("ok\n", encoding="utf-8")
+    review_env_file.write_text("ok\n", encoding="utf-8")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "systemctl").write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    (fake_bin / "systemctl").chmod(0o755)
+    unit_dir = tmp_path / "units"
+    result = subprocess.run(
+        [
+            "bash", str(repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"),
+            "--repo-root", str(fake_repo), "--unit-dir", str(unit_dir),
+            "--env-file", str(env_file),
+            "--egress-broker-env-file", str(broker_env_file),
+            "--egress-self-review-env-file", str(review_env_file),
+            "--no-start",
+        ],
+        check=False, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 0, result.stderr
+    for name, (defaults, exec_references) in defaulted_units.items():
+        rendered = _read_unit_path(unit_dir / name)["Service"]["ExecStart"]
+        rendered_text = (unit_dir / name).read_text(encoding="utf-8")
+        for default in defaults:
+            assert default in rendered_text
+            assert rendered_text.index(default) < rendered_text.index("EnvironmentFile=")
+        for exec_reference in exec_references:
+            assert exec_reference in rendered
 
 
 def test_codex_seat_unit_supervises_detached_container(repo_root: Path):
