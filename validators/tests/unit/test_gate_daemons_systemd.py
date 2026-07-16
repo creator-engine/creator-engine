@@ -626,6 +626,14 @@ def test_materializer_unit_supervises_disarmed_dry_run_loop(repo_root: Path):
     assert "CE_MATERIALIZER_APP_PRIVATE_KEY" not in unit_text
 
 
+def test_queue_daemon_unit_provisions_private_log_directory(repo_root: Path):
+    unit_path = repo_root / "deploy" / "queue-daemon" / "ce-queue-daemon.service"
+    service = _read_unit_path(unit_path)["Service"]
+
+    assert service["LogsDirectory"] == "ce-queue-daemon"
+    assert service["LogsDirectoryMode"] == "0700"
+
+
 def test_materializer_env_template_is_dry_run_only(repo_root: Path):
     template = repo_root / "deploy" / "materializer" / "ce-materializer.env.example"
     text = template.read_text(encoding="utf-8")
