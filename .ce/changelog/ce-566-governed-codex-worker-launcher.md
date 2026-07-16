@@ -1,7 +1,7 @@
 ---
 slug: ce-566-governed-codex-worker-launcher
 date: 2026-07-16
-kind: feature
+kind: epic
 scope: governed Codex one-shot worker launcher
 issue: ce-ops#566
 ---
