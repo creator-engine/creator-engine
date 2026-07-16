@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from creator_engine_validator.conveyor_daemon import (
     ConveyorValidationLedgerBinding,
     _PUBLISH_TRANSPORT_CONFIG_PATTERN,
 )
+from creator_engine_validator.conveyor_discovery import ConveyorSeatDiscoveryRunner, SeatProbeSpec
 from creator_engine_validator.forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
 from creator_engine_validator.validation_sandbox_receipt import ValidationSandboxReceiptIssuer
 
@@ -1729,6 +1731,49 @@ def test_idempotent_re_discovery_skips_completed_item():
     assert second.results[0].status == "skipped"
     assert [call for call, _cwd in git.calls].count(("push", "--", "origin", "feature-one:feature-one")) == 1
     assert len(gh.calls) == 1
+
+
+def test_receipt_terminal_state_refuses_reentry_after_restart(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+        )()
+    )[0]
+
+    first = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+    assert first.results[0].status == "failed"
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "failed"
+
+    restarted = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+    assert restarted.results[0].status == "skipped"
+    assert restarted.results[0].reasons == ("receipt is not processable",)
 
 
 def test_hostile_item_bundle_path_transport_gadget_is_rejected_never_reaches_git():

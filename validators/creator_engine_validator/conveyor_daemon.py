@@ -28,6 +28,7 @@ from .conveyor import (
     validation_sandbox_spec_from_command,
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
+from .conveyor_discovery import HandledSignalReceipt, ReceiptDiscoveryPayload
 from .daemon_lease import DaemonLease
 from .checks.path_manifest_fidelity import branch_slug, extract_manifest_paths_from_file
 from .forge.daemon_allocation import (
@@ -151,6 +152,7 @@ class ConveyorDaemonItem:
     pr_base: str | None = None
     identity: str | None = None
     allocation_receipt: DaemonPathReceipt | None = None
+    receipt: HandledSignalReceipt | None = None
 
     @classmethod
     def from_mapping(
@@ -164,6 +166,7 @@ class ConveyorDaemonItem:
         # control fields such as validate_command/base/remote or local paths
         # are audited by the shared schema and never reach item construction.
         parsed = validate_discovery_payload(payload, audit_sink=audit_sink, source="conveyor_daemon")
+        receipt = payload.receipt if isinstance(payload, ReceiptDiscoveryPayload) else None
         return cls(
             branch=parsed.branch_name,
             issue=parsed.issue,
@@ -174,10 +177,13 @@ class ConveyorDaemonItem:
             declared_work_class="story",
             pr_title=parsed.pr_title,
             pr_body=parsed.pr_body,
+            receipt=receipt,
         )
 
     @property
     def key(self) -> str:
+        if self.receipt is not None:
+            return f"{self.receipt.seat_id}:{self.receipt.branch}:{self.receipt.sha}"
         return self.identity or branch_slug(self.branch)
 
     def harvest_spec(
@@ -470,7 +476,44 @@ class ConveyorDaemon:
                 )
                 self._log(f"conveyor dry-run plan {item.branch}: {', '.join(PLAN_ACTIONS)}")
             else:
+                if item.receipt is not None:
+                    try:
+                        claimed = item.receipt.claim()
+                    except ValueError as exc:
+                        results.append(
+                            self._failed(item, (f"receipt state refused: {exc}",))
+                        )
+                        continue
+                    if not claimed:
+                        results.append(
+                            ConveyorDaemonItemResult(
+                                status="skipped",
+                                branch=item.branch,
+                                key=item.key,
+                                reasons=("receipt is not processable",),
+                            )
+                        )
+                        continue
                 result = self._process_armed(item)
+                if item.receipt is not None:
+                    terminal_state = "pr_opened" if result.status == "pr-opened" else (
+                        "uncertain" if any(reason.startswith("exception:") for reason in result.reasons) else "failed"
+                    )
+                    try:
+                        completed = item.receipt.complete(terminal_state)
+                    except ValueError as exc:
+                        completed = False
+                        completion_reason = f"receipt completion refused: {exc}"
+                    else:
+                        completion_reason = "receipt completion refused"
+                    if not completed:
+                        result = self._failed(
+                            item,
+                            (*result.reasons, completion_reason),
+                            prepare_result=result.prepare_result,
+                            landing_result=result.landing_result,
+                            ledger_records=result.ledger_records,
+                        )
                 if result.status == "pr-opened":
                     self._completed_keys.add(item.key)
             results.append(result)
