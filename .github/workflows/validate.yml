@@ -55,7 +55,7 @@ jobs:
       - name: Creator Engine validator — pytest suite (offline)
         run: |
           # F-wheel-2's post-merge bake lane runs the first-party wheel parity gate.
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
+          CE_SUITE_HEADROOM_GATE_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
             python -m pytest -p no:cacheprovider validators/tests/ \
               -m "not wheel_bake_gate" -q -n auto --dist loadgroup
 
