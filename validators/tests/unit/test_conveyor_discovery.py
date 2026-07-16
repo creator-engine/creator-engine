@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -141,7 +142,7 @@ def test_last_signal_wins_per_branch():
     )
 
 
-def test_runner_dedupes_across_runs_and_writes_atomic_state(tmp_path):
+def test_runner_receipts_are_versioned_and_only_one_duplicate_is_processable(tmp_path):
     state_path = tmp_path / "processed.json"
     spec = SeatProbeSpec("seat-1", ("probe", "seat-1"))
     pane_text = f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}"
@@ -153,25 +154,29 @@ def test_runner_dedupes_across_runs_and_writes_atomic_state(tmp_path):
     )
 
     first = list(runner())
+    assert first[0].receipt.claim() is True
     second = list(runner())
 
     assert len(first) == 1
-    assert second == []
+    assert len(second) == 1
+    assert second[0].receipt.claim() is False
     assert first[0]["branch_name"] == "ce-388-conveyor-discovery"
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state == {
-        "processed": [
+        "receipts": [
             {
                 "seat_id": "seat-1",
                 "branch": "ce-388-conveyor-discovery",
                 "sha": SHA_ONE,
+                "state": "processing",
             }
-        ]
+        ],
+        "version": 1,
     }
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_corrupt_state_recovers_and_is_rewritten(tmp_path):
+def test_corrupt_receipt_state_is_preserved_and_refused(tmp_path):
     state_path = tmp_path / "processed.json"
     state_path.write_text("{not json", encoding="utf-8")
     audit: list[dict] = []
@@ -184,9 +189,51 @@ def test_corrupt_state_recovers_and_is_rewritten(tmp_path):
 
     payloads = list(runner())
 
-    assert len(payloads) == 1
-    assert any(record["reason"] == "corrupt_state" for record in audit)
-    assert json.loads(state_path.read_text(encoding="utf-8"))["processed"][0]["sha"] == SHA_ONE
+    assert payloads == []
+    assert any(record["reason"] == "corrupt_receipt_state" for record in audit)
+    assert state_path.read_text(encoding="utf-8") == "{not json"
+
+
+def test_receipt_transitions_are_monotonic_and_new_sha_is_separate(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    runner = ConveyorSeatDiscoveryRunner(
+        [SeatProbeSpec("seat-1", ("probe",))],
+        state_path,
+        probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+    )
+    first = list(runner())[0].receipt
+    assert first.claim() is True
+    assert first.complete("failed") is True
+    assert first.claim() is False
+    assert first.complete("pr_opened") is False
+
+    next_runner = ConveyorSeatDiscoveryRunner(
+        [SeatProbeSpec("seat-1", ("probe",))],
+        state_path,
+        probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_TWO}",
+    )
+    second = list(next_runner())[0].receipt
+    assert second.claim() is True
+    assert second.complete("uncertain") is True
+    assert {(entry["sha"], entry["state"]) for entry in json.loads(state_path.read_text())["receipts"]} == {
+        (SHA_ONE, "failed"),
+        (SHA_TWO, "uncertain"),
+    }
+
+
+def test_concurrent_claims_have_one_winner_and_atomic_json(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    runner = ConveyorSeatDiscoveryRunner(
+        [SeatProbeSpec("seat-1", ("probe",))],
+        state_path,
+        probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+    )
+    receipt = list(runner())[0].receipt
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims = list(pool.map(lambda _ignored: receipt.claim(), range(2)))
+
+    assert claims.count(True) == 1
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "processing"
 
 
 def test_emitted_payload_passes_schema_and_daemon_mapping(tmp_path):

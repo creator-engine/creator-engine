@@ -7,7 +7,9 @@ import os
 import re
 import subprocess
 import tempfile
+import fcntl
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,9 @@ ProbeRunner = Callable[[Sequence[str]], str]
 
 READY_TOKEN = "READY-FOR-HARVEST"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+RECEIPT_VERSION = 1
+RECEIPT_STATES = frozenset({"observed", "processing", "pr_opened", "failed", "uncertain"})
+RECEIPT_TERMINAL_STATES = frozenset({"pr_opened", "failed", "uncertain"})
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 DIFF_ECHO_PATTERN = re.compile(r"^\s*(?:\d+\s*[: ]?\s*)?\+\s*READY-FOR-HARVEST\b")
 SIGNAL_PREFIX_PATTERN = re.compile(r"^\s*(?:[•\-*>]\s*)?READY-FOR-HARVEST\b")
@@ -47,6 +52,30 @@ class ReadyForHarvestSignal:
     tag: str | None = None
 
 
+@dataclass(frozen=True)
+class HandledSignalReceipt:
+    """Reference to one locally persisted, outcome-bound discovery signal."""
+
+    state_path: Path
+    seat_id: str
+    branch: str
+    sha: str
+
+    def claim(self) -> bool:
+        return _receipt_ledger(self.state_path).claim(self)
+
+    def complete(self, state: str) -> bool:
+        return _receipt_ledger(self.state_path).complete(self, state)
+
+
+class ReceiptDiscoveryPayload(dict[str, str]):
+    """Schema-shaped discovery data carrying a non-serialised local receipt."""
+
+    def __init__(self, payload: Mapping[str, str], receipt: HandledSignalReceipt) -> None:
+        super().__init__(payload)
+        self.receipt = receipt
+
+
 class ConveyorSeatDiscoveryRunner:
     """DiscoveryRunner-compatible callable for live seat pane probes."""
 
@@ -64,8 +93,8 @@ class ConveyorSeatDiscoveryRunner:
         self.audit_sink = audit_sink
 
     def __call__(self) -> Iterable[Mapping[str, str]]:
-        processed = _load_processed_state(self.state_path, self.audit_sink)
-        updated = set(processed)
+        ledger = _receipt_ledger(self.state_path, self.audit_sink)
+        emitted: set[tuple[str, str, str]] = set()
         payloads: list[Mapping[str, str]] = []
 
         for spec in self.specs:
@@ -87,7 +116,7 @@ class ConveyorSeatDiscoveryRunner:
             )
             for signal in signals:
                 key = (spec.seat_id, signal.branch, signal.sha)
-                if key in updated:
+                if key in emitted:
                     continue
 
                 payload = payload_for_signal(signal, seat_id=spec.seat_id)
@@ -100,11 +129,18 @@ class ConveyorSeatDiscoveryRunner:
                 except DiscoveryPayloadRejected:
                     continue
 
-                payloads.append(payload)
-                updated.add(key)
-
-        if updated != processed:
-            _write_processed_state(self.state_path, updated)
+                try:
+                    receipt = ledger.observe(*key)
+                except ValueError as exc:
+                    _emit_audit(
+                        self.audit_sink,
+                        "corrupt_receipt_state",
+                        state_path=str(self.state_path),
+                        detail=str(exc),
+                    )
+                    return tuple(payloads)
+                payloads.append(ReceiptDiscoveryPayload(payload, receipt))
+                emitted.add(key)
 
         return tuple(payloads)
 
@@ -245,71 +281,123 @@ def _tag_on_sha_line(text: str, offset: int) -> str | None:
     return remainder.split(maxsplit=1)[0]
 
 
-def _load_processed_state(
-    state_path: Path,
-    audit_sink: AuditSink | None,
-) -> set[tuple[str, str, str]]:
-    if not state_path.exists():
-        _emit_audit(audit_sink, "state_missing", state_path=str(state_path))
-        return set()
+class _SignalReceiptLedger:
+    """Versioned local receipt store, serialised by an adjacent advisory lock."""
 
-    try:
-        data = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        _emit_audit(
-            audit_sink,
-            "corrupt_state",
-            state_path=str(state_path),
-            detail=type(exc).__name__,
-        )
-        return set()
+    def __init__(self, state_path: Path, audit_sink: AuditSink | None = None) -> None:
+        self.state_path = state_path
+        self.audit_sink = audit_sink
 
-    try:
-        return _processed_entries(data)
-    except ValueError as exc:
-        _emit_audit(
-            audit_sink,
-            "corrupt_state",
-            state_path=str(state_path),
-            detail=str(exc),
-        )
-        return set()
+    def observe(self, seat_id: str, branch: str, sha: str) -> HandledSignalReceipt:
+        receipt = HandledSignalReceipt(self.state_path, seat_id, branch, sha)
+        with _locked_receipt_state(self.state_path) as state:
+            entries = _receipt_entries(state)
+            if _find_receipt(entries, receipt) is None:
+                entries.append(_receipt_record(receipt, "observed"))
+                _write_receipt_state(self.state_path, entries)
+        return receipt
 
+    def claim(self, receipt: HandledSignalReceipt) -> bool:
+        with _locked_receipt_state(self.state_path) as state:
+            entries = _receipt_entries(state)
+            entry = _find_receipt(entries, receipt)
+            if entry is None or entry["state"] != "observed":
+                return False
+            entry["state"] = "processing"
+            _write_receipt_state(self.state_path, entries)
+            return True
 
-def _processed_entries(data: Any) -> set[tuple[str, str, str]]:
-    if not isinstance(data, Mapping):
-        raise ValueError("state_not_mapping")
-    processed = data.get("processed", [])
-    if not isinstance(processed, list):
-        raise ValueError("processed_not_list")
-
-    entries: set[tuple[str, str, str]] = set()
-    for item in processed:
-        if not isinstance(item, Mapping):
-            raise ValueError("processed_entry_not_mapping")
-        seat_id = item.get("seat_id")
-        branch = item.get("branch")
-        sha = item.get("sha")
-        if not all(isinstance(value, str) for value in (seat_id, branch, sha)):
-            raise ValueError("processed_entry_not_strings")
-        entries.add((seat_id, branch, sha))
-    return entries
+    def complete(self, receipt: HandledSignalReceipt, state: str) -> bool:
+        if state not in RECEIPT_TERMINAL_STATES:
+            raise ValueError("receipt_completion_must_be_terminal")
+        with _locked_receipt_state(self.state_path) as data:
+            entries = _receipt_entries(data)
+            entry = _find_receipt(entries, receipt)
+            if entry is None or entry["state"] != "processing":
+                return False
+            entry["state"] = state
+            _write_receipt_state(self.state_path, entries)
+            return True
 
 
-def _write_processed_state(state_path: Path, processed: set[tuple[str, str, str]]) -> None:
+def _receipt_ledger(state_path: Path, audit_sink: AuditSink | None = None) -> _SignalReceiptLedger:
+    return _SignalReceiptLedger(state_path, audit_sink)
+
+
+@contextmanager
+def _locked_receipt_state(state_path: Path) -> Iterable[Mapping[str, Any]]:
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "processed": [
-            {"seat_id": seat_id, "branch": branch, "sha": sha}
-            for seat_id, branch, sha in sorted(processed)
-        ]
+    lock_path = state_path.with_name(f".{state_path.name}.lock")
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            if not state_path.exists():
+                yield {"version": RECEIPT_VERSION, "receipts": []}
+                return
+            try:
+                raw = state_path.read_text(encoding="utf-8")
+                data = json.loads(raw)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"receipt_state_unreadable:{type(exc).__name__}") from exc
+            yield data
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, str]]:
+    if not isinstance(data, Mapping):
+        raise ValueError("receipt_state_not_mapping")
+    version = data.get("version")
+    receipts = data.get("receipts")
+    if version != RECEIPT_VERSION or not isinstance(receipts, list):
+        raise ValueError("receipt_state_schema_invalid")
+    parsed: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in receipts:
+        if not isinstance(item, Mapping):
+            raise ValueError("receipt_not_mapping")
+        seat_id, branch, sha, state = (item.get(name) for name in ("seat_id", "branch", "sha", "state"))
+        if not all(isinstance(value, str) for value in (seat_id, branch, sha, state)):
+            raise ValueError("receipt_fields_not_strings")
+        if not seat_id or not branch or SHA_PATTERN.fullmatch(sha) is None or state not in RECEIPT_STATES:
+            raise ValueError("receipt_fields_invalid")
+        key = (seat_id, branch, sha)
+        if key in seen:
+            raise ValueError("receipt_key_duplicate")
+        seen.add(key)
+        parsed.append({"seat_id": seat_id, "branch": branch, "sha": sha, "state": state})
+    return parsed
+
+
+def _find_receipt(
+    entries: list[dict[str, str]], receipt: HandledSignalReceipt
+) -> dict[str, str] | None:
+    for entry in entries:
+        if (entry["seat_id"], entry["branch"], entry["sha"]) == (
+            receipt.seat_id,
+            receipt.branch,
+            receipt.sha,
+        ):
+            return entry
+    return None
+
+
+def _receipt_record(receipt: HandledSignalReceipt, state: str) -> dict[str, str]:
+    return {
+        "seat_id": receipt.seat_id,
+        "branch": receipt.branch,
+        "sha": receipt.sha,
+        "state": state,
     }
 
+
+def _write_receipt_state(state_path: Path, receipts: list[dict[str, str]]) -> None:
+    payload = {
+        "receipts": sorted(receipts, key=lambda item: (item["seat_id"], item["branch"], item["sha"])),
+        "version": RECEIPT_VERSION,
+    }
     fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{state_path.name}.",
-        suffix=".tmp",
-        dir=str(state_path.parent),
-        text=True,
+        prefix=f".{state_path.name}.", suffix=".tmp", dir=str(state_path.parent), text=True
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
