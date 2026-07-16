@@ -1,9 +1,8 @@
-"""Policy-bound, pure-plan-first ``ce worker launch`` Codex one-shot launcher.
+"""Fail-closed, policy-bound ``ce worker launch`` Codex one-shot launcher.
 
-The module intentionally contains no ambient-Codex lookup, host configuration
-read, container operation, or prompt persistence.  It first creates an
-immutable plan from the checked-in policy and only a caller that explicitly
-uses :func:`launch` reaches an injectable runner.
+The only production policy source is the canonical tracked policy inside the
+allocated worktree.  Prompt bodies never enter a plan: exact canonical role
+policy bytes and SHA-256-verified brief bytes are framed only for runner stdin.
 """
 from __future__ import annotations
 
@@ -19,61 +18,166 @@ from typing import Any, Protocol, Sequence
 import yaml
 
 
+CANONICAL_POLICY_RELATIVE_PATH = "governance/policies/codex-one-shot-launch-v1.yaml"
+CANONICAL_BRIEF_AREA = ".ce/briefs"
+CANONICAL_ROLE_AREA = ".claude/agents"
 POLICY_REQUIRED_KEYS = frozenset(
     {
         "kind",
         "schema_version",
         "policy_id",
         "version",
-        "codex_binary_template",
         "supported_roles",
         "venues",
         "model_defaults",
         "canonical_add_dirs",
     }
 )
+VENUE_REQUIRED_KEYS = frozenset(
+    {"codex_binary_template", "outer_isolation_attestation", "role_sandboxes"}
+)
 POLICY_KIND = "codex-one-shot-launch-policy"
 POLICY_SCHEMA_VERSION = "1"
+ALLOWED_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
 _RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
+_ROLE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 
 
 class CodexWorkerLaunchError(ValueError):
-    """A policy or caller input was refused before runner invocation."""
+    """A policy, filesystem, deployment, or caller input was refused."""
+
+
+class LauncherFilesystem(Protocol):
+    def realpath(self, path: str) -> str: ...
+    def lexists(self, path: str) -> bool: ...
+    def is_dir(self, path: str) -> bool: ...
+    def is_file(self, path: str) -> bool: ...
+    def is_readable(self, path: str) -> bool: ...
+    def is_executable(self, path: str) -> bool: ...
+    def read_bytes(self, path: str) -> bytes: ...
+
+
+class RealLauncherFilesystem:
+    """Small injectable filesystem seam used by every preflight check."""
+
+    def realpath(self, path: str) -> str:
+        return os.path.realpath(path)
+
+    def lexists(self, path: str) -> bool:
+        return os.path.lexists(path)
+
+    def is_dir(self, path: str) -> bool:
+        return os.path.isdir(path)
+
+    def is_file(self, path: str) -> bool:
+        return os.path.isfile(path)
+
+    def is_readable(self, path: str) -> bool:
+        return os.access(path, os.R_OK)
+
+    def is_executable(self, path: str) -> bool:
+        return os.access(path, os.X_OK)
+
+    def read_bytes(self, path: str) -> bytes:
+        with open(path, "rb") as handle:
+            return handle.read()
+
+
+class CodexVersionProbe(Protocol):
+    def probe(self, binary: str) -> str: ...
+
+
+class SubprocessCodexVersionProbe:
+    """Probe the already-preflighted absolute executable, never ambient PATH."""
+
+    def probe(self, binary: str) -> str:
+        try:
+            completed = subprocess.run(
+                [binary, "--version"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            raise CodexWorkerLaunchError("Codex version probe could not execute pinned binary") from exc
+        if completed.returncode != 0:
+            raise CodexWorkerLaunchError("Codex version probe failed")
+        output = f"{completed.stdout}\n{completed.stderr}"
+        match = re.search(r"(?<![0-9A-Za-z.])([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)", output)
+        if match is None:
+            raise CodexWorkerLaunchError("Codex version probe returned no parseable version")
+        return match.group(1)
+
+
+@dataclass(frozen=True)
+class VenuePolicy:
+    name: str
+    codex_binary_template: str
+    outer_isolation_attestation: str | None
+    role_sandboxes: tuple[tuple[str, str | None], ...]
+
+    def sandbox_for(self, role: str) -> str:
+        for candidate, sandbox in self.role_sandboxes:
+            if candidate != role:
+                continue
+            if sandbox is None:
+                raise CodexWorkerLaunchError(
+                    f"role {role} at venue {self.name} is not attested for required isolation"
+                )
+            return sandbox
+        raise CodexWorkerLaunchError(f"role {role} has no venue matrix entry for {self.name}")
 
 
 @dataclass(frozen=True)
 class CodexOneShotPolicy:
     policy_id: str
     version: str
-    codex_binary_template: str
     supported_roles: tuple[str, ...]
-    venues: tuple[tuple[str, str], ...]
+    venues: tuple[VenuePolicy, ...]
     model: str
     effort: str
     canonical_add_dirs: tuple[str, ...]
-
-    def sandbox_for(self, venue: str) -> str:
-        for candidate, sandbox in self.venues:
-            if candidate == venue:
-                return sandbox
-        raise CodexWorkerLaunchError(f"unknown venue: {venue}")
+    worktree: str
+    source_path: str
+    source_sha256: str
 
     @property
-    def pinned_binary(self) -> str:
-        try:
-            value = self.codex_binary_template.format(version=self.version)
-        except (KeyError, ValueError) as exc:
-            raise CodexWorkerLaunchError("invalid codex_binary_template") from exc
-        if not PurePath(value).is_absolute():
-            raise CodexWorkerLaunchError("policy Codex binary must be absolute")
-        return value
+    def venue_names(self) -> tuple[str, ...]:
+        return tuple(venue.name for venue in self.venues)
+
+    def venue(self, name: str) -> VenuePolicy:
+        for venue in self.venues:
+            if venue.name == name:
+                return venue
+        raise CodexWorkerLaunchError(f"unknown venue: {name}")
+
+    def sandbox_for(self, *, role: str, venue: str) -> str:
+        return self.venue(venue).sandbox_for(role)
+
+
+@dataclass(frozen=True)
+class GovernedWorkerInput:
+    role: str
+    role_policy_path: str
+    role_policy_sha256: str
+    brief_path: str
+    brief_sha256: str
+    stdin: bytes
 
 
 @dataclass(frozen=True)
 class CodexWorkerLaunchPlan:
     policy_id: str
     policy_version: str
+    policy_path: str
+    policy_sha256: str
     role: str
+    role_policy_path: str
+    role_policy_sha256: str
+    brief_path: str
+    brief_sha256: str
     venue: str
     sandbox: str
     model: str
@@ -87,7 +191,13 @@ class CodexWorkerLaunchPlan:
         return {
             "policy_id": self.policy_id,
             "policy_version": self.policy_version,
+            "policy_path": self.policy_path,
+            "policy_sha256": self.policy_sha256,
             "role": self.role,
+            "role_policy_path": self.role_policy_path,
+            "role_policy_sha256": self.role_policy_sha256,
+            "brief_path": self.brief_path,
+            "brief_sha256": self.brief_sha256,
             "venue": self.venue,
             "sandbox": self.sandbox,
             "model": self.model,
@@ -100,15 +210,13 @@ class CodexWorkerLaunchPlan:
 
 
 class CodexOneShotRunner(Protocol):
-    def run(self, argv: Sequence[str], *, stdin: str) -> int:
-        """Run a governed plan. Implementations must not alter ``argv``."""
+    def run(self, argv: Sequence[str], *, stdin: bytes) -> int:
+        """Run a governed plan without altering argv or verified stdin bytes."""
 
 
 class SubprocessCodexOneShotRunner:
-    """The explicit execution seam; never used by planning or dry-runs."""
-
-    def run(self, argv: Sequence[str], *, stdin: str) -> int:
-        completed = subprocess.run(list(argv), input=stdin, text=True, check=False)
+    def run(self, argv: Sequence[str], *, stdin: bytes) -> int:
+        completed = subprocess.run(list(argv), input=stdin, text=False, check=False)
         return completed.returncode
 
 
@@ -119,54 +227,14 @@ def _require_string(value: Any, field: str) -> str:
 
 
 def _require_string_list(value: Any, field: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value or any(not isinstance(item, str) or not item.strip() for item in value):
+    if not isinstance(value, list) or not value or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
         raise CodexWorkerLaunchError(f"policy {field} must be a nonempty string list")
     values = tuple(item.strip() for item in value)
     if len(set(values)) != len(values):
         raise CodexWorkerLaunchError(f"policy {field} must not contain duplicates")
     return values
-
-
-def load_policy(path: str | os.PathLike[str]) -> CodexOneShotPolicy:
-    """Load a strict checked-in policy; unknown keys fail closed."""
-    try:
-        raw = yaml.safe_load(open(path, encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise CodexWorkerLaunchError(f"cannot load launcher policy: {path}") from exc
-    if not isinstance(raw, dict) or set(raw) != POLICY_REQUIRED_KEYS:
-        raise CodexWorkerLaunchError("policy keys must exactly match the v1 schema")
-    if raw["kind"] != POLICY_KIND or raw["schema_version"] != POLICY_SCHEMA_VERSION:
-        raise CodexWorkerLaunchError("unsupported launcher policy kind or schema_version")
-    venues = raw["venues"]
-    if not isinstance(venues, dict) or not venues:
-        raise CodexWorkerLaunchError("policy venues must be a nonempty mapping")
-    venue_items: list[tuple[str, str]] = []
-    for venue, sandbox in venues.items():
-        venue_items.append((_require_string(venue, "venue"), _require_string(sandbox, "venue sandbox")))
-    if len({venue for venue, _ in venue_items}) != len(venue_items):
-        raise CodexWorkerLaunchError("policy venues must not contain duplicates")
-    defaults = raw["model_defaults"]
-    if not isinstance(defaults, dict) or set(defaults) != {"model", "effort"}:
-        raise CodexWorkerLaunchError("policy model_defaults must contain only model and effort")
-    policy = CodexOneShotPolicy(
-        policy_id=_require_string(raw["policy_id"], "policy_id"),
-        version=_require_string(raw["version"], "version"),
-        codex_binary_template=_require_string(raw["codex_binary_template"], "codex_binary_template"),
-        supported_roles=_require_string_list(raw["supported_roles"], "supported_roles"),
-        venues=tuple(venue_items),
-        model=_require_string(defaults["model"], "model_defaults.model"),
-        effort=_require_string(defaults["effort"], "model_defaults.effort"),
-        canonical_add_dirs=_require_string_list(raw["canonical_add_dirs"], "canonical_add_dirs"),
-    )
-    # Validate this now, before a caller has a chance to reach a runner.
-    policy.pinned_binary
-    return policy
-
-
-def _normal_absolute(path: str, *, field: str) -> str:
-    if not path or not PurePath(path).is_absolute():
-        raise CodexWorkerLaunchError(f"{field} must be an absolute path")
-    return os.path.normpath(path)
 
 
 def _inside(path: str, root: str) -> bool:
@@ -176,84 +244,337 @@ def _inside(path: str, root: str) -> bool:
         return False
 
 
-def _canonical_add_dirs(policy: CodexOneShotPolicy, worktree: str) -> tuple[str, ...]:
+def _lexical_absolute(path: str, *, field: str) -> str:
+    pure = PurePath(path)
+    if not path or not pure.is_absolute():
+        raise CodexWorkerLaunchError(f"{field} must be an absolute path")
+    if ".." in pure.parts:
+        raise CodexWorkerLaunchError(f"{field} must not contain '..'")
+    return os.path.normpath(path)
+
+
+def _real_directory(path: str, *, field: str, filesystem: LauncherFilesystem) -> str:
+    normalized = _lexical_absolute(path, field=field)
+    resolved = filesystem.realpath(normalized)
+    if resolved != normalized:
+        raise CodexWorkerLaunchError(f"{field} must be a real directory, not a symlink")
+    if not filesystem.is_dir(resolved):
+        raise CodexWorkerLaunchError(f"{field} must be an existing real directory")
+    return resolved
+
+
+def _read_contained_regular_file(
+    path: str,
+    *,
+    root: str,
+    field: str,
+    filesystem: LauncherFilesystem,
+) -> tuple[str, bytes]:
+    normalized = _lexical_absolute(path, field=field)
+    resolved = filesystem.realpath(normalized)
+    if resolved != normalized:
+        raise CodexWorkerLaunchError(f"{field} must not be a symlink")
+    if not _inside(resolved, root) or resolved == root:
+        raise CodexWorkerLaunchError(f"{field} escapes its canonical area")
+    if not filesystem.is_file(resolved) or not filesystem.is_readable(resolved):
+        raise CodexWorkerLaunchError(f"{field} must be a regular readable file")
+    try:
+        payload = filesystem.read_bytes(resolved)
+    except OSError as exc:
+        raise CodexWorkerLaunchError(f"{field} cannot be read") from exc
+    return resolved, payload
+
+
+def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> CodexOneShotPolicy:
+    try:
+        raw = yaml.safe_load(raw_bytes)
+    except yaml.YAMLError as exc:
+        raise CodexWorkerLaunchError("cannot parse canonical launcher policy") from exc
+    if not isinstance(raw, dict) or set(raw) != POLICY_REQUIRED_KEYS:
+        raise CodexWorkerLaunchError("policy keys must exactly match the v1 schema")
+    if raw["kind"] != POLICY_KIND or raw["schema_version"] != POLICY_SCHEMA_VERSION:
+        raise CodexWorkerLaunchError("unsupported launcher policy kind or schema_version")
+    version = _require_string(raw["version"], "version")
+    if not _VERSION_RE.fullmatch(version):
+        raise CodexWorkerLaunchError("policy version must be a Codex deployment version")
+    roles = _require_string_list(raw["supported_roles"], "supported_roles")
+    if any(not _ROLE_RE.fullmatch(role) for role in roles):
+        raise CodexWorkerLaunchError("policy supported_roles contains an invalid role name")
+    raw_venues = raw["venues"]
+    if not isinstance(raw_venues, dict) or not raw_venues:
+        raise CodexWorkerLaunchError("policy venues must be a nonempty mapping")
+    venues: list[VenuePolicy] = []
+    for raw_name, raw_venue in raw_venues.items():
+        name = _require_string(raw_name, "venue")
+        if not isinstance(raw_venue, dict) or set(raw_venue) != VENUE_REQUIRED_KEYS:
+            raise CodexWorkerLaunchError(f"policy venue {name} keys must exactly match the v1 schema")
+        template = _require_string(raw_venue["codex_binary_template"], f"venues.{name}.codex_binary_template")
+        if template.count("{version}") != 1:
+            raise CodexWorkerLaunchError(f"policy venue {name} binary template must contain one version placeholder")
+        try:
+            rendered = template.format(version=version)
+        except (KeyError, ValueError) as exc:
+            raise CodexWorkerLaunchError(f"policy venue {name} has an invalid binary template") from exc
+        if not PurePath(rendered).is_absolute() or ".." in PurePath(rendered).parts:
+            raise CodexWorkerLaunchError(f"policy venue {name} Codex binary must be absolute and nonescaping")
+        attestation = raw_venue["outer_isolation_attestation"]
+        if attestation is not None:
+            attestation = _require_string(attestation, f"venues.{name}.outer_isolation_attestation")
+        matrix = raw_venue["role_sandboxes"]
+        if not isinstance(matrix, dict) or set(matrix) != set(roles):
+            raise CodexWorkerLaunchError(f"policy venue {name} must define every supported role exactly once")
+        role_sandboxes: list[tuple[str, str | None]] = []
+        for role in roles:
+            sandbox = matrix[role]
+            if sandbox is not None:
+                sandbox = _require_string(sandbox, f"venues.{name}.role_sandboxes.{role}")
+                if sandbox not in ALLOWED_SANDBOXES:
+                    raise CodexWorkerLaunchError(f"policy venue {name} has unsupported sandbox {sandbox}")
+                if sandbox == "danger-full-access" and not attestation:
+                    raise CodexWorkerLaunchError(
+                        f"policy venue {name} danger-full-access requires outer isolation attestation"
+                    )
+                if role != "implementer" and sandbox == "danger-full-access":
+                    raise CodexWorkerLaunchError("read-only roles may not receive danger-full-access")
+                if role == "implementer" and sandbox == "read-only":
+                    raise CodexWorkerLaunchError("implementer may not receive an unusable read-only sandbox")
+            role_sandboxes.append((role, sandbox))
+        venues.append(VenuePolicy(name, template, attestation, tuple(role_sandboxes)))
+    defaults = raw["model_defaults"]
+    if not isinstance(defaults, dict) or set(defaults) != {"model", "effort"}:
+        raise CodexWorkerLaunchError("policy model_defaults must contain only model and effort")
+    return CodexOneShotPolicy(
+        policy_id=_require_string(raw["policy_id"], "policy_id"),
+        version=version,
+        supported_roles=roles,
+        venues=tuple(venues),
+        model=_require_string(defaults["model"], "model_defaults.model"),
+        effort=_require_string(defaults["effort"], "model_defaults.effort"),
+        canonical_add_dirs=_require_string_list(raw["canonical_add_dirs"], "canonical_add_dirs"),
+        worktree=worktree,
+        source_path=source_path,
+        source_sha256=hashlib.sha256(raw_bytes).hexdigest(),
+    )
+
+
+def load_canonical_policy(
+    worktree: str | os.PathLike[str],
+    *,
+    filesystem: LauncherFilesystem | None = None,
+) -> CodexOneShotPolicy:
+    """Load exactly the canonical tracked policy from the allocated worktree."""
+    fs = filesystem or RealLauncherFilesystem()
+    root = _real_directory(os.fspath(worktree), field="worktree", filesystem=fs)
+    policy_root = _real_directory(
+        os.path.join(root, "governance", "policies"),
+        field="canonical launcher policy area",
+        filesystem=fs,
+    )
+    path, raw = _read_contained_regular_file(
+        os.path.join(root, CANONICAL_POLICY_RELATIVE_PATH),
+        root=policy_root,
+        field="canonical launcher policy",
+        filesystem=fs,
+    )
+    return _parse_policy(raw, worktree=root, source_path=path)
+
+
+def load_governed_worker_input(
+    *,
+    worktree: str,
+    role: str,
+    brief_path: str,
+    brief_sha256: str,
+    filesystem: LauncherFilesystem | None = None,
+) -> GovernedWorkerInput:
+    """Read canonical role policy and verified brief exactly once and frame bytes."""
+    fs = filesystem or RealLauncherFilesystem()
+    root = _real_directory(worktree, field="worktree", filesystem=fs)
+    if not _ROLE_RE.fullmatch(role):
+        raise CodexWorkerLaunchError("role must be a canonical role name")
+    if not _SHA256_RE.fullmatch(brief_sha256):
+        raise CodexWorkerLaunchError("brief SHA-256 must be exactly 64 lowercase hex characters")
+    role_root = _real_directory(
+        os.path.join(root, CANONICAL_ROLE_AREA),
+        field="canonical role policy area",
+        filesystem=fs,
+    )
+    role_path, role_bytes = _read_contained_regular_file(
+        os.path.join(role_root, f"{role}.md"),
+        root=role_root,
+        field="canonical role policy",
+        filesystem=fs,
+    )
+    brief_root = _real_directory(
+        os.path.join(root, CANONICAL_BRIEF_AREA),
+        field="governed brief area",
+        filesystem=fs,
+    )
+    if PurePath(brief_path).is_absolute():
+        candidate = brief_path
+    else:
+        if ".." in PurePath(brief_path).parts:
+            raise CodexWorkerLaunchError("governed brief escapes its canonical area")
+        candidate = os.path.join(root, brief_path)
+    brief_resolved, brief_bytes = _read_contained_regular_file(
+        candidate,
+        root=brief_root,
+        field="governed brief",
+        filesystem=fs,
+    )
+    actual_brief_sha256 = hashlib.sha256(brief_bytes).hexdigest()
+    if actual_brief_sha256 != brief_sha256:
+        raise CodexWorkerLaunchError("brief SHA-256 mismatch")
+    role_sha256 = hashlib.sha256(role_bytes).hexdigest()
+    header = (
+        "CE-GOVERNED-CODEX-WORKER-PROMPT-V1\n"
+        f"ROLE-SHA256 {role_sha256}\n"
+        f"ROLE-BYTES {len(role_bytes)}\n"
+        f"BRIEF-SHA256 {actual_brief_sha256}\n"
+        f"BRIEF-BYTES {len(brief_bytes)}\n\n"
+    ).encode("ascii")
+    return GovernedWorkerInput(
+        role=role,
+        role_policy_path=role_path,
+        role_policy_sha256=role_sha256,
+        brief_path=brief_resolved,
+        brief_sha256=actual_brief_sha256,
+        stdin=header + role_bytes + brief_bytes,
+    )
+
+
+def _canonical_add_dirs(
+    policy: CodexOneShotPolicy,
+    worktree: str,
+    *,
+    filesystem: LauncherFilesystem,
+) -> tuple[str, ...]:
     directories: list[str] = []
     for relative in policy.canonical_add_dirs:
         if PurePath(relative).is_absolute() or ".." in PurePath(relative).parts:
             raise CodexWorkerLaunchError("policy canonical_add_dirs must be relative and nonescaping")
-        directory = os.path.normpath(os.path.join(worktree, relative))
-        if not _inside(directory, worktree) or directory == worktree:
+        candidate = os.path.normpath(os.path.join(worktree, relative))
+        if not _inside(candidate, worktree) or candidate == worktree:
             raise CodexWorkerLaunchError("policy canonical_add_dirs escapes the worktree")
-        directories.append(directory)
+        resolved = filesystem.realpath(candidate)
+        if resolved != candidate:
+            raise CodexWorkerLaunchError("canonical add-dir must not be a symlink")
+        if not filesystem.is_dir(resolved):
+            raise CodexWorkerLaunchError("canonical add-dir must be an existing real directory")
+        directories.append(resolved)
     return tuple(directories)
 
 
-def _derive_run_id(*, policy: CodexOneShotPolicy, role: str, venue: str, worktree: str, add_dirs: Sequence[str]) -> str:
+def _derive_run_id(
+    *, policy: CodexOneShotPolicy, role: str, venue: str, worktree: str, brief_sha256: str
+) -> str:
     seed = json.dumps(
         {
-            "policy_id": policy.policy_id,
-            "policy_version": policy.version,
+            "policy_sha256": policy.source_sha256,
             "role": role,
             "venue": venue,
             "worktree": worktree,
-            "add_dirs": list(add_dirs),
+            "brief_sha256": brief_sha256,
         },
         sort_keys=True,
         separators=(",", ":"),
     )
-    return "codex-one-shot-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+    return "codex-one-shot-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
+
+
+def _preflight_binary(
+    *,
+    policy: CodexOneShotPolicy,
+    venue: VenuePolicy,
+    filesystem: LauncherFilesystem,
+    version_probe: CodexVersionProbe,
+) -> str:
+    declared = _lexical_absolute(
+        venue.codex_binary_template.format(version=policy.version),
+        field=f"policy Codex binary for {venue.name}",
+    )
+    parts = PurePath(declared).parts
+    indexes = [index for index, part in enumerate(parts) if part == policy.version]
+    if len(indexes) != 1:
+        raise CodexWorkerLaunchError("policy Codex binary must live under its declared version root")
+    version_root = os.path.normpath(str(PurePath(*parts[: indexes[0] + 1])))
+    real_version_root = filesystem.realpath(version_root)
+    if real_version_root != version_root:
+        raise CodexWorkerLaunchError("Codex declared version root must not be a symlink")
+    resolved = filesystem.realpath(declared)
+    if not _inside(resolved, real_version_root) or resolved == real_version_root:
+        raise CodexWorkerLaunchError("Codex binary symlink escapes the declared version root")
+    if not filesystem.is_file(resolved) or not filesystem.is_executable(resolved):
+        raise CodexWorkerLaunchError("policy Codex binary must be an existing regular executable")
+    try:
+        actual_version = version_probe.probe(resolved)
+    except CodexWorkerLaunchError:
+        raise
+    except OSError as exc:
+        raise CodexWorkerLaunchError("Codex version probe failed") from exc
+    if actual_version != policy.version:
+        raise CodexWorkerLaunchError(
+            f"Codex version probe mismatch: expected {policy.version}, got {actual_version}"
+        )
+    return resolved
 
 
 def build_launch_plan(
     *,
     policy: CodexOneShotPolicy,
+    governed_input: GovernedWorkerInput,
     role: str,
     venue: str,
     worktree: str,
-    codex_binary: str | None = None,
-    add_dirs: Sequence[str] = (),
     run_id: str | None = None,
-    output: str | None = None,
-    caller_flags: Sequence[str] = (),
+    filesystem: LauncherFilesystem | None = None,
+    version_probe: CodexVersionProbe | None = None,
 ) -> CodexWorkerLaunchPlan:
-    """Build a deterministic plan and refuse every caller-controlled escape."""
-    if caller_flags:
-        raise CodexWorkerLaunchError("caller Codex flags are not permitted by the governed launcher")
+    """Build a deterministic digest/path-only plan after all preflights pass."""
+    fs = filesystem or RealLauncherFilesystem()
+    probe = version_probe or SubprocessCodexVersionProbe()
+    root = _real_directory(worktree, field="worktree", filesystem=fs)
+    if root != policy.worktree:
+        raise CodexWorkerLaunchError("policy does not belong to the allocated worktree")
     if role not in policy.supported_roles:
         raise CodexWorkerLaunchError(f"unknown role: {role}")
-    sandbox = policy.sandbox_for(venue)
-    normalized_worktree = _normal_absolute(worktree, field="worktree")
-    pinned_binary = policy.pinned_binary
-    supplied_binary = pinned_binary if codex_binary is None else _normal_absolute(codex_binary, field="Codex binary")
-    if supplied_binary != pinned_binary:
-        raise CodexWorkerLaunchError("Codex binary does not match the policy-pinned template")
-    canonical = _canonical_add_dirs(policy, normalized_worktree)
-    selected = canonical if not add_dirs else tuple(_normal_absolute(value, field="--add-dir") for value in add_dirs)
-    if len(set(selected)) != len(selected):
-        raise CodexWorkerLaunchError("duplicate --add-dir")
-    for directory in selected:
-        if not _inside(directory, normalized_worktree):
-            raise CodexWorkerLaunchError("--add-dir escapes the worktree")
-        if directory not in canonical:
-            raise CodexWorkerLaunchError("--add-dir is not in the policy canonical allowlist")
-    # Always order by the policy's canonical order, never caller order.
-    ordered_add_dirs = tuple(directory for directory in canonical if directory in selected)
+    if governed_input.role != role:
+        raise CodexWorkerLaunchError("governed role policy does not match requested role")
+    if not _inside(governed_input.role_policy_path, root) or not _inside(governed_input.brief_path, root):
+        raise CodexWorkerLaunchError("governed input does not belong to the allocated worktree")
+    venue_policy = policy.venue(venue)
+    sandbox = venue_policy.sandbox_for(role)
+    add_dirs = _canonical_add_dirs(policy, root, filesystem=fs)
+    state_root = _real_directory(
+        os.path.join(root, ".ce", "state"), field="worktree state root", filesystem=fs
+    )
+    binary = _preflight_binary(
+        policy=policy, venue=venue_policy, filesystem=fs, version_probe=probe
+    )
     chosen_run_id = run_id or _derive_run_id(
         policy=policy,
         role=role,
         venue=venue,
-        worktree=normalized_worktree,
-        add_dirs=ordered_add_dirs,
+        worktree=root,
+        brief_sha256=governed_input.brief_sha256,
     )
     if not _RUN_ID_RE.fullmatch(chosen_run_id):
         raise CodexWorkerLaunchError("run_id must be lowercase slug text")
-    expected_output = os.path.join(normalized_worktree, ".ce", "state", "codex-one-shot", f"{chosen_run_id}.json")
-    if output is not None and _normal_absolute(output, field="output") != expected_output:
-        raise CodexWorkerLaunchError("output must equal the deterministic governed output path")
+    output = os.path.join(state_root, f"{chosen_run_id}.json")
+    if not _inside(output, state_root):
+        raise CodexWorkerLaunchError("deterministic output escapes the real worktree state root")
+    if fs.realpath(output) != output:
+        raise CodexWorkerLaunchError("deterministic output must not be a symlink")
+    if fs.lexists(output) and not fs.is_file(output):
+        raise CodexWorkerLaunchError("deterministic output must be a regular file when it already exists")
     argv = [
-        pinned_binary,
+        binary,
         "exec",
         "--ephemeral",
+        "-m",
+        policy.model,
+        "-c",
+        f"model_reasoning_effort={policy.effort}",
         "-c",
         "features.multi_agent=false",
         "-c",
@@ -261,26 +582,45 @@ def build_launch_plan(
         "-s",
         sandbox,
         "-C",
-        normalized_worktree,
+        root,
     ]
-    for directory in ordered_add_dirs:
+    for directory in add_dirs:
         argv.extend(("--add-dir", directory))
-    argv.extend(("-o", expected_output, "-"))
+    argv.extend(("-o", output, "-"))
     return CodexWorkerLaunchPlan(
         policy_id=policy.policy_id,
         policy_version=policy.version,
+        policy_path=policy.source_path,
+        policy_sha256=policy.source_sha256,
         role=role,
+        role_policy_path=governed_input.role_policy_path,
+        role_policy_sha256=governed_input.role_policy_sha256,
+        brief_path=governed_input.brief_path,
+        brief_sha256=governed_input.brief_sha256,
         venue=venue,
         sandbox=sandbox,
         model=policy.model,
         effort=policy.effort,
-        worktree=normalized_worktree,
+        worktree=root,
         run_id=chosen_run_id,
-        output=expected_output,
+        output=output,
         argv=tuple(argv),
     )
 
 
-def launch(plan: CodexWorkerLaunchPlan, *, runner: CodexOneShotRunner, stdin: str) -> int:
-    """Execute only a previously validated plan through an injectable runner."""
-    return runner.run(plan.argv, stdin=stdin)
+def launch(
+    plan: CodexWorkerLaunchPlan,
+    *,
+    governed_input: GovernedWorkerInput,
+    runner: CodexOneShotRunner,
+) -> int:
+    """Execute only if the verified input metadata is exactly plan-bound."""
+    if (
+        plan.role != governed_input.role
+        or plan.role_policy_path != governed_input.role_policy_path
+        or plan.role_policy_sha256 != governed_input.role_policy_sha256
+        or plan.brief_path != governed_input.brief_path
+        or plan.brief_sha256 != governed_input.brief_sha256
+    ):
+        raise CodexWorkerLaunchError("governed stdin does not match the launch plan")
+    return runner.run(plan.argv, stdin=governed_input.stdin)

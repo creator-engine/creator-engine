@@ -8,6 +8,7 @@ fail-closed seams (Podman unavailable on this host).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -254,26 +255,40 @@ def test_worker_run_help_is_discoverable(capsys):
     assert "run" in capsys.readouterr().out
 
 
+def _one_shot_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
+    worktree = tmp_path / "worker"
+    (worktree / "governance" / "policies").mkdir(parents=True)
+    source_policy = Path(__file__).resolve().parents[3] / "governance" / "policies" / "codex-one-shot-launch-v1.yaml"
+    (worktree / "governance" / "policies" / source_policy.name).write_bytes(source_policy.read_bytes())
+    (worktree / "governance").mkdir(exist_ok=True)
+    (worktree / "validators").mkdir()
+    (worktree / ".claude" / "agents").mkdir(parents=True)
+    (worktree / ".claude" / "agents" / "implementer.md").write_text("# governed implementer\n", encoding="utf-8")
+    brief = worktree / ".ce" / "briefs" / "task.md"
+    brief.parent.mkdir(parents=True)
+    brief.write_text("bounded cli brief\n", encoding="utf-8")
+    (worktree / ".ce" / "state").mkdir()
+    return worktree, brief, hashlib.sha256(brief.read_bytes()).hexdigest()
+
+
 def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, monkeypatch, capsys):
-    policy = tmp_path / "policy.yaml"
-    policy.write_text(
-        """kind: codex-one-shot-launch-policy
-schema_version: \"1\"
-policy_id: test-policy
-version: \"1\"
-codex_binary_template: /opt/codex/{version}/bin/codex
-supported_roles: [implementer]
-venues: {contained: danger-full-access}
-model_defaults: {model: gpt-5.6-terra, effort: high}
-canonical_add_dirs: [governance]
-""",
-        encoding="utf-8",
-    )
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
     called = []
     monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: called.append(True))
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_launcher_filesystem", lambda: __import__(
+            "validators.tests.unit.test_codex_worker_launcher", fromlist=["HermeticFilesystem"]
+        ).HermeticFilesystem()
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_version_probe", lambda: __import__(
+            "validators.tests.unit.test_codex_worker_launcher", fromlist=["FixedVersionProbe"]
+        ).FixedVersionProbe()
+    )
     assert ce_cli.main([
-        "worker", "launch", "--dry-run", "--json", "--policy", str(policy),
-        "--role", "implementer", "--venue", "contained", "--worktree", "/tmp/worker",
+        "worker", "launch", "--dry-run", "--json",
+        "--role", "implementer", "--venue", "dev1-local", "--worktree", str(worktree),
+        "--brief", str(brief), "--brief-sha256", digest,
         "--run-id", "cli-test",
     ]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -282,27 +297,18 @@ canonical_add_dirs: [governance]
     assert called == []
 
 
-def test_worker_launch_refuses_caller_flags_before_runner(tmp_path, monkeypatch, capsys):
-    policy = tmp_path / "policy.yaml"
-    policy.write_text(
-        """kind: codex-one-shot-launch-policy
-schema_version: \"1\"
-policy_id: test-policy
-version: \"1\"
-codex_binary_template: /opt/codex/{version}/bin/codex
-supported_roles: [implementer]
-venues: {contained: danger-full-access}
-model_defaults: {model: gpt-5.6-terra, effort: high}
-canonical_add_dirs: [governance]
-""",
-        encoding="utf-8",
-    )
+def test_worker_launch_refuses_removed_policy_binary_and_stdin_overrides(tmp_path, monkeypatch, capsys):
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
     monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner invoked"))
-    assert ce_cli.main([
-        "worker", "launch", "--policy", str(policy), "--role", "implementer",
-        "--venue", "contained", "--worktree", "/tmp/worker", "--codex-arg=--model",
-    ]) == 1
-    assert "caller Codex flags" in capsys.readouterr().err
+    for removed in ("--policy", "--codex-binary", "--stdin"):
+        with pytest.raises(SystemExit) as exc:
+            ce_cli.main([
+                "worker", "launch", "--role", "implementer", "--venue", "dev1-local",
+                "--worktree", str(worktree), "--brief", str(brief),
+                "--brief-sha256", digest, removed, "untrusted",
+            ])
+        assert exc.value.code == 2
+        capsys.readouterr()
 
 
 def test_worker_spawn_dry_run_json_has_no_side_effect(tmp_path, monkeypatch, capsys):

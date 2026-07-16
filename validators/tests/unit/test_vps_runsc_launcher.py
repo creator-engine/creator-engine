@@ -23,7 +23,11 @@ HOOK_COMMAND = (
     "python3 /workspace/creator-engine/.codex/hooks/ce-pretooluse-codex.py"
 )
 RUNSC_IMAGE_RE = re.compile(
-    r"^creator-engine/codex-runsc:x86_64(?:@sha256:[0-9a-fA-F]{64})?$"
+    r"^(?:docker\.io/)?creator-engine/codex-runsc:x86_64@sha256:[0-9a-f]{64}$"
+)
+MANIFEST_VPS_IMAGE = (
+    "docker.io/creator-engine/codex-runsc:x86_64@"
+    "sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639"
 )
 
 
@@ -418,13 +422,32 @@ def test_default_dry_run_uses_detached_named_persistent_run_without_rm() -> None
     assert "-i" not in argv
     assert "-t" not in argv
     assert "-it" not in argv
-    assert argv[runsc_image_index(argv)] == "creator-engine/codex-runsc:x86_64"
+    assert argv[runsc_image_index(argv)] == MANIFEST_VPS_IMAGE
 
 
-def test_vps_image_override_is_preserved_without_a_stale_default_digest() -> None:
+def test_vps_image_override_is_preserved_without_a_duplicated_default_digest() -> None:
     argv = dry_run_argv(run_wrapper("tui", CE_VPS_IMAGE="registry.example/approved:custom"))
     assert "registry.example/approved:custom" in argv
-    assert "@sha256:" not in SCRIPT.read_text(encoding="utf-8")
+    assert "42a402cdc867036f" not in SCRIPT.read_text(encoding="utf-8")
+
+
+def test_default_image_fails_closed_for_missing_mutable_or_malformed_manifest(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.yaml"
+    for text in (
+        "surfaces: []\n",
+        "surfaces:\n  - name: VPS runsc image\n    source: docker.io/creator-engine/codex-runsc:x86_64\n    commit_or_digest: null\n",
+        "surfaces:\n  - name: VPS runsc image\n    source: docker.io/creator-engine/codex-runsc:latest\n    commit_or_digest: sha256:not-a-digest\n",
+    ):
+        manifest.write_text(text, encoding="utf-8")
+        result = run_wrapper("tui", CE_VPS_TEST_SURFACES_MANIFEST=str(manifest), CE_VPS_IMAGE=None)
+        assert result.returncode != 0
+        assert "VPS runsc image" in result.stderr
+
+
+def test_exact_name_commands_never_select_sibling_seat_by_image_ancestor() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "ancestor=" not in text
+    assert "docker rm -f \"${CE_VPS_CONTAINER_NAME}\"" in text
 
 
 def test_detach_dry_run_honors_explicit_tty_flags_for_operator_diagnostics() -> None:

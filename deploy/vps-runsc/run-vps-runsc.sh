@@ -14,7 +14,8 @@ Launch mode:
                               run --rm and block the caller's terminal.
 
 Environment:
-  CE_VPS_IMAGE                 Docker image tag (default: creator-engine/codex-runsc:x86_64)
+  CE_VPS_IMAGE                 Explicit governed Docker image override. By default,
+                                source + digest are resolved from surfaces/manifest.yaml.
   CE_VPS_RUNTIME               Docker runtime (default: runsc-gvproxy-ptrace)
   CE_VPS_MEMORY_LIMIT          Docker --memory cgroup cap for this seat. Default: 8g.
                                 Set to empty string to disable.
@@ -68,6 +69,44 @@ EOF
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../.." && pwd)"
+
+resolve_manifest_vps_image() {
+  local manifest_path="$1"
+  python3 - "${manifest_path}" <<'PY'
+import re
+import sys
+
+import yaml
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as handle:
+        document = yaml.safe_load(handle)
+except (OSError, yaml.YAMLError) as exc:
+    raise SystemExit(f"VPS runsc image manifest refusal: cannot read canonical manifest: {exc}")
+
+surfaces = document.get("surfaces") if isinstance(document, dict) else None
+if not isinstance(surfaces, list):
+    raise SystemExit("VPS runsc image manifest refusal: surfaces must be a list")
+matches = [item for item in surfaces if isinstance(item, dict) and item.get("name") == "VPS runsc image"]
+if len(matches) != 1:
+    raise SystemExit("VPS runsc image manifest refusal: expected exactly one VPS runsc image entry")
+surface = matches[0]
+source = surface.get("source")
+digest = surface.get("commit_or_digest")
+version = surface.get("version")
+update_policy = surface.get("update_policy")
+if version != "x86_64":
+    raise SystemExit("VPS runsc image manifest refusal: version must be x86_64")
+if source != "docker.io/creator-engine/codex-runsc:x86_64":
+    raise SystemExit("VPS runsc image manifest refusal: source is missing, mutable, or inconsistent")
+if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+    raise SystemExit("VPS runsc image manifest refusal: commit_or_digest must be an immutable sha256 pin")
+if not isinstance(update_policy, str) or "digest pin required" not in update_policy:
+    raise SystemExit("VPS runsc image manifest refusal: update policy does not require a digest pin")
+print(f"{source}@{digest}")
+PY
+}
 
 validate_no_credential_container_env() {
   local validators_root="${CE_VPS_VALIDATORS_ROOT:-${repo_root}/validators}"
@@ -148,7 +187,13 @@ case "${harness}" in
     ;;
 esac
 
-CE_VPS_IMAGE="${CE_VPS_IMAGE:-creator-engine/codex-runsc:x86_64}"
+manifest_path="${repo_root}/surfaces/manifest.yaml"
+if [ "${CE_VPS_DRY_RUN:-0}" = "1" ] && [ -n "${CE_VPS_TEST_SURFACES_MANIFEST:-}" ]; then
+  manifest_path="${CE_VPS_TEST_SURFACES_MANIFEST}"
+fi
+if [ -z "${CE_VPS_IMAGE:-}" ]; then
+  CE_VPS_IMAGE="$(resolve_manifest_vps_image "${manifest_path}")"
+fi
 CE_VPS_RUNTIME="${CE_VPS_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_VPS_MEMORY_LIMIT="${CE_VPS_MEMORY_LIMIT-8g}"
 CE_VPS_DOCKER_NETWORK="${CE_VPS_DOCKER_NETWORK:-host}"

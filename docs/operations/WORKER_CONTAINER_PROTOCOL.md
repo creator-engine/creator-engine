@@ -313,28 +313,58 @@ and every refusal raises before any side effect.
 
 ### 7.1 Policy-bound external Codex one-shots
 
-`ce worker launch` is a narrow, pure-plan-first external Codex seam. Its v1
-policy is `governance/policies/codex-one-shot-launch-v1.yaml`; unknown policy
-keys fail closed. The policy, rather than ambient PATH or host Codex config,
-owns the version-expanded absolute binary, supported roles and venues, venue
-sandbox, model/effort defaults, and canonical worktree-relative `--add-dir`
-allowlist.
+`ce worker launch` is a narrow, pure-plan-first external Codex seam. Callers
+provide `--brief <path> --brief-sha256 <64-lowerhex>`; there is no caller policy,
+binary, stdin, output, flag, or add-dir override. The command resolves exactly
+`governance/policies/codex-one-shot-launch-v1.yaml` inside the allocated
+worktree and rejects a symlink, escape, missing file, nonregular file, or
+unreadable file. Unknown policy keys fail closed.
+
+The same containment rule resolves the exact canonical
+`.claude/agents/<role>.md` and a regular brief beneath `.ce/briefs`. The brief's
+exact bytes must match the supplied SHA-256. The runner receives an
+unambiguous, length-delimited byte frame containing the canonical role policy
+bytes followed by the verified brief bytes. Plan JSON carries only canonical
+paths and digests; it never carries or persists either prompt body.
+
+The policy pins Codex deployment version `0.145.0-alpha.9`, model, reasoning
+effort, canonical add-dirs, and this complete role-by-venue matrix:
+
+| Venue | `architect_research` | `implementer` | `reviewer` | `verification` |
+|---|---|---|---|---|
+| `dgx-relay` | `read-only` | `workspace-write` | `read-only` | `read-only` |
+| `dev1-local` | `read-only` | `workspace-write` | `read-only` | `read-only` |
+| `vps-tmux` | refused | refused | refused | refused |
+| `in-seat` | refused | refused | refused | refused |
+
+The contained `vps-tmux` and `in-seat` venues cannot currently demonstrate the
+role-required mount/scratch contract to this inner launcher. They therefore
+fail closed for every role until a separately reviewed, machine-verifiable
+outer-isolation attestation exists. In particular, the launcher does not give
+read-only roles `danger-full-access` and does not give implementers an unusable
+nested `read-only` sandbox. This is an enforcement refusal, not prose trust.
 
 Every plan has this fixed argv order:
 
 ```text
 <pinned-binary> exec --ephemeral \
+  -m <pinned-model> -c model_reasoning_effort=<pinned-effort> \
   -c features.multi_agent=false -c features.multi_agent_v2=false \
   -s <venue-sandbox> -C <worktree> \
   [canonical --add-dir values] -o <deterministic-output> -
 ```
 
-The planner refuses unknown roles or venues, a nonabsolute or mismatched binary,
-duplicate or escaping add-dirs, arbitrary caller Codex flags, and a noncanonical
-output path before the injectable runner can be called. The run id and output
-path are deterministic; prompt text is passed only as stdin at execution and is
-not written by this surface. This slice neither starts a container nor performs
-a live relaunch.
+Before runner construction, the planner requires the worktree, canonical
+add-dirs, and `.ce/state` to be existing real directories without symlink or
+`..` traversal. It resolves the venue-owned absolute binary, allows a binary
+symlink only when its final real target remains beneath the declared
+`0.145.0-alpha.9` version root, requires a regular executable, and verifies its
+reported version through an injectable probe. The deterministic output stays
+inside the real worktree state root.
+
+This source slice neither starts a container nor performs a live relaunch.
+Source validation and merge must precede a separately authorized real relaunch;
+that post-land act must record real evidence and may not be simulated here.
 
 ### 7.2 `ce worker run` design note and deferrals
 

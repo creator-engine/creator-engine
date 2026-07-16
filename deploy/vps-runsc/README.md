@@ -12,7 +12,7 @@ the entrypoint runs the bare selected harness binary. `exec` launches append
 `run-vps-runsc.sh` defaults to the VPS posture:
 
 ```text
-CE_VPS_IMAGE=creator-engine/codex-runsc:x86_64
+CE_VPS_IMAGE=<surfaces/manifest.yaml source>@<sha256 digest>
 CE_VPS_RUNTIME=runsc-gvproxy-ptrace
 CE_VPS_DOCKER_NETWORK=host
 CE_VPS_HARNESS=codex
@@ -30,10 +30,14 @@ CE_VPS_TTY_FLAGS=<empty in detached mode, -it in legacy foreground mode>
 CE_VPS_DETACH=1
 ```
 
-`CE_VPS_IMAGE` deliberately defaults to the stable governed x86_64 tag
-`creator-engine/codex-runsc:x86_64`, not a launcher-embedded digest. Operators
-may supply a specific approved image through `CE_VPS_IMAGE`; the launcher never
-inspects, pulls, or publishes that image.
+When `CE_VPS_IMAGE` is unset, the launcher resolves exactly one `VPS runsc
+image` entry from the tracked `surfaces/manifest.yaml` and combines its source
+with its immutable SHA-256 digest. It fails closed if the entry is missing,
+duplicated, malformed, mutable, not `x86_64`, or inconsistent with the governed
+update policy. The launcher therefore has no second digest literal to rot.
+Operators may still supply a specific image through `CE_VPS_IMAGE` under the
+existing governed override contract; the launcher never inspects, pulls, or
+publishes that image.
 
 The VPS runtime explicitly allows Docker `--network=host`; the corresponding
 Docker runtime still uses `runsc-gvproxy-ptrace` for process containment.

@@ -1,7 +1,10 @@
 """Hermetic contracts for the policy-bound Codex one-shot launcher."""
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -10,109 +13,327 @@ from creator_engine_validator import codex_worker_launcher as launcher
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POLICY_PATH = REPO_ROOT / "governance" / "policies" / "codex-one-shot-launch-v1.yaml"
-WORKTREE = "/tmp/allocated-worker"
-PINNED_BINARY = "/opt/creator-engine/codex/2026.07.16/bin/codex"
+PINNED_BINARY = "/opt/creator-engine/codex/0.145.0-alpha.9/bin/codex"
+
+
+class HermeticFilesystem(launcher.RealLauncherFilesystem):
+    def __init__(
+        self,
+        *,
+        binary_exists: bool = True,
+        binary_executable: bool = True,
+        binary_realpath: str = PINNED_BINARY,
+    ) -> None:
+        self.binary_exists = binary_exists
+        self.binary_executable = binary_executable
+        self.binary_realpath = binary_realpath
+
+    def realpath(self, path: str) -> str:
+        if os.path.normpath(path) == PINNED_BINARY:
+            return self.binary_realpath
+        return super().realpath(path)
+
+    def is_file(self, path: str) -> bool:
+        if os.path.normpath(path) in {PINNED_BINARY, self.binary_realpath}:
+            return self.binary_exists
+        return super().is_file(path)
+
+    def is_executable(self, path: str) -> bool:
+        if os.path.normpath(path) in {PINNED_BINARY, self.binary_realpath}:
+            return self.binary_executable
+        return super().is_executable(path)
+
+
+class FixedVersionProbe:
+    def __init__(self, version: str = "0.145.0-alpha.9") -> None:
+        self.version = version
+        self.calls: list[str] = []
+
+    def probe(self, binary: str) -> str:
+        self.calls.append(binary)
+        return self.version
 
 
 class RecordingRunner:
     def __init__(self) -> None:
-        self.calls: list[tuple[tuple[str, ...], str]] = []
+        self.calls: list[tuple[tuple[str, ...], bytes]] = []
 
-    def run(self, argv, *, stdin: str) -> int:
+    def run(self, argv, *, stdin: bytes) -> int:
         self.calls.append((tuple(argv), stdin))
         return 0
 
 
-def policy() -> launcher.CodexOneShotPolicy:
-    return launcher.load_policy(POLICY_PATH)
+@pytest.fixture
+def worktree(tmp_path: Path) -> Path:
+    root = tmp_path / "allocated-worker"
+    (root / "governance" / "policies").mkdir(parents=True)
+    shutil.copy2(POLICY_PATH, root / "governance" / "policies" / POLICY_PATH.name)
+    (root / "validators").mkdir()
+    (root / ".claude" / "agents").mkdir(parents=True)
+    for role in ("architect_research", "implementer", "reviewer", "verification"):
+        (root / ".claude" / "agents" / f"{role}.md").write_bytes(
+            f"# Canonical {role}\nexact policy bytes\n".encode()
+        )
+    (root / ".ce" / "briefs").mkdir(parents=True)
+    (root / ".ce" / "state").mkdir()
+    return root
 
 
-def plan(**overrides) -> launcher.CodexWorkerLaunchPlan:
+def policy(worktree: Path) -> launcher.CodexOneShotPolicy:
+    return launcher.load_canonical_policy(worktree, filesystem=HermeticFilesystem())
+
+
+def governed_input(
+    worktree: Path,
+    *,
+    role: str = "implementer",
+    brief_path: Path | None = None,
+    brief_sha256: str | None = None,
+) -> launcher.GovernedWorkerInput:
+    brief = brief_path or (worktree / ".ce" / "briefs" / "task.md")
+    if brief_path is None:
+        brief.write_bytes(b"perform the bounded task\n")
+    digest = brief_sha256 or hashlib.sha256(brief.read_bytes()).hexdigest()
+    return launcher.load_governed_worker_input(
+        worktree=str(worktree),
+        role=role,
+        brief_path=str(brief),
+        brief_sha256=digest,
+        filesystem=HermeticFilesystem(),
+    )
+
+
+def plan(worktree: Path, **overrides) -> launcher.CodexWorkerLaunchPlan:
     values = {
-        "policy": policy(),
+        "policy": policy(worktree),
+        "governed_input": governed_input(worktree),
         "role": "implementer",
-        "venue": "contained",
-        "worktree": WORKTREE,
+        "venue": "dev1-local",
+        "worktree": str(worktree),
         "run_id": "test-run",
+        "filesystem": HermeticFilesystem(),
+        "version_probe": FixedVersionProbe(),
     }
     values.update(overrides)
     return launcher.build_launch_plan(**values)
 
 
-def test_plan_has_exact_deterministic_argv_and_defaults() -> None:
-    built = plan()
+def test_canonical_policy_pins_deployment_version_and_actual_venues(worktree: Path) -> None:
+    loaded = policy(worktree)
+    assert loaded.version == "0.145.0-alpha.9"
+    assert set(loaded.venue_names) == {"dgx-relay", "vps-tmux", "dev1-local", "in-seat"}
+
+
+@pytest.mark.parametrize(
+    ("venue", "role", "sandbox"),
+    [
+        (venue, role, sandbox)
+        for venue, values in {
+            "dgx-relay": {
+                "architect_research": "read-only",
+                "implementer": "workspace-write",
+                "reviewer": "read-only",
+                "verification": "read-only",
+            },
+            "dev1-local": {
+                "architect_research": "read-only",
+                "implementer": "workspace-write",
+                "reviewer": "read-only",
+                "verification": "read-only",
+            },
+            "vps-tmux": {
+                "architect_research": None,
+                "implementer": None,
+                "reviewer": None,
+                "verification": None,
+            },
+            "in-seat": {
+                "architect_research": None,
+                "implementer": None,
+                "reviewer": None,
+                "verification": None,
+            },
+        }.items()
+        for role, sandbox in values.items()
+    ],
+)
+def test_role_venue_matrix_is_complete_and_fail_closed(
+    worktree: Path, venue: str, role: str, sandbox: str | None
+) -> None:
+    loaded = policy(worktree)
+    if sandbox is None:
+        with pytest.raises(launcher.CodexWorkerLaunchError, match="not attested"):
+            loaded.sandbox_for(role=role, venue=venue)
+    else:
+        assert loaded.sandbox_for(role=role, venue=venue) == sandbox
+
+
+def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path) -> None:
+    built = plan(worktree)
     assert built.model == "gpt-5.6-terra"
     assert built.effort == "high"
     assert built.argv == (
         PINNED_BINARY,
         "exec",
         "--ephemeral",
+        "-m",
+        "gpt-5.6-terra",
+        "-c",
+        "model_reasoning_effort=high",
         "-c",
         "features.multi_agent=false",
         "-c",
         "features.multi_agent_v2=false",
         "-s",
-        "danger-full-access",
+        "workspace-write",
         "-C",
-        WORKTREE,
+        str(worktree),
         "--add-dir",
-        f"{WORKTREE}/governance",
+        f"{worktree}/governance",
         "--add-dir",
-        f"{WORKTREE}/validators",
+        f"{worktree}/validators",
         "-o",
-        f"{WORKTREE}/.ce/state/codex-one-shot/test-run.json",
+        f"{worktree}/.ce/state/test-run.json",
         "-",
     )
+    serialized = str(built.to_dict())
+    assert "perform the bounded task" not in serialized
+    assert built.brief_sha256 in serialized
+    assert built.role_policy_sha256 in serialized
 
 
-def test_derived_run_id_and_output_are_repeatable() -> None:
-    first = plan(run_id=None)
-    second = plan(run_id=None)
-    assert first.run_id == second.run_id
-    assert first.output == second.output
+def test_governed_input_frames_exact_canonical_role_and_verified_brief_bytes(worktree: Path) -> None:
+    loaded = governed_input(worktree)
+    role_bytes = (worktree / ".claude" / "agents" / "implementer.md").read_bytes()
+    brief_bytes = (worktree / ".ce" / "briefs" / "task.md").read_bytes()
+    assert loaded.stdin.endswith(role_bytes + brief_bytes)
+    header = loaded.stdin[: -(len(role_bytes) + len(brief_bytes))]
+    assert header.startswith(b"CE-GOVERNED-CODEX-WORKER-PROMPT-V1\n")
+    assert f"ROLE-SHA256 {hashlib.sha256(role_bytes).hexdigest()}\n".encode() in header
+    assert f"ROLE-BYTES {len(role_bytes)}\n".encode() in header
+    assert f"BRIEF-SHA256 {hashlib.sha256(brief_bytes).hexdigest()}\n".encode() in header
+    assert f"BRIEF-BYTES {len(brief_bytes)}\n\n".encode() in header
+
+
+@pytest.mark.parametrize("digest", ["A" * 64, "f" * 63, "0" * 64])
+def test_governed_input_refuses_noncanonical_or_mismatched_digest(worktree: Path, digest: str) -> None:
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="brief SHA-256"):
+        governed_input(worktree, brief_sha256=digest)
+
+
+def test_governed_input_refuses_brief_escape_symlink_and_nonregular(worktree: Path) -> None:
+    outside = worktree.parent / "outside.md"
+    outside.write_text("outside\n", encoding="utf-8")
+    link = worktree / ".ce" / "briefs" / "link.md"
+    link.symlink_to(outside)
+    directory = worktree / ".ce" / "briefs" / "directory"
+    directory.mkdir()
+    missing = worktree / ".ce" / "briefs" / "missing.md"
+    for candidate, message in [
+        (outside, "canonical area"),
+        (link, "symlink"),
+        (directory, "regular readable file"),
+        (missing, "regular readable file"),
+    ]:
+        with pytest.raises(launcher.CodexWorkerLaunchError, match=message):
+            governed_input(worktree, brief_path=candidate, brief_sha256="0" * 64)
+
+
+def test_governed_input_refuses_replaced_canonical_role_policy(worktree: Path) -> None:
+    role_path = worktree / ".claude" / "agents" / "implementer.md"
+    role_path.unlink()
+    role_path.symlink_to(worktree / ".claude" / "agents" / "reviewer.md")
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="role policy.*symlink"):
+        governed_input(worktree)
+
+
+def test_canonical_policy_rejects_symlink_replacement(worktree: Path) -> None:
+    canonical = worktree / "governance" / "policies" / POLICY_PATH.name
+    replacement = worktree / "replacement.yaml"
+    replacement.write_bytes(POLICY_PATH.read_bytes())
+    canonical.unlink()
+    canonical.symlink_to(replacement)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launcher policy.*symlink"):
+        launcher.load_canonical_policy(worktree, filesystem=HermeticFilesystem())
+
+
+def test_worktree_and_canonical_directories_are_real_existing_directories(worktree: Path) -> None:
+    missing = worktree / "validators"
+    missing.rmdir()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="canonical add-dir.*directory"):
+        plan(worktree)
+    missing.write_text("not a directory\n", encoding="utf-8")
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="canonical add-dir.*directory"):
+        plan(worktree)
+
+
+def test_canonical_add_dir_symlink_is_refused(worktree: Path) -> None:
+    validators = worktree / "validators"
+    validators.rmdir()
+    outside = worktree.parent / "outside-validators"
+    outside.mkdir()
+    validators.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="canonical add-dir.*symlink"):
+        plan(worktree)
+
+
+def test_worktree_symlink_is_refused(worktree: Path) -> None:
+    link = worktree.parent / "linked-worker"
+    link.symlink_to(worktree, target_is_directory=True)
+    loaded = policy(worktree)
+    worker_input = governed_input(worktree)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="worktree.*symlink"):
+        launcher.build_launch_plan(
+            policy=loaded,
+            governed_input=worker_input,
+            role="implementer",
+            venue="dev1-local",
+            worktree=str(link),
+            filesystem=HermeticFilesystem(),
+            version_probe=FixedVersionProbe(),
+        )
+
+
+def test_existing_output_symlink_or_nonregular_node_is_refused(worktree: Path) -> None:
+    output = worktree / ".ce" / "state" / "test-run.json"
+    outside = worktree.parent / "outside-output.json"
+    outside.write_text("do not overwrite\n", encoding="utf-8")
+    output.symlink_to(outside)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="output.*symlink"):
+        plan(worktree)
+    output.unlink()
+    output.mkdir()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="output.*regular file"):
+        plan(worktree)
 
 
 @pytest.mark.parametrize(
-    ("values", "message"),
+    ("filesystem", "probe", "message"),
     [
-        ({"role": "controller"}, "unknown role"),
-        ({"venue": "vps"}, "unknown venue"),
-        ({"codex_binary": "codex"}, "absolute"),
-        ({"codex_binary": "/opt/other/codex"}, "does not match"),
-        ({"add_dirs": [f"{WORKTREE}/governance", f"{WORKTREE}/governance"]}, "duplicate"),
-        ({"add_dirs": ["/tmp/escape"]}, "escapes"),
-        ({"caller_flags": ["--dangerously-bypass-approvals-and-sandbox"]}, "not permitted"),
+        (HermeticFilesystem(binary_exists=False), FixedVersionProbe(), "regular executable"),
+        (HermeticFilesystem(binary_executable=False), FixedVersionProbe(), "regular executable"),
+        (
+            HermeticFilesystem(binary_realpath="/opt/creator-engine/codex/other/bin/codex"),
+            FixedVersionProbe(),
+            "version root",
+        ),
+        (HermeticFilesystem(), FixedVersionProbe("0.144.1"), "version probe"),
     ],
 )
-def test_refusals_happen_while_building_plan(values, message: str) -> None:
+def test_binary_preflight_refuses_missing_nonexecutable_escape_or_version_mismatch(
+    worktree: Path,
+    filesystem: HermeticFilesystem,
+    probe: FixedVersionProbe,
+    message: str,
+) -> None:
     with pytest.raises(launcher.CodexWorkerLaunchError, match=message):
-        plan(**values)
+        plan(worktree, filesystem=filesystem, version_probe=probe)
 
 
-def test_add_dirs_are_canonical_not_caller_order() -> None:
-    built = plan(add_dirs=[f"{WORKTREE}/validators", f"{WORKTREE}/governance"])
-    assert [value for index, value in enumerate(built.argv) if built.argv[index - 1] == "--add-dir"] == [
-        f"{WORKTREE}/governance",
-        f"{WORKTREE}/validators",
-    ]
-
-
-def test_explicit_output_must_match_deterministic_path() -> None:
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="deterministic"):
-        plan(output="/tmp/untrusted-output.json")
-
-
-def test_strict_policy_rejects_unknown_keys(tmp_path: Path) -> None:
-    raw = POLICY_PATH.read_text(encoding="utf-8") + "unknown_key: denied\n"
-    candidate = tmp_path / "policy.yaml"
-    candidate.write_text(raw, encoding="utf-8")
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="keys"):
-        launcher.load_policy(candidate)
-
-
-def test_only_explicit_launch_calls_injected_runner() -> None:
+def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree: Path) -> None:
     runner = RecordingRunner()
-    built = plan()
+    worker_input = governed_input(worktree)
+    built = plan(worktree, governed_input=worker_input)
     assert runner.calls == []
-    assert launcher.launch(built, runner=runner, stdin="bounded prompt") == 0
-    assert runner.calls == [(built.argv, "bounded prompt")]
+    assert launcher.launch(built, governed_input=worker_input, runner=runner) == 0
+    assert runner.calls == [(built.argv, worker_input.stdin)]

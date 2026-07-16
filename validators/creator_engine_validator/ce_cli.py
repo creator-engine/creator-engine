@@ -205,6 +205,16 @@ def _make_codex_one_shot_runner():
     return codex_worker_launcher.SubprocessCodexOneShotRunner()
 
 
+def _make_codex_launcher_filesystem():
+    """Factory for one-shot canonical-path preflight (monkeypatchable in tests)."""
+    return codex_worker_launcher.RealLauncherFilesystem()
+
+
+def _make_codex_version_probe():
+    """Factory for the pinned Codex deployment probe (monkeypatchable in tests)."""
+    return codex_worker_launcher.SubprocessCodexVersionProbe()
+
+
 def _make_herdr_attach_runner():
     """Factory for interactive herdr remote attach (monkeypatchable in tests)."""
     herdr_session = _herdr_session_module()
@@ -834,20 +844,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "launch",
         help="plan or execute a policy-bound external Codex one-shot worker",
     )
-    wlaunch.add_argument(
-        "--policy",
-        default="governance/policies/codex-one-shot-launch-v1.yaml",
-        help="checked-in strict one-shot launch policy",
-    )
     wlaunch.add_argument("--role", required=True, help="policy-supported worker role")
     wlaunch.add_argument("--venue", required=True, help="policy-supported execution venue")
     wlaunch.add_argument("--worktree", required=True, help="absolute allocated worktree path")
-    wlaunch.add_argument("--codex-binary", default=None, help="must exactly match the policy-pinned absolute binary")
-    wlaunch.add_argument("--add-dir", action="append", default=[], help="repeatable policy-canonical extra directory")
+    wlaunch.add_argument("--brief", required=True, help="regular brief file inside <worktree>/.ce/briefs")
+    wlaunch.add_argument(
+        "--brief-sha256",
+        required=True,
+        help="expected SHA-256 of the exact governed brief bytes (64 lowercase hex)",
+    )
     wlaunch.add_argument("--run-id", default=None, help="optional deterministic lowercase run identifier")
-    wlaunch.add_argument("--output", default=None, help="must equal the deterministic governed output path")
-    wlaunch.add_argument("--codex-arg", action="append", default=[], help="always refused; caller flags are not governable")
-    wlaunch.add_argument("--stdin", default="", help="one-shot stdin delivered only to the injected runner")
     wlaunch.add_argument("--dry-run", action="store_true", help="emit deterministic plan JSON without runner invocation")
     wlaunch.add_argument("--json", action="store_true", dest="json_output")
 
@@ -2730,18 +2736,28 @@ def _worker_run(args) -> int:
 
 
 def _worker_launch(args) -> int:
+    filesystem = _make_codex_launcher_filesystem()
     try:
-        policy = codex_worker_launcher.load_policy(args.policy)
+        policy = codex_worker_launcher.load_canonical_policy(
+            args.worktree,
+            filesystem=filesystem,
+        )
+        governed_input = codex_worker_launcher.load_governed_worker_input(
+            worktree=args.worktree,
+            role=args.role,
+            brief_path=args.brief,
+            brief_sha256=args.brief_sha256,
+            filesystem=filesystem,
+        )
         plan = codex_worker_launcher.build_launch_plan(
             policy=policy,
+            governed_input=governed_input,
             role=args.role,
             venue=args.venue,
             worktree=args.worktree,
-            codex_binary=args.codex_binary,
-            add_dirs=args.add_dir,
             run_id=args.run_id,
-            output=args.output,
-            caller_flags=args.codex_arg,
+            filesystem=filesystem,
+            version_probe=_make_codex_version_probe(),
         )
     except codex_worker_launcher.CodexWorkerLaunchError as exc:
         print(f"ERROR: ce worker launch refused: {exc}", file=sys.stderr)
@@ -2752,7 +2768,7 @@ def _worker_launch(args) -> int:
     result = codex_worker_launcher.launch(
         plan,
         runner=_make_codex_one_shot_runner(),
-        stdin=args.stdin,
+        governed_input=governed_input,
     )
     if args.json_output:
         print(json.dumps({"plan": plan.to_dict(), "returncode": result}, indent=2, sort_keys=True))

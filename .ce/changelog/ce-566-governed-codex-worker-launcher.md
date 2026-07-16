@@ -8,10 +8,11 @@ issue: ce-ops#566
 
 **Add the policy-bound ce worker launch one-shot planner.**
 
-- Adds a strict tracked policy and pure-plan-first external Codex launcher with
-  deterministic argv, run-id/output, policy-owned binary/sandbox/model/effort,
-  canonical add-dir selection, and hermetic injected-runner coverage.
-- Documents the no-ambient-PATH/no-host-config and pre-run refusal boundary.
-- Corrects the VPS launcher to use the stable governed x86_64 image tag by
-  default and keeps exact `CE_VPS_CONTAINER_NAME` targeting for removal,
-  readiness, and diagnostics without image-ancestor selectors.
+- Adds canonical role-policy plus SHA-256-verified brief delivery, a complete
+  role-by-venue isolation matrix, the pinned Codex `0.145.0-alpha.9` model and
+  effort argv, and executable/realpath/version fail-closed preflight.
+- Removes caller policy, binary, stdin, output, flag, and add-dir replacement;
+  dry-run plans retain only canonical paths and digests.
+- Resolves the default VPS image source and immutable digest from the tracked
+  surfaces manifest while preserving exact-container-name removal, readiness,
+  and diagnostics without image-ancestor selectors.
