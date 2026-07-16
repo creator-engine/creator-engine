@@ -46,10 +46,18 @@ CE_BELT_LABELS=enhancement
 GH_TOKEN=<integrator-token>
 CE_PICKUP_TOKEN=<review-pickup-token>
 CE_RATIFIER_QUEUE_CANDIDATES_PATH=/owner-only/path/ratifier-candidates.json
-# Optional; the unit default is %h/.local/state/creator-engine/ratifier-queue/state.json
+# Optional; the unit default is %h/.local/state/creator-engine/ratifier-queue/state.json.
 CE_RATIFIER_QUEUE_STATE_PATH=/owner-only/path/ratifier-state.json
+# Optional; the unit default is 120 seconds.
 CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120
 ```
+
+`CE_BELT_INTERVAL_SECONDS` and `CE_RATIFIER_QUEUE_INTERVAL_SECONDS` both
+default to `120` when unset. An explicit override must be a positive decimal
+integer; empty, zero, signed, whitespace-padded, fractional, or suffixed values
+are refused before polling starts. The belt exits on a failed sleep rather than
+re-entering the poll loop. A ratifier state path is passed as one exact argument,
+including paths that contain whitespace.
 
 `GH_TOKEN` and `CE_GATE_AUTHORIZED_REVIEWERS` are required by the integrator
 daemon. `CE_GATE_AUTHORIZED_REVIEWERS` is a comma-separated list for the
@@ -179,6 +187,17 @@ operator-created, owner-only candidate document named by
 state, and emits `PENDING`, `STALE`, `BLOCKED`, or `ATTESTED` evidence. An
 `ATTESTED` row is never an approval, enqueue, merge, signature, or ratification
 act. The service has no forge or credential configuration.
+
+The unit sets non-secret defaults before reading `gate-daemons.env`:
+`CE_RATIFIER_QUEUE_STATE_PATH` defaults to
+`%h/.local/state/creator-engine/ratifier-queue/state.json` and
+`CE_RATIFIER_QUEUE_INTERVAL_SECONDS` defaults to `120`. Set either value in the
+env file to override that default; the candidates path remains required and has
+no unit default.
+
+Both daemon intervals must be positive decimal integers when explicitly set.
+Invalid values fail closed before the belt polls or the ratifier starts. The
+ratifier preserves a configured state path as one argument, including whitespace.
 
 The candidate document is strict JSON with `version: 1` and a `candidates`
 array. Each candidate supplies immutable PR/head identity plus the complete

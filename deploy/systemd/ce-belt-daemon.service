@@ -6,10 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=CE_BELT_INTERVAL_SECONDS=120
 EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
 WorkingDirectory=/workspace/creator-engine
 ExecStartPre=/usr/bin/mkdir -p %h/.local/state/creator-engine/daemon-heartbeats
-ExecStart=/usr/bin/env bash -lc 'while true; do ce pickup poll --identity "$CE_BELT_IDENTITY" --repo "$CE_GATE_REPO" ${CE_BELT_LABELS:+--label "$CE_BELT_LABELS"} --json; sleep "${CE_BELT_INTERVAL_SECONDS:-120}"; done'
+ExecStart=/usr/bin/env bash -lc 'interval="$${CE_BELT_INTERVAL_SECONDS}"; case "$interval" in ""|*[!0-9]*) printf "%s\\n" "CE_BELT_INTERVAL_SECONDS must be a positive decimal integer" >&2; exit 64 ;; *[1-9]*) ;; *) printf "%s\\n" "CE_BELT_INTERVAL_SECONDS must be a positive decimal integer" >&2; exit 64 ;; esac; while true; do ce pickup poll --identity "$${CE_BELT_IDENTITY}" --repo "$${CE_GATE_REPO}" $${CE_BELT_LABELS:+--label "$${CE_BELT_LABELS}"} --json; sleep "$interval" || exit $$?; done'
 Restart=on-failure
 RestartSec=30s
 

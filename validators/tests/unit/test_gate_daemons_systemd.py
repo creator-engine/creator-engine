@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -42,6 +43,132 @@ def _read_unit_path(path: Path) -> configparser.ConfigParser:
     return parser
 
 
+def _run_gate_daemon_shell_contract(
+    repo_root: Path,
+    unit_name: str,
+    tmp_path: Path,
+    env_overrides: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run an ExecStart bash payload with command stubs, as systemd would."""
+    exec_start = _read_unit(repo_root, unit_name)["Service"]["ExecStart"]
+    command = shlex.split(exec_start)
+    assert command[:3] == ["/usr/bin/env", "bash", "-lc"]
+    script = command[3].replace("$$", "$")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "ce").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\0' \"$@\" > \"$CE_TEST_CE_ARGS\"\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "sleep").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\0' \"$@\" > \"$CE_TEST_SLEEP_ARGS\"\n"
+        "exit 42\n",
+        encoding="utf-8",
+    )
+    for stub in bin_dir.iterdir():
+        stub.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CE_TEST_CE_ARGS": str(tmp_path / "ce.args"),
+        "CE_TEST_SLEEP_ARGS": str(tmp_path / "sleep.args"),
+        "CE_BELT_IDENTITY": "dev-3",
+        "CE_GATE_REPO": "creator-engine/creator-engine",
+        "CE_RATIFIER_QUEUE_CANDIDATES_PATH": "/owner/candidates.json",
+    }
+    for env_name in (
+        "CE_BELT_INTERVAL_SECONDS",
+        "CE_RATIFIER_QUEUE_INTERVAL_SECONDS",
+        "CE_RATIFIER_QUEUE_STATE_PATH",
+    ):
+        env.pop(env_name, None)
+    for line in (
+        repo_root / "deploy" / "systemd" / unit_name
+    ).read_text(encoding="utf-8").splitlines():
+        if line.startswith("Environment="):
+            name, value = line.removeprefix("Environment=").split("=", 1)
+            env.setdefault(name, value)
+    env.update(env_overrides)
+    return subprocess.run(
+        ["bash", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+@pytest.mark.parametrize(
+    "value", ("", "0", "00", "0000", "-1", " 1", "+1", "1.5", "1s", "one")
+)
+@pytest.mark.parametrize(
+    ("unit_name", "env_name"),
+    (
+        ("ce-belt-daemon.service", "CE_BELT_INTERVAL_SECONDS"),
+        ("ce-ratifier-queue.service", "CE_RATIFIER_QUEUE_INTERVAL_SECONDS"),
+    ),
+)
+def test_gate_daemon_intervals_refuse_invalid_values_before_execution(
+    repo_root: Path, tmp_path: Path, unit_name: str, env_name: str, value: str
+):
+    result = _run_gate_daemon_shell_contract(repo_root, unit_name, tmp_path, {env_name: value})
+
+    assert result.returncode != 0
+    assert "must be a positive decimal integer" in result.stderr
+    assert not (tmp_path / "ce.args").exists()
+    assert not (tmp_path / "sleep.args").exists()
+
+
+def test_belt_shell_contract_uses_default_and_preserves_valid_override(
+    repo_root: Path, tmp_path: Path
+):
+    default_result = _run_gate_daemon_shell_contract(
+        repo_root, "ce-belt-daemon.service", tmp_path / "default", {}
+    )
+    assert default_result.returncode == 42
+    assert (tmp_path / "default" / "sleep.args").read_bytes() == b"120\0"
+
+    override_result = _run_gate_daemon_shell_contract(
+        repo_root,
+        "ce-belt-daemon.service",
+        tmp_path / "override",
+        {"CE_BELT_INTERVAL_SECONDS": "45"},
+    )
+    assert override_result.returncode == 42
+    assert (tmp_path / "override" / "sleep.args").read_bytes() == b"45\0"
+
+
+def test_ratifier_shell_contract_keeps_whitespace_state_path_as_one_argv_item(
+    repo_root: Path, tmp_path: Path
+):
+    state_path = "/owner only/ratifier state.json"
+    result = _run_gate_daemon_shell_contract(
+        repo_root,
+        "ce-ratifier-queue.service",
+        tmp_path,
+        {
+            "CE_RATIFIER_QUEUE_STATE_PATH": state_path,
+            "CE_RATIFIER_QUEUE_INTERVAL_SECONDS": "45",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "ce.args").read_bytes().split(b"\0") == [
+        b"ratifier-queue",
+        b"--candidates",
+        b"/owner/candidates.json",
+        b"--state-path",
+        state_path.encode(),
+        b"--loop",
+        b"--interval",
+        b"45",
+        b"--json",
+        b"",
+    ]
+
+
 def test_gate_daemon_units_parse_and_restart(repo_root: Path):
     for name in SERVICE_NAMES:
         unit = _read_unit(repo_root, name)
@@ -55,7 +182,8 @@ def test_gate_daemon_units_parse_and_restart(repo_root: Path):
         )
         assert unit["Service"]["Restart"] == "on-failure"
         assert unit["Service"]["RestartSec"]
-        assert "Environment" not in unit["Service"]
+        if name not in {"ce-belt-daemon.service", "ce-ratifier-queue.service"}:
+            assert "Environment" not in unit["Service"]
         assert unit["Service"]["ExecStart"].startswith(("/usr/bin/env ce ", "/usr/bin/env bash "))
         assert "PYTHONPATH=validators" not in unit["Service"]["ExecStart"]
         assert "creator_engine_validator.v3_cli" not in unit["Service"]["ExecStart"]
@@ -66,10 +194,10 @@ def test_belt_daemon_unit_execstart_is_observe_only_poll_loop(repo_root: Path):
     exec_start = unit["Service"]["ExecStart"]
     assert exec_start.startswith("/usr/bin/env bash -lc ")
     assert "while true; do ce pickup poll " in exec_start
-    assert ' --identity "$CE_BELT_IDENTITY" ' in exec_start
-    assert ' --repo "$CE_GATE_REPO" ' in exec_start
-    assert ' ${CE_BELT_LABELS:+--label "$CE_BELT_LABELS"} ' in exec_start
-    assert exec_start.endswith('sleep "${CE_BELT_INTERVAL_SECONDS:-120}"; done\'')
+    assert ' --identity "$${CE_BELT_IDENTITY}" ' in exec_start
+    assert ' --repo "$${CE_GATE_REPO}" ' in exec_start
+    assert ' $${CE_BELT_LABELS:+--label "$${CE_BELT_LABELS}"} ' in exec_start
+    assert 'sleep "$interval" || exit $$?; done\'' in exec_start
     assert " --json;" in exec_start
     assert "--claim" not in exec_start
     assert "--enable-launch" not in exec_start
@@ -85,8 +213,90 @@ def test_ratifier_queue_unit_is_proposal_only_and_restart_supervised(repo_root: 
     assert "ce ratifier-queue" in service["ExecStart"]
     assert "--loop" in service["ExecStart"]
     assert "CE_RATIFIER_QUEUE_CANDIDATES_PATH" in service["ExecStart"]
+    unit_text = (repo_root / "deploy" / "systemd" / "ce-ratifier-queue.service").read_text(
+        encoding="utf-8"
+    )
+    assert "Environment=CE_RATIFIER_QUEUE_STATE_PATH=" in unit_text
+    assert "Environment=CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120" in unit_text
     assert "GH_TOKEN" not in service["ExecStart"]
     assert "--apply" not in service["ExecStart"]
+
+
+def test_gate_daemon_execstarts_use_explicit_systemd_defaults_and_installer_keeps_them(
+    tmp_path: Path, repo_root: Path
+):
+    defaulted_units = {
+        "ce-belt-daemon.service": (
+            ("Environment=CE_BELT_INTERVAL_SECONDS=120",),
+            ('interval="$${CE_BELT_INTERVAL_SECONDS}"', 'sleep "$interval"'),
+        ),
+        "ce-ratifier-queue.service": (
+            (
+                "Environment=CE_RATIFIER_QUEUE_STATE_PATH=%h/.local/state/creator-engine/ratifier-queue/state.json",
+                "Environment=CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120",
+            ),
+            (
+                ' --state-path "$${CE_RATIFIER_QUEUE_STATE_PATH}" ',
+                'interval="$${CE_RATIFIER_QUEUE_INTERVAL_SECONDS}"',
+                ' --interval "$interval" ',
+            ),
+        ),
+    }
+    for name in SERVICE_NAMES:
+        unit_path = repo_root / "deploy" / "systemd" / name
+        exec_start = _read_unit_path(unit_path)["Service"]["ExecStart"]
+        assert re.search(r"\$\{[^}]*:-[^}]*\}", exec_start) is None
+        if name in defaulted_units:
+            defaults, exec_references = defaulted_units[name]
+            unit_text = unit_path.read_text(encoding="utf-8")
+            for default in defaults:
+                assert default in unit_text
+                assert unit_text.index(default) < unit_text.index("EnvironmentFile=")
+            for exec_reference in exec_references:
+                assert exec_reference in exec_start
+
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").mkdir()
+    fake_python = fake_repo / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    env_file = tmp_path / "gate-daemons.env"
+    env_file.write_text(
+        "CE_RATIFIER_QUEUE_CANDIDATES_PATH=/owner-only/candidates.json\n",
+        encoding="utf-8",
+    )
+    broker_env_file = tmp_path / "ce-egress-broker.env"
+    review_env_file = tmp_path / "ce-egress-self-review.env"
+    broker_env_file.write_text("ok\n", encoding="utf-8")
+    review_env_file.write_text("ok\n", encoding="utf-8")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "systemctl").write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    (fake_bin / "systemctl").chmod(0o755)
+    unit_dir = tmp_path / "units"
+    result = subprocess.run(
+        [
+            "bash", str(repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"),
+            "--repo-root", str(fake_repo), "--unit-dir", str(unit_dir),
+            "--env-file", str(env_file),
+            "--egress-broker-env-file", str(broker_env_file),
+            "--egress-self-review-env-file", str(review_env_file),
+            "--no-start",
+        ],
+        check=False, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 0, result.stderr
+    for name, (defaults, exec_references) in defaulted_units.items():
+        rendered = _read_unit_path(unit_dir / name)["Service"]["ExecStart"]
+        rendered_text = (unit_dir / name).read_text(encoding="utf-8")
+        for default in defaults:
+            assert default in rendered_text
+            assert rendered_text.index(default) < rendered_text.index("EnvironmentFile=")
+        for exec_reference in exec_references:
+            assert exec_reference in rendered
 
 
 def test_codex_seat_unit_supervises_detached_container(repo_root: Path):
