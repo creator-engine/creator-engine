@@ -1487,6 +1487,25 @@ Options:
 | `--claim-id` | no |  | optional: scope the sweep to one claim |
 | `--json` | no |  |  |
 
+### `worker launch`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--policy` | no |  | checked-in strict one-shot launch policy |
+| `--role` | yes |  | policy-supported worker role |
+| `--venue` | yes |  | policy-supported execution venue |
+| `--worktree` | yes |  | absolute allocated worktree path |
+| `--codex-binary` | no |  | must exactly match the policy-pinned absolute binary |
+| `--add-dir` | no |  | repeatable policy-canonical extra directory |
+| `--run-id` | no |  | optional deterministic lowercase run identifier |
+| `--output` | no |  | must equal the deterministic governed output path |
+| `--codex-arg` | no |  | always refused; caller flags are not governable |
+| `--stdin` | no |  | one-shot stdin delivered only to the injected runner |
+| `--dry-run` | no |  | emit deterministic plan JSON without runner invocation |
+| `--json` | no |  |  |
+
 ### `worker run`
 
 Options:

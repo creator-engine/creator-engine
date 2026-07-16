@@ -3,10 +3,10 @@ slug: ce-566-governed-codex-worker-launcher
 date: 2026-07-16
 kind: feature
 scope: governed Codex one-shot worker launcher
-issue: ce-ops#566, ce-ops#567
+issue: ce-ops#566
 ---
 
-**Add the policy-bound `ce worker launch` one-shot planner.**
+**Add the policy-bound ce worker launch one-shot planner.**
 
 - Adds a strict tracked policy and pure-plan-first external Codex launcher with
   deterministic argv, run-id/output, policy-owned binary/sandbox/model/effort,
