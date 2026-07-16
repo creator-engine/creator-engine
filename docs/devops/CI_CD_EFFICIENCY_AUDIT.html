@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CE CI Efficiency Audit: Preserve Safety, Remove Fidelity Drift</title>
+  <style>
+    :root { color-scheme: light dark; --ink: #17202a; --paper: #fff; --muted: #4f5b66; --line: #aeb7c0; --accent: #075985; --safe: #065f46; --warn: #9a3412; --soft: #e0f2fe; }
+    * { box-sizing: border-box; }
+    body { background: var(--paper); color: var(--ink); font: 1rem/1.55 system-ui, sans-serif; margin: 0; }
+    main { margin: auto; max-width: 76rem; padding: 2rem 1.25rem 4rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { font-size: clamp(2rem, 5vw, 3.3rem); max-width: 22ch; }
+    h2 { border-bottom: 2px solid var(--line); margin-top: 2.8rem; padding-bottom: .35rem; }
+    a { color: var(--accent); }
+    .lede { font-size: 1.18rem; max-width: 70ch; }
+    .notice { background: #fff7ed; border-left: .4rem solid var(--warn); padding: 1rem 1.2rem; }
+    .diagram { background: var(--soft); border: 1px solid var(--line); border-radius: .5rem; padding: 1rem; }
+    .flow { align-items: stretch; display: flex; flex-wrap: wrap; gap: .6rem; justify-content: center; list-style: none; margin: 0; padding: 0; }
+    .flow li { background: var(--paper); border: 2px solid var(--accent); border-radius: .4rem; font-weight: 650; max-width: 14rem; padding: .75rem; text-align: center; }
+    .flow li:not(:last-child)::after { content: "→"; display: inline-block; font-size: 1.6rem; margin: 0 -.9rem 0 .9rem; vertical-align: middle; }
+    .flow small { display: block; font-weight: 400; }
+    .scroll { overflow-x: auto; }
+    table { border-collapse: collapse; min-width: 62rem; width: 100%; }
+    caption { font-weight: 700; margin-bottom: .5rem; text-align: left; }
+    th, td { border: 1px solid var(--line); padding: .65rem; text-align: left; vertical-align: top; }
+    th { background: var(--soft); }
+    .score { font-weight: 750; white-space: nowrap; }
+    .recommendation { border-left: .4rem solid var(--safe); margin: 1rem 0; padding: .15rem 1rem; }
+    .ratify { border-left-color: var(--warn); }
+    footer { color: var(--muted); font-size: .92rem; margin-top: 3rem; }
+    @media (prefers-color-scheme: dark) { :root { --ink: #edf2f7; --paper: #111827; --muted: #cbd5e1; --line: #64748b; --accent: #7dd3fc; --safe: #6ee7b7; --warn: #fdba74; --soft: #0c4a6e; } .notice { background: #431407; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p>Creator Engine · CI/CD strategy companion · 16 July 2026</p>
+      <h1>CE CI Efficiency Audit: Preserve Safety, Remove Fidelity Drift</h1>
+      <p class="lede">Creator Engine's local and CI validation share substantial safety coverage, but their orchestration and PR-data inputs diverge. The practical sequence is to measure gates, consolidate shared definitions, and ratify any change that can weaken a safety property.</p>
+    </header>
+
+    <aside class="notice" aria-label="Timing evidence limitation">
+      <strong>Timing limitation:</strong> trustworthy live CI timing telemetry was unavailable for this audit. The documented full-suite range (about 1–4 minutes) and <code>check-examples</code> range (about 60–90 seconds) are documentation, not measurements.
+    </aside>
+
+    <section aria-labelledby="pipeline-heading">
+      <h2 id="pipeline-heading">Validation pipeline</h2>
+      <div class="diagram" role="img" aria-label="Author carrier and local input flow through local base and head preflight, push, CI with live pull-request metadata and base, required pull-request gates, and merge-group validation.">
+        <ol class="flow">
+          <li>Author carrier / local input<small>declared work class, scope, paths</small></li>
+          <li>Local base + head preflight<small><code>ce validate-pr</code></small></li>
+          <li>Push<small>candidate branch</small></li>
+          <li>CI live PR metadata + base<small>server-resolved comparison</small></li>
+          <li>Required PR gates<small>tests, sizing, coupling, manifest</small></li>
+          <li>Merge group<small>combined candidate validation</small></li>
+        </ol>
+      </div>
+    </section>
+
+    <section aria-labelledby="gap-heading">
+      <h2 id="gap-heading">The current fidelity gap</h2>
+      <p>Local preflight derives the work class and coupling exemption from carrier/local input. CI evaluates the live PR body and a server-resolved comparison base. This creates two sources of truth: a carrier can be locally coherent while the PR body is stale or otherwise different. The current-main #557 history demonstrated declared-class corrections from <code>story</code> to <code>feature</code> and then <code>epic</code>; the execution fixes landed, but the structural carrier-versus-PR-body split remains.</p>
+      <p>Local baseline comparison also has a distinct policy: it carries identical baseline/head failure IDs. That protects authors from inherited failures, but without freshness or identity constraints a long-lived failure can be silently normalized. These are fidelity and safety design questions, not evidence that any present gate should be removed.</p>
+    </section>
+
+    <section aria-labelledby="score-heading">
+      <h2 id="score-heading">Component scorecard</h2>
+      <div class="scroll">
+        <table>
+          <caption>Scores use 1 (weak) through 5 (strong) for safety value relative to observed cost and fidelity.</caption>
+          <thead><tr><th scope="col">Component</th><th scope="col">Trigger / entrypoint</th><th scope="col">Safety value</th><th scope="col">Known cost evidence</th><th scope="col">Fidelity gap</th><th scope="col">Score and rationale</th></tr></thead>
+          <tbody>
+            <tr><td>Pytest suite</td><td>Validate workflow; <code>pr_preflight.DEFAULT_TEST_COMMAND</code></td><td>Regression coverage</td><td>Documented 1–4 min full suite</td><td>CI runs head once; local runs base and head</td><td class="score">5 — core signal</td></tr>
+            <tr><td>Baseline comparison</td><td>Local <code>_run_baseline_diff_tests</code></td><td>Avoids blocking inherited failures</td><td>Unavailable</td><td>Identical failure IDs carry; no freshness policy</td><td class="score">3 — useful, needs bounds</td></tr>
+            <tr><td><code>check-examples</code></td><td>Preflight and pytest sweep fixture</td><td>Schema/fixture contract</td><td>Documented 60–90 s</td><td>Separate invocation may duplicate sweep semantics</td><td class="score">3 — measure before dedupe</td></tr>
+            <tr><td>YAML, schema, docs</td><td>Workflow and local YAML parse</td><td>Artifact validity</td><td>Unavailable</td><td>Mostly shared, separate orchestration</td><td class="score">4 — low-risk guard</td></tr>
+            <tr><td>Work sizing</td><td>CI live PR body; local carrier</td><td>Prevents under-ceremonied scope</td><td>Unavailable</td><td>Two work-class sources</td><td class="score">4 — important fidelity gap</td></tr>
+            <tr><td>Test coupling</td><td>CI PR body; local carrier fallback</td><td>Requires tests with source change</td><td>Unavailable</td><td>Exemption source can differ</td><td class="score">4 — retain while aligning</td></tr>
+            <tr><td>Path manifest / carrier</td><td>CI PR-only; local preflight</td><td>Closed authorized path set</td><td>Unavailable</td><td>Omitted in contained-seat local profile</td><td class="score">5 — strong scope guard</td></tr>
+            <tr><td>Confidentiality / support scans</td><td>Local preflight</td><td>Pre-push leak prevention</td><td>Unavailable</td><td>Not part of Validate workflow</td><td class="score">5 — preserve early check</td></tr>
+            <tr><td>Version, harness, brain gates</td><td>Both, mostly shared calls</td><td>Current-surface and state integrity</td><td>Unavailable</td><td>Duplicated orchestration</td><td class="score">4 — consolidate definition</td></tr>
+            <tr><td>Permissions / install / portability</td><td>Partly divergent local and CI checks</td><td>Least privilege and provenance</td><td>Unavailable</td><td>Serial local ceremony differs by plane</td><td class="score">4 — safety-sensitive</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="recommendations-heading">
+      <h2 id="recommendations-heading">Ranked recommendations</h2>
+      <article class="recommendation"><h3>1. Safe quick win: one machine-readable gate manifest</h3><p>Generate a shared ordered gate manifest consumed by the workflow and <code>pr_preflight.py</code>. A parity test should fail when gate IDs or PR-data sources diverge.</p></article>
+      <article class="recommendation"><h3>2. Safe quick win: one declared-work-class payload</h3><p>Generate the payload from the carrier, then submit and verify it against the live PR body. A mismatch should fail locally before push and in CI with the same error code.</p></article>
+      <article class="recommendation"><h3>3. Safe quick win: publish timing evidence</h3><p>Record per-gate duration, cache status, test count, and comparison-base SHA as CI artifacts. Use a secret-safe schema so a sequence of runs can establish p50 and p95.</p></article>
+      <article class="recommendation"><h3>4. Safe quick win with benchmark guard: remove duplicate example sweeping</h3><p>Reuse one recorded aggregate <code>check-examples</code> result only after malformed and well-formed negative coverage proves every present property remains covered.</p></article>
+      <article class="recommendation ratify"><h3>5. Design / ratification: bound carried baseline failures</h3><p>Replace unconstrained failure-ID parity with an explicit dated allowlist keyed to test node and base SHA. Expiry or node/SHA changes must fail closed.</p></article>
+      <article class="recommendation ratify"><h3>6. Design / ratification: introduce path-aware local tiers</h3><p>Always run carrier, class, confidentiality, and permissions checks locally; keep the full suite before merge and define escalation for validator/runtime surfaces. Seeded mutations must demonstrate no lost safety property.</p></article>
+      <article class="recommendation ratify"><h3>7. Design / ratification: verify merge-group combined diffs</h3><p>Add merge-group checks for manifest, sizing, and coupling—or prove PR-only sufficiency. A fixture with conflicting individually-green PRs should be rejected.</p></article>
+    </section>
+
+    <section aria-labelledby="questions-heading">
+      <h2 id="questions-heading">Risks and open questions</h2>
+      <ul>
+        <li>Live Actions logs and timing data were not available to this read-only audit; instrument before claiming latency savings.</li>
+        <li>Tiering and baseline changes can weaken safety unless negative tests and ratification accompany them.</li>
+        <li>Current-main conclusions were anchored to the audited <code>origin/main</code> evidence; re-check the gate manifest as workflows evolve.</li>
+      </ul>
+    </section>
+
+    <footer>
+      <h2>Repository sources</h2>
+      <ol>
+        <li><code>.github/workflows/validate.yml</code> — CI triggers and PR/merge-group gates.</li>
+        <li><code>validators/creator_engine_validator/pr_preflight.py</code> — local orchestration and baseline comparison.</li>
+        <li><code>validators/tests/conftest.py</code> — example sweep fixture context.</li>
+        <li><code>docs/operations/AUTHOR_A_CE_VALID_PR.md</code> and <code>docs/contracts/authoring-a-governed-pr.md</code> — documented validation expectations.</li>
+        <li><code>docs/design/seat-side-preflight.md</code> — contained-seat preflight context.</li>
+        <li><code>.ce/changelog/</code> and <code>.ce/pr-manifests/</code> #557 history — current-main work-class correction evidence.</li>
+      </ol>
+    </footer>
+  </main>
+</body>
+</html>

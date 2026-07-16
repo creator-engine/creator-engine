@@ -165,3 +165,9 @@ This CI_CD_STRATEGY.md satisfies Feature 002 Canonical Document
 Specification #15: the verifies-not-ratifies invariant is explicit;
 the Feature 003 deferral is explicit; CI evidence linkage to T17 is
 stated; no `.github/` workflow content is authored.
+
+## CI efficiency audit
+
+The repository-native [CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html)
+maps shared local/CI gates, records known fidelity gaps, and separates safe
+measurement work from changes that require safety ratification.
