@@ -17,3 +17,15 @@ def test_local_preflight_wires_the_same_release_smoke_gate():
     preflight = (ROOT / "validators/creator_engine_validator/pr_preflight.py").read_text(encoding="utf-8")
     assert "Release smoke-evidence gate" in preflight
     assert "verify-release-smoke-evidence" in preflight
+
+
+def test_release_finalize_workflow_deliberately_does_not_fabricate_or_sign_smoke_evidence():
+    workflow = (ROOT / ".github/workflows/release-finalize.yml").read_text(encoding="utf-8")
+    forbidden = (
+        "release-smoke-prepare",
+        "release-smoke-finalize",
+        "ce-release-smoke-v1",
+        ".ce/release-evidence",
+        "ssh-keygen -Y sign",
+    )
+    assert not [token for token in forbidden if token in workflow]

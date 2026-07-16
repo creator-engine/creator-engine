@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from .. import release_smoke_evidence as producer
 from ..reporting import CheckResult, ValidationError, make_error
 from . import install_spec_signature_guard
 from .git_helpers import repo_root_for, run_git
@@ -65,7 +66,11 @@ def _changed_paths(repo_root: Path, base: str) -> tuple[set[str] | None, Validat
 
 def _canonical_record_bytes(record: dict[str, object]) -> bytes:
     unsigned = dict(record)
-    unsigned.pop("signature", None)
+    signature = unsigned.get("signature")
+    if isinstance(signature, dict):
+        public_descriptor = dict(signature)
+        public_descriptor.pop("value", None)
+        unsigned["signature"] = public_descriptor
     return json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
 
@@ -227,6 +232,7 @@ def _validate_evidence(
         "schema_version",
         "canonical_spec_sha256",
         "signed_spec_sha256",
+        "finalize_manifest_sha256",
         "summary",
         "stages",
         "containment",
@@ -262,6 +268,21 @@ def _validate_evidence(
                 signed_spec_sha256=actual_signed,
             )
         )
+    try:
+        tree_binding = producer.validate_release_tree(repo_root)
+    except producer.ReleaseSmokeEvidenceError as exc:
+        errors.append(_error(FINALIZE_MANIFEST, "artifacts", str(exc)))
+    else:
+        manifest_digest = _string(record, "finalize_manifest_sha256")
+        if manifest_digest != tree_binding.finalize_manifest_sha256:
+            errors.append(
+                _error(
+                    evidence_path,
+                    "finalize_manifest_sha256",
+                    "must match the exact checked-out release finalize manifest "
+                    f"({tree_binding.finalize_manifest_sha256})",
+                )
+            )
 
     summary = record.get("summary")
     if not _exact_keys(summary, {"failed", "stubbed"}) or summary.get("failed") != 0 or summary.get("stubbed") != 0:

@@ -104,3 +104,18 @@ ceo_merge
 ceo_report
 teardown
 ```
+
+## Release-smoke result
+
+The governed `--release-smoke` mode does not emit the timestamped slice-1
+rehearsal bundle. It writes this value-free canonical JSON contract instead:
+
+```json
+{"container_image":"registry.example/ce-smoke@sha256:<64 lowercase hex>","containment":{"host_checkout_mount":false},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}
+```
+
+The producer accepts exactly these fields and values. Tags, checkout mounts,
+failed/stubbed counts, missing stages, non-passing stages, additional fields,
+or non-canonical JSON are refused before unsigned evidence bytes are emitted.
+The result contains no timestamps, IDs, logs, host paths, credentials, or
+secret-shaped values.

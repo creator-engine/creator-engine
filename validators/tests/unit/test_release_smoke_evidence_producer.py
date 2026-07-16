@@ -1,0 +1,320 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+from creator_engine_validator import carrier_gen, cli, v3_installer
+from creator_engine_validator import release_smoke_evidence as producer
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def _spec(value: str = "signed-spec") -> str:
+    draft = """<!--
+signature:
+  key_id: ce-root-v1
+  algo: ssh-ed25519
+  namespace: ce-spec-v1
+  value: {value}
+  content_sha256: <published-with-this-spec>
+-->
+# install
+
+artifact_manifest:
+  package_version: 0.3.6
+""".format(value=value)
+    canonical = hashlib.sha256(v3_installer.canonical_spec_bytes(draft)).hexdigest()
+    return draft.replace("<published-with-this-spec>", canonical)
+
+
+def _artifact(docs: Path, relative: str) -> dict[str, object]:
+    path = docs / relative
+    raw = path.read_bytes()
+    return {"path": relative, "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw)}
+
+
+def _write_manifest(root: Path, artifacts: list[dict[str, object]] | None = None) -> Path:
+    docs = root / "docs"
+    spec = (docs / "llms-install.md").read_bytes()
+    signature = v3_installer.parse_embedded_signature_block(spec)
+    manifest = {
+        "kind": "ce-release-finalize-manifest",
+        "schema_version": "1",
+        "package_version": "0.3.6",
+        "canonical_spec_sha256": hashlib.sha256(v3_installer.canonical_spec_bytes(spec)).hexdigest(),
+        "signed_spec_sha256": hashlib.sha256(spec).hexdigest(),
+        "signature_sha256": hashlib.sha256(signature["value"].encode("ascii")).hexdigest(),
+        "signing_key_id": signature["key_id"],
+        "signing_namespace": signature["namespace"],
+        "artifacts": artifacts
+        if artifacts is not None
+        else [
+            _artifact(docs, "downloads/0.3.6/SHA256SUMS"),
+            _artifact(docs, "llms-install.md"),
+        ],
+    }
+    path = docs / "release-finalize-manifest.yml"
+    path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def _result(root: Path, **overrides: object) -> Path:
+    value: dict[str, object] = {
+        "schema_version": "1",
+        "container_image": "registry.example.invalid/ce-smoke@sha256:" + "a" * 64,
+        "containment": {"host_checkout_mount": False},
+        "summary": {"failed": 0, "stubbed": 0},
+        "stages": {"install": "passed", "install_verify": "passed"},
+    }
+    value.update(overrides)
+    path = root / "smoke-result.json"
+    path.write_bytes(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("ascii"))
+    return path
+
+
+def _repo(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    docs = root / "docs"
+    (docs / "downloads/0.3.6").mkdir(parents=True)
+    (docs / "llms-install.md").write_text(_spec(), encoding="utf-8")
+    (docs / "downloads/0.3.6/SHA256SUMS").write_text("fixture\n", encoding="utf-8")
+    _write_manifest(root)
+    (root / ".ce/pr-manifests").mkdir(parents=True)
+    carrier_path = ".ce/pr-manifests/release-publish-v0.3.6.md"
+    carrier = carrier_gen.render_manifest(
+        "release-publish-v0.3.6",
+        "release/v0.3.6",
+        "Finalize signed Creator Engine v0.3.6",
+        [carrier_path],
+        1,
+        hashlib.sha256((carrier_path + "\n").encode()).hexdigest(),
+        declared_work_class="tiny",
+    )
+    (root / carrier_path).write_text(carrier, encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "tests@example.invalid")
+    _git(root, "config", "user.name", "CE Tests")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "finalized release PR")
+    return root
+
+
+def test_prepare_emits_exact_canonical_unsigned_bytes_and_offline_instruction(tmp_path: Path):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+
+    prepared = producer.prepare_evidence(
+        repo_root=root,
+        result_path=_result(root),
+        unsigned_out=unsigned,
+    )
+
+    expected = json.dumps(prepared.record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    assert unsigned.read_bytes() == expected == prepared.canonical_bytes
+    assert prepared.record["finalize_manifest_sha256"] == hashlib.sha256(
+        (root / "docs/release-finalize-manifest.yml").read_bytes()
+    ).hexdigest()
+    assert prepared.record["signature"] == {
+        "algo": "ssh-ed25519",
+        "key_id": "ce-root-v1",
+        "namespace": "ce-release-smoke-v1",
+    }
+    assert prepared.signing_command == (
+        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I ce-root-v1 "
+        f"-n ce-release-smoke-v1 {unsigned}"
+    )
+    assert "curl" not in prepared.signing_command
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"container_image": "registry.example.invalid/ce-smoke:latest"},
+        {"containment": {"host_checkout_mount": True}},
+        {"summary": {"failed": 1, "stubbed": 0}},
+        {"summary": {"failed": 0, "stubbed": 1}},
+        {"stages": {"install": "failed", "install_verify": "passed"}},
+        {"stages": {"install": "passed", "install_verify": "failed"}},
+    ],
+)
+def test_prepare_refuses_unsafe_or_nonpassing_smoke_result(tmp_path: Path, overrides: dict[str, object]):
+    root = _repo(tmp_path)
+    with pytest.raises(producer.ReleaseSmokeEvidenceError):
+        producer.prepare_evidence(root, _result(root, **overrides), tmp_path / "unsigned.json")
+
+
+def test_prepare_refuses_missing_drifted_extra_and_escaping_finalize_artifacts(tmp_path: Path):
+    root = _repo(tmp_path)
+    result = _result(root)
+    artifact = root / "docs/downloads/0.3.6/SHA256SUMS"
+
+    artifact.write_text("drift\n", encoding="utf-8")
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="size|sha256"):
+        producer.prepare_evidence(root, result, tmp_path / "drift.json")
+
+    artifact.write_text("fixture\n", encoding="utf-8")
+    _write_manifest(root)
+    artifact.unlink()
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="missing"):
+        producer.prepare_evidence(root, result, tmp_path / "missing.json")
+
+    artifact.write_text("fixture\n", encoding="utf-8")
+    _write_manifest(root)
+    (artifact.parent / "EXTRA").write_text("extra\n", encoding="utf-8")
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="extra"):
+        producer.prepare_evidence(root, result, tmp_path / "extra.json")
+
+    artifacts = [_artifact(root / "docs", "llms-install.md")]
+    artifacts.append({"path": "../escape", "sha256": "0" * 64, "size": 0})
+    _write_manifest(root, artifacts)
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="relative|escape"):
+        producer.prepare_evidence(root, result, tmp_path / "escape.json")
+
+
+def test_finalize_verifies_public_signature_writes_canonical_record_and_refreshes_carrier(tmp_path: Path):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    prepared = producer.prepare_evidence(root, _result(root), unsigned)
+    evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+    signature = base64.b64encode(b"public-detached-sshsig").decode("ascii")
+    calls: list[tuple[object, ...]] = []
+
+    def verifier(algo, message, value, key):
+        calls.append((algo, message, value, key))
+        return True
+
+    finalized = producer.finalize_evidence(
+        repo_root=root,
+        unsigned_path=unsigned,
+        signature_base64=signature,
+        evidence_out=evidence,
+        carrier_path=carrier,
+        base="HEAD",
+        verifier=verifier,
+    )
+
+    assert calls == [
+        ("ssh-ed25519", prepared.canonical_bytes, signature, v3_installer.PINNED_KEYS["ce-root-v1"])
+    ]
+    raw = evidence.read_bytes()
+    assert raw == json.dumps(finalized.record, sort_keys=True, separators=(",", ":")).encode("ascii")
+    assert finalized.record["signature"]["value"] == signature
+    assert ".ce/release-evidence/release-v0.3.6.json" in carrier.read_text(encoding="utf-8")
+
+
+def test_finalize_refuses_tampered_bytes_key_namespace_digest_and_bad_public_signature(tmp_path: Path):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    producer.prepare_evidence(root, _result(root), unsigned)
+    evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+
+    for field, value in (
+        ("finalize_manifest_sha256", "0" * 64),
+        ("signature.key_id", "ce-dev1-root-v1"),
+        ("signature.namespace", "wrong"),
+    ):
+        record = json.loads(unsigned.read_text(encoding="ascii"))
+        if "." in field:
+            outer, inner = field.split(".")
+            record[outer][inner] = value
+        else:
+            record[field] = value
+        unsigned.write_bytes(json.dumps(record, sort_keys=True, separators=(",", ":")).encode("ascii"))
+        with pytest.raises(producer.ReleaseSmokeEvidenceError):
+            producer.finalize_evidence(root, unsigned, base64.b64encode(b"sig").decode(), evidence, carrier, "HEAD", verifier=lambda *_: True)
+        producer.prepare_evidence(root, _result(root), unsigned)
+
+    unsigned.write_bytes(unsigned.read_bytes() + b"\n")
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="canonical"):
+        producer.finalize_evidence(root, unsigned, base64.b64encode(b"sig").decode(), evidence, carrier, "HEAD", verifier=lambda *_: True)
+
+    producer.prepare_evidence(root, _result(root), unsigned)
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="verify"):
+        producer.finalize_evidence(root, unsigned, base64.b64encode(b"sig").decode(), evidence, carrier, "HEAD", verifier=lambda *_: False)
+    assert not evidence.exists()
+
+
+def test_producer_module_has_no_private_signing_or_egress_surface():
+    source = Path(producer.__file__).read_text(encoding="utf-8")
+    forbidden = ("urlopen", "requests.", "httpx.", "OpenBao", "private_key", "ssh-keygen -Y sign\"", "subprocess.run")
+    assert not [token for token in forbidden if token in source]
+
+
+def test_cli_prepare_and_finalize_are_public_file_only(tmp_path: Path, monkeypatch, capsys):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    assert cli.main(
+        [
+            "--json",
+            "release-smoke-prepare",
+            "--repo-root",
+            str(root),
+            "--result",
+            str(_result(root)),
+            "--unsigned-out",
+            str(unsigned),
+        ]
+    ) == 0
+    prepare_payload = json.loads(capsys.readouterr().out)
+    assert prepare_payload["unsigned_path"] == str(unsigned)
+    assert "ssh-keygen -Y sign" in prepare_payload["operator_signing_command"]
+
+    signature_file = tmp_path / "public.sig"
+    signature_file.write_bytes(b"public detached signature fixture")
+    evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+    calls: list[dict[str, object]] = []
+
+    def fake_finalize(**kwargs):
+        calls.append(kwargs)
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_bytes(b"{}")
+        return producer.FinalizedEvidence(record={}, evidence_path=evidence, carrier_path=carrier)
+
+    monkeypatch.setattr(producer, "finalize_evidence", fake_finalize)
+    assert cli.main(
+        [
+            "--json",
+            "release-smoke-finalize",
+            "--repo-root",
+            str(root),
+            "--unsigned",
+            str(unsigned),
+            "--signature-file",
+            str(signature_file),
+            "--evidence-out",
+            str(evidence),
+            "--carrier",
+            str(carrier),
+            "--base",
+            "HEAD",
+        ]
+    ) == 0
+    finalize_payload = json.loads(capsys.readouterr().out)
+    assert finalize_payload["evidence_path"] == str(evidence)
+    assert calls[0]["signature_base64"] == base64.b64encode(signature_file.read_bytes()).decode("ascii")
+    parsed = cli._build_parser().parse_args(
+        [
+            "release-smoke-finalize",
+            "--unsigned",
+            str(unsigned),
+            "--signature-file",
+            str(signature_file),
+            "--evidence-out",
+            str(evidence),
+            "--carrier",
+            str(carrier),
+        ]
+    )
+    assert not hasattr(parsed, "signing_key")

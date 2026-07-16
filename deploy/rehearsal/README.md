@@ -34,6 +34,37 @@ CE_REHEARSAL_EVIDENCE_OUT=<output-path> \
 The container is started without `--rm` so the cleanup trap can remove it with
 `docker rm -f`. The harness mounts nothing from the host checkout.
 
+## Governed release smoke
+
+`--release-smoke` is a separate, deliberately narrow post-PR mode for the
+governed smoke worker. It runs only clean-container install and install-verify,
+never mounts the checkout, and emits deterministic value-free JSON. The image
+must be digest-pinned and `CE_REHEARSAL_CHECKOUT_MOUNT` must remain `false`.
+
+```bash
+CE_REHEARSAL_IMAGE='registry.example/ce-smoke@sha256:<64 lowercase hex>' \
+CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT=/secure-scratch/release-smoke-result.json \
+./deploy/rehearsal/run-rehearsal.sh --release-smoke
+```
+
+The supported release-publish sequence is intentionally split across roles:
+
+1. `release-finalize.yml` opens the release-publish PR with exact finalized
+   `docs/` bytes; that PR is expected to remain red initially.
+2. An explicitly authorized governed smoke worker runs `--release-smoke`
+   against that finalized tree using a digest-pinned clean-container image.
+3. `release-smoke-prepare --result ... --unsigned-out ...` verifies the result,
+   signed install spec, finalize manifest, and every manifest-owned artifact.
+4. The Operator signs only the emitted canonical bytes offline using the exact
+   printed `ssh-keygen -Y sign -n ce-release-smoke-v1` instruction.
+5. `release-smoke-finalize --signature-file ...` verifies that public signature
+   against pinned `ce-root-v1`, writes
+   `.ce/release-evidence/release-vX.Y.Z.json`, and refreshes the requested PR
+   carrier. It has no signing or publishing capability.
+
+The release-finalize workflow does not run these steps, fabricate smoke output,
+or receive the smoke signing key. That separation is the authority boundary.
+
 ## Environment
 
 - `CE_REHEARSAL_IMAGE`: Docker image reference. Default tag: `ubuntu:24.04`.
@@ -46,6 +77,10 @@ The container is started without `--rm` so the cleanup trap can remove it with
   debugging. Default: `0`.
 - `CE_REHEARSAL_CONTAINER_NAME`: container name. Default:
   `ce-p3-rehearsal-$$`.
+- `CE_REHEARSAL_ENGINE`: container engine command for governed release smoke.
+  Default: `docker`; tests inject a hermetic fake.
+- `CE_REHEARSAL_CHECKOUT_MOUNT`: must be exactly `false` in release-smoke mode.
+- `CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT`: explicit deterministic result path.
 
 No secret, token, or credential value is accepted as a default.
 

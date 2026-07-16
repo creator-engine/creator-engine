@@ -42,6 +42,9 @@ def _record(repo: Path, **overrides: object) -> dict[str, object]:
         "schema_version": "1",
         "canonical_spec_sha256": hashlib.sha256(v3_installer.canonical_spec_bytes(spec)).hexdigest(),
         "signed_spec_sha256": hashlib.sha256(spec).hexdigest(),
+        "finalize_manifest_sha256": hashlib.sha256(
+            (repo / "docs/release-finalize-manifest.yml").read_bytes()
+        ).hexdigest(),
         "summary": {"failed": 0, "stubbed": 0},
         "stages": {"install": "passed", "install_verify": "passed"},
         "containment": {"host_checkout_mount": False},
@@ -69,7 +72,18 @@ def _finalize_manifest(repo: Path, **overrides: object) -> dict[str, object]:
         "signature_sha256": hashlib.sha256(signature["value"].encode("ascii")).hexdigest(),
         "signing_key_id": signature["key_id"],
         "signing_namespace": signature["namespace"],
-        "artifacts": [{"path": "downloads/0.3.6/SHA256SUMS", "sha256": "b" * 64, "size": 123}],
+        "artifacts": [
+            {
+                "path": "downloads/0.3.6/SHA256SUMS",
+                "sha256": hashlib.sha256((repo / "docs/downloads/0.3.6/SHA256SUMS").read_bytes()).hexdigest(),
+                "size": (repo / "docs/downloads/0.3.6/SHA256SUMS").stat().st_size,
+            },
+            {
+                "path": "llms-install.md",
+                "sha256": hashlib.sha256(spec).hexdigest(),
+                "size": len(spec),
+            },
+        ],
     }
     manifest.update(overrides)
     return manifest
@@ -85,6 +99,8 @@ def _repo(tmp_path: Path) -> Path:
     root = tmp_path
     (root / "docs").mkdir()
     (root / ".ce/release-evidence").mkdir(parents=True)
+    (root / "docs/downloads/0.3.6").mkdir(parents=True)
+    (root / "docs/downloads/0.3.6/SHA256SUMS").write_text("fixture\n", encoding="utf-8")
     spec = _spec()
     (root / "docs/llms-install.md").write_text(spec, encoding="utf-8")
     _write_finalize_manifest(root)
@@ -142,6 +158,7 @@ def test_release_evidence_refuses_absent_altered_stale_and_unsafe_records(tmp_pa
 
     cases = (
         {"canonical_spec_sha256": "0" * 64},
+        {"finalize_manifest_sha256": "0" * 64},
         {"summary": {"failed": 1, "stubbed": 0}},
         {"stages": {"install": "passed", "install_verify": "failed"}},
         {"containment": {"host_checkout_mount": True}},

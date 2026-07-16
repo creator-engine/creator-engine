@@ -7,6 +7,7 @@ HARNESS_VERSION="ce-p3-rehearsal-s1"
 DRY_RUN=0
 LIVE=0
 LIST_STAGES=0
+RELEASE_SMOKE=0
 SELECTED_STAGE=""
 CONTAINER_ID=""
 CONTAINER_OWNED=0
@@ -20,6 +21,9 @@ CE_REHEARSAL_SITE="${CE_REHEARSAL_SITE:-https://creator-engine.dev}"
 CE_REHEARSAL_EVIDENCE_OUT="${CE_REHEARSAL_EVIDENCE_OUT:-/tmp/ce-rehearsal-evidence.json}"
 CE_REHEARSAL_KEEP_CONTAINER="${CE_REHEARSAL_KEEP_CONTAINER:-0}"
 CE_REHEARSAL_CONTAINER_NAME="${CE_REHEARSAL_CONTAINER_NAME:-ce-p3-rehearsal-$$}"
+CE_REHEARSAL_ENGINE="${CE_REHEARSAL_ENGINE:-docker}"
+CE_REHEARSAL_CHECKOUT_MOUNT="${CE_REHEARSAL_CHECKOUT_MOUNT:-false}"
+CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT:-/tmp/ce-release-smoke-result.json}"
 
 STAGES=(
   provision
@@ -41,6 +45,7 @@ usage() {
 Usage:
   ${SCRIPT_NAME} --dry-run [--stage NAME]
   ${SCRIPT_NAME} --live [--stage NAME]
+  ${SCRIPT_NAME} --release-smoke
   ${SCRIPT_NAME} --list-stages
   ${SCRIPT_NAME} --help
 
@@ -48,6 +53,8 @@ Options:
   --dry-run       Print the staged plan and stub markers. Does not require
                   Docker, network, or credentials.
   --live          Affirmatively enable Docker/network execution.
+  --release-smoke Run only the governed release install/install-verify smoke
+                  and emit deterministic value-free result JSON.
   --stage NAME    Run one named stage. Use --list-stages for valid names.
   --list-stages   Print stage names and exit 0.
   --help, -h      Show this help.
@@ -58,6 +65,10 @@ Environment:
   CE_REHEARSAL_EVIDENCE_OUT      Evidence JSON path. Default: /tmp/ce-rehearsal-evidence.json
   CE_REHEARSAL_KEEP_CONTAINER    Set to 1 to keep the live container for debug.
   CE_REHEARSAL_CONTAINER_NAME    Container name. Default: ce-p3-rehearsal-\$\$
+  CE_REHEARSAL_ENGINE            Container engine command. Default: docker.
+  CE_REHEARSAL_CHECKOUT_MOUNT    Must be exactly false for release smoke.
+  CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT
+                                  Explicit deterministic result path.
 
 The harness mounts no host checkout into the container. Live execution is
 fail-closed unless --live is supplied.
@@ -79,7 +90,9 @@ fail() {
 
 cleanup() {
   local status=$?
-  write_evidence || true
+  if [ "${RELEASE_SMOKE}" != "1" ]; then
+    write_evidence || true
+  fi
   if [ -n "${CONTAINER_ID:-}" ] && [ "${CONTAINER_OWNED}" = "1" ] && [ "${CE_REHEARSAL_KEEP_CONTAINER}" != "1" ]; then
     docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
   fi
@@ -254,6 +267,10 @@ parse_args() {
         LIVE=1
         shift
         ;;
+      --release-smoke)
+        RELEASE_SMOKE=1
+        shift
+        ;;
       --stage)
         [ "$#" -ge 2 ] || fail "global" "--stage requires a name"
         SELECTED_STAGE="$2"
@@ -272,6 +289,46 @@ parse_args() {
         ;;
     esac
   done
+}
+
+release_smoke_fail() {
+  log "FAIL" "release_smoke" "$1"
+  exit 1
+}
+
+run_release_smoke() {
+  local engine result_out result_tmp
+  if [ "${DRY_RUN}" = "1" ] || [ "${LIVE}" = "1" ] || [ "${LIST_STAGES}" = "1" ] || [ -n "${SELECTED_STAGE}" ]; then
+    release_smoke_fail "--release-smoke is a separate governed-worker mode"
+  fi
+  if [[ ! "${CE_REHEARSAL_IMAGE}" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+    release_smoke_fail "release smoke image must be digest-pinned"
+  fi
+  if [ "${CE_REHEARSAL_CHECKOUT_MOUNT}" != "false" ]; then
+    release_smoke_fail "release smoke requires host checkout mount=false"
+  fi
+  engine="${CE_REHEARSAL_ENGINE}"
+  if ! command -v "${engine}" >/dev/null 2>&1; then
+    release_smoke_fail "container engine command is unavailable: ${engine}"
+  fi
+  result_out="${CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT}"
+  [ -n "${result_out}" ] || release_smoke_fail "release smoke result path must not be empty"
+  rm -f "${result_out}"
+
+  log "RUN" "release_smoke" "image=${CE_REHEARSAL_IMAGE}; checkout_mount=false"
+  if ! "${engine}" run --rm \
+    --env "CE_SITE=${CE_REHEARSAL_SITE}" \
+    "${CE_REHEARSAL_IMAGE}" \
+    bash -lc 'set -euo pipefail; apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl bash openssh-client git; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/install.sh" | bash; export PATH="/root/.local/bin:${PATH}"; cev3 --version; ce --version; ce --help >/dev/null; ce onboard --help >/dev/null'; then
+    release_smoke_fail "clean-container install/install_verify failed"
+  fi
+
+  mkdir -p "$(dirname "${result_out}")"
+  result_tmp="${result_out}.tmp.$$"
+  printf '{"container_image":"%s","containment":{"host_checkout_mount":false},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}' \
+    "${CE_REHEARSAL_IMAGE}" > "${result_tmp}"
+  mv "${result_tmp}" "${result_out}"
+  log "PASS" "release_smoke" "result=${result_out}"
 }
 
 require_live_or_dry_run() {
@@ -491,6 +548,11 @@ main() {
 
   if [ "${LIST_STAGES}" = "1" ]; then
     print_stages
+    exit 0
+  fi
+
+  if [ "${RELEASE_SMOKE}" = "1" ]; then
+    run_release_smoke
     exit 0
   fi
 
