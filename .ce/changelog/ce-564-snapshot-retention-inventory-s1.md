@@ -9,3 +9,4 @@ issue: ce-ops#564
 **Snapshot retention inventory slice 1.**
 
 - Add a disabled-by-default, read-only snapshot protection inventory with strict schema coverage.
+- Regenerate the checked schema reference for the snapshot retention inventory schema.

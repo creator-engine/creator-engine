@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 77
+Schema files: 78
 
 ## Index
 
@@ -74,6 +74,7 @@ Schema files: 77
 | `schemas/secret-ref.schema.yaml` | SecretRef | `object` |
 | `schemas/secret-zero-grant.schema.yaml` | SecretZeroGrant | `object` |
 | `schemas/side-effect-ledger.schema.yaml` | Creator Engine Side-Effect Ledger Record | `object` |
+| `schemas/snapshot-retention-inventory.schema.yaml` | Creator Engine snapshot retention inventory | `object` |
 | `schemas/spec-ce-sidecar.schema.yaml` | Creator Engine v2 Spec CE Sidecar | `object` |
 | `schemas/spec-wrapper-sidecar.schema.yaml` | Creator Engine Spec Wrapper Sidecar | `object` |
 | `schemas/state-boundary-contract.schema.yaml` | Creator Engine State Boundary Contract | `object` |
@@ -2321,6 +2322,41 @@ Definitions:
 | Property | Shape | Required | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `timestamp` | oneOf | no |  |  |
+
+### `schemas/snapshot-retention-inventory.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine snapshot retention inventory |
+| `$id` | `https://creator-engine.local/schemas/snapshot-retention-inventory.schema.yaml` |
+| Root type | `object` |
+
+Version 1 is a disabled-by-default, read-only inventory record. It cannot authorize deletion, retention actions, timers, commands, path globs, locking, persistence, or executor eligibility.
+
+Required fields:
+
+`schema_version`, `enabled`, `identity`, `source_generations`, `observations`, `disposition`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `schema_version` | string | yes | const `1` |  |
+| `enabled` | boolean | yes |  |  |
+| `identity` | $ref #/$defs/identity | yes |  |  |
+| `source_generations` | object | yes | additionalProperties `false` |  |
+| `observations` | array | yes |  |  |
+| `disposition` | string | yes | enum `disabled`, `protected`, `unprotected`, `blocked` |  |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `opaque` | string | no | pattern `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$` |  |
+| `sha256` | string | no | pattern `^[0-9a-f]{64}$` |  |
+| `timestamp` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` |  |
+| `identity` | object | no | additionalProperties `false` |  |
+| `observation` | object | no | additionalProperties `false` |  |
 
 ### `schemas/spec-ce-sidecar.schema.yaml`
 

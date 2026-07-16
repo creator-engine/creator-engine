@@ -6,13 +6,14 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** feature
 
-AUTHORIZED_PATHS_COUNT=5
+AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=d12cdd8276b732bb41bd6f2af8b646f70b52a04a53a2e6bb3a9ad33dc758430b
+AUTHORIZED_PATHS_SHA256=e66135c7d1a5ee5fbf7b1b3478ac77d47a0f7d3024d1f47db0a9a55ca01f4ae5
 
 ```text
 .ce/changelog/ce-564-snapshot-retention-inventory-s1.md
 .ce/pr-manifests/ce-564-snapshot-retention-inventory-s1.md
+.ce/reference/schemas.generated.md
 validators/creator_engine_validator/schemas/snapshot-retention-inventory.schema.yaml
 validators/creator_engine_validator/snapshot_retention.py
 validators/tests/unit/test_snapshot_retention.py
