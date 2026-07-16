@@ -311,7 +311,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="validate finalized docs plus governed smoke result and emit exact offline-signing bytes",
     )
     release_smoke_prepare.add_argument("--repo-root", default=".", help="release publish PR checkout (default: .)")
-    release_smoke_prepare.add_argument("--result", required=True, help="deterministic value-free governed smoke result JSON")
+    release_smoke_prepare.add_argument("--result", required=True, help="deterministic endpoint-bound governed smoke result JSON")
     release_smoke_prepare.add_argument("--unsigned-out", required=True, help="explicit path for canonical unsigned evidence bytes")
 
     release_smoke_finalize = sub.add_parser(

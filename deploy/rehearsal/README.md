@@ -38,8 +38,10 @@ The container is started without `--rm` so the cleanup trap can remove it with
 
 `--release-smoke` is a separate, deliberately narrow post-PR mode for the
 governed smoke worker. It runs only clean-container install and install-verify,
-never mounts the checkout, and emits deterministic value-free JSON. The image
-must be digest-pinned and `CE_REHEARSAL_CHECKOUT_MOUNT` must remain `false`.
+never mounts the checkout, and emits deterministic JSON containing the package,
+spec, finalize-manifest, and artifact-set bindings observed from the same
+`CE_SITE` endpoint. The image must be digest-pinned and
+`CE_REHEARSAL_CHECKOUT_MOUNT` must remain `false`.
 
 ```bash
 CE_REHEARSAL_IMAGE='registry.example/ce-smoke@sha256:<64 lowercase hex>' \
@@ -53,14 +55,19 @@ The supported release-publish sequence is intentionally split across roles:
    `docs/` bytes; that PR is expected to remain red initially.
 2. An explicitly authorized governed smoke worker runs `--release-smoke`
    against that finalized tree using a digest-pinned clean-container image.
-3. `release-smoke-prepare --result ... --unsigned-out ...` verifies the result,
-   signed install spec, finalize manifest, and every manifest-owned artifact.
+3. `release-smoke-prepare --result ... --unsigned-out ...` verifies the observed
+   bindings against the exact local signed install spec, finalize manifest, and
+   every manifest-owned artifact. A stale result cannot be rebound to new bytes.
 4. The Operator signs only the emitted canonical bytes offline using the exact
-   printed `ssh-keygen -Y sign -n ce-release-smoke-v1` instruction.
+   printed `ssh-keygen -Y sign -f <key> -n ce-release-smoke-v1 <file>` instruction.
 5. `release-smoke-finalize --signature-file ...` verifies that public signature
    against pinned `ce-root-v1`, writes
    `.ce/release-evidence/release-vX.Y.Z.json`, and refreshes the requested PR
    carrier. It has no signing or publishing capability.
+
+The PR gate derives the one expected evidence path from the checked-out package
+version. It requires that exact record to be newly changed, rejects additional
+changed evidence JSON, and ignores unchanged records from prior releases.
 
 The release-finalize workflow does not run these steps, fabricate smoke output,
 or receive the smoke signing key. That separation is the authority boundary.

@@ -68,10 +68,18 @@ def _write_manifest(root: Path, artifacts: list[dict[str, object]] | None = None
 
 
 def _result(root: Path, **overrides: object) -> Path:
+    binding = producer.validate_release_tree(root)
     value: dict[str, object] = {
         "schema_version": "1",
         "container_image": "registry.example.invalid/ce-smoke@sha256:" + "a" * 64,
         "containment": {"host_checkout_mount": False},
+        "release_binding": {
+            "package_version": binding.package_version,
+            "canonical_spec_sha256": binding.canonical_spec_sha256,
+            "signed_spec_sha256": binding.signed_spec_sha256,
+            "finalize_manifest_sha256": binding.finalize_manifest_sha256,
+            "artifacts_sha256": binding.artifacts_sha256,
+        },
         "summary": {"failed": 0, "stubbed": 0},
         "stages": {"install": "passed", "install_verify": "passed"},
     }
@@ -123,14 +131,15 @@ def test_prepare_emits_exact_canonical_unsigned_bytes_and_offline_instruction(tm
     assert prepared.record["finalize_manifest_sha256"] == hashlib.sha256(
         (root / "docs/release-finalize-manifest.yml").read_bytes()
     ).hexdigest()
+    assert prepared.record["package_version"] == "0.3.6"
+    assert prepared.record["artifacts_sha256"] == producer.validate_release_tree(root).artifacts_sha256
     assert prepared.record["signature"] == {
         "algo": "ssh-ed25519",
         "key_id": "ce-root-v1",
         "namespace": "ce-release-smoke-v1",
     }
     assert prepared.signing_command == (
-        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I ce-root-v1 "
-        f"-n ce-release-smoke-v1 {unsigned}"
+        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -n ce-release-smoke-v1 {unsigned}"
     )
     assert "curl" not in prepared.signing_command
 
@@ -150,6 +159,51 @@ def test_prepare_refuses_unsafe_or_nonpassing_smoke_result(tmp_path: Path, overr
     root = _repo(tmp_path)
     with pytest.raises(producer.ReleaseSmokeEvidenceError):
         producer.prepare_evidence(root, _result(root, **overrides), tmp_path / "unsigned.json")
+
+
+def test_prepare_refuses_missing_malformed_or_stale_observed_release_binding(tmp_path: Path):
+    root = _repo(tmp_path)
+    old_result = _result(root)
+    old_result_bytes = old_result.read_bytes()
+
+    for binding in (None, {}, {"package_version": "0.3.6"}):
+        overrides = {} if binding is None else {"release_binding": binding}
+        path = _result(root, **overrides)
+        if binding is None:
+            value = json.loads(path.read_text(encoding="ascii"))
+            del value["release_binding"]
+            path.write_bytes(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("ascii"))
+        with pytest.raises(producer.ReleaseSmokeEvidenceError, match="release_binding|result fields"):
+            producer.prepare_evidence(root, path, tmp_path / "invalid-binding.json")
+
+    stale = json.loads(old_result_bytes.decode("ascii"))
+    stale["release_binding"]["signed_spec_sha256"] = "0" * 64
+    old_result.write_bytes(json.dumps(stale, sort_keys=True, separators=(",", ":")).encode("ascii"))
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="signed_spec_sha256"):
+        producer.prepare_evidence(root, old_result, tmp_path / "stale-spec.json")
+
+
+def test_prepare_refuses_old_result_after_valid_release_tree_bytes_change(tmp_path: Path):
+    root = _repo(tmp_path)
+    stale_result = _result(root)
+
+    (root / "docs/llms-install.md").write_text(_spec("new-signed-spec"), encoding="utf-8")
+    _write_manifest(root)
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="canonical_spec_sha256|signed_spec_sha256"):
+        producer.prepare_evidence(root, stale_result, tmp_path / "changed-spec.json")
+
+    fresh_result = _result(root)
+    manifest = root / "docs/release-finalize-manifest.yml"
+    manifest.write_bytes(manifest.read_bytes() + b"\n")
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="finalize_manifest_sha256"):
+        producer.prepare_evidence(root, fresh_result, tmp_path / "changed-manifest.json")
+
+    fresh_result = _result(root)
+    artifact = root / "docs/downloads/0.3.6/SHA256SUMS"
+    artifact.write_text("new fixture\n", encoding="utf-8")
+    _write_manifest(root)
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="artifacts_sha256|finalize_manifest_sha256"):
+        producer.prepare_evidence(root, fresh_result, tmp_path / "changed-artifact.json")
 
 
 def test_prepare_refuses_missing_drifted_extra_and_escaping_finalize_artifacts(tmp_path: Path):

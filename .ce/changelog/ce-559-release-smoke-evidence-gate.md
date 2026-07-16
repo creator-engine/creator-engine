@@ -16,3 +16,6 @@ Implement the fail-closed release smoke-evidence PR-diff gate.
 - Add the governed post-PR producer path: digest-pinned no-checkout smoke result,
   canonical offline-signing bytes, public-only SSHSIG finalization, exact
   finalized-tree verification, and atomic evidence/carrier output.
+- Bind the clean-container result to its observed package, spec, finalize
+  manifest, and artifact-set bytes; accept only the version-derived changed
+  evidence record across successive releases; and require `ce-root-v1` exactly.

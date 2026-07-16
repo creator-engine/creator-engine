@@ -204,6 +204,13 @@ def test_finalized_docs_smoke_prepare_public_finalize_and_gate_round_trip(tmp_pa
                 "schema_version": "1",
                 "container_image": "registry.example.invalid/ce-smoke@sha256:" + "a" * 64,
                 "containment": {"host_checkout_mount": False},
+                "release_binding": {
+                    "package_version": release_smoke_evidence.validate_release_tree(repo).package_version,
+                    "canonical_spec_sha256": release_smoke_evidence.validate_release_tree(repo).canonical_spec_sha256,
+                    "signed_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "finalize_manifest_sha256": release_smoke_evidence.validate_release_tree(repo).finalize_manifest_sha256,
+                    "artifacts_sha256": release_smoke_evidence.validate_release_tree(repo).artifacts_sha256,
+                },
                 "summary": {"failed": 0, "stubbed": 0},
                 "stages": {"install": "passed", "install_verify": "passed"},
             },
@@ -220,11 +227,9 @@ def test_finalized_docs_smoke_prepare_public_finalize_and_gate_round_trip(tmp_pa
         check=True,
         capture_output=True,
     )
-    subprocess.run(
-        ["ssh-keygen", "-Y", "sign", "-f", str(smoke_key), "-n", release_smoke_evidence.SSH_SIG_NAMESPACE, str(unsigned)],
-        check=True,
-        capture_output=True,
-    )
+    signing_argv = prepared.signing_command.split()
+    signing_argv[signing_argv.index("/path/to/ce-root-v1-private")] = str(smoke_key)
+    subprocess.run(signing_argv, check=True, capture_output=True)
     signature_base64 = base64.b64encode((tmp_path / "release-v0.3.6.unsigned.json.sig").read_bytes()).decode("ascii")
     public = (tmp_path / "smoke-key.pub").read_text(encoding="utf-8").split()
     smoke_trust_root = f"ce-root-v1 {public[0]} {public[1]}"

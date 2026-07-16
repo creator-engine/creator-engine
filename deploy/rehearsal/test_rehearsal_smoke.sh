@@ -53,21 +53,27 @@ fake_engine="${tmp_dir}/fake-engine"
 cat > "${fake_engine}" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "${CE_FAKE_ENGINE_ARGS}"
+[ -z "${CE_FAKE_ENGINE_OUTPUT:-}" ] || printf '%s\n' "${CE_FAKE_ENGINE_OUTPUT}"
 exit "${CE_FAKE_ENGINE_STATUS:-0}"
 EOF
 chmod +x "${fake_engine}"
 digest_image="registry.example.invalid/ce-smoke@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 result_path="${tmp_dir}/release-smoke-result.json"
 args_path="${tmp_dir}/engine-args"
+binding_line="CE_RELEASE_SMOKE_BINDING 0.3.6 $(printf 'b%.0s' {1..64}) $(printf 'c%.0s' {1..64}) $(printf 'd%.0s' {1..64}) $(printf 'e%.0s' {1..64})"
 CE_FAKE_ENGINE_ARGS="${args_path}" \
+CE_FAKE_ENGINE_OUTPUT="${binding_line}" \
 CE_REHEARSAL_ENGINE="${fake_engine}" \
 CE_REHEARSAL_IMAGE="${digest_image}" \
 CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${result_path}" \
   "${HARNESS}" --release-smoke
 
-expected_result="{\"container_image\":\"${digest_image}\",\"containment\":{\"host_checkout_mount\":false},\"schema_version\":\"1\",\"stages\":{\"install\":\"passed\",\"install_verify\":\"passed\"},\"summary\":{\"failed\":0,\"stubbed\":0}}"
+expected_result="{\"container_image\":\"${digest_image}\",\"containment\":{\"host_checkout_mount\":false},\"release_binding\":{\"artifacts_sha256\":\"$(printf 'e%.0s' {1..64})\",\"canonical_spec_sha256\":\"$(printf 'b%.0s' {1..64})\",\"finalize_manifest_sha256\":\"$(printf 'd%.0s' {1..64})\",\"package_version\":\"0.3.6\",\"signed_spec_sha256\":\"$(printf 'c%.0s' {1..64})\"},\"schema_version\":\"1\",\"stages\":{\"install\":\"passed\",\"install_verify\":\"passed\"},\"summary\":{\"failed\":0,\"stubbed\":0}}"
 [ "$(cat "${result_path}")" = "${expected_result}" ] || fail "release smoke result was not deterministic canonical JSON"
 grep -q -- "${digest_image}" "${args_path}" || fail "release smoke did not use digest-pinned image"
+grep -q -- 'llms-install.md' "${args_path}" || fail "release smoke did not observe the signed install spec from CE_SITE"
+grep -q -- 'release-finalize-manifest.yml' "${args_path}" || fail "release smoke did not observe the finalize manifest from CE_SITE"
+grep -q -- 'artifacts_sha256' "${args_path}" || fail "release smoke did not derive the observed artifact-set binding"
 if grep -Eq -- '(^|[[:space:]])(-v|--volume|--mount)([[:space:]]|=)' "${args_path}"; then
   fail "release smoke mounted host content"
 fi
@@ -87,10 +93,15 @@ CE_FAKE_ENGINE_ARGS="${args_path}" CE_FAKE_ENGINE_STATUS=9 CE_REHEARSAL_ENGINE="
 CE_REHEARSAL_IMAGE="${digest_image}" CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${result_path}" \
   "${HARNESS}" --release-smoke >/dev/null 2>&1
 engine_status=$?
+CE_FAKE_ENGINE_ARGS="${args_path}" CE_FAKE_ENGINE_OUTPUT="CE_RELEASE_SMOKE_BINDING malformed" CE_REHEARSAL_ENGINE="${fake_engine}" \
+CE_REHEARSAL_IMAGE="${digest_image}" CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${result_path}" \
+  "${HARNESS}" --release-smoke >/dev/null 2>&1
+binding_status=$?
 set -e
 [ "${tag_status}" -ne 0 ] || fail "release smoke accepted a tag-only image"
 [ "${mount_status}" -ne 0 ] || fail "release smoke accepted checkout mount=true"
 [ "${engine_status}" -ne 0 ] || fail "release smoke accepted a failed engine run"
+[ "${binding_status}" -ne 0 ] || fail "release smoke accepted malformed observed release bindings"
 [ ! -e "${result_path}" ] || fail "failed release smoke left a stale result"
 
 printf 'smoke: PASS\n'

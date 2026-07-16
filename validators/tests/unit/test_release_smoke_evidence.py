@@ -6,6 +6,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import yaml
+
 from creator_engine_validator import v3_installer
 from creator_engine_validator.checks import release_smoke_evidence as gate
 
@@ -38,10 +40,13 @@ artifact_manifest:
 
 def _record(repo: Path, **overrides: object) -> dict[str, object]:
     spec = (repo / "docs/llms-install.md").read_bytes()
+    binding = gate.producer.validate_release_tree(repo)
     record: dict[str, object] = {
         "schema_version": "1",
+        "package_version": binding.package_version,
         "canonical_spec_sha256": hashlib.sha256(v3_installer.canonical_spec_bytes(spec)).hexdigest(),
         "signed_spec_sha256": hashlib.sha256(spec).hexdigest(),
+        "artifacts_sha256": binding.artifacts_sha256,
         "finalize_manifest_sha256": hashlib.sha256(
             (repo / "docs/release-finalize-manifest.yml").read_bytes()
         ).hexdigest(),
@@ -91,7 +96,7 @@ def _finalize_manifest(repo: Path, **overrides: object) -> dict[str, object]:
 
 def _write_finalize_manifest(root: Path, **overrides: object) -> None:
     (root / "docs/release-finalize-manifest.yml").write_text(
-        json.dumps(_finalize_manifest(root, **overrides), sort_keys=True), encoding="utf-8"
+        yaml.safe_dump(_finalize_manifest(root, **overrides), sort_keys=False), encoding="utf-8"
     )
 
 
@@ -104,6 +109,10 @@ def _repo(tmp_path: Path) -> Path:
     spec = _spec()
     (root / "docs/llms-install.md").write_text(spec, encoding="utf-8")
     _write_finalize_manifest(root)
+    _write_record(
+        root / ".ce/release-evidence/release-v0.3.5.json",
+        {"historical": "unchanged prior release evidence is intentionally ignored"},
+    )
     _git(root, "init")
     _git(root, "add", ".")
     _commit(root, "base")
@@ -120,7 +129,13 @@ def _codes(result) -> set[str]:
 
 
 def _write_record(path: Path, record: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii"))
+
+
+def _amend(repo: Path, *paths: str) -> None:
+    _git(repo, "add", *paths)
+    _git(repo, "-c", "user.name=CE Test", "-c", "user.email=ce-test@example.invalid", "commit", "--amend", "--no-edit")
 
 
 def test_non_release_diff_is_neutral(tmp_path: Path):
@@ -137,7 +152,8 @@ def test_non_release_diff_is_neutral(tmp_path: Path):
 def test_release_evidence_accepts_exact_valid_record(tmp_path: Path):
     root = _repo(tmp_path)
     record = _record(root)
-    _write_record(root / ".ce/release-evidence/smoke.json", record)
+    _write_record(root / ".ce/release-evidence/release-v0.3.6.json", record)
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
 
     calls = []
     def verifier(algo, message, value, key):
@@ -157,7 +173,9 @@ def test_release_evidence_refuses_absent_altered_stale_and_unsafe_records(tmp_pa
     assert _codes(result) == {gate.CODE_INVALID}
 
     cases = (
+        {"package_version": "0.3.5"},
         {"canonical_spec_sha256": "0" * 64},
+        {"artifacts_sha256": "0" * 64},
         {"finalize_manifest_sha256": "0" * 64},
         {"summary": {"failed": 1, "stubbed": 0}},
         {"stages": {"install": "passed", "install_verify": "failed"}},
@@ -167,24 +185,49 @@ def test_release_evidence_refuses_absent_altered_stale_and_unsafe_records(tmp_pa
         {"signature": {"key_id": "ce-root-v1", "algo": "ssh-ed25519", "namespace": "wrong", "value": "bad"}},
     )
     for index, overrides in enumerate(cases):
-        _write_record(root / ".ce/release-evidence/smoke.json", _record(root, **overrides))
+        _write_record(root / ".ce/release-evidence/release-v0.3.6.json", _record(root, **overrides))
+        _amend(root, ".ce/release-evidence/release-v0.3.6.json")
         result = gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)
         assert _codes(result) == {gate.CODE_INVALID}, index
 
 
-def test_release_evidence_refuses_unverified_or_multiple_records(tmp_path: Path):
+def test_release_evidence_refuses_unverified_or_wrong_ambiguous_changed_records(tmp_path: Path):
     root = _repo(tmp_path)
     record = _record(root)
     evidence = root / ".ce/release-evidence"
-    _write_record(evidence / "one.json", record)
+    _write_record(evidence / "release-v0.3.6.json", record)
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
     assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: False)) == {gate.CODE_INVALID}
-    _write_record(evidence / "two.json", record)
+
+    (evidence / "release-v0.3.6.json").unlink()
+    _write_record(evidence / "release-v9.9.9.json", record)
+    _amend(root, ".ce/release-evidence")
     assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)) == {gate.CODE_INVALID}
+
+    _write_record(evidence / "release-v0.3.6.json", record)
+    _write_record(evidence / "extra.json", record)
+    _amend(root, ".ce/release-evidence")
+    assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)) == {gate.CODE_INVALID}
+
+
+def test_release_evidence_refuses_alternate_pinned_identity_without_verifying(tmp_path: Path):
+    root = _repo(tmp_path)
+    record = _record(root)
+    record["signature"]["key_id"] = "ce-dev1-root-v1"
+    _write_record(root / ".ce/release-evidence/release-v0.3.6.json", record)
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
+    calls = []
+
+    result = gate.run_with_base([root], "HEAD~1", verifier=lambda *args: calls.append(args) or True)
+
+    assert _codes(result) == {gate.CODE_INVALID}
+    assert calls == []
 
 
 def test_release_evidence_refuses_truncated_or_altered_finalize_contract(tmp_path: Path):
     root = _repo(tmp_path)
-    _write_record(root / ".ce/release-evidence/smoke.json", _record(root))
+    _write_record(root / ".ce/release-evidence/release-v0.3.6.json", _record(root))
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
 
     cases = (
         {"kind": "not-a-finalize-manifest"},
@@ -203,5 +246,5 @@ def test_release_evidence_refuses_truncated_or_altered_finalize_contract(tmp_pat
 
     truncated = _finalize_manifest(root)
     del truncated["artifacts"]
-    (root / "docs/release-finalize-manifest.yml").write_text(json.dumps(truncated), encoding="utf-8")
+    (root / "docs/release-finalize-manifest.yml").write_text(yaml.safe_dump(truncated, sort_keys=False), encoding="utf-8")
     assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)) == {gate.CODE_INVALID}

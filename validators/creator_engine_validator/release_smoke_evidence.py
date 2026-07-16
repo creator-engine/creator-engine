@@ -47,12 +47,22 @@ FINALIZE_MANIFEST_FIELDS = {
     "artifacts",
 }
 FINALIZE_ARTIFACT_FIELDS = {"path", "sha256", "size"}
-RESULT_FIELDS = {"schema_version", "container_image", "containment", "summary", "stages"}
-UNSIGNED_FIELDS = {
-    "schema_version",
+RESULT_FIELDS = {"schema_version", "container_image", "containment", "release_binding", "summary", "stages"}
+RESULT_BINDING_ORDER = (
+    "package_version",
     "canonical_spec_sha256",
     "signed_spec_sha256",
     "finalize_manifest_sha256",
+    "artifacts_sha256",
+)
+RESULT_BINDING_FIELDS = set(RESULT_BINDING_ORDER)
+UNSIGNED_FIELDS = {
+    "schema_version",
+    "package_version",
+    "canonical_spec_sha256",
+    "signed_spec_sha256",
+    "finalize_manifest_sha256",
+    "artifacts_sha256",
     "summary",
     "stages",
     "containment",
@@ -82,6 +92,7 @@ class ReleaseTreeBinding:
     canonical_spec_sha256: str
     signed_spec_sha256: str
     finalize_manifest_sha256: str
+    artifacts_sha256: str
 
 
 @dataclass(frozen=True)
@@ -139,7 +150,7 @@ def _load_json_canonical(path: Path, *, label: str) -> dict[str, object]:
 
 def _validate_result(value: dict[str, object]) -> None:
     if set(value) != RESULT_FIELDS:
-        raise ReleaseSmokeEvidenceError("smoke result must contain exactly the value-free result fields")
+        raise ReleaseSmokeEvidenceError("smoke result must contain exactly the endpoint-observed result fields")
     if value.get("schema_version") != SCHEMA_VERSION:
         raise ReleaseSmokeEvidenceError("smoke result schema_version must be '1'")
     image = value.get("container_image")
@@ -155,6 +166,28 @@ def _validate_result(value: dict[str, object]) -> None:
     expected_stages = {"install": "passed", "install_verify": "passed"}
     if not _exact_mapping(stages, set(expected_stages)) or stages != expected_stages:
         raise ReleaseSmokeEvidenceError("smoke result install and install_verify must both be passed")
+    release_binding = value.get("release_binding")
+    if not _exact_mapping(release_binding, RESULT_BINDING_FIELDS):
+        raise ReleaseSmokeEvidenceError("smoke result release_binding must contain exactly the observed release fields")
+    assert isinstance(release_binding, dict)
+    package_version = release_binding.get("package_version")
+    if not isinstance(package_version, str) or not package_version or any(character.isspace() for character in package_version):
+        raise ReleaseSmokeEvidenceError("smoke result release_binding.package_version is invalid")
+    for field in RESULT_BINDING_FIELDS - {"package_version"}:
+        value = release_binding.get(field)
+        if not isinstance(value, str) or not HEX64_RE.fullmatch(value):
+            raise ReleaseSmokeEvidenceError(f"smoke result release_binding.{field} must be a lowercase SHA-256 digest")
+
+
+def _validate_observed_binding(result: dict[str, object], binding: ReleaseTreeBinding) -> None:
+    observed = result["release_binding"]
+    assert isinstance(observed, dict)
+    for field in RESULT_BINDING_ORDER:
+        expected = getattr(binding, field)
+        if observed.get(field) != expected:
+            raise ReleaseSmokeEvidenceError(
+                f"smoke result release_binding.{field} does not match the exact finalized release tree"
+            )
 
 
 def _manifest_artifact_path(docs: Path, relative: str, package_version: str) -> Path:
@@ -262,15 +295,26 @@ def validate_release_tree(repo_root: Path | str) -> ReleaseTreeBinding:
         canonical_spec_sha256=canonical_sha,
         signed_spec_sha256=signed_sha,
         finalize_manifest_sha256=hashlib.sha256(manifest_raw).hexdigest(),
+        artifacts_sha256=_artifact_section_sha256(manifest_raw),
     )
+
+
+def _artifact_section_sha256(manifest_raw: bytes) -> str:
+    marker = b"artifacts:\n"
+    position = manifest_raw.find(marker)
+    if position < 0:
+        raise ReleaseSmokeEvidenceError("release finalize manifest is missing its canonical artifacts section")
+    return hashlib.sha256(manifest_raw[position:]).hexdigest()
 
 
 def _unsigned_record(binding: ReleaseTreeBinding, result: dict[str, object]) -> dict[str, object]:
     return {
         "schema_version": SCHEMA_VERSION,
+        "package_version": binding.package_version,
         "canonical_spec_sha256": binding.canonical_spec_sha256,
         "signed_spec_sha256": binding.signed_spec_sha256,
         "finalize_manifest_sha256": binding.finalize_manifest_sha256,
+        "artifacts_sha256": binding.artifacts_sha256,
         "summary": result["summary"],
         "stages": result["stages"],
         "containment": result["containment"],
@@ -306,13 +350,13 @@ def prepare_evidence(
     binding = validate_release_tree(repo_root)
     result = _load_json_canonical(Path(result_path), label="release smoke result")
     _validate_result(result)
+    _validate_observed_binding(result, binding)
     record = _unsigned_record(binding, result)
     canonical = _canonical_json(record)
     output = Path(unsigned_out)
     _atomic_write(output, canonical)
     signing_command = (
-        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -I {SIGNING_KEY_ID} "
-        f"-n {SSH_SIG_NAMESPACE} {output}"
+        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -n {SSH_SIG_NAMESPACE} {output}"
     )
     return PreparedEvidence(
         record=record,
@@ -327,17 +371,24 @@ def _validate_unsigned(repo_root: Path, unsigned_path: Path) -> tuple[dict[str, 
     record = _load_json_canonical(unsigned_path, label="unsigned release smoke evidence")
     if set(record) != UNSIGNED_FIELDS:
         raise ReleaseSmokeEvidenceError("unsigned release smoke evidence has unexpected fields")
-    synthetic_result = {field: record[field] for field in RESULT_FIELDS}
+    synthetic_result = {
+        field: record[field]
+        for field in RESULT_FIELDS - {"release_binding"}
+    }
+    synthetic_result["release_binding"] = {field: record[field] for field in RESULT_BINDING_FIELDS}
     _validate_result(synthetic_result)
     signature = record.get("signature")
     expected_signature = {"key_id": SIGNING_KEY_ID, "algo": SSH_ALGO, "namespace": SSH_SIG_NAMESPACE}
     if signature != expected_signature:
         raise ReleaseSmokeEvidenceError("unsigned signature descriptor must bind ce-root-v1 and ce-release-smoke-v1")
     binding = validate_release_tree(repo_root)
+    _validate_observed_binding(synthetic_result, binding)
     for field, expected in (
+        ("package_version", binding.package_version),
         ("canonical_spec_sha256", binding.canonical_spec_sha256),
         ("signed_spec_sha256", binding.signed_spec_sha256),
         ("finalize_manifest_sha256", binding.finalize_manifest_sha256),
+        ("artifacts_sha256", binding.artifacts_sha256),
     ):
         if record.get(field) != expected:
             raise ReleaseSmokeEvidenceError(f"unsigned release smoke evidence {field} does not match finalized tree")

@@ -4,9 +4,11 @@ type: object
 additionalProperties: false
 required:
   - schema_version
+  - package_version
   - canonical_spec_sha256
   - signed_spec_sha256
   - finalize_manifest_sha256
+  - artifacts_sha256
   - summary
   - stages
   - containment
@@ -15,6 +17,9 @@ required:
 properties:
   schema_version:
     const: "1"
+  package_version:
+    type: string
+    pattern: '^\S+$'
   canonical_spec_sha256:
     type: string
     pattern: '^[0-9a-f]{64}$'
@@ -22,6 +27,9 @@ properties:
     type: string
     pattern: '^[0-9a-f]{64}$'
   finalize_manifest_sha256:
+    type: string
+    pattern: '^[0-9a-f]{64}$'
+  artifacts_sha256:
     type: string
     pattern: '^[0-9a-f]{64}$'
   summary:
@@ -52,7 +60,7 @@ properties:
     additionalProperties: false
     required: [key_id, algo, namespace, value]
     properties:
-      key_id: {type: string}
+      key_id: {const: ce-root-v1}
       algo: {const: ssh-ed25519}
       namespace: {const: ce-release-smoke-v1}
       value: {type: string}

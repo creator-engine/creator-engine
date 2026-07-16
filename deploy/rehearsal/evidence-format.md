@@ -108,14 +108,18 @@ teardown
 ## Release-smoke result
 
 The governed `--release-smoke` mode does not emit the timestamped slice-1
-rehearsal bundle. It writes this value-free canonical JSON contract instead:
+rehearsal bundle. It writes this deterministic canonical JSON contract instead:
 
 ```json
-{"container_image":"registry.example/ce-smoke@sha256:<64 lowercase hex>","containment":{"host_checkout_mount":false},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}
+{"container_image":"registry.example/ce-smoke@sha256:<64 lowercase hex>","containment":{"host_checkout_mount":false},"release_binding":{"artifacts_sha256":"<64 lowercase hex>","canonical_spec_sha256":"<64 lowercase hex>","finalize_manifest_sha256":"<64 lowercase hex>","package_version":"<version>","signed_spec_sha256":"<64 lowercase hex>"},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}
 ```
 
-The producer accepts exactly these fields and values. Tags, checkout mounts,
-failed/stubbed counts, missing stages, non-passing stages, additional fields,
-or non-canonical JSON are refused before unsigned evidence bytes are emitted.
+The clean container derives `release_binding` from the signed install spec and
+release-finalize manifest fetched from the same `CE_SITE` endpoint used for the
+install. The producer requires every observed value to match the exact local
+finalized tree, including the manifest's artifact-set section. Tags, checkout
+mounts, stale/missing/malformed bindings, failed/stubbed counts, missing stages,
+non-passing stages, additional fields, or non-canonical JSON are refused before
+unsigned evidence bytes are emitted.
 The result contains no timestamps, IDs, logs, host paths, credentials, or
 secret-shaped values.

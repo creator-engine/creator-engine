@@ -1812,16 +1812,18 @@ Properties:
 
 Required fields:
 
-`schema_version`, `canonical_spec_sha256`, `signed_spec_sha256`, `finalize_manifest_sha256`, `summary`, `stages`, `containment`, `container_image`, `signature`
+`schema_version`, `package_version`, `canonical_spec_sha256`, `signed_spec_sha256`, `finalize_manifest_sha256`, `artifacts_sha256`, `summary`, `stages`, `containment`, `container_image`, `signature`
 
 Properties:
 
 | Property | Shape | Required | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `schema_version` | const | yes | const `1` |  |
+| `package_version` | string | yes | pattern `^\S+$` |  |
 | `canonical_spec_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
 | `signed_spec_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
 | `finalize_manifest_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `artifacts_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
 | `summary` | object | yes | additionalProperties `false` |  |
 | `stages` | object | yes | additionalProperties `false` |  |
 | `containment` | object | yes | additionalProperties `false` |  |

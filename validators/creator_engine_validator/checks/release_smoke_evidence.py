@@ -33,6 +33,7 @@ FINALIZE_MANIFEST = Path("docs/release-finalize-manifest.yml")
 EVIDENCE_DIR = Path(".ce/release-evidence")
 SCHEMA_VERSION = "1"
 SSH_SIG_NAMESPACE = "ce-release-smoke-v1"
+SIGNING_KEY_ID = "ce-root-v1"
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_RE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 PACKAGE_VERSION_RE = re.compile(r"^  package_version: (\S+)$")
@@ -230,9 +231,11 @@ def _validate_evidence(
     errors: list[ValidationError] = []
     if set(record) != {
         "schema_version",
+        "package_version",
         "canonical_spec_sha256",
         "signed_spec_sha256",
         "finalize_manifest_sha256",
+        "artifacts_sha256",
         "summary",
         "stages",
         "containment",
@@ -273,6 +276,13 @@ def _validate_evidence(
     except producer.ReleaseSmokeEvidenceError as exc:
         errors.append(_error(FINALIZE_MANIFEST, "artifacts", str(exc)))
     else:
+        for field, expected in (
+            ("package_version", tree_binding.package_version),
+            ("artifacts_sha256", tree_binding.artifacts_sha256),
+        ):
+            value = _string(record, field)
+            if value != expected:
+                errors.append(_error(evidence_path, field, f"must match the exact checked-out finalized release tree ({expected})"))
         manifest_digest = _string(record, "finalize_manifest_sha256")
         if manifest_digest != tree_binding.finalize_manifest_sha256:
             errors.append(
@@ -304,8 +314,8 @@ def _validate_evidence(
     algo = _string(signature, "algo")
     namespace = _string(signature, "namespace")
     value = _string(signature, "value")
-    if key_id not in install_spec_signature_guard.PINNED_KEYS:
-        errors.append(_error(evidence_path, "signature.key_id", "must name an existing pinned trust-root key"))
+    if key_id != SIGNING_KEY_ID:
+        errors.append(_error(evidence_path, "signature.key_id", f"must be {SIGNING_KEY_ID!r}"))
     if algo != install_spec_signature_guard.SSH_ED25519_ALGO:
         errors.append(_error(evidence_path, "signature.algo", "must be ssh-ed25519"))
     if namespace != SSH_SIG_NAMESPACE:
@@ -319,7 +329,7 @@ def _validate_evidence(
             errors.append(_error(evidence_path, "signature.value", "must be valid base64"))
     if not errors:
         verify = verifier or _default_verifier()
-        if not verify(algo, _canonical_record_bytes(record), value, install_spec_signature_guard.PINNED_KEYS[key_id]):
+        if not verify(algo, _canonical_record_bytes(record), value, install_spec_signature_guard.PINNED_KEYS[SIGNING_KEY_ID]):
             errors.append(_error(evidence_path, "signature", "detached SSHSIG did not verify in ce-release-smoke-v1 namespace"))
     return errors
 
@@ -334,10 +344,28 @@ def run_with_base(paths: Iterable[Path], base: str, *, verifier: Verifier | None
     if not {INSTALL_SPEC.as_posix(), FINALIZE_MANIFEST.as_posix()}.issubset(changed):
         return CheckResult(name=CHECK_NAME)
 
-    evidence_paths = sorted((repo_root / EVIDENCE_DIR).glob("*.json")) if (repo_root / EVIDENCE_DIR).is_dir() else []
-    if len(evidence_paths) != 1:
+    try:
+        binding = producer.validate_release_tree(repo_root)
+    except producer.ReleaseSmokeEvidenceError as exc:
+        return CheckResult(name=CHECK_NAME, errors=(_error(FINALIZE_MANIFEST, "", str(exc)),))
+    expected_relative = (EVIDENCE_DIR / f"release-v{binding.package_version}.json").as_posix()
+    changed_evidence = sorted(
+        path for path in changed
+        if path.startswith(f"{EVIDENCE_DIR.as_posix()}/") and path.endswith(".json")
+    )
+    if changed_evidence != [expected_relative]:
         return CheckResult(
             name=CHECK_NAME,
-            errors=(_error(EVIDENCE_DIR, "", "release-class PR requires exactly one canonical JSON smoke-evidence record"),),
+            errors=(
+                _error(
+                    EVIDENCE_DIR,
+                    "",
+                    "release-class PR must newly change exactly its version-derived canonical smoke-evidence record "
+                    f"({expected_relative}); changed evidence: {changed_evidence}",
+                ),
+            ),
         )
-    return CheckResult(name=CHECK_NAME, errors=tuple(_validate_evidence(repo_root, evidence_paths[0], verifier=verifier)))
+    evidence_path = repo_root / expected_relative
+    if not evidence_path.is_file():
+        return CheckResult(name=CHECK_NAME, errors=(_error(evidence_path, "", "expected smoke-evidence record is missing"),))
+    return CheckResult(name=CHECK_NAME, errors=tuple(_validate_evidence(repo_root, evidence_path, verifier=verifier)))

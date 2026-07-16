@@ -297,7 +297,8 @@ release_smoke_fail() {
 }
 
 run_release_smoke() {
-  local engine result_out result_tmp
+  local engine result_out result_tmp engine_output binding_line binding_count
+  local marker package_version canonical_spec_sha256 signed_spec_sha256 finalize_manifest_sha256 artifacts_sha256 extra
   if [ "${DRY_RUN}" = "1" ] || [ "${LIVE}" = "1" ] || [ "${LIST_STAGES}" = "1" ] || [ -n "${SELECTED_STAGE}" ]; then
     release_smoke_fail "--release-smoke is a separate governed-worker mode"
   fi
@@ -316,17 +317,27 @@ run_release_smoke() {
   rm -f "${result_out}"
 
   log "RUN" "release_smoke" "image=${CE_REHEARSAL_IMAGE}; checkout_mount=false"
-  if ! "${engine}" run --rm \
+  if ! engine_output="$("${engine}" run --rm \
     --env "CE_SITE=${CE_REHEARSAL_SITE}" \
     "${CE_REHEARSAL_IMAGE}" \
-    bash -lc 'set -euo pipefail; apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl bash openssh-client git; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/install.sh" | bash; export PATH="/root/.local/bin:${PATH}"; cev3 --version; ce --version; ce --help >/dev/null; ce onboard --help >/dev/null'; then
+    bash -lc 'set -euo pipefail; apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl bash openssh-client git; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/install.sh" | bash; export PATH="/root/.local/bin:${PATH}"; cev3 --version; ce --version; ce --help >/dev/null; ce onboard --help >/dev/null; smoke_dir="$(mktemp -d)"; trap "rm -rf \"${smoke_dir}\"" EXIT; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/llms-install.md" -o "${smoke_dir}/llms-install.md"; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/release-finalize-manifest.yml" -o "${smoke_dir}/release-finalize-manifest.yml"; package_version="$(sed -n "s/^package_version: //p" "${smoke_dir}/release-finalize-manifest.yml")"; canonical_spec_sha256="$(sed -n "s/^canonical_spec_sha256: //p" "${smoke_dir}/release-finalize-manifest.yml")"; signed_spec_sha256="$(sha256sum "${smoke_dir}/llms-install.md" | cut -d " " -f 1)"; expected_signed_spec_sha256="$(sed -n "s/^signed_spec_sha256: //p" "${smoke_dir}/release-finalize-manifest.yml")"; finalize_manifest_sha256="$(sha256sum "${smoke_dir}/release-finalize-manifest.yml" | cut -d " " -f 1)"; artifacts_sha256="$(sed -n "/^artifacts:$/,$ p" "${smoke_dir}/release-finalize-manifest.yml" | sha256sum | cut -d " " -f 1)"; [ "${signed_spec_sha256}" = "${expected_signed_spec_sha256}" ]; [[ "${package_version}" =~ ^[^[:space:]]+$ ]]; [[ "${canonical_spec_sha256}" =~ ^[0-9a-f]{64}$ ]]; [[ "${signed_spec_sha256}" =~ ^[0-9a-f]{64}$ ]]; [[ "${finalize_manifest_sha256}" =~ ^[0-9a-f]{64}$ ]]; [[ "${artifacts_sha256}" =~ ^[0-9a-f]{64}$ ]]; printf "CE_RELEASE_SMOKE_BINDING %s %s %s %s %s\n" "${package_version}" "${canonical_spec_sha256}" "${signed_spec_sha256}" "${finalize_manifest_sha256}" "${artifacts_sha256}"')"; then
     release_smoke_fail "clean-container install/install_verify failed"
   fi
 
+  binding_count="$(printf '%s\n' "${engine_output}" | grep -c '^CE_RELEASE_SMOKE_BINDING ' || true)"
+  [ "${binding_count}" = "1" ] || release_smoke_fail "clean container must emit exactly one observed release binding"
+  binding_line="$(printf '%s\n' "${engine_output}" | grep '^CE_RELEASE_SMOKE_BINDING ')"
+  read -r marker package_version canonical_spec_sha256 signed_spec_sha256 finalize_manifest_sha256 artifacts_sha256 extra <<< "${binding_line}"
+  [ "${marker}" = "CE_RELEASE_SMOKE_BINDING" ] && [ -z "${extra:-}" ] || release_smoke_fail "observed release binding is malformed"
+  [[ "${package_version}" =~ ^[^[:space:]]+$ ]] || release_smoke_fail "observed package version is malformed"
+  for digest in "${canonical_spec_sha256}" "${signed_spec_sha256}" "${finalize_manifest_sha256}" "${artifacts_sha256}"; do
+    [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || release_smoke_fail "observed release digest is malformed"
+  done
+
   mkdir -p "$(dirname "${result_out}")"
   result_tmp="${result_out}.tmp.$$"
-  printf '{"container_image":"%s","containment":{"host_checkout_mount":false},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}' \
-    "${CE_REHEARSAL_IMAGE}" > "${result_tmp}"
+  printf '{"container_image":"%s","containment":{"host_checkout_mount":false},"release_binding":{"artifacts_sha256":"%s","canonical_spec_sha256":"%s","finalize_manifest_sha256":"%s","package_version":"%s","signed_spec_sha256":"%s"},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}' \
+    "${CE_REHEARSAL_IMAGE}" "${artifacts_sha256}" "${canonical_spec_sha256}" "${finalize_manifest_sha256}" "${package_version}" "${signed_spec_sha256}" > "${result_tmp}"
   mv "${result_tmp}" "${result_out}"
   log "PASS" "release_smoke" "result=${result_out}"
 }
