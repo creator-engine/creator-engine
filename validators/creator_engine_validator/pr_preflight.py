@@ -1136,9 +1136,21 @@ def run_preflight(
         print(f"FAIL: PR preflight failed: could not create owned scratch under {scratch_parent}: {exc}", file=err)
         return 1
     with scratch as scratch_path:
+        scratch_root = Path(scratch_path)
+
+        def run_baseline_diff(config: PreflightConfig, comparison_base: str) -> BaselineDiffTestResult:
+            return _run_baseline_diff_tests(
+                config,
+                comparison_base,
+                scratch_root,
+                runner=runner,
+                out=out,
+                err=err,
+            )
+
         return _run_preflight(
             config,
-            Path(scratch_path),
+            baseline_diff_runner=run_baseline_diff,
             runner=runner,
             out=out,
             err=err,
@@ -1147,8 +1159,8 @@ def run_preflight(
 
 def _run_preflight(
     config: PreflightConfig,
-    scratch_root: Path,
     *,
+    baseline_diff_runner: Callable[[PreflightConfig, str], BaselineDiffTestResult],
     runner: Runner = default_runner,
     out: TextIO = sys.stdout,
     err: TextIO = sys.stderr,
@@ -1266,14 +1278,7 @@ def _run_preflight(
         return f"passed; {reconcile_detail}"
 
     def baseline_diff_gate() -> str:
-        result = _run_baseline_diff_tests(
-            config,
-            comparison_base["value"],
-            scratch_root,
-            runner=runner,
-            out=out,
-            err=err,
-        )
+        result = baseline_diff_runner(config, comparison_base["value"])
         skipped_tests["value"] = result.head_skip_count
         return result.detail
 
