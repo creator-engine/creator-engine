@@ -13,9 +13,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from creator_engine_validator import disk_headroom as dh
 from creator_engine_validator import pr_preflight
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 # ---------------------------------------------------------------------------
@@ -284,3 +288,32 @@ def test_pytest_subprocess_env_disables_headroom_gate() -> None:
     """
     env = pr_preflight._python_env(Path("/tmp"), pytest=True)
     assert env.get(pr_preflight.DISK_HEADROOM_GATE_DISABLED_ENV) == "1"
+
+
+def test_ci_pytest_step_disables_nested_headroom_gate_only_for_that_command() -> None:
+    """The CI pytest suite must use the nested-test headroom seam locally."""
+    workflow_path = _REPO_ROOT / ".github/workflows/validate.yml"
+    workflow_text = workflow_path.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(workflow_text)
+    assert isinstance(workflow, dict)
+    assert "env" not in workflow
+
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    job = jobs["validate"]
+    assert isinstance(job, dict)
+    assert "env" not in job
+
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    pytest_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Creator Engine validator — pytest suite (offline)"
+    )
+    assert "env" not in pytest_step
+    run = pytest_step["run"]
+    assert "CE_SUITE_HEADROOM_GATE_DISABLED=1" in run
+    assert "CE_SUITE_HEADROOM_GATE_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators" in run
+    assert workflow_text.count("CE_SUITE_HEADROOM_GATE_DISABLED") == 1
+    assert "CE_SUITE_MIN_FREE_GB" not in workflow_text
