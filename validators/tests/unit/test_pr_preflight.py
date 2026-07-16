@@ -156,9 +156,78 @@ def _config(tmp_path: Path, **overrides) -> pr_preflight.PreflightConfig:
         "declared_work_class": "M",
         "head_ref": "dev4-night-lane0-pr-preflight",
         "allow_dirty": False,
+        "scratch_parent": tmp_path,
     }
     values.update(overrides)
     return pr_preflight.PreflightConfig(**values)
+
+
+def test_preflight_owns_one_scratch_root_for_baseline_and_head(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    caller_tmpdir = tmp_path / "caller-owned"
+    caller_tmpdir.mkdir()
+    sibling = tmp_path / "sibling-invocation"
+    sibling.mkdir()
+    monkeypatch.setenv("TMPDIR", str(caller_tmpdir))
+    runner = FakeRunner(tmp_path)
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=io.StringIO(), err=io.StringIO())
+
+    assert rc == 0
+    pytest_calls = [call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"]]
+    assert len(pytest_calls) == 2
+    pytest_tmpdirs = {call[2]["TMPDIR"] for call in pytest_calls if call[2] is not None}
+    assert len(pytest_tmpdirs) == 1
+    owned_scratch = Path(pytest_tmpdirs.pop())
+    assert owned_scratch.parent == tmp_path
+    assert owned_scratch.name.startswith("cv-")
+    baseline_add = next(call for call in runner.calls if call[0][:4] == ["git", "worktree", "add", "--detach"])
+    assert Path(baseline_add[0][4]) == owned_scratch / "base"
+    assert not owned_scratch.exists()
+    assert caller_tmpdir.is_dir()
+    assert sibling.is_dir()
+
+
+def test_preflight_removes_only_owned_scratch_after_test_failure(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+    sibling = tmp_path / "sibling-invocation"
+    sibling.mkdir()
+    runner = FakeRunner(
+        tmp_path,
+        head_test_result=pr_preflight.CommandResult(
+            1,
+            "1 failed in 0.01s\nFAILED validators/tests/test_new.py::test_new\n",
+            "",
+        ),
+    )
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=io.StringIO(), err=io.StringIO())
+
+    assert rc == 1
+    pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
+    assert pytest_call[2] is not None
+    assert not Path(pytest_call[2]["TMPDIR"]).exists()
+    assert sibling.is_dir()
+
+
+def test_preflight_removes_owned_scratch_after_runner_exception(tmp_path: Path, monkeypatch):
+    _stub_expensive_preflight_checks(monkeypatch)
+
+    class ExplodingHeadRunner(FakeRunner):
+        def __call__(self, argv, cwd, env=None, *, timeout=None):
+            if list(argv)[:3] == [sys.executable, "-m", "pytest"] and not str(cwd).endswith("/base"):
+                self.calls.append((list(argv), cwd, dict(env) if env is not None else None, timeout))
+                raise RuntimeError("controlled head runner explosion")
+            return super().__call__(argv, cwd, env, timeout=timeout)
+
+    runner = ExplodingHeadRunner(tmp_path)
+
+    rc = pr_preflight.run_preflight(_config(tmp_path), runner=runner, out=io.StringIO(), err=io.StringIO())
+
+    assert rc == 1
+    pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
+    assert pytest_call[2] is not None
+    assert not Path(pytest_call[2]["TMPDIR"]).exists()
 
 
 def _stub_expensive_preflight_checks(monkeypatch) -> None:
@@ -784,7 +853,7 @@ def test_seat_ready_default_test_command_caps_pytest_workers(tmp_path: Path, mon
     assert "auto" not in pytest_call[0]
 
 
-def test_seat_ready_pytest_env_uses_home_tmpdir(tmp_path: Path, monkeypatch):
+def test_seat_ready_pytest_env_uses_owned_scratch(tmp_path: Path, monkeypatch):
     _stub_expensive_preflight_checks(monkeypatch)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     runner = FakeRunner(tmp_path)
@@ -800,7 +869,10 @@ def test_seat_ready_pytest_env_uses_home_tmpdir(tmp_path: Path, monkeypatch):
     pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
     env = pytest_call[2]
     assert env is not None
-    assert env["TMPDIR"] == str(tmp_path / "home" / "tmp")
+    owned_scratch = Path(env["TMPDIR"])
+    assert owned_scratch.parent == tmp_path
+    assert owned_scratch.name.startswith("cv-")
+    assert not owned_scratch.exists()
 
 
 def test_linked_worktree_default_test_command_uses_shared_main_venv_python(tmp_path: Path, monkeypatch):
@@ -1457,7 +1529,7 @@ def test_contained_seat_profile_reports_skips_without_changing_carrier_notice(tm
     assert "PASS: PR preflight (with 1 skipped test -- see report above)" in output
 
 
-def test_pytest_env_scrubs_host_tokens_and_preserves_caller_tmpdir(tmp_path: Path, monkeypatch):
+def test_pytest_env_scrubs_host_tokens_and_replaces_caller_tmpdir_with_owned_scratch(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "secret")
     monkeypatch.setenv("BAO_TOKEN", "secret")
     monkeypatch.setenv("OPENBAO_TOKEN", "secret")
@@ -1475,7 +1547,11 @@ def test_pytest_env_scrubs_host_tokens_and_preserves_caller_tmpdir(tmp_path: Pat
     pytest_call = next(call for call in runner.calls if call[0][:3] == [sys.executable, "-m", "pytest"])
     env = pytest_call[2]
     assert env is not None
-    assert env["TMPDIR"] == "/custom/path"
+    owned_scratch = Path(env["TMPDIR"])
+    assert owned_scratch != Path("/custom/path")
+    assert owned_scratch.parent == tmp_path
+    assert owned_scratch.name.startswith("cv-")
+    assert not owned_scratch.exists()
     for key in pr_preflight.TOKEN_ENV_VARS:
         assert key not in env
 

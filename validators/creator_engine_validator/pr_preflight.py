@@ -77,6 +77,7 @@ CONTAINED_SEAT_CARRIER_NOTICE = (
 BRAIN_LEDGER_PATH = ".ce/brain/assertions.yaml"
 DISK_HEADROOM_CHECK_NAME = "disk_headroom (suite pre-flight)"
 DISK_HEADROOM_GATE_DISABLED_ENV = "CE_SUITE_HEADROOM_GATE_DISABLED"
+DEFAULT_PREFLIGHT_SCRATCH_PARENT = Path("/var/tmp")
 BRAIN_LEDGER_RECHAIN_TOOL_HINT = (
     "rebase onto the current base and re-run the brain re-chain tool "
     "(`ce brain assert` for appends, or `ce brain correct` for supersede/re-pin cascades)"
@@ -94,6 +95,8 @@ class PreflightConfig:
     allow_dirty: bool = False
     test_command: str = DEFAULT_TEST_COMMAND
     profile: str | None = None
+    # Test seam for hermetic invocation scratch; production defaults to /var/tmp.
+    scratch_parent: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -378,10 +381,9 @@ def _effective_test_command(config: PreflightConfig, py: str = sys.executable) -
     return config.test_command
 
 
-def _pytest_tmpdir(config: PreflightConfig) -> str | None:
-    if config.profile == SEAT_READY_PROFILE:
-        return str(Path("~/tmp").expanduser())
-    return None
+def _pytest_tmpdir(scratch_root: Path) -> str:
+    """Return this preflight invocation's private pytest scratch root."""
+    return str(scratch_root)
 
 
 def _extract_declared_work_classes(text: str) -> list[str]:
@@ -738,30 +740,31 @@ def _pytest_counts_detail(
 def _run_baseline_diff_tests(
     config: PreflightConfig,
     comparison_base: str,
+    scratch_root: Path,
     *,
     runner: Runner,
     out: TextIO,
     err: TextIO,
 ) -> BaselineDiffTestResult:
     argv = _test_command_argv(config.test_command)
-    with tempfile.TemporaryDirectory(prefix="ce-validate-pr-base-") as temp:
-        base_worktree = Path(temp) / "base"
-        add = runner(
-            ["git", "worktree", "add", "--detach", str(base_worktree), comparison_base],
-            config.repo_root,
-            None,
-        )
-        _print_streams(add, out, err)
-        if add.returncode != 0:
-            raise RuntimeError(f"could not create baseline worktree for {comparison_base}")
-        try:
-            baseline = runner(argv, base_worktree, _python_env(base_worktree, pytest=True, tmpdir=_pytest_tmpdir(config)))
-            _print_streams(baseline, out, err)
-            head = runner(argv, config.repo_root, _python_env(config.repo_root, pytest=True, tmpdir=_pytest_tmpdir(config)))
-            _print_streams(head, out, err)
-        finally:
-            remove = runner(["git", "worktree", "remove", "--force", str(base_worktree)], config.repo_root, None)
-            _print_streams(remove, out, err)
+    base_worktree = scratch_root / "base"
+    add = runner(
+        ["git", "worktree", "add", "--detach", str(base_worktree), comparison_base],
+        config.repo_root,
+        None,
+    )
+    _print_streams(add, out, err)
+    if add.returncode != 0:
+        raise RuntimeError(f"could not create baseline worktree for {comparison_base}")
+    try:
+        pytest_tmpdir = _pytest_tmpdir(scratch_root)
+        baseline = runner(argv, base_worktree, _python_env(base_worktree, pytest=True, tmpdir=pytest_tmpdir))
+        _print_streams(baseline, out, err)
+        head = runner(argv, config.repo_root, _python_env(config.repo_root, pytest=True, tmpdir=pytest_tmpdir))
+        _print_streams(head, out, err)
+    finally:
+        remove = runner(["git", "worktree", "remove", "--force", str(base_worktree)], config.repo_root, None)
+        _print_streams(remove, out, err)
 
     parsed_baseline = _pytest_terminal_counts(baseline)
     parsed_head = _pytest_terminal_counts(head)
@@ -1118,6 +1121,50 @@ def run_preflight(
     out: TextIO = sys.stdout,
     err: TextIO = sys.stderr,
 ) -> int:
+    """Run one preflight inside an ownership-bounded disk-backed scratch root.
+
+    ``scratch_parent`` is an explicit test seam. Production callers leave it
+    unset and receive a private directory under ``/var/tmp``; tests inject a
+    temporary parent so they never depend on host disk state.
+    """
+    scratch_parent = config.scratch_parent or DEFAULT_PREFLIGHT_SCRATCH_PARENT
+    try:
+        scratch = tempfile.TemporaryDirectory(prefix="cv-", dir=str(scratch_parent))
+    except OSError as exc:
+        checks = [CheckDetail(name="preflight scratch setup", ok=False, detail=str(exc))]
+        _print_summary(checks, out)
+        print(f"FAIL: PR preflight failed: could not create owned scratch under {scratch_parent}: {exc}", file=err)
+        return 1
+    with scratch as scratch_path:
+        scratch_root = Path(scratch_path)
+
+        def run_baseline_diff(config: PreflightConfig, comparison_base: str) -> BaselineDiffTestResult:
+            return _run_baseline_diff_tests(
+                config,
+                comparison_base,
+                scratch_root,
+                runner=runner,
+                out=out,
+                err=err,
+            )
+
+        return _run_preflight(
+            config,
+            baseline_diff_runner=run_baseline_diff,
+            runner=runner,
+            out=out,
+            err=err,
+        )
+
+
+def _run_preflight(
+    config: PreflightConfig,
+    *,
+    baseline_diff_runner: Callable[[PreflightConfig, str], BaselineDiffTestResult],
+    runner: Runner = default_runner,
+    out: TextIO = sys.stdout,
+    err: TextIO = sys.stderr,
+) -> int:
     """Run the local PR preflight. Prints one final PASS/FAIL summary plus check detail."""
     checks: list[CheckDetail] = []
     try:
@@ -1133,6 +1180,7 @@ def run_preflight(
             allow_dirty=config.allow_dirty,
             test_command=_effective_test_command(config, py),
             profile=config.profile,
+            scratch_parent=config.scratch_parent,
         )
         _validate_profile(config.profile)
     except Exception as exc:
@@ -1230,13 +1278,7 @@ def run_preflight(
         return f"passed; {reconcile_detail}"
 
     def baseline_diff_gate() -> str:
-        result = _run_baseline_diff_tests(
-            config,
-            comparison_base["value"],
-            runner=runner,
-            out=out,
-            err=err,
-        )
+        result = baseline_diff_runner(config, comparison_base["value"])
         skipped_tests["value"] = result.head_skip_count
         return result.detail
 
