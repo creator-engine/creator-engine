@@ -204,6 +204,7 @@ def _config_for_headroom(repo_root: Path) -> pr_preflight.PreflightConfig:
         base="origin/main",
         head_ref="ce-f1-storage-admission",
         declared_work_class="S",
+        scratch_parent=repo_root,
     )
 
 
@@ -213,6 +214,7 @@ def test_preflight_refuses_when_disk_below_threshold(tmp_path: Path, monkeypatch
     _stub_all_heavy_gates(monkeypatch)
     runner = _MinimalFakeRunner(tmp_path)
     config = _config_for_headroom(tmp_path)
+    assert config.scratch_parent == tmp_path
     out = io.StringIO()
     err = io.StringIO()
 
@@ -234,6 +236,7 @@ def test_preflight_passes_headroom_check_when_disk_sufficient(tmp_path: Path, mo
     _stub_all_heavy_gates(monkeypatch)
     runner = _MinimalFakeRunner(tmp_path)
     config = _config_for_headroom(tmp_path)
+    assert config.scratch_parent == tmp_path
     out = io.StringIO()
     err = io.StringIO()
 
@@ -270,6 +273,7 @@ def test_headroom_gate_skips_when_disabled_env_set(tmp_path: Path, monkeypatch) 
     _stub_all_heavy_gates(monkeypatch)
     runner = _MinimalFakeRunner(tmp_path)
     config = _config_for_headroom(tmp_path)
+    assert config.scratch_parent == tmp_path
     out = io.StringIO()
     err = io.StringIO()
 

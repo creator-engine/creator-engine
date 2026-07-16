@@ -6,13 +6,14 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** tiny
 
-AUTHORIZED_PATHS_COUNT=4
+AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=cf8dd56e4f78191089c4541fecb70a8d1deddc1a9ca421938c7ed15a8037c020
+AUTHORIZED_PATHS_SHA256=bb43f9f66486f02516cc9cdd92d7fd40b69286d50ec659557e81a805dfa61acd
 
 ```text
 .ce/changelog/ce-571-preflight-scratch-isolation.md
 .ce/pr-manifests/ce-571-preflight-scratch-isolation.md
 validators/creator_engine_validator/pr_preflight.py
+validators/tests/unit/test_disk_headroom.py
 validators/tests/unit/test_pr_preflight.py
 ```
