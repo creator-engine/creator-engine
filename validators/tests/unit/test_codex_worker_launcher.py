@@ -402,11 +402,20 @@ def test_production_runner_uses_isolated_homes_and_scrubs_hostile_ambient_env(
     assert child_env["LANG"] == "C.UTF-8"
     assert child_env["LC_ALL"] == "C.UTF-8"
     assert child_env["TERM"] == "xterm-256color"
+    invocation_owned = {"HOME", "CODEX_HOME", "XDG_CONFIG_HOME"}
     for name in hostile:
-        if name not in {"PATH", "LANG", "LC_ALL", "TERM", "OPENAI_API_KEY"}:
+        if name not in {
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "TERM",
+            "OPENAI_API_KEY",
+            *invocation_owned,
+        }:
             assert name not in child_env
-    assert child_env["HOME"] != hostile["HOME"]
-    assert child_env["CODEX_HOME"] != hostile["CODEX_HOME"]
+    for name in invocation_owned:
+        assert name in child_env
+        assert child_env[name] != hostile[name]
     assert not Path(child_env["HOME"]).exists()
     assert not Path(child_env["CODEX_HOME"]).exists()
 
