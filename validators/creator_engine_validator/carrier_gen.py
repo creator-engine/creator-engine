@@ -23,6 +23,12 @@ from .checks.path_manifest_fidelity import (
 GitRunner = Callable[[Sequence[str], Path], tuple[int, str, str]]
 
 GENERATED_ARTIFACT_DIR_NAMES: frozenset[str] = frozenset({"build"})
+RETIRED_WORK_CLASS_ALIASES: dict[str, str] = {
+    "XS": "tiny",
+    "S": "story",
+    "M": "feature",
+    "L": "epic",
+}
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,12 @@ def _default_git_runner(args: Sequence[str], cwd: Path) -> tuple[int, str, str]:
 def _normalise_paths(paths: Sequence[str]) -> tuple[tuple[str, ...], int, str]:
     count, sha256, _ = _normalize_manifest([p.strip() for p in paths if p.strip()])
     return tuple(sorted({p.strip() for p in paths if p.strip()})), count, sha256
+
+
+def _canonical_manifest_work_class(declared_work_class: str) -> str:
+    """Translate only retired aliases while preserving every other supplied value."""
+
+    return RETIRED_WORK_CLASS_ALIASES.get(declared_work_class, declared_work_class)
 
 
 def _is_generated_artifact_path(path: str) -> bool:
@@ -145,7 +157,7 @@ def render_manifest(
 
     body = "\n".join(canonical_paths)
     work_class_line = (
-        f"\n\n- **Declared work class:** {declared_work_class}"
+        f"\n\n- **Declared work class:** {_canonical_manifest_work_class(declared_work_class)}"
         if declared_work_class is not None
         else ""
     )

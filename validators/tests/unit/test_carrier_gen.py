@@ -121,10 +121,38 @@ def test_render_manifest_can_include_declared_work_class_without_affecting_path_
     )
     identity = parse_carrier(text)
 
-    assert text.count("- **Declared work class:** M") == 1
+    assert text.count("- **Declared work class:** feature") == 1
     assert identity is not None
     assert identity.consistent is True
     assert identity.paths == (f"{MANIFEST_DIR}/ce-test.md", "a.py", "b.py")
+
+
+def test_render_manifest_canonicalizes_retired_work_class_aliases_without_changing_canonical_inputs():
+    paths = (f"{MANIFEST_DIR}/ce-test.md", "a.py")
+    count = len(paths)
+    sha = _sha(paths)
+
+    for supplied, expected in (
+        ("XS", "tiny"),
+        ("S", "story"),
+        ("M", "feature"),
+        ("L", "epic"),
+        ("tiny", "tiny"),
+        ("story", "story"),
+        ("feature", "feature"),
+        ("epic", "epic"),
+    ):
+        text = render_manifest(
+            "ce-test",
+            "ce-ops#536",
+            "Canonical carrier work class",
+            paths,
+            count,
+            sha,
+            declared_work_class=supplied,
+        )
+
+        assert f"- **Declared work class:** {expected}" in text
 
 
 def test_render_changelog_frontmatter_and_body():
@@ -215,7 +243,7 @@ def test_write_carriers_writes_changelog_before_manifest_and_uses_diff_paths(tmp
     assert identity is not None
     assert identity.consistent is True
     assert identity.paths == written.paths
-    assert written.manifest_path.read_text(encoding="utf-8").count("- **Declared work class:** S") == 1
+    assert written.manifest_path.read_text(encoding="utf-8").count("- **Declared work class:** story") == 1
 
 
 def test_write_carriers_excludes_stale_artifacts_from_manifest(tmp_path: Path, recwarn):
