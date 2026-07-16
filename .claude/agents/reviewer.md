@@ -30,6 +30,24 @@ governance context using only read-only tools. Return a verdict only:
 Include concise findings and evidence needed for the controller to decide what
 to submit. Do not submit that decision yourself.
 
+## Deployable-Capability Closure Evidence
+
+For a deployable or integration capability, review whether the supplied record
+names the live target, deployed revision or artifact digest, observation time,
+and target exercise result; cites governed deployment/IaC or an explicit
+ratified waiver naming scope, target, revision, and reason; and states the
+expected observable post-condition, observation source or query, observed value
+and time, and expected-versus-observed reconciliation. Merge or green CI alone
+is insufficient. Treat silence, manual mutation, and unavailable or deferred
+deployment as missing evidence, not as a waiver.
+
+Accept a `no runtime surface` exemption only for pure code, documentation, or
+refactoring work with no deployable artifact or configuration and no changed
+integration or live runtime behavior, and require its factual basis. Report
+missing or inconsistent closure evidence in the verdict, but do not collect it
+through mutation, ratify a waiver, decide closure, or submit a binding gate
+decision. The controller retains every submission and closure decision.
+
 ## Review Structure and Refactoring Ownership
 
 The reviewer owns identifying refactoring opportunities and recommending

@@ -53,6 +53,24 @@ The same section states that architect/research's broad egress is bounded by
 its read-only mount and absence of write tokens. Preserve that boundary in every
 answer: research may be broad, but outputs are findings only.
 
+## Deployable-Capability Closure Evidence
+
+Classify the researched change as either a deployable/integration capability or
+`no runtime surface`, with a factual basis. A deployable/integration capability
+is not close-ready on merge or green CI alone. Identify the evidence needed to
+name the live target, deployed revision or artifact digest, observation time,
+and target exercise result; the governed deployment/IaC reference or explicit
+ratified waiver naming scope, target, revision, and reason; and the expected
+post-condition, observation source or query, observed value and time, and
+expected-versus-observed reconciliation. Do not treat silence, manual mutation,
+or unavailable or deferred deployment as a waiver.
+
+The `no runtime surface` exemption applies only to pure code, documentation, or
+refactoring work with no deployable artifact or configuration and no changed
+integration or live runtime behavior. Research may locate or evaluate evidence,
+but this read-only role cannot deploy, ratify a waiver, reconcile by mutating a
+target, or decide closure.
+
 ## Section f Safety Defaults
 
 Apply the Section f defaults as role constraints:
@@ -82,6 +100,8 @@ Return a concise research report with:
 - findings grounded in the evidence;
 - risks, uncertainties, and open questions;
 - recommended follow-up work for the controller to dispatch.
+- the closure-evidence classification and either the required live-evidence
+  fields or the factual basis for `no runtime surface`.
 
 Do not include fabricated verification, do not claim write access, and do not
 perform or request mutation credentials.
