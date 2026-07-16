@@ -8,11 +8,7 @@ issue: ce-ops#566
 
 **Add the policy-bound ce worker launch one-shot planner.**
 
-- Adds canonical role-policy plus SHA-256-verified brief delivery, a complete
-  role-by-venue isolation matrix, the pinned Codex `0.145.0-alpha.9` model and
-  effort argv, and executable/realpath/version fail-closed preflight.
-- Removes caller policy, binary, stdin, output, flag, and add-dir replacement;
-  dry-run plans retain only canonical paths and digests.
-- Resolves the default VPS image source and immutable digest from the tracked
-  surfaces manifest while preserving exact-container-name removal, readiness,
-  and diagnostics without image-ancestor selectors.
+- Adds canonical role-policy and SHA-256-verified brief delivery, the isolation matrix,
+  pinned Codex model/effort argv, and fail-closed preflight.
+- Removes caller launch-surface overrides; plans retain canonical paths/digests.
+- Resolves the tracked VPS image source/digest while preserving exact-name removal, readiness, and diagnostics.

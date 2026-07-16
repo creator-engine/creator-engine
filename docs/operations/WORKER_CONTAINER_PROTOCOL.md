@@ -313,22 +313,17 @@ and every refusal raises before any side effect.
 
 ### 7.1 Policy-bound external Codex one-shots
 
-`ce worker launch` is a narrow, pure-plan-first external Codex seam. Callers
-provide `--brief <path> --brief-sha256 <64-lowerhex>`; there is no caller policy,
-binary, stdin, output, flag, or add-dir override. The command resolves exactly
-`governance/policies/codex-one-shot-launch-v1.yaml` inside the allocated
-worktree and rejects a symlink, escape, missing file, nonregular file, or
-unreadable file. Unknown policy keys fail closed.
+`ce worker launch` is a narrow, pure-plan-first external Codex seam. Callers provide
+`--brief <path> --brief-sha256 <64-lowerhex>` but cannot override policy, binary,
+stdin, output, flags, or add-dirs. It loads only `governance/policies/codex-one-shot-launch-v1.yaml`
+from the allocated worktree and fails closed on unknown keys, symlinks, escapes, or unreadable non-files.
 
-The same containment rule resolves the exact canonical
-`.claude/agents/<role>.md` and a regular brief beneath `.ce/briefs`. The brief's
-exact bytes must match the supplied SHA-256. The runner receives an
-unambiguous, length-delimited byte frame containing the canonical role policy
-bytes followed by the verified brief bytes. Plan JSON carries only canonical
-paths and digests; it never carries or persists either prompt body.
+The same containment rule resolves `.claude/agents/<role>.md` and a regular brief
+beneath `.ce/briefs`, whose exact bytes must match the supplied SHA-256. The runner
+receives a length-delimited frame of canonical role-policy then exact brief bytes. Plan JSON stores
+only canonical paths and digests, never either prompt body.
 
-The policy pins Codex deployment version `0.145.0-alpha.9`, model, reasoning
-effort, canonical add-dirs, and this complete role-by-venue matrix:
+The policy pins Codex `0.145.0-alpha.9`, model, reasoning effort, canonical add-dirs, and this complete matrix:
 
 | Venue | `architect_research` | `implementer` | `reviewer` | `verification` |
 |---|---|---|---|---|
@@ -337,34 +332,27 @@ effort, canonical add-dirs, and this complete role-by-venue matrix:
 | `vps-tmux` | refused | refused | refused | refused |
 | `in-seat` | refused | refused | refused | refused |
 
-The contained `vps-tmux` and `in-seat` venues cannot currently demonstrate the
-role-required mount/scratch contract to this inner launcher. They therefore
-fail closed for every role until a separately reviewed, machine-verifiable
-outer-isolation attestation exists. In particular, the launcher does not give
-read-only roles `danger-full-access` and does not give implementers an unusable
-nested `read-only` sandbox. This is an enforcement refusal, not prose trust.
+Contained `vps-tmux` and `in-seat` cannot prove the required mount/scratch contract,
+so every role fails closed pending separately reviewed, machine-verifiable outer-isolation
+attestation. Neither `danger-full-access` for read-only roles nor unusable nested
+`read-only` for implementers is allowed; this is enforced rather than trusted to prose.
 
 Every plan has this fixed argv order:
 
 ```text
-<pinned-binary> exec --ephemeral \
-  -m <pinned-model> -c model_reasoning_effort=<pinned-effort> \
-  -c features.multi_agent=false -c features.multi_agent_v2=false \
-  -s <venue-sandbox> -C <worktree> \
+<pinned-binary> exec --ephemeral -m <pinned-model> -c model_reasoning_effort=<pinned-effort> \
+  -c features.multi_agent=false -c features.multi_agent_v2=false -s <venue-sandbox> -C <worktree> \
   [canonical --add-dir values] -o <deterministic-output> -
 ```
 
-Before runner construction, the planner requires the worktree, canonical
-add-dirs, and `.ce/state` to be existing real directories without symlink or
-`..` traversal. It resolves the venue-owned absolute binary, allows a binary
-symlink only when its final real target remains beneath the declared
-`0.145.0-alpha.9` version root, requires a regular executable, and verifies its
-reported version through an injectable probe. The deterministic output stays
-inside the real worktree state root.
+Before runner construction, the worktree, canonical add-dirs, and `.ce/state` must
+be existing real directories without symlink or `..` traversal. The venue-owned
+absolute binary must be a regular executable whose final symlink target remains
+under its `0.145.0-alpha.9` root; an injectable probe verifies that version, and
+deterministic output remains inside the real worktree state root.
 
-This source slice neither starts a container nor performs a live relaunch.
-Source validation and merge must precede a separately authorized real relaunch;
-that post-land act must record real evidence and may not be simulated here.
+This source slice neither starts a container nor performs a live relaunch. Source
+validation and merge must precede a separately authorized real-evidence post-land relaunch, which may not be simulated.
 
 ### 7.2 `ce worker run` design note and deferrals
 

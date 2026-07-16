@@ -30,14 +30,11 @@ CE_VPS_TTY_FLAGS=<empty in detached mode, -it in legacy foreground mode>
 CE_VPS_DETACH=1
 ```
 
-When `CE_VPS_IMAGE` is unset, the launcher resolves exactly one `VPS runsc
-image` entry from the tracked `surfaces/manifest.yaml` and combines its source
-with its immutable SHA-256 digest. It fails closed if the entry is missing,
-duplicated, malformed, mutable, not `x86_64`, or inconsistent with the governed
-update policy. The launcher therefore has no second digest literal to rot.
-Operators may still supply a specific image through `CE_VPS_IMAGE` under the
-existing governed override contract; the launcher never inspects, pulls, or
-publishes that image.
+When `CE_VPS_IMAGE` is unset, the launcher combines the source and immutable SHA-256
+digest from exactly one `VPS runsc image` entry in tracked `surfaces/manifest.yaml`. It fails closed on
+a missing, duplicate, malformed, mutable, non-`x86_64`, or policy-inconsistent entry,
+avoiding a second digest literal. The governed override remains available; the launcher
+never inspects, pulls, or publishes that image.
 
 The VPS runtime explicitly allows Docker `--network=host`; the corresponding
 Docker runtime still uses `runsc-gvproxy-ptrace` for process containment.
