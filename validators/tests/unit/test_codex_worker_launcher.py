@@ -108,8 +108,8 @@ def governed_input(
 def plan(worktree: Path, **overrides) -> launcher.CodexWorkerLaunchPlan:
     values = {
         "policy": policy(worktree),
-        "governed_input": governed_input(worktree),
-        "role": "implementer",
+        "governed_input": governed_input(worktree, role="architect_research"),
+        "role": "architect_research",
         "venue": "dev1-local",
         "worktree": str(worktree),
         "run_id": "test-run",
@@ -137,13 +137,13 @@ def test_canonical_policy_pins_deployment_version_and_actual_venues(worktree: Pa
         for venue, values in {
             "dgx-relay": {
                 "architect_research": "read-only",
-                "implementer": "workspace-write",
+                "implementer": None,
                 "reviewer": "read-only",
                 "verification": "read-only",
             },
             "dev1-local": {
                 "architect_research": "read-only",
-                "implementer": "workspace-write",
+                "implementer": None,
                 "reviewer": "read-only",
                 "verification": "read-only",
             },
@@ -191,7 +191,7 @@ def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path)
         "-c",
         "features.multi_agent_v2=false",
         "-s",
-        "workspace-write",
+        "read-only",
         "-C",
         str(worktree),
         "--add-dir",
@@ -287,12 +287,12 @@ def test_worktree_symlink_is_refused(worktree: Path) -> None:
     link = worktree.parent / "linked-worker"
     link.symlink_to(worktree, target_is_directory=True)
     loaded = policy(worktree)
-    worker_input = governed_input(worktree)
+    worker_input = governed_input(worktree, role="architect_research")
     with pytest.raises(launcher.CodexWorkerLaunchError, match="worktree.*symlink"):
         launcher.build_launch_plan(
             policy=loaded,
             governed_input=worker_input,
-            role="implementer",
+            role="architect_research",
             venue="dev1-local",
             worktree=str(link),
             filesystem=HermeticFilesystem(),
@@ -338,11 +338,30 @@ def test_binary_preflight_refuses_missing_nonexecutable_escape_or_version_mismat
 
 def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree: Path) -> None:
     runner = RecordingRunner()
-    worker_input = governed_input(worktree)
+    worker_input = governed_input(worktree, role="architect_research")
     built = plan(worktree, governed_input=worker_input)
     assert runner.calls == []
     assert launcher.launch(built, governed_input=worker_input, runner=runner) == 0
     assert runner.calls == [(built.argv, worker_input.stdin)]
+
+
+@pytest.mark.parametrize("venue", ["dgx-relay", "dev1-local"])
+def test_implementer_is_refused_at_former_native_venues_before_runner_execution(
+    worktree: Path, venue: str
+) -> None:
+    runner = RecordingRunner()
+    worker_input = governed_input(worktree, role="implementer")
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="not attested"):
+        launcher.build_launch_plan(
+            policy=policy(worktree),
+            governed_input=worker_input,
+            role="implementer",
+            venue=venue,
+            worktree=str(worktree),
+            filesystem=HermeticFilesystem(),
+            version_probe=FixedVersionProbe(),
+        )
+    assert runner.calls == []
 
 
 def test_production_runner_uses_isolated_homes_and_scrubs_hostile_ambient_env(

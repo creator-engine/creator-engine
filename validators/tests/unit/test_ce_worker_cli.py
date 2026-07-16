@@ -263,7 +263,10 @@ def _one_shot_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
     (worktree / "governance").mkdir(exist_ok=True)
     (worktree / "validators").mkdir()
     (worktree / ".claude" / "agents").mkdir(parents=True)
-    (worktree / ".claude" / "agents" / "implementer.md").write_text("# governed implementer\n", encoding="utf-8")
+    for role in ("architect_research", "implementer"):
+        (worktree / ".claude" / "agents" / f"{role}.md").write_text(
+            f"# governed {role}\n", encoding="utf-8"
+        )
     brief = worktree / ".ce" / "briefs" / "task.md"
     brief.parent.mkdir(parents=True)
     brief.write_text("bounded cli brief\n", encoding="utf-8")
@@ -287,7 +290,7 @@ def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, m
     )
     assert ce_cli.main([
         "worker", "launch", "--dry-run", "--json",
-        "--role", "implementer", "--venue", "dev1-local", "--worktree", str(worktree),
+        "--role", "architect_research", "--venue", "dev1-local", "--worktree", str(worktree),
         "--brief", str(brief), "--brief-sha256", digest,
         "--run-id", "cli-test",
     ]) == 0
@@ -300,10 +303,10 @@ def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, m
 def test_worker_launch_refuses_removed_policy_binary_and_stdin_overrides(tmp_path, monkeypatch, capsys):
     worktree, brief, digest = _one_shot_worktree(tmp_path)
     monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner invoked"))
-    for removed in ("--policy", "--codex-binary", "--stdin"):
+    for removed in ("--policy", "--codex-binary", "--stdin", "--sandbox"):
         with pytest.raises(SystemExit) as exc:
             ce_cli.main([
-                "worker", "launch", "--role", "implementer", "--venue", "dev1-local",
+                "worker", "launch", "--role", "architect_research", "--venue", "dev1-local",
                 "--worktree", str(worktree), "--brief", str(brief),
                 "--brief-sha256", digest, removed, "untrusted",
             ])
@@ -338,10 +341,36 @@ def _patch_one_shot_preflight(monkeypatch, runner: FakeOneShotRunner) -> None:
 
 def _worker_launch_argv(worktree: Path, brief: Path, digest: str) -> list[str]:
     return [
-        "worker", "launch", "--role", "implementer", "--venue", "dev1-local",
+        "worker", "launch", "--role", "architect_research", "--venue", "dev1-local",
         "--worktree", str(worktree), "--brief", str(brief),
         "--brief-sha256", digest, "--run-id", "cli-reporting-test",
     ]
+
+
+@pytest.mark.parametrize("venue", ["dgx-relay", "dev1-local"])
+def test_worker_launch_refuses_implementer_native_venues_before_runner_construction(
+    tmp_path, monkeypatch, capsys, venue
+) -> None:
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    support = __import__(
+        "validators.tests.unit.test_codex_worker_launcher",
+        fromlist=["HermeticFilesystem", "FixedVersionProbe"],
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_launcher_filesystem", lambda: support.HermeticFilesystem()
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_version_probe", lambda: support.FixedVersionProbe()
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner constructed")
+    )
+    assert ce_cli.main([
+        "worker", "launch", "--role", "implementer", "--venue", venue,
+        "--worktree", str(worktree), "--brief", str(brief),
+        "--brief-sha256", digest, "--run-id", "cli-refusal-test",
+    ]) == 1
+    assert "not attested for required isolation" in capsys.readouterr().err
 
 
 def test_worker_launch_oserror_is_governed_refusal_without_traceback(

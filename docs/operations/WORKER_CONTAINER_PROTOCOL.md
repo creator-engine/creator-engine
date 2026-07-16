@@ -334,15 +334,20 @@ The policy pins Codex `0.145.0-alpha.9`, model, reasoning effort, canonical add-
 
 | Venue | `architect_research` | `implementer` | `reviewer` | `verification` |
 |---|---|---|---|---|
-| `dgx-relay` | `read-only` | `workspace-write` | `read-only` | `read-only` |
-| `dev1-local` | `read-only` | `workspace-write` | `read-only` | `read-only` |
+| `dgx-relay` | `read-only` | refused | `read-only` | `read-only` |
+| `dev1-local` | `read-only` | refused | `read-only` | `read-only` |
 | `vps-tmux` | refused | refused | refused | refused |
 | `in-seat` | refused | refused | refused | refused |
 
-Contained `vps-tmux` and `in-seat` cannot prove the required mount/scratch contract,
-so every role fails closed pending separately reviewed, machine-verifiable outer-isolation
-attestation. Neither `danger-full-access` for read-only roles nor unusable nested
-`read-only` for implementers is allowed; this is enforced rather than trusted to prose.
+Every implementer venue is refused until it has a separately reviewed, mechanically
+enforced boundary that keeps `governance/`, `schemas/`, `validators/`, and the validator
+binary read-only while the allocated worktree remains writable. `workspace-write` alone
+does not supply that boundary, and neither currently executable native venue has an
+outer-isolation attestation or launcher primitive that does. Contained `vps-tmux` and
+`in-seat` also cannot prove the required mount/scratch contract, so every role there
+fails closed pending separately reviewed, machine-verifiable outer-isolation attestation.
+Neither `danger-full-access` for read-only roles nor unusable nested `read-only` for
+implementers is allowed; this is enforced rather than trusted to prose.
 
 Every plan has this fixed argv order:
 

@@ -20,7 +20,7 @@ venues:
     outer_isolation_attestation: null
     role_sandboxes:
       architect_research: read-only
-      implementer: workspace-write
+      implementer: null
       reviewer: read-only
       verification: read-only
   vps-tmux:
@@ -36,7 +36,7 @@ venues:
     outer_isolation_attestation: null
     role_sandboxes:
       architect_research: read-only
-      implementer: workspace-write
+      implementer: null
       reviewer: read-only
       verification: read-only
   in-seat:

@@ -10,6 +10,10 @@ issue: ce-ops#566
 
 - Adds canonical role-policy and SHA-256-verified brief delivery, the isolation matrix,
   pinned Codex model/effort argv, and fail-closed preflight.
+- Refuses implementer launch at every venue until the governance, schema, validator,
+  and validator-binary read-only boundary is mechanically enforced.
+- Reconciles the protocol-backed Brain assertion through the accepted two-phase
+  supersede path and ratchets the authoritative active assertion count to 118.
 - Runs Codex under cleanup-bound isolated home/config directories and a role-policy-bound
   environment, and reports execution errors or nonzero exits as fail-closed refusals.
 - Removes caller launch-surface overrides; plans retain canonical paths/digests.
