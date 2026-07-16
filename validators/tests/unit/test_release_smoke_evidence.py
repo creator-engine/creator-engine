@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -197,6 +198,72 @@ def test_release_evidence_refuses_current_record_symlink_inside_or_outside_repo(
 
         assert _codes(result) == {gate.CODE_INVALID}
         assert calls == []
+
+
+def test_release_evidence_refuses_in_repository_symlink_evidence_parent(tmp_path: Path):
+    root = _repo(tmp_path)
+    evidence_dir = root / ".ce/release-evidence"
+    current = evidence_dir / "release-v0.3.6.json"
+    _write_record(current, _record(root))
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
+    alternate = root / "alternate-release-evidence"
+    evidence_dir.rename(alternate)
+    evidence_dir.symlink_to(alternate, target_is_directory=True)
+    current_bytes = (alternate / current.name).read_bytes()
+    calls = []
+
+    result = gate.run_with_base(
+        [root], "HEAD~1", verifier=lambda *args: calls.append(args) or True
+    )
+
+    assert _codes(result) == {gate.CODE_INVALID}
+    assert "must not be a symlink" in result.errors[0].message
+    assert "in-repository target" in result.errors[0].message
+    assert calls == []
+    assert (alternate / current.name).read_bytes() == current_bytes
+
+
+def test_release_evidence_refuses_escaping_symlink_evidence_parent(tmp_path: Path):
+    root = _repo(tmp_path / "repo")
+    evidence_dir = root / ".ce/release-evidence"
+    current = evidence_dir / "release-v0.3.6.json"
+    _write_record(current, _record(root))
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
+    external = tmp_path / "external-release-evidence"
+    evidence_dir.rename(external)
+    evidence_dir.symlink_to(external, target_is_directory=True)
+    external_bytes = (external / current.name).read_bytes()
+    calls = []
+
+    result = gate.run_with_base(
+        [root], "HEAD~1", verifier=lambda *args: calls.append(args) or True
+    )
+
+    assert _codes(result) == {gate.CODE_INVALID}
+    assert "must not be a symlink" in result.errors[0].message
+    assert "escaping target" in result.errors[0].message
+    assert calls == []
+    assert (external / current.name).read_bytes() == external_bytes
+
+
+def test_release_evidence_refuses_non_directory_evidence_parent(tmp_path: Path):
+    root = _repo(tmp_path)
+    evidence_dir = root / ".ce/release-evidence"
+    current = evidence_dir / "release-v0.3.6.json"
+    _write_record(current, _record(root))
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
+    shutil.rmtree(evidence_dir)
+    evidence_dir.write_bytes(b"not a directory\n")
+    calls = []
+
+    result = gate.run_with_base(
+        [root], "HEAD~1", verifier=lambda *args: calls.append(args) or True
+    )
+
+    assert _codes(result) == {gate.CODE_INVALID}
+    assert "must be a real directory" in result.errors[0].message
+    assert calls == []
+    assert evidence_dir.read_bytes() == b"not a directory\n"
 
 
 def test_release_evidence_allows_only_canonical_valid_strictly_prior_history(tmp_path: Path):

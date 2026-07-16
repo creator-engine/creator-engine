@@ -12,6 +12,7 @@ import binascii
 import hashlib
 import json
 import re
+import stat
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,47 @@ def _changed_paths(repo_root: Path, base: str) -> tuple[set[str] | None, Validat
     if code != 0:
         return None, _error("PR_DIFF", "", "git diff name-only failed")
     return {line.strip() for line in stdout.splitlines() if line.strip()}, None
+
+
+def _validated_evidence_directory(
+    repo_root: Path,
+) -> tuple[Path | None, ValidationError | None]:
+    evidence_dir = repo_root / EVIDENCE_DIR
+    for parent in (repo_root / ".ce", evidence_dir):
+        try:
+            parent_status = parent.stat(follow_symlinks=False)
+        except OSError as exc:
+            return None, _error(parent, "", f"could not inspect canonical evidence parent: {exc}")
+        if stat.S_ISLNK(parent_status.st_mode):
+            try:
+                resolved_target = parent.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                return None, _error(
+                    parent, "", f"could not resolve canonical evidence symlink parent: {exc}"
+                )
+            try:
+                resolved_target.relative_to(repo_root)
+                target_kind = "in-repository target"
+            except ValueError:
+                target_kind = "escaping target"
+            return None, _error(
+                parent,
+                "",
+                f"canonical evidence parent must not be a symlink ({target_kind})",
+            )
+        if not stat.S_ISDIR(parent_status.st_mode):
+            return None, _error(parent, "", "canonical evidence parent must be a real directory")
+        try:
+            resolved_parent = parent.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            return None, _error(parent, "", f"could not resolve canonical evidence parent: {exc}")
+        if resolved_parent != parent:
+            return None, _error(
+                parent,
+                "",
+                "canonical evidence parent must resolve exactly inside the real repository root",
+            )
+    return evidence_dir, None
 
 
 def _canonical_record_bytes(record: dict[str, object]) -> bytes:
@@ -440,7 +482,13 @@ def _validate_evidence(
 
 def run_with_base(paths: Iterable[Path], base: str, *, verifier: Verifier | None = None) -> CheckResult:
     raw_paths = [Path(path) for path in paths] or [Path(".")]
-    repo_root = repo_root_for(raw_paths[0])
+    try:
+        repo_root = repo_root_for(raw_paths[0]).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(_error(EVIDENCE_DIR, "", f"could not resolve real repository root: {exc}"),),
+        )
     changed, error = _changed_paths(repo_root, base)
     if error is not None:
         return CheckResult(name=CHECK_NAME, errors=(error,))
@@ -466,7 +514,24 @@ def run_with_base(paths: Iterable[Path], base: str, *, verifier: Verifier | None
                 ),
             ),
         )
-    evidence_path = repo_root / expected_relative
+    evidence_dir, parent_error = _validated_evidence_directory(repo_root)
+    if parent_error is not None:
+        return CheckResult(name=CHECK_NAME, errors=(parent_error,))
+    assert evidence_dir is not None
+    current_name = f"release-v{binding.package_version}.json"
+    expected_lexical = EVIDENCE_DIR / current_name
+    evidence_path = evidence_dir / current_name
+    if expected_lexical.as_posix() != expected_relative or evidence_path.parent != evidence_dir:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(
+                _error(
+                    expected_relative,
+                    "",
+                    "current smoke-evidence record must use its exact version-derived lexical path",
+                ),
+            ),
+        )
     if evidence_path.is_symlink():
         return CheckResult(
             name=CHECK_NAME,
@@ -474,16 +539,32 @@ def run_with_base(paths: Iterable[Path], base: str, *, verifier: Verifier | None
                 _error(evidence_path, "", "expected smoke-evidence record must not be a symlink"),
             ),
         )
+    try:
+        resolved_evidence = evidence_path.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(_error(evidence_path, "", f"could not resolve current smoke-evidence record: {exc}"),),
+        )
+    if resolved_evidence != evidence_path or resolved_evidence.parent != evidence_dir:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(
+                _error(
+                    evidence_path,
+                    "",
+                    "current smoke-evidence record must resolve exactly inside the canonical evidence directory",
+                ),
+            ),
+        )
     if not evidence_path.is_file():
         return CheckResult(name=CHECK_NAME, errors=(_error(evidence_path, "", "expected smoke-evidence record is missing"),))
-    current_name = f"release-v{binding.package_version}.json"
     current_semver = _semver_from_evidence_name(current_name)
     if current_semver is None:
         return CheckResult(
             name=CHECK_NAME,
             errors=(_error(FINALIZE_MANIFEST, "package_version", "package version is not canonical semantic version"),),
         )
-    evidence_dir = repo_root / EVIDENCE_DIR
     try:
         entries = sorted(evidence_dir.iterdir(), key=lambda path: path.name)
     except OSError as exc:

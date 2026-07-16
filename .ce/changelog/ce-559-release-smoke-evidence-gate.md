@@ -30,3 +30,6 @@ Implement the fail-closed release smoke-evidence PR-diff gate.
 - Reject symlinked/non-regular canonical evidence outputs and unsafe parent
   components before publication, and reject symlinked current records in the PR
   gate without following their in-repository or escaping targets.
+- Validate the PR gate's `.ce` and release-evidence parent components with
+  no-follow semantics before any current or historical record access, rejecting
+  in-repository/escaping symlink parents and non-directory parents.
