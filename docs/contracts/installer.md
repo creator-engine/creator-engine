@@ -474,19 +474,26 @@ only handoff for deployment-specific credentials and daemon configuration:
   SecretRef allowlist.
 - `CE_PICKUP_TOKEN_SECRET_TARGET_REF` — `file:` materialization target read after
   OpenBao delivery.
-- `CE_BELT_INTERVAL_SECONDS` — optional belt poll interval.
+- `CE_BELT_INTERVAL_SECONDS` — optional belt poll interval; defaults to `120`
+  seconds and must be a positive decimal integer when explicitly set.
 - `CE_BELT_LABELS` — optional single work-pickup label filter.
 - `CE_RATIFIER_QUEUE_CANDIDATES_PATH` — required owner-only candidate document
   for the proposal-only ratifier queue.
 - `CE_RATIFIER_QUEUE_STATE_PATH` — optional owner-only ratifier state path;
   defaults to `%h/.local/state/creator-engine/ratifier-queue/state.json`.
 - `CE_RATIFIER_QUEUE_INTERVAL_SECONDS` — optional ratifier polling interval;
-  defaults to `120` seconds.
+  defaults to `120` seconds and must be a positive decimal integer when
+  explicitly set.
 
 The ratifier unit supplies the non-secret state-path and interval defaults with
 `Environment=` before it reads the deployment-specific `EnvironmentFile`.
 Values set in that env file override the defaults; the candidates path is never
 defaulted and must be supplied by the operator.
+
+Both units fail closed before polling or daemon execution when an explicit
+interval is empty, zero, signed, whitespace-padded, fractional, or otherwise
+not a positive decimal integer. The belt exits rather than hot-polling after a
+failed sleep, and the ratifier passes its state path as one exact argument.
 
 The OpenBao-backed review-pickup path is armed only when the env file carries
 the OpenBao client variables, `CE_OPENBAO_ALLOWED_REFS`, and the full

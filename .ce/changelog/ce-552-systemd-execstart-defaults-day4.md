@@ -12,3 +12,6 @@ issue: ce-ops#552
   into explicit non-secret systemd `Environment=` directives.
 - Keep the deployment environment file as the override surface and document the
   ratifier defaults and required candidates path.
+- Validate explicit belt and ratifier interval overrides as positive decimal
+  integers before polling, refusing invalid values instead of hot-polling.
+- Preserve ratifier state paths containing whitespace as one argument.

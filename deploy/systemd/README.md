@@ -52,6 +52,13 @@ CE_RATIFIER_QUEUE_STATE_PATH=/owner-only/path/ratifier-state.json
 CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120
 ```
 
+`CE_BELT_INTERVAL_SECONDS` and `CE_RATIFIER_QUEUE_INTERVAL_SECONDS` both
+default to `120` when unset. An explicit override must be a positive decimal
+integer; empty, zero, signed, whitespace-padded, fractional, or suffixed values
+are refused before polling starts. The belt exits on a failed sleep rather than
+re-entering the poll loop. A ratifier state path is passed as one exact argument,
+including paths that contain whitespace.
+
 `GH_TOKEN` and `CE_GATE_AUTHORIZED_REVIEWERS` are required by the integrator
 daemon. `CE_GATE_AUTHORIZED_REVIEWERS` is a comma-separated list for the
 configured reviewer seats whose approvals may authorize merge-queue enqueue;
@@ -187,6 +194,10 @@ The unit sets non-secret defaults before reading `gate-daemons.env`:
 `CE_RATIFIER_QUEUE_INTERVAL_SECONDS` defaults to `120`. Set either value in the
 env file to override that default; the candidates path remains required and has
 no unit default.
+
+Both daemon intervals must be positive decimal integers when explicitly set.
+Invalid values fail closed before the belt polls or the ratifier starts. The
+ratifier preserves a configured state path as one argument, including whitespace.
 
 The candidate document is strict JSON with `version: 1` and a `candidates`
 array. Each candidate supplies immutable PR/head identity plus the complete

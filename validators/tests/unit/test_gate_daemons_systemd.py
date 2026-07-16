@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -42,6 +43,130 @@ def _read_unit_path(path: Path) -> configparser.ConfigParser:
     return parser
 
 
+def _run_gate_daemon_shell_contract(
+    repo_root: Path,
+    unit_name: str,
+    tmp_path: Path,
+    env_overrides: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run an ExecStart bash payload with command stubs, as systemd would."""
+    exec_start = _read_unit(repo_root, unit_name)["Service"]["ExecStart"]
+    command = shlex.split(exec_start)
+    assert command[:3] == ["/usr/bin/env", "bash", "-lc"]
+    script = command[3].replace("$$", "$")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "ce").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\0' \"$@\" > \"$CE_TEST_CE_ARGS\"\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "sleep").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\0' \"$@\" > \"$CE_TEST_SLEEP_ARGS\"\n"
+        "exit 42\n",
+        encoding="utf-8",
+    )
+    for stub in bin_dir.iterdir():
+        stub.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CE_TEST_CE_ARGS": str(tmp_path / "ce.args"),
+        "CE_TEST_SLEEP_ARGS": str(tmp_path / "sleep.args"),
+        "CE_BELT_IDENTITY": "dev-3",
+        "CE_GATE_REPO": "creator-engine/creator-engine",
+        "CE_RATIFIER_QUEUE_CANDIDATES_PATH": "/owner/candidates.json",
+    }
+    for env_name in (
+        "CE_BELT_INTERVAL_SECONDS",
+        "CE_RATIFIER_QUEUE_INTERVAL_SECONDS",
+        "CE_RATIFIER_QUEUE_STATE_PATH",
+    ):
+        env.pop(env_name, None)
+    for line in (
+        repo_root / "deploy" / "systemd" / unit_name
+    ).read_text(encoding="utf-8").splitlines():
+        if line.startswith("Environment="):
+            name, value = line.removeprefix("Environment=").split("=", 1)
+            env.setdefault(name, value)
+    env.update(env_overrides)
+    return subprocess.run(
+        ["bash", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+@pytest.mark.parametrize("value", ("", "0", "-1", " 1", "+1", "1.5", "one"))
+@pytest.mark.parametrize(
+    ("unit_name", "env_name"),
+    (
+        ("ce-belt-daemon.service", "CE_BELT_INTERVAL_SECONDS"),
+        ("ce-ratifier-queue.service", "CE_RATIFIER_QUEUE_INTERVAL_SECONDS"),
+    ),
+)
+def test_gate_daemon_intervals_refuse_invalid_values_before_execution(
+    repo_root: Path, tmp_path: Path, unit_name: str, env_name: str, value: str
+):
+    result = _run_gate_daemon_shell_contract(repo_root, unit_name, tmp_path, {env_name: value})
+
+    assert result.returncode != 0
+    assert "must be a positive decimal integer" in result.stderr
+    assert not (tmp_path / "ce.args").exists()
+    assert not (tmp_path / "sleep.args").exists()
+
+
+def test_belt_shell_contract_uses_default_and_preserves_valid_override(
+    repo_root: Path, tmp_path: Path
+):
+    default_result = _run_gate_daemon_shell_contract(
+        repo_root, "ce-belt-daemon.service", tmp_path / "default", {}
+    )
+    assert default_result.returncode == 42
+    assert (tmp_path / "default" / "sleep.args").read_bytes() == b"120\0"
+
+    override_result = _run_gate_daemon_shell_contract(
+        repo_root,
+        "ce-belt-daemon.service",
+        tmp_path / "override",
+        {"CE_BELT_INTERVAL_SECONDS": "45"},
+    )
+    assert override_result.returncode == 42
+    assert (tmp_path / "override" / "sleep.args").read_bytes() == b"45\0"
+
+
+def test_ratifier_shell_contract_keeps_whitespace_state_path_as_one_argv_item(
+    repo_root: Path, tmp_path: Path
+):
+    state_path = "/owner only/ratifier state.json"
+    result = _run_gate_daemon_shell_contract(
+        repo_root,
+        "ce-ratifier-queue.service",
+        tmp_path,
+        {
+            "CE_RATIFIER_QUEUE_STATE_PATH": state_path,
+            "CE_RATIFIER_QUEUE_INTERVAL_SECONDS": "45",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "ce.args").read_bytes().split(b"\0") == [
+        b"ratifier-queue",
+        b"--candidates",
+        b"/owner/candidates.json",
+        b"--state-path",
+        state_path.encode(),
+        b"--loop",
+        b"--interval",
+        b"45",
+        b"--json",
+        b"",
+    ]
+
+
 def test_gate_daemon_units_parse_and_restart(repo_root: Path):
     for name in SERVICE_NAMES:
         unit = _read_unit(repo_root, name)
@@ -67,10 +192,10 @@ def test_belt_daemon_unit_execstart_is_observe_only_poll_loop(repo_root: Path):
     exec_start = unit["Service"]["ExecStart"]
     assert exec_start.startswith("/usr/bin/env bash -lc ")
     assert "while true; do ce pickup poll " in exec_start
-    assert ' --identity "$CE_BELT_IDENTITY" ' in exec_start
-    assert ' --repo "$CE_GATE_REPO" ' in exec_start
-    assert ' ${CE_BELT_LABELS:+--label "$CE_BELT_LABELS"} ' in exec_start
-    assert exec_start.endswith('sleep "$CE_BELT_INTERVAL_SECONDS"; done\'')
+    assert ' --identity "$${CE_BELT_IDENTITY}" ' in exec_start
+    assert ' --repo "$${CE_GATE_REPO}" ' in exec_start
+    assert ' $${CE_BELT_LABELS:+--label "$${CE_BELT_LABELS}"} ' in exec_start
+    assert 'sleep "$interval" || exit $$?; done\'' in exec_start
     assert " --json;" in exec_start
     assert "--claim" not in exec_start
     assert "--enable-launch" not in exec_start
@@ -101,7 +226,7 @@ def test_gate_daemon_execstarts_use_explicit_systemd_defaults_and_installer_keep
     defaulted_units = {
         "ce-belt-daemon.service": (
             ("Environment=CE_BELT_INTERVAL_SECONDS=120",),
-            ('sleep "$CE_BELT_INTERVAL_SECONDS"',),
+            ('interval="$${CE_BELT_INTERVAL_SECONDS}"', 'sleep "$interval"'),
         ),
         "ce-ratifier-queue.service": (
             (
@@ -109,8 +234,9 @@ def test_gate_daemon_execstarts_use_explicit_systemd_defaults_and_installer_keep
                 "Environment=CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120",
             ),
             (
-                ' --state-path "$CE_RATIFIER_QUEUE_STATE_PATH" ',
-                ' --interval "$CE_RATIFIER_QUEUE_INTERVAL_SECONDS" ',
+                ' --state-path "$${CE_RATIFIER_QUEUE_STATE_PATH}" ',
+                'interval="$${CE_RATIFIER_QUEUE_INTERVAL_SECONDS}"',
+                ' --interval "$interval" ',
             ),
         ),
     }
