@@ -311,6 +311,72 @@ def test_worker_launch_refuses_removed_policy_binary_and_stdin_overrides(tmp_pat
         capsys.readouterr()
 
 
+class FakeOneShotRunner:
+    def __init__(self, *, returncode: int = 0, error: Exception | None = None) -> None:
+        self.returncode = returncode
+        self.error = error
+
+    def run(self, argv, *, stdin: bytes, provider_credential_env_names) -> int:
+        if self.error is not None:
+            raise self.error
+        return self.returncode
+
+
+def _patch_one_shot_preflight(monkeypatch, runner: FakeOneShotRunner) -> None:
+    support = __import__(
+        "validators.tests.unit.test_codex_worker_launcher",
+        fromlist=["HermeticFilesystem", "FixedVersionProbe"],
+    )
+    monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: runner)
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_launcher_filesystem", lambda: support.HermeticFilesystem()
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_version_probe", lambda: support.FixedVersionProbe()
+    )
+
+
+def _worker_launch_argv(worktree: Path, brief: Path, digest: str) -> list[str]:
+    return [
+        "worker", "launch", "--role", "implementer", "--venue", "dev1-local",
+        "--worktree", str(worktree), "--brief", str(brief),
+        "--brief-sha256", digest, "--run-id", "cli-reporting-test",
+    ]
+
+
+def test_worker_launch_oserror_is_governed_refusal_without_traceback(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    _patch_one_shot_preflight(monkeypatch, FakeOneShotRunner(error=OSError("exec failed")))
+    assert ce_cli.main(_worker_launch_argv(worktree, brief, digest)) == 1
+    captured = capsys.readouterr()
+    assert "ce worker launch refused" in captured.err
+    assert "Traceback" not in captured.err
+    assert "completed" not in captured.out + captured.err
+
+
+def test_worker_launch_nonzero_reports_failed_refused_and_returns_child_status(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    _patch_one_shot_preflight(monkeypatch, FakeOneShotRunner(returncode=23))
+    assert ce_cli.main(_worker_launch_argv(worktree, brief, digest)) == 23
+    captured = capsys.readouterr()
+    assert "failed/refused" in captured.err
+    assert "status 23" in captured.err
+    assert "completed" not in captured.out + captured.err
+
+
+def test_worker_launch_zero_reports_completion(tmp_path, monkeypatch, capsys) -> None:
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    _patch_one_shot_preflight(monkeypatch, FakeOneShotRunner())
+    assert ce_cli.main(_worker_launch_argv(worktree, brief, digest)) == 0
+    captured = capsys.readouterr()
+    assert "ce worker launch: completed cli-reporting-test" in captured.out
+    assert captured.err == ""
+
+
 def test_worker_spawn_dry_run_json_has_no_side_effect(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     worktree = tmp_path / "worker"

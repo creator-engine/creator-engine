@@ -11,6 +11,8 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Protocol, Sequence
@@ -28,6 +30,7 @@ POLICY_REQUIRED_KEYS = frozenset(
         "policy_id",
         "version",
         "supported_roles",
+        "role_provider_credentials",
         "venues",
         "model_defaults",
         "canonical_add_dirs",
@@ -39,6 +42,8 @@ VENUE_REQUIRED_KEYS = frozenset(
 POLICY_KIND = "codex-one-shot-launch-policy"
 POLICY_SCHEMA_VERSION = "1"
 ALLOWED_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
+ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES = frozenset({"OPENAI_API_KEY"})
+SAFE_RUNTIME_ENV_NAMES = frozenset({"LANG", "PATH", "TERM"})
 _RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 _ROLE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -138,6 +143,7 @@ class CodexOneShotPolicy:
     venues: tuple[VenuePolicy, ...]
     model: str
     effort: str
+    role_provider_credentials: tuple[tuple[str, tuple[str, ...]], ...]
     canonical_add_dirs: tuple[str, ...]
     worktree: str
     source_path: str
@@ -155,6 +161,12 @@ class CodexOneShotPolicy:
 
     def sandbox_for(self, *, role: str, venue: str) -> str:
         return self.venue(venue).sandbox_for(role)
+
+    def provider_credentials_for(self, role: str) -> tuple[str, ...]:
+        for candidate, credentials in self.role_provider_credentials:
+            if candidate == role:
+                return credentials
+        raise CodexWorkerLaunchError(f"role {role} has no provider credential policy")
 
 
 @dataclass(frozen=True)
@@ -182,6 +194,7 @@ class CodexWorkerLaunchPlan:
     sandbox: str
     model: str
     effort: str
+    provider_credential_env_names: tuple[str, ...]
     worktree: str
     run_id: str
     output: str
@@ -202,6 +215,7 @@ class CodexWorkerLaunchPlan:
             "sandbox": self.sandbox,
             "model": self.model,
             "effort": self.effort,
+            "provider_credential_env_names": list(self.provider_credential_env_names),
             "worktree": self.worktree,
             "run_id": self.run_id,
             "output": self.output,
@@ -210,14 +224,82 @@ class CodexWorkerLaunchPlan:
 
 
 class CodexOneShotRunner(Protocol):
-    def run(self, argv: Sequence[str], *, stdin: bytes) -> int:
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        stdin: bytes,
+        provider_credential_env_names: Sequence[str],
+    ) -> int:
         """Run a governed plan without altering argv or verified stdin bytes."""
 
 
 class SubprocessCodexOneShotRunner:
-    def run(self, argv: Sequence[str], *, stdin: bytes) -> int:
-        completed = subprocess.run(list(argv), input=stdin, text=False, check=False)
-        return completed.returncode
+    """Run with an invocation-owned home and an explicit environment allowlist."""
+
+    def __init__(self, *, environ: Mapping[str, str] | None = None) -> None:
+        self._environ = environ
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        stdin: bytes,
+        provider_credential_env_names: Sequence[str],
+    ) -> int:
+        source = dict(os.environ if self._environ is None else self._environ)
+        credential_names = tuple(provider_credential_env_names)
+        if any(
+            name not in ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES
+            for name in credential_names
+        ):
+            raise CodexWorkerLaunchError("runner received a non-provider credential name")
+        try:
+            with tempfile.TemporaryDirectory(prefix="ce-codex-one-shot-") as invocation_root:
+                home = os.path.join(invocation_root, "home")
+                codex_home = os.path.join(invocation_root, "codex")
+                tmpdir = os.path.join(invocation_root, "tmp")
+                xdg_config = os.path.join(invocation_root, "xdg-config")
+                xdg_cache = os.path.join(invocation_root, "xdg-cache")
+                xdg_data = os.path.join(invocation_root, "xdg-data")
+                for directory in (home, codex_home, tmpdir, xdg_config, xdg_cache, xdg_data):
+                    os.mkdir(directory, mode=0o700)
+                child_env = {
+                    name: value
+                    for name, value in source.items()
+                    if name in SAFE_RUNTIME_ENV_NAMES or name.startswith("LC_")
+                }
+                child_env.update(
+                    {
+                        name: source[name]
+                        for name in credential_names
+                        if name in source
+                    }
+                )
+                child_env.update(
+                    {
+                        "HOME": home,
+                        "CODEX_HOME": codex_home,
+                        "TMPDIR": tmpdir,
+                        "XDG_CONFIG_HOME": xdg_config,
+                        "XDG_CACHE_HOME": xdg_cache,
+                        "XDG_DATA_HOME": xdg_data,
+                        "GIT_CONFIG_NOSYSTEM": "1",
+                        "GIT_TERMINAL_PROMPT": "0",
+                    }
+                )
+                completed = subprocess.run(
+                    list(argv),
+                    input=stdin,
+                    text=False,
+                    check=False,
+                    env=child_env,
+                )
+                return completed.returncode
+        except CodexWorkerLaunchError:
+            raise
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise CodexWorkerLaunchError("Codex subprocess execution failed") from exc
 
 
 def _require_string(value: Any, field: str) -> str:
@@ -300,6 +382,33 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
     roles = _require_string_list(raw["supported_roles"], "supported_roles")
     if any(not _ROLE_RE.fullmatch(role) for role in roles):
         raise CodexWorkerLaunchError("policy supported_roles contains an invalid role name")
+    raw_credentials = raw["role_provider_credentials"]
+    if not isinstance(raw_credentials, dict) or set(raw_credentials) != set(roles):
+        raise CodexWorkerLaunchError(
+            "policy role_provider_credentials must define every supported role exactly once"
+        )
+    role_provider_credentials: list[tuple[str, tuple[str, ...]]] = []
+    for role in roles:
+        raw_role_credentials = raw_credentials[role]
+        if not isinstance(raw_role_credentials, list) or any(
+            not isinstance(name, str) for name in raw_role_credentials
+        ):
+            raise CodexWorkerLaunchError(
+                f"policy role_provider_credentials.{role} must be a string list"
+            )
+        credentials = tuple(raw_role_credentials)
+        if len(set(credentials)) != len(credentials):
+            raise CodexWorkerLaunchError(
+                f"policy role_provider_credentials.{role} must not contain duplicates"
+            )
+        if any(
+            name not in ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES
+            for name in credentials
+        ):
+            raise CodexWorkerLaunchError(
+                f"policy role_provider_credentials.{role} contains a non-provider credential"
+            )
+        role_provider_credentials.append((role, credentials))
     raw_venues = raw["venues"]
     if not isinstance(raw_venues, dict) or not raw_venues:
         raise CodexWorkerLaunchError("policy venues must be a nonempty mapping")
@@ -350,6 +459,7 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
         venues=tuple(venues),
         model=_require_string(defaults["model"], "model_defaults.model"),
         effort=_require_string(defaults["effort"], "model_defaults.effort"),
+        role_provider_credentials=tuple(role_provider_credentials),
         canonical_add_dirs=_require_string_list(raw["canonical_add_dirs"], "canonical_add_dirs"),
         worktree=worktree,
         source_path=source_path,
@@ -601,6 +711,7 @@ def build_launch_plan(
         sandbox=sandbox,
         model=policy.model,
         effort=policy.effort,
+        provider_credential_env_names=policy.provider_credentials_for(role),
         worktree=root,
         run_id=chosen_run_id,
         output=output,
@@ -623,4 +734,13 @@ def launch(
         or plan.brief_sha256 != governed_input.brief_sha256
     ):
         raise CodexWorkerLaunchError("governed stdin does not match the launch plan")
-    return runner.run(plan.argv, stdin=governed_input.stdin)
+    try:
+        return runner.run(
+            plan.argv,
+            stdin=governed_input.stdin,
+            provider_credential_env_names=plan.provider_credential_env_names,
+        )
+    except CodexWorkerLaunchError:
+        raise
+    except Exception as exc:
+        raise CodexWorkerLaunchError("Codex subprocess execution failed") from exc

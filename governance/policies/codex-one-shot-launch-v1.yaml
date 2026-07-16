@@ -7,6 +7,13 @@ supported_roles:
   - implementer
   - reviewer
   - verification
+role_provider_credentials:
+  architect_research:
+    - OPENAI_API_KEY
+  implementer:
+    - OPENAI_API_KEY
+  reviewer: []
+  verification: []
 venues:
   dgx-relay:
     codex_binary_template: /opt/creator-engine/codex/{version}/bin/codex

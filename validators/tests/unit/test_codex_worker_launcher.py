@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import subprocess
 
 import pytest
 
@@ -58,8 +59,9 @@ class RecordingRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[tuple[str, ...], bytes]] = []
 
-    def run(self, argv, *, stdin: bytes) -> int:
+    def run(self, argv, *, stdin: bytes, provider_credential_env_names) -> int:
         self.calls.append((tuple(argv), stdin))
+        assert tuple(provider_credential_env_names) == ("OPENAI_API_KEY",)
         return 0
 
 
@@ -122,6 +124,10 @@ def test_canonical_policy_pins_deployment_version_and_actual_venues(worktree: Pa
     loaded = policy(worktree)
     assert loaded.version == "0.145.0-alpha.9"
     assert set(loaded.venue_names) == {"dgx-relay", "vps-tmux", "dev1-local", "in-seat"}
+    assert loaded.provider_credentials_for("architect_research") == ("OPENAI_API_KEY",)
+    assert loaded.provider_credentials_for("implementer") == ("OPENAI_API_KEY",)
+    assert loaded.provider_credentials_for("reviewer") == ()
+    assert loaded.provider_credentials_for("verification") == ()
 
 
 @pytest.mark.parametrize(
@@ -337,3 +343,79 @@ def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree
     assert runner.calls == []
     assert launcher.launch(built, governed_input=worker_input, runner=runner) == 0
     assert runner.calls == [(built.argv, worker_input.stdin)]
+
+
+def test_production_runner_uses_isolated_homes_and_scrubs_hostile_ambient_env(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict[str, object] = {}
+    hostile = {
+        "PATH": "/runtime/bin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "TERM": "xterm-256color",
+        "HOME": str(tmp_path / "host-home"),
+        "CODEX_HOME": str(tmp_path / "host-codex"),
+        "XDG_CONFIG_HOME": str(tmp_path / "host-config"),
+        "GH_TOKEN": "host-gh-secret",
+        "GITHUB_TOKEN": "host-github-secret",
+        "AWS_ACCESS_KEY_ID": "host-aws-secret",
+        "AWS_SECRET_ACCESS_KEY": "host-aws-secret",
+        "SSH_AUTH_SOCK": str(tmp_path / "ssh-agent.sock"),
+        "GPG_AGENT_INFO": str(tmp_path / "gpg-agent.sock"),
+        "CE_CONTROLLER_SOCKET": str(tmp_path / "controller.sock"),
+        "CE_SEAT_SOCKET": str(tmp_path / "seat.sock"),
+        "GIT_CONFIG_GLOBAL": str(tmp_path / "host-gitconfig"),
+        "AWS_CONFIG_FILE": str(tmp_path / "host-aws-config"),
+        "OPENAI_API_KEY": "allowed-provider-secret",
+        "ANTHROPIC_API_KEY": "unlisted-provider-secret",
+        "HOSTILE_AMBIENT": "must-not-survive",
+    }
+
+    def fake_run(argv, **kwargs):
+        env = kwargs["env"]
+        captured.update({"argv": argv, "env": dict(env)})
+        for name in (
+            "HOME",
+            "CODEX_HOME",
+            "TMPDIR",
+            "XDG_CONFIG_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_DATA_HOME",
+        ):
+            assert Path(env[name]).is_dir()
+            assert Path(env[name]).is_relative_to(Path(env["HOME"]).parent)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    runner = launcher.SubprocessCodexOneShotRunner(environ=hostile)
+    assert runner.run(
+        ["/pinned/codex", "exec"],
+        stdin=b"verified",
+        provider_credential_env_names=("OPENAI_API_KEY",),
+    ) == 0
+
+    child_env = captured["env"]
+    assert isinstance(child_env, dict)
+    assert child_env["OPENAI_API_KEY"] == "allowed-provider-secret"
+    assert child_env["PATH"] == "/runtime/bin"
+    assert child_env["LANG"] == "C.UTF-8"
+    assert child_env["LC_ALL"] == "C.UTF-8"
+    assert child_env["TERM"] == "xterm-256color"
+    for name in hostile:
+        if name not in {"PATH", "LANG", "LC_ALL", "TERM", "OPENAI_API_KEY"}:
+            assert name not in child_env
+    assert child_env["HOME"] != hostile["HOME"]
+    assert child_env["CODEX_HOME"] != hostile["CODEX_HOME"]
+    assert not Path(child_env["HOME"]).exists()
+    assert not Path(child_env["CODEX_HOME"]).exists()
+
+
+def test_production_runner_refuses_untracked_provider_credential_name() -> None:
+    runner = launcher.SubprocessCodexOneShotRunner(environ={"GITHUB_TOKEN": "secret"})
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="non-provider credential"):
+        runner.run(
+            ["/pinned/codex", "exec"],
+            stdin=b"verified",
+            provider_credential_env_names=("GITHUB_TOKEN",),
+        )

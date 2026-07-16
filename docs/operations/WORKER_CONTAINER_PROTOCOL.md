@@ -323,6 +323,13 @@ beneath `.ce/briefs`, whose exact bytes must match the supplied SHA-256. The run
 receives a length-delimited frame of canonical role-policy then exact brief bytes. Plan JSON stores
 only canonical paths and digests, never either prompt body.
 
+Production execution never inherits the controller environment wholesale. Each invocation
+uses fresh, cleanup-bound `HOME`, `CODEX_HOME`, XDG, and temporary directories; preserves
+only the small non-secret runtime allowlist; and admits only provider credential names
+explicitly listed for the role by the canonical policy. GitHub, cloud, SSH/GPG agent,
+controller/seat socket, and host configuration variables are absent. An execution exception
+or nonzero Codex exit is reported as failed/refused; completion is emitted only for zero.
+
 The policy pins Codex `0.145.0-alpha.9`, model, reasoning effort, canonical add-dirs, and this complete matrix:
 
 | Venue | `architect_research` | `implementer` | `reviewer` | `verification` |

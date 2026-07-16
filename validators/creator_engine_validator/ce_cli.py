@@ -2765,15 +2765,31 @@ def _worker_launch(args) -> int:
     if args.dry_run:
         print(json.dumps(plan.to_dict(), indent=2, sort_keys=True))
         return 0
-    result = codex_worker_launcher.launch(
-        plan,
-        runner=_make_codex_one_shot_runner(),
-        governed_input=governed_input,
-    )
+    try:
+        result = codex_worker_launcher.launch(
+            plan,
+            runner=_make_codex_one_shot_runner(),
+            governed_input=governed_input,
+        )
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        print(f"ERROR: ce worker launch refused: {exc}", file=sys.stderr)
+        return 1
+    status = "completed" if result == 0 else "failed/refused"
     if args.json_output:
-        print(json.dumps({"plan": plan.to_dict(), "returncode": result}, indent=2, sort_keys=True))
-    else:
+        print(
+            json.dumps(
+                {"plan": plan.to_dict(), "returncode": result, "status": status},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    elif result == 0:
         print(f"ce worker launch: completed {plan.run_id} ({plan.role}/{plan.venue})")
+    else:
+        print(
+            f"ERROR: ce worker launch failed/refused: Codex exited with status {result}",
+            file=sys.stderr,
+        )
     return result
 
 

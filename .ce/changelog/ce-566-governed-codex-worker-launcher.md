@@ -10,5 +10,7 @@ issue: ce-ops#566
 
 - Adds canonical role-policy and SHA-256-verified brief delivery, the isolation matrix,
   pinned Codex model/effort argv, and fail-closed preflight.
+- Runs Codex under cleanup-bound isolated home/config directories and a role-policy-bound
+  environment, and reports execution errors or nonzero exits as fail-closed refusals.
 - Removes caller launch-surface overrides; plans retain canonical paths/digests.
 - Resolves the tracked VPS image source/digest while preserving exact-name removal, readiness, and diagnostics.
