@@ -1,0 +1,82 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/snapshot-retention-inventory.schema.yaml"
+title: "Creator Engine snapshot retention inventory"
+description: >-
+  Version 1 is a disabled-by-default, read-only inventory record. It cannot
+  authorize deletion, retention actions, timers, commands, path globs, locking,
+  persistence, or executor eligibility.
+type: object
+required: [schema_version, enabled, identity, source_generations, observations, disposition]
+additionalProperties: false
+properties:
+  schema_version:
+    type: string
+    const: "1"
+  enabled:
+    type: boolean
+  identity:
+    $ref: "#/$defs/identity"
+  source_generations:
+    type: object
+    required: [active_claim, worktree, evidence_pin, detached_artifact]
+    additionalProperties: false
+    properties:
+      active_claim: {$ref: "#/$defs/opaque"}
+      worktree: {$ref: "#/$defs/opaque"}
+      evidence_pin: {$ref: "#/$defs/opaque"}
+      detached_artifact: {$ref: "#/$defs/opaque"}
+  observations:
+    type: array
+    items: {$ref: "#/$defs/observation"}
+  disposition:
+    type: string
+    enum: [disabled, protected, unprotected, blocked]
+allOf:
+  - if:
+      properties: {enabled: {const: false}}
+    then:
+      properties:
+        observations: {maxItems: 0}
+        disposition: {const: disabled}
+  - if:
+      properties: {enabled: {const: true}}
+    then:
+      properties:
+        observations: {minItems: 4, maxItems: 4}
+        disposition: {enum: [protected, unprotected, blocked]}
+$defs:
+  opaque:
+    type: string
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+  sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  identity:
+    type: object
+    required: [snapshot_id, seat_id, created_at, content_sha256]
+    additionalProperties: false
+    properties:
+      snapshot_id: {$ref: "#/$defs/opaque"}
+      seat_id: {$ref: "#/$defs/opaque"}
+      created_at: {$ref: "#/$defs/timestamp"}
+      content_sha256: {$ref: "#/$defs/sha256"}
+  observation:
+    type: object
+    required: [source, status, snapshot_id, source_ref, generation, reason]
+    additionalProperties: false
+    properties:
+      source:
+        type: string
+        enum: [active_claim, worktree, evidence_pin, detached_artifact]
+      status:
+        type: string
+        enum: [protected, clear, blocked]
+      snapshot_id: {$ref: "#/$defs/opaque"}
+      source_ref: {$ref: "#/$defs/opaque"}
+      generation:
+        anyOf: [{$ref: "#/$defs/opaque"}, {type: "null"}]
+      reason:
+        anyOf: [{$ref: "#/$defs/opaque"}, {type: "null"}]
