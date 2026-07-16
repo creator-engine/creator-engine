@@ -209,6 +209,7 @@ def _config_for_headroom(repo_root: Path) -> pr_preflight.PreflightConfig:
 
 def test_preflight_refuses_when_disk_below_threshold(tmp_path: Path, monkeypatch) -> None:
     """run_preflight must stop before baseline-diff when disk is low."""
+    monkeypatch.delenv("CE_SUITE_HEADROOM_GATE_DISABLED", raising=False)
     _stub_all_heavy_gates(monkeypatch)
     runner = _MinimalFakeRunner(tmp_path)
     config = _config_for_headroom(tmp_path)
@@ -229,6 +230,7 @@ def test_preflight_refuses_when_disk_below_threshold(tmp_path: Path, monkeypatch
 
 def test_preflight_passes_headroom_check_when_disk_sufficient(tmp_path: Path, monkeypatch) -> None:
     """When disk is ample, the disk_headroom check passes and suite proceeds."""
+    monkeypatch.delenv("CE_SUITE_HEADROOM_GATE_DISABLED", raising=False)
     _stub_all_heavy_gates(monkeypatch)
     runner = _MinimalFakeRunner(tmp_path)
     config = _config_for_headroom(tmp_path)
