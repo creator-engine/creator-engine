@@ -17,16 +17,25 @@ work.
 
 ## Local preflight
 
-Run from the PR worktree:
+Create a named exact-path candidate commit first. Run the preflight from the
+clean candidate worktree:
 
 ```bash
 scripts/ce-preflight.sh --base origin/main --head-ref "$(git branch --show-current)" --declared-work-class M
 ```
 
 The command refuses a dirty worktree by default because it validates committed
-state only. If you need to inspect committed state while unrelated local files
-exist, pass `--allow-dirty`; the diff gates still use `git diff <base>..HEAD`,
-never working-tree content.
+state only. Do not use `--allow-dirty` as candidate or handoff evidence: it
+validates the old committed state, not uncommitted work. If validation or review
+requires a correction, append a new commit; never amend, rewrite, or discard the
+candidate, then rerun the preflight.
+
+Contained seats run `ce validate-pr --profile contained-seat` on their clean
+candidate commit. The profile preserves the contained-seat carrier notice while
+omitting the harvest-side carrier gate. The controller later generates and
+commits the carrier and runs full unprofiled `ce validate-pr` before attestation
+or merge-gate handling. Independent review, green checks, ratification, and
+merge-gate requirements remain mandatory.
 
 The preflight resolves the comparison base by fetching the base branch and
 using `git merge-base <base> HEAD`, then runs the same gate families as

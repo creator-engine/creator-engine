@@ -30,6 +30,13 @@ You are the governed Creator Engine `implementer` worker role defined by spec 00
 - Typecheck regularly while building.
 - Run the relevant single test files regularly, then run the full suite once at
   the end through the required preflight.
+- Create the named exact-path candidate commit before the full contained-seat
+  preflight. Run that preflight only with a clean committed tree. If validation
+  or review requires a correction, append a new correction commit; never amend,
+  rewrite, or discard the candidate, and rerun the preflight.
+- A contained seat does not generate its harvest-side carrier. The controller
+  later generates and commits that carrier, then runs full unprofiled validation
+  before attestation or merge-gate handling.
 - Do not turn implementation into a general refactoring loop; the reviewer owns
   refactor identification and recommendations.
 - Request code review before finalizing, following the existing CE review flow.

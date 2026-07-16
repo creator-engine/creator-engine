@@ -1,13 +1,12 @@
 # Author A CE-Valid PR
 
-Use this playbook before handing a branch to a controller for commit, push, or review.
+Use this playbook before handing a branch to a controller for push or review.
 
-> **Standing directive: full local preflight before every self-push / commit-for-harvest.**
-> Run the FULL local validator preflight (`ce validate-pr`, CI-parity) before
-> every self-push or commit-for-harvest. Do not discover gates via CI. The full
-> suite is what must pass before push. For fast iteration once the test-tier
-> split lands on main, use `pytest -m "not slow"` — that is for iteration only;
-> the full suite still gates the push.
+> **Standing directive: commit the candidate before local preflight.** Create a
+> named exact-path candidate commit, then run the FULL local validator preflight
+> (`ce validate-pr`, CI-parity) only on that clean committed tree before every
+> self-push or handoff. A required correction is a new appended commit followed
+> by another preflight; never amend, rewrite, or discard the candidate.
 
 > **MANDATORY before EVERY push — no exemptions.** `ce validate-pr` (the full
 > CI-parity offline suite, whole tree, run on a CLEAN working tree) MUST go green
@@ -36,7 +35,10 @@ Use this playbook before handing a branch to a controller for commit, push, or r
 
 2. Make the scoped change and keep the tree focused on the ticket.
 
-3. Add the PR carriers for the same branch slug:
+3. Create the named exact-path candidate commit before preflight. For a
+   contained seat, commit the scoped files named by the brief; the controller
+   generates and commits the required carrier later. For a non-contained
+   author, include the PR carriers for the same branch slug:
 
    - `.ce/changelog/<branch-slug>.md`
    - `.ce/pr-manifests/<branch-slug>.md`
@@ -53,7 +55,7 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    work-sizing gate derives a minimum tier from the diff and rejects declarations
    below that floor.
 
-4. Run the local preflight before push:
+4. Run the local preflight on the clean candidate commit before push:
 
    ```sh
    PYTHONPATH=validators python -m creator_engine_validator.ce_cli validate-pr
@@ -61,8 +63,15 @@ Use this playbook before handing a branch to a controller for commit, push, or r
 
    The preflight's default test gate mirrors the CI offline invocation exactly — the whole `validators/tests/` tree (unit + integration), excluding `wheel_bake_gate`, run in parallel (`python -m pytest -p no:cacheprovider validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup`). This is true CI parity, so it is slower (~1-4 min) than a unit-only run; that cost is intentional to avoid CI false-greens.
 
-   For uncommitted worker handoff checks, add `--allow-dirty` only to inspect deterministic gates before the foreman commit. The authoritative carrier and diff gates validate committed `base..HEAD` state.
+   Do not use `--allow-dirty` as candidate or handoff evidence: it validates old
+   committed state rather than an uncommitted candidate. A dirty tree must be
+   committed before authoritative validation.
 
-5. Fix every failed per-check line until the final summary is `PASS: PR preflight`.
+5. Fix every failed per-check line with a new appended commit, then rerun until
+   the final summary is `PASS: PR preflight`.
 
-6. Hand off the branch evidence to the foreman/controller. Do not self-merge.
+6. Hand off the branch evidence to the foreman/controller. The controller
+   generates and commits any contained-seat carrier and runs full unprofiled
+   validation before attestation or merge-gate handling. Independent review,
+   green checks, ratification, and merge-gate requirements still apply. Do not
+   self-merge.
