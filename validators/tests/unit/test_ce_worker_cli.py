@@ -8,6 +8,7 @@ fail-closed seams (Podman unavailable on this host).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any
 
@@ -251,6 +252,57 @@ def test_worker_run_help_is_discoverable(capsys):
         ce_cli.main(["worker", "--help"])
     assert exc.value.code == 0
     assert "run" in capsys.readouterr().out
+
+
+def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, monkeypatch, capsys):
+    policy = tmp_path / "policy.yaml"
+    policy.write_text(
+        """kind: codex-one-shot-launch-policy
+schema_version: \"1\"
+policy_id: test-policy
+version: \"1\"
+codex_binary_template: /opt/codex/{version}/bin/codex
+supported_roles: [implementer]
+venues: {contained: danger-full-access}
+model_defaults: {model: gpt-5.6-terra, effort: high}
+canonical_add_dirs: [governance]
+""",
+        encoding="utf-8",
+    )
+    called = []
+    monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: called.append(True))
+    assert ce_cli.main([
+        "worker", "launch", "--dry-run", "--json", "--policy", str(policy),
+        "--role", "implementer", "--venue", "contained", "--worktree", "/tmp/worker",
+        "--run-id", "cli-test",
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["run_id"] == "cli-test"
+    assert payload["argv"][-1] == "-"
+    assert called == []
+
+
+def test_worker_launch_refuses_caller_flags_before_runner(tmp_path, monkeypatch, capsys):
+    policy = tmp_path / "policy.yaml"
+    policy.write_text(
+        """kind: codex-one-shot-launch-policy
+schema_version: \"1\"
+policy_id: test-policy
+version: \"1\"
+codex_binary_template: /opt/codex/{version}/bin/codex
+supported_roles: [implementer]
+venues: {contained: danger-full-access}
+model_defaults: {model: gpt-5.6-terra, effort: high}
+canonical_add_dirs: [governance]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner invoked"))
+    assert ce_cli.main([
+        "worker", "launch", "--policy", str(policy), "--role", "implementer",
+        "--venue", "contained", "--worktree", "/tmp/worker", "--codex-arg=--model",
+    ]) == 1
+    assert "caller Codex flags" in capsys.readouterr().err
 
 
 def test_worker_spawn_dry_run_json_has_no_side_effect(tmp_path, monkeypatch, capsys):

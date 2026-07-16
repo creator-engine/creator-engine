@@ -418,6 +418,13 @@ def test_default_dry_run_uses_detached_named_persistent_run_without_rm() -> None
     assert "-i" not in argv
     assert "-t" not in argv
     assert "-it" not in argv
+    assert argv[runsc_image_index(argv)] == "creator-engine/codex-runsc:x86_64"
+
+
+def test_vps_image_override_is_preserved_without_a_stale_default_digest() -> None:
+    argv = dry_run_argv(run_wrapper("tui", CE_VPS_IMAGE="registry.example/approved:custom"))
+    assert "registry.example/approved:custom" in argv
+    assert "@sha256:" not in SCRIPT.read_text(encoding="utf-8")
 
 
 def test_detach_dry_run_honors_explicit_tty_flags_for_operator_diagnostics() -> None:
@@ -461,6 +468,12 @@ def test_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
     assert "backed up stale herdr session" in result.stderr
     assert "container ce-vps-codex is ready" in result.stdout
     docker_log = (tmp_path / "docker-invocations.log").read_text(encoding="utf-8")
+    commands = docker_log.splitlines()
+    assert any(command == "rm -f ce-vps-codex" for command in commands)
+    assert any(command.startswith("run -d --name ce-vps-codex ") for command in commands)
+    assert any(command.startswith("exec ce-vps-codex test -S ") for command in commands)
+    assert any(command.startswith("exec --env HERDR_SOCKET_PATH=") and " ce-vps-codex herdr pane list" in command for command in commands)
+    assert "ancestor=" not in docker_log
     assert "pane-list={\"panes\":[{\"id\":\"w1:p1\"}]}" in docker_log
     # The relaunch must not replay stale herdr windows (e.g. w2/w3 from a stale
     # session.json). Match the herdr window-id token form ("wN:" pane ref or

@@ -110,6 +110,7 @@ from . import (
     brain_recall,
     brain_recall_surface,
     bootstrap_runtime,
+    codex_worker_launcher,
     check_profiles,
     ce_ops_triage_queue,
     ce_event_runtime,
@@ -197,6 +198,11 @@ def _make_worker_run_seeder():
 def _make_worker_run_collector(timeout_seconds: float):
     """Factory for worker-run findings collection (monkeypatchable in tests)."""
     return worker_run.FileFindingsCollector(timeout_seconds=timeout_seconds)
+
+
+def _make_codex_one_shot_runner():
+    """Factory for the explicit Codex one-shot execution seam."""
+    return codex_worker_launcher.SubprocessCodexOneShotRunner()
 
 
 def _make_herdr_attach_runner():
@@ -823,6 +829,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="seconds to wait for the worker findings artifact (default: 300)",
     )
     wrun.add_argument("--json", action="store_true", dest="json_output")
+
+    wlaunch = worker_sub.add_parser(
+        "launch",
+        help="plan or execute a policy-bound external Codex one-shot worker",
+    )
+    wlaunch.add_argument(
+        "--policy",
+        default="governance/policies/codex-one-shot-launch-v1.yaml",
+        help="checked-in strict one-shot launch policy",
+    )
+    wlaunch.add_argument("--role", required=True, help="policy-supported worker role")
+    wlaunch.add_argument("--venue", required=True, help="policy-supported execution venue")
+    wlaunch.add_argument("--worktree", required=True, help="absolute allocated worktree path")
+    wlaunch.add_argument("--codex-binary", default=None, help="must exactly match the policy-pinned absolute binary")
+    wlaunch.add_argument("--add-dir", action="append", default=[], help="repeatable policy-canonical extra directory")
+    wlaunch.add_argument("--run-id", default=None, help="optional deterministic lowercase run identifier")
+    wlaunch.add_argument("--output", default=None, help="must equal the deterministic governed output path")
+    wlaunch.add_argument("--codex-arg", action="append", default=[], help="always refused; caller flags are not governable")
+    wlaunch.add_argument("--stdin", default="", help="one-shot stdin delivered only to the injected runner")
+    wlaunch.add_argument("--dry-run", action="store_true", help="emit deterministic plan JSON without runner invocation")
+    wlaunch.add_argument("--json", action="store_true", dest="json_output")
 
     wse = worker_sub.add_parser(
         "scrub-env",
@@ -2700,6 +2727,38 @@ def _worker_run(args) -> int:
         print(f"ce worker run: completed {result.run_id} ({result.role.name}/{args.harness})")
         print(f"findings: {result.findings_path}")
     return 0
+
+
+def _worker_launch(args) -> int:
+    try:
+        policy = codex_worker_launcher.load_policy(args.policy)
+        plan = codex_worker_launcher.build_launch_plan(
+            policy=policy,
+            role=args.role,
+            venue=args.venue,
+            worktree=args.worktree,
+            codex_binary=args.codex_binary,
+            add_dirs=args.add_dir,
+            run_id=args.run_id,
+            output=args.output,
+            caller_flags=args.codex_arg,
+        )
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        print(f"ERROR: ce worker launch refused: {exc}", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print(json.dumps(plan.to_dict(), indent=2, sort_keys=True))
+        return 0
+    result = codex_worker_launcher.launch(
+        plan,
+        runner=_make_codex_one_shot_runner(),
+        stdin=args.stdin,
+    )
+    if args.json_output:
+        print(json.dumps({"plan": plan.to_dict(), "returncode": result}, indent=2, sort_keys=True))
+    else:
+        print(f"ce worker launch: completed {plan.run_id} ({plan.role}/{plan.venue})")
+    return result
 
 
 def _worker_scrub_env(args) -> int:
@@ -5618,6 +5677,7 @@ _LEDGER_DISPATCH = {
 }
 
 _WORKER_DISPATCH = {
+    "launch": _worker_launch,
     "run": _worker_run,
     "spawn": _worker_spawn,
     "scrub-env": _worker_scrub_env,

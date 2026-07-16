@@ -30,6 +30,11 @@ CE_VPS_TTY_FLAGS=<empty in detached mode, -it in legacy foreground mode>
 CE_VPS_DETACH=1
 ```
 
+`CE_VPS_IMAGE` deliberately defaults to the stable governed x86_64 tag
+`creator-engine/codex-runsc:x86_64`, not a launcher-embedded digest. Operators
+may supply a specific approved image through `CE_VPS_IMAGE`; the launcher never
+inspects, pulls, or publishes that image.
+
 The VPS runtime explicitly allows Docker `--network=host`; the corresponding
 Docker runtime still uses `runsc-gvproxy-ptrace` for process containment.
 
@@ -140,7 +145,8 @@ docker stop ce-vps-codex && docker rm ce-vps-codex
 Detached launch performs an idempotent pre-launch `docker rm -f <name>` for
 the exact `CE_VPS_CONTAINER_NAME` immediately before `docker run -d --name`.
 This clears a stale stopped or wedged copy of that one seat without touching
-other containers.
+other containers. The governed destructive and readiness commands target that
+exact name only; they do not select containers by image or image ancestor.
 
 To bound stopped-container buildup from one-off diagnostics, install the tracked
 host cron artifact:

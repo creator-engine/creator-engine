@@ -14,7 +14,7 @@ Launch mode:
                               run --rm and block the caller's terminal.
 
 Environment:
-  CE_VPS_IMAGE                 Docker image tag (default: creator-engine/codex-runsc:x86_64@sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639)
+  CE_VPS_IMAGE                 Docker image tag (default: creator-engine/codex-runsc:x86_64)
   CE_VPS_RUNTIME               Docker runtime (default: runsc-gvproxy-ptrace)
   CE_VPS_MEMORY_LIMIT          Docker --memory cgroup cap for this seat. Default: 8g.
                                 Set to empty string to disable.
@@ -148,7 +148,7 @@ case "${harness}" in
     ;;
 esac
 
-CE_VPS_IMAGE="${CE_VPS_IMAGE:-creator-engine/codex-runsc:x86_64@sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639}"
+CE_VPS_IMAGE="${CE_VPS_IMAGE:-creator-engine/codex-runsc:x86_64}"
 CE_VPS_RUNTIME="${CE_VPS_RUNTIME:-runsc-gvproxy-ptrace}"
 CE_VPS_MEMORY_LIMIT="${CE_VPS_MEMORY_LIMIT-8g}"
 CE_VPS_DOCKER_NETWORK="${CE_VPS_DOCKER_NETWORK:-host}"

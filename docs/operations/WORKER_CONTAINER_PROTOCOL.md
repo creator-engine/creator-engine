@@ -300,6 +300,7 @@ above into a local runtime:
 | `ce worker status` | local read | read a single container-instance record (read-only) |
 | `ce worker spawn` | `worker_spawn.spawn_worker` | spawn a harness-agnostic governed worker seat under a scrubbed environment, recording only prompt refs/hashes and value-free launch metadata |
 | `ce worker run --role <role> --brief <file>` | `worker_run.run_worker_role` | sanctioned one-call role-brief path: resolve `.claude/agents/<role>.md`, compose `worker_spawn`, wait for the declared findings artifact, and return structured findings |
+| `ce worker launch` | `codex_worker_launcher.build_launch_plan` | load the strict checked-in one-shot policy and construct a deterministic external Codex argv; `--dry-run` emits JSON and never invokes a runner |
 
 Runtime invariants: the container engine and credential broker are reached
 **only** through injectable seams (`PodmanCommandRunner`, `NullCredentialBroker`);
@@ -310,7 +311,32 @@ secret values never enter argv, records, side-effect details, or broker metadata
 enforcement primitive is refused before container start (`G5-EGRESS-UNENFORCEABLE`);
 and every refusal raises before any side effect.
 
-### 7.1 `ce worker run` design note and deferrals
+### 7.1 Policy-bound external Codex one-shots
+
+`ce worker launch` is a narrow, pure-plan-first external Codex seam. Its v1
+policy is `governance/policies/codex-one-shot-launch-v1.yaml`; unknown policy
+keys fail closed. The policy, rather than ambient PATH or host Codex config,
+owns the version-expanded absolute binary, supported roles and venues, venue
+sandbox, model/effort defaults, and canonical worktree-relative `--add-dir`
+allowlist.
+
+Every plan has this fixed argv order:
+
+```text
+<pinned-binary> exec --ephemeral \
+  -c features.multi_agent=false -c features.multi_agent_v2=false \
+  -s <venue-sandbox> -C <worktree> \
+  [canonical --add-dir values] -o <deterministic-output> -
+```
+
+The planner refuses unknown roles or venues, a nonabsolute or mismatched binary,
+duplicate or escaping add-dirs, arbitrary caller Codex flags, and a noncanonical
+output path before the injectable runner can be called. The run id and output
+path are deterministic; prompt text is passed only as stdin at execution and is
+not written by this surface. This slice neither starts a container nor performs
+a live relaunch.
+
+### 7.2 `ce worker run` design note and deferrals
 
 `ce worker run --role <role> --brief <file>` is the sanctioned replacement for
 ad hoc harness fallback when a controller needs a governed role to answer a
