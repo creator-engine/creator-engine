@@ -267,6 +267,18 @@ def test_release_evidence_refuses_absent_altered_stale_and_unsafe_records(tmp_pa
         assert _codes(result) == {gate.CODE_INVALID}, index
 
 
+def test_release_evidence_refuses_equal_semver_with_different_installed_builds(tmp_path: Path):
+    root = _repo(tmp_path)
+    record = _record(root)
+    record["installation"]["cev3_version"] = "0.3.6+87654321"
+    _write_record(root / ".ce/release-evidence/release-v0.3.6.json", record)
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
+
+    result = gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)
+
+    assert _codes(result) == {gate.CODE_INVALID}
+
+
 def test_release_evidence_refuses_unverified_or_wrong_ambiguous_changed_records(tmp_path: Path):
     root = _repo(tmp_path)
     record = _record(root)

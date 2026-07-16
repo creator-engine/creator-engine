@@ -236,6 +236,9 @@ def test_prepare_refuses_missing_malformed_or_mismatched_install_observation(tmp
     stale_cli = json.loads(json.dumps(valid))
     stale_cli["installation"]["cev3_version"] = "0.3.5+12345678"
     cases.append(stale_cli)
+    split_build = json.loads(json.dumps(valid))
+    split_build["installation"]["cev3_version"] = "0.3.6+87654321"
+    cases.append(split_build)
     drift = json.loads(json.dumps(valid))
     drift["installation"]["post_signed_spec_sha256"] = "0" * 64
     cases.append(drift)
@@ -328,6 +331,76 @@ def test_finalize_verifies_public_signature_writes_canonical_record_and_refreshe
     assert raw == json.dumps(finalized.record, sort_keys=True, separators=(",", ":")).encode("ascii")
     assert finalized.record["signature"]["value"] == signature
     assert ".ce/release-evidence/release-v0.3.6.json" in carrier.read_text(encoding="utf-8")
+
+
+def test_finalize_restores_both_outputs_when_second_replacement_fails(tmp_path: Path, monkeypatch):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    producer.prepare_evidence(root, _result(root), unsigned)
+    evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_bytes(b"prior evidence bytes\n")
+    prior_evidence = evidence.read_bytes()
+    prior_carrier = carrier.read_bytes()
+    real_replace = producer.os.replace
+    replacement_count = 0
+
+    def fail_second_replacement(source, destination):
+        nonlocal replacement_count
+        replacement_count += 1
+        if replacement_count == 2:
+            raise OSError("injected second replacement failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(producer.os, "replace", fail_second_replacement)
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="prior outputs were restored"):
+        producer.finalize_evidence(
+            root,
+            unsigned,
+            base64.b64encode(b"sig").decode(),
+            evidence,
+            carrier,
+            "HEAD",
+            verifier=lambda *_: True,
+        )
+
+    assert evidence.read_bytes() == prior_evidence
+    assert carrier.read_bytes() == prior_carrier
+    assert not list(evidence.parent.glob(f".{evidence.name}.*"))
+    assert not list(carrier.parent.glob(f".{carrier.name}.*"))
+
+
+def test_finalize_refuses_release_tree_mutation_immediately_before_publication(tmp_path: Path, monkeypatch):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    producer.prepare_evidence(root, _result(root), unsigned)
+    evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+    prior_carrier = carrier.read_bytes()
+    real_render = producer._render_refreshed_carrier
+
+    def render_then_mutate(*args, **kwargs):
+        rendered = real_render(*args, **kwargs)
+        (root / "docs/llms-install.md").write_text(_spec("mutated-before-publication"), encoding="utf-8")
+        _write_manifest(root)
+        return rendered
+
+    monkeypatch.setattr(producer, "_render_refreshed_carrier", render_then_mutate)
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="changed before evidence publication"):
+        producer.finalize_evidence(
+            root,
+            unsigned,
+            base64.b64encode(b"sig").decode(),
+            evidence,
+            carrier,
+            "HEAD",
+            verifier=lambda *_: True,
+        )
+
+    assert not evidence.exists()
+    assert carrier.read_bytes() == prior_carrier
+    assert not list(carrier.parent.glob(f".{carrier.name}.*"))
 
 
 def test_finalize_refuses_tampered_bytes_key_namespace_digest_and_bad_public_signature(tmp_path: Path):

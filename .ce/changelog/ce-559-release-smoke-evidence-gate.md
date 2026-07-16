@@ -23,3 +23,7 @@ Implement the fail-closed release smoke-evidence PR-diff gate.
   unchanged prior evidence record; and bind the installed `ce`/`cev3` version
   plus installer-persisted signed spec to identical pre/post finalized endpoint
   observations and explicit finalized-tree expectations.
+- Require the complete installed `ce` and `cev3` build tokens to be identical,
+  and transactionally publish staged evidence/carrier bytes only after an
+  immediate finalized-tree revalidation, restoring both prior outputs on any
+  replacement failure.

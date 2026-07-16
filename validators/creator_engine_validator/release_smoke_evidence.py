@@ -209,6 +209,10 @@ def _validate_result(value: dict[str, object]) -> None:
             raise ReleaseSmokeEvidenceError(
                 f"smoke result installation.{field} must identify finalized package version {package_version}"
             )
+    if installation["ce_version"] != installation["cev3_version"]:
+        raise ReleaseSmokeEvidenceError(
+            "smoke result installed ce and cev3 versions must identify the exact same build"
+        )
     expected_observations = {
         "verified_spec_sha256": ("signed_spec_sha256", release_binding["signed_spec_sha256"]),
         "pre_signed_spec_sha256": ("signed_spec_sha256", release_binding["signed_spec_sha256"]),
@@ -386,6 +390,80 @@ def _atomic_write(path: Path, raw: bytes) -> None:
         raise
 
 
+def _stage_bytes(path: Path, raw: bytes) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return temporary
+
+
+def _prior_bytes(path: Path) -> tuple[bool, bytes]:
+    try:
+        return True, path.read_bytes()
+    except FileNotFoundError:
+        return False, b""
+    except OSError as exc:
+        raise ReleaseSmokeEvidenceError(f"could not capture prior output {path}: {exc}") from exc
+
+
+def _publish_pair(
+    evidence_path: Path,
+    evidence_raw: bytes,
+    carrier_path: Path,
+    carrier_raw: bytes,
+    *,
+    revalidate: Callable[[], None],
+) -> None:
+    targets = {"evidence": evidence_path, "carrier": carrier_path}
+    new_stages: dict[str, Path] = {}
+    rollback_stages: dict[str, Path] = {}
+    prior_exists: dict[str, bool] = {}
+    try:
+        for label, path, raw in (
+            ("evidence", evidence_path, evidence_raw),
+            ("carrier", carrier_path, carrier_raw),
+        ):
+            existed, prior_raw = _prior_bytes(path)
+            prior_exists[label] = existed
+            new_stages[label] = _stage_bytes(path, raw)
+            if existed:
+                rollback_stages[label] = _stage_bytes(path, prior_raw)
+
+        revalidate()
+        try:
+            os.replace(new_stages["evidence"], evidence_path)
+            os.replace(new_stages["carrier"], carrier_path)
+        except Exception as exc:
+            rollback_errors: list[str] = []
+            for label in ("evidence", "carrier"):
+                try:
+                    if prior_exists[label]:
+                        os.replace(rollback_stages[label], targets[label])
+                    else:
+                        targets[label].unlink(missing_ok=True)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"{label}: {rollback_exc}")
+            if rollback_errors:
+                raise ReleaseSmokeEvidenceError(
+                    "evidence/carrier publication failed and rollback was incomplete: "
+                    + "; ".join(rollback_errors)
+                ) from exc
+            raise ReleaseSmokeEvidenceError(
+                "evidence/carrier publication failed; prior outputs were restored"
+            ) from exc
+    finally:
+        for temporary in (*new_stages.values(), *rollback_stages.values()):
+            temporary.unlink(missing_ok=True)
+
+
 def prepare_evidence(
     repo_root: Path | str,
     result_path: Path | str,
@@ -547,8 +625,18 @@ def finalize_evidence(
     final_record["signature"] = final_signature
     evidence_raw = _canonical_json(final_record)
     carrier_raw = _render_refreshed_carrier(root, carrier, evidence_path, base=base)
-    _atomic_write(evidence_path, evidence_raw)
-    _atomic_write(carrier, carrier_raw)
+
+    def revalidate() -> None:
+        if validate_release_tree(root) != binding:
+            raise ReleaseSmokeEvidenceError("finalized release tree changed before evidence publication")
+
+    _publish_pair(
+        evidence_path,
+        evidence_raw,
+        carrier,
+        carrier_raw,
+        revalidate=revalidate,
+    )
     return FinalizedEvidence(record=final_record, evidence_path=evidence_path, carrier_path=carrier)
 
 

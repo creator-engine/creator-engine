@@ -116,6 +116,11 @@ CE_FAKE_ENGINE_ARGS="${args_path}" CE_FAKE_ENGINE_OUTPUT="${old_version_line}" C
 CE_REHEARSAL_IMAGE="${digest_image}" CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${result_path}" \
   "${HARNESS}" --release-smoke >/dev/null 2>&1
 split_brain_status=$?
+different_build_line="CE_RELEASE_SMOKE_BINDING ${expected_package_version} ${expected_canonical_spec_sha256} ${expected_signed_spec_sha256} ${expected_finalize_manifest_sha256} ${expected_artifacts_sha256} ${expected_package_version}+11111111 ${expected_package_version}+22222222 ${expected_signed_spec_sha256} ${expected_signed_spec_sha256} ${expected_signed_spec_sha256} ${expected_finalize_manifest_sha256} ${expected_finalize_manifest_sha256}"
+CE_FAKE_ENGINE_ARGS="${args_path}" CE_FAKE_ENGINE_OUTPUT="${different_build_line}" CE_REHEARSAL_ENGINE="${fake_engine}" \
+CE_REHEARSAL_IMAGE="${digest_image}" CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${result_path}" \
+  "${HARNESS}" --release-smoke >/dev/null 2>&1
+different_build_status=$?
 drift_line="CE_RELEASE_SMOKE_BINDING ${expected_package_version} ${expected_canonical_spec_sha256} ${expected_signed_spec_sha256} ${expected_finalize_manifest_sha256} ${expected_artifacts_sha256} ${version_token} ${version_token} ${expected_signed_spec_sha256} ${expected_signed_spec_sha256} $(printf '0%.0s' {1..64}) ${expected_finalize_manifest_sha256} ${expected_finalize_manifest_sha256}"
 CE_FAKE_ENGINE_ARGS="${args_path}" CE_FAKE_ENGINE_OUTPUT="${drift_line}" CE_REHEARSAL_ENGINE="${fake_engine}" \
 CE_REHEARSAL_IMAGE="${digest_image}" CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${result_path}" \
@@ -127,6 +132,7 @@ set -e
 [ "${engine_status}" -ne 0 ] || fail "release smoke accepted a failed engine run"
 [ "${binding_status}" -ne 0 ] || fail "release smoke accepted malformed observed release bindings"
 [ "${split_brain_status}" -ne 0 ] || fail "release smoke accepted stale installed CLI with current finalized documents"
+[ "${different_build_status}" -ne 0 ] || fail "release smoke accepted ce and cev3 from different builds"
 [ "${endpoint_drift_status}" -ne 0 ] || fail "release smoke accepted pre/post endpoint drift"
 [ ! -e "${result_path}" ] || fail "failed release smoke left a stale result"
 
