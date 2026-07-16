@@ -4852,4 +4852,54 @@ records:
   verification_method:
     evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
     type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: c90789d582f35aa38aa5231b22dbdc492961fddc1a8a52d9b2638799da3785b3
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: f4593ed4b6e765732ddc120d8471f1588a44018f2fb87e282323dd78885424c9
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-0a6fb3e3b65966cff353956f
+  kind: brain-assertion
+  prev_hash: 00460fdb37b9c0b92b617e79aeec980340b769d92436eff04e9ef5de253391c9
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 186
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: superseded
+  superseded_by: brain-assertion-478c91282dd7827da17a0f4f
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 3f7a0ab9cefa284d0b70dc5ca391dd409d6ed1fe2cab87143c15b088d111f185
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 2d0637c6f9addb181dd4d5153c6fbe06d7bf8e4163222ad1be6a60f475457d7a
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-478c91282dd7827da17a0f4f
+  kind: brain-assertion
+  prev_hash: f4593ed4b6e765732ddc120d8471f1588a44018f2fb87e282323dd78885424c9
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 187
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
 schema_version: '1'
