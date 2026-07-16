@@ -9,7 +9,7 @@ Environment=CE_RATIFIER_QUEUE_INTERVAL_SECONDS=120
 EnvironmentFile=%h/.config/creator-engine/gate-daemons.env
 WorkingDirectory=/workspace/creator-engine
 ExecStartPre=/usr/bin/mkdir -p %h/.local/state/creator-engine/daemon-heartbeats
-ExecStart=/usr/bin/env bash -lc 'interval="$${CE_RATIFIER_QUEUE_INTERVAL_SECONDS}"; case "$interval" in ""|*[!0-9]*|0) printf "%s\\n" "CE_RATIFIER_QUEUE_INTERVAL_SECONDS must be a positive decimal integer" >&2; exit 64 ;; esac; exec ce ratifier-queue --candidates "$${CE_RATIFIER_QUEUE_CANDIDATES_PATH}" --state-path "$${CE_RATIFIER_QUEUE_STATE_PATH}" --loop --interval "$interval" --json'
+ExecStart=/usr/bin/env bash -lc 'interval="$${CE_RATIFIER_QUEUE_INTERVAL_SECONDS}"; case "$interval" in ""|*[!0-9]*) printf "%s\\n" "CE_RATIFIER_QUEUE_INTERVAL_SECONDS must be a positive decimal integer" >&2; exit 64 ;; *[1-9]*) ;; *) printf "%s\\n" "CE_RATIFIER_QUEUE_INTERVAL_SECONDS must be a positive decimal integer" >&2; exit 64 ;; esac; exec ce ratifier-queue --candidates "$${CE_RATIFIER_QUEUE_CANDIDATES_PATH}" --state-path "$${CE_RATIFIER_QUEUE_STATE_PATH}" --loop --interval "$interval" --json'
 Restart=on-failure
 RestartSec=30s
 

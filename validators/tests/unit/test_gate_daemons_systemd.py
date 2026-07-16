@@ -100,7 +100,9 @@ def _run_gate_daemon_shell_contract(
     )
 
 
-@pytest.mark.parametrize("value", ("", "0", "-1", " 1", "+1", "1.5", "one"))
+@pytest.mark.parametrize(
+    "value", ("", "0", "00", "0000", "-1", " 1", "+1", "1.5", "1s", "one")
+)
 @pytest.mark.parametrize(
     ("unit_name", "env_name"),
     (
