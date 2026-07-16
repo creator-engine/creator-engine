@@ -333,6 +333,116 @@ def test_finalize_verifies_public_signature_writes_canonical_record_and_refreshe
     assert ".ce/release-evidence/release-v0.3.6.json" in carrier.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("target_location", ["inside", "outside"])
+def test_finalize_refuses_canonical_evidence_symlink_without_touching_target(
+    tmp_path: Path, target_location: str
+):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    producer.prepare_evidence(root, _result(root), unsigned)
+    evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+    evidence.parent.mkdir(parents=True)
+    target = (
+        root / ".ce/release-evidence/real-record.json"
+        if target_location == "inside"
+        else tmp_path / "escaping-record.json"
+    )
+    target.write_bytes(b"target must remain unchanged\n")
+    evidence.symlink_to(target)
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+    prior_carrier = carrier.read_bytes()
+
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="must not be a symlink"):
+        producer.finalize_evidence(
+            root,
+            unsigned,
+            base64.b64encode(b"sig").decode(),
+            evidence,
+            carrier,
+            "HEAD",
+            verifier=lambda *_: True,
+        )
+
+    assert evidence.is_symlink()
+    assert target.read_bytes() == b"target must remain unchanged\n"
+    assert carrier.read_bytes() == prior_carrier
+
+
+@pytest.mark.parametrize("parent_kind", ["symlink", "file"])
+def test_finalize_refuses_non_directory_or_symlink_evidence_parent(
+    tmp_path: Path, parent_kind: str
+):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    producer.prepare_evidence(root, _result(root), unsigned)
+    evidence_parent = root / ".ce/release-evidence"
+    external = tmp_path / "external-evidence"
+    external.mkdir()
+    if parent_kind == "symlink":
+        evidence_parent.symlink_to(external, target_is_directory=True)
+    else:
+        evidence_parent.write_text("not a directory\n", encoding="utf-8")
+    evidence = evidence_parent / "release-v0.3.6.json"
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="non-symlink directory"):
+        producer.finalize_evidence(
+            root,
+            unsigned,
+            base64.b64encode(b"sig").decode(),
+            evidence,
+            carrier,
+            "HEAD",
+            verifier=lambda *_: True,
+        )
+
+    assert not list(external.iterdir())
+
+
+def test_finalize_refuses_existing_non_regular_canonical_evidence_target(tmp_path: Path):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    producer.prepare_evidence(root, _result(root), unsigned)
+    evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+    evidence.mkdir(parents=True)
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="must be a regular file"):
+        producer.finalize_evidence(
+            root,
+            unsigned,
+            base64.b64encode(b"sig").decode(),
+            evidence,
+            carrier,
+            "HEAD",
+            verifier=lambda *_: True,
+        )
+
+    assert evidence.is_dir()
+
+
+def test_finalize_refuses_noncanonical_lexical_alias_for_evidence_output(tmp_path: Path):
+    root = _repo(tmp_path)
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    producer.prepare_evidence(root, _result(root), unsigned)
+    canonical = root / ".ce/release-evidence/release-v0.3.6.json"
+    lexical_alias = root / ".ce/release-evidence/../release-evidence/release-v0.3.6.json"
+    carrier = root / ".ce/pr-manifests/release-publish-v0.3.6.md"
+
+    with pytest.raises(producer.ReleaseSmokeEvidenceError, match="must be exactly"):
+        producer.finalize_evidence(
+            root,
+            unsigned,
+            base64.b64encode(b"sig").decode(),
+            lexical_alias,
+            carrier,
+            "HEAD",
+            verifier=lambda *_: True,
+        )
+
+    assert not canonical.exists()
+
+
 def test_finalize_restores_both_outputs_when_second_replacement_fails(tmp_path: Path, monkeypatch):
     root = _repo(tmp_path)
     unsigned = tmp_path / "release-v0.3.6.unsigned.json"

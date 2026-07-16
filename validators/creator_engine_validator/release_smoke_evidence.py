@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -414,6 +415,56 @@ def _prior_bytes(path: Path) -> tuple[bool, bytes]:
         raise ReleaseSmokeEvidenceError(f"could not capture prior output {path}: {exc}") from exc
 
 
+def _canonical_evidence_output(
+    repo_root: Path, evidence_out: Path | str, package_version: str
+) -> Path:
+    """Return the exact version-derived output after fail-closed path checks."""
+
+    expected = repo_root / ".ce/release-evidence" / f"release-v{package_version}.json"
+    supplied = Path(evidence_out)
+    lexical = supplied if supplied.is_absolute() else Path.cwd() / supplied
+    if lexical != expected:
+        raise ReleaseSmokeEvidenceError(f"evidence output must be exactly {expected}")
+
+    for parent in (repo_root / ".ce", expected.parent):
+        try:
+            parent.mkdir()
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ReleaseSmokeEvidenceError(f"could not create evidence output parent {parent}: {exc}") from exc
+        try:
+            parent_status = parent.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise ReleaseSmokeEvidenceError(f"could not inspect evidence output parent {parent}: {exc}") from exc
+        if stat.S_ISLNK(parent_status.st_mode) or not stat.S_ISDIR(parent_status.st_mode):
+            raise ReleaseSmokeEvidenceError(
+                f"evidence output parent must be a non-symlink directory: {parent}"
+            )
+
+    try:
+        target_status = expected.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        target_status = None
+    except OSError as exc:
+        raise ReleaseSmokeEvidenceError(f"could not inspect evidence output {expected}: {exc}") from exc
+    if target_status is not None:
+        if stat.S_ISLNK(target_status.st_mode):
+            raise ReleaseSmokeEvidenceError("canonical evidence output must not be a symlink")
+        if not stat.S_ISREG(target_status.st_mode):
+            raise ReleaseSmokeEvidenceError("canonical evidence output must be a regular file when it exists")
+
+    try:
+        resolved_parent = expected.parent.resolve(strict=True)
+    except OSError as exc:
+        raise ReleaseSmokeEvidenceError(f"could not resolve evidence output parent {expected.parent}: {exc}") from exc
+    if resolved_parent != expected.parent or expected.resolve(strict=False) != expected:
+        raise ReleaseSmokeEvidenceError(
+            "evidence output must remain physically contained at its version-derived canonical path"
+        )
+    return expected
+
+
 def _publish_pair(
     evidence_path: Path,
     evidence_raw: bytes,
@@ -427,6 +478,9 @@ def _publish_pair(
     rollback_stages: dict[str, Path] = {}
     prior_exists: dict[str, bool] = {}
     try:
+        # Reject output-path substitution before reading any prior bytes, then
+        # repeat immediately before the canonical directory-entry replacements.
+        revalidate()
         for label, path, raw in (
             ("evidence", evidence_path, evidence_raw),
             ("carrier", carrier_path, carrier_raw),
@@ -609,10 +663,7 @@ def finalize_evidence(
     if not verify(SSH_ALGO, canonical, signature, keys[SIGNING_KEY_ID]):
         raise ReleaseSmokeEvidenceError("public detached SSHSIG did not verify in ce-release-smoke-v1 namespace")
 
-    evidence_path = Path(evidence_out).resolve()
-    expected_evidence = (root / ".ce/release-evidence" / f"release-v{binding.package_version}.json").resolve()
-    if evidence_path != expected_evidence:
-        raise ReleaseSmokeEvidenceError(f"evidence output must be {expected_evidence}")
+    evidence_path = _canonical_evidence_output(root, evidence_out, binding.package_version)
     carrier = Path(carrier_path).resolve()
     try:
         carrier.relative_to(root / ".ce/pr-manifests")
@@ -627,6 +678,7 @@ def finalize_evidence(
     carrier_raw = _render_refreshed_carrier(root, carrier, evidence_path, base=base)
 
     def revalidate() -> None:
+        _canonical_evidence_output(root, evidence_path, binding.package_version)
         if validate_release_tree(root) != binding:
             raise ReleaseSmokeEvidenceError("finalized release tree changed before evidence publication")
 

@@ -27,3 +27,6 @@ Implement the fail-closed release smoke-evidence PR-diff gate.
   and transactionally publish staged evidence/carrier bytes only after an
   immediate finalized-tree revalidation, restoring both prior outputs on any
   replacement failure.
+- Reject symlinked/non-regular canonical evidence outputs and unsafe parent
+  components before publication, and reject symlinked current records in the PR
+  gate without following their in-repository or escaping targets.

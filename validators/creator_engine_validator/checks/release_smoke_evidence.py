@@ -467,6 +467,13 @@ def run_with_base(paths: Iterable[Path], base: str, *, verifier: Verifier | None
             ),
         )
     evidence_path = repo_root / expected_relative
+    if evidence_path.is_symlink():
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(
+                _error(evidence_path, "", "expected smoke-evidence record must not be a symlink"),
+            ),
+        )
     if not evidence_path.is_file():
         return CheckResult(name=CHECK_NAME, errors=(_error(evidence_path, "", "expected smoke-evidence record is missing"),))
     current_name = f"release-v{binding.package_version}.json"

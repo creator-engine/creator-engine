@@ -177,6 +177,28 @@ def test_release_evidence_accepts_exact_valid_record(tmp_path: Path):
     assert calls[0][3] == v3_installer.PINNED_KEYS["ce-root-v1"]
 
 
+def test_release_evidence_refuses_current_record_symlink_inside_or_outside_repo(tmp_path: Path):
+    for target_location in ("inside", "outside"):
+        root = _repo(tmp_path / target_location)
+        evidence = root / ".ce/release-evidence/release-v0.3.6.json"
+        target = (
+            root / ".ce/release-evidence/real-current.json"
+            if target_location == "inside"
+            else tmp_path / f"{target_location}-current.json"
+        )
+        _write_record(target, _record(root))
+        evidence.symlink_to(target)
+        _amend(root, ".ce/release-evidence/release-v0.3.6.json")
+        calls = []
+
+        result = gate.run_with_base(
+            [root], "HEAD~1", verifier=lambda *args: calls.append(args) or True
+        )
+
+        assert _codes(result) == {gate.CODE_INVALID}
+        assert calls == []
+
+
 def test_release_evidence_allows_only_canonical_valid_strictly_prior_history(tmp_path: Path):
     root = _repo(tmp_path)
     evidence = root / ".ce/release-evidence"
