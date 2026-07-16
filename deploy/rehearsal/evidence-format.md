@@ -111,13 +111,17 @@ The governed `--release-smoke` mode does not emit the timestamped slice-1
 rehearsal bundle. It writes this deterministic canonical JSON contract instead:
 
 ```json
-{"container_image":"registry.example/ce-smoke@sha256:<64 lowercase hex>","containment":{"host_checkout_mount":false},"release_binding":{"artifacts_sha256":"<64 lowercase hex>","canonical_spec_sha256":"<64 lowercase hex>","finalize_manifest_sha256":"<64 lowercase hex>","package_version":"<version>","signed_spec_sha256":"<64 lowercase hex>"},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}
+{"container_image":"registry.example/ce-smoke@sha256:<64 lowercase hex>","containment":{"host_checkout_mount":false},"installation":{"ce_version":"<version>+<8 lowercase hex>","cev3_version":"<version>+<8 lowercase hex>","post_finalize_manifest_sha256":"<64 lowercase hex>","post_signed_spec_sha256":"<64 lowercase hex>","pre_finalize_manifest_sha256":"<64 lowercase hex>","pre_signed_spec_sha256":"<64 lowercase hex>","verified_spec_sha256":"<64 lowercase hex>"},"release_binding":{"artifacts_sha256":"<64 lowercase hex>","canonical_spec_sha256":"<64 lowercase hex>","finalize_manifest_sha256":"<64 lowercase hex>","package_version":"<version>","signed_spec_sha256":"<64 lowercase hex>"},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}
 ```
 
 The clean container derives `release_binding` from the signed install spec and
-release-finalize manifest fetched from the same `CE_SITE` endpoint used for the
-install. The producer requires every observed value to match the exact local
-finalized tree, including the manifest's artifact-set section. Tags, checkout
+release-finalize manifest fetched before installation, matches both to explicit
+finalized-tree expectations, and re-fetches them after installation. The
+`installation` object carries both installed CLI version tokens, the persisted
+installer-verified signed-spec digest, and the pre/post endpoint observations.
+The harness and producer require all of these values to agree with each other
+and with the exact local finalized tree, including the manifest's artifact-set
+section. Tags, checkout
 mounts, stale/missing/malformed bindings, failed/stubbed counts, missing stages,
 non-passing stages, additional fields, or non-canonical JSON are refused before
 unsigned evidence bytes are emitted.

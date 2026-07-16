@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,7 +48,15 @@ FINALIZE_MANIFEST_FIELDS = {
     "artifacts",
 }
 FINALIZE_ARTIFACT_FIELDS = {"path", "sha256", "size"}
-RESULT_FIELDS = {"schema_version", "container_image", "containment", "release_binding", "summary", "stages"}
+RESULT_FIELDS = {
+    "schema_version",
+    "container_image",
+    "containment",
+    "installation",
+    "release_binding",
+    "summary",
+    "stages",
+}
 RESULT_BINDING_ORDER = (
     "package_version",
     "canonical_spec_sha256",
@@ -56,6 +65,15 @@ RESULT_BINDING_ORDER = (
     "artifacts_sha256",
 )
 RESULT_BINDING_FIELDS = set(RESULT_BINDING_ORDER)
+INSTALLATION_FIELDS = {
+    "ce_version",
+    "cev3_version",
+    "verified_spec_sha256",
+    "pre_signed_spec_sha256",
+    "post_signed_spec_sha256",
+    "pre_finalize_manifest_sha256",
+    "post_finalize_manifest_sha256",
+}
 UNSIGNED_FIELDS = {
     "schema_version",
     "package_version",
@@ -67,6 +85,7 @@ UNSIGNED_FIELDS = {
     "stages",
     "containment",
     "container_image",
+    "installation",
     "signature",
 }
 ROOT_ARTIFACT_PATHS = {
@@ -150,7 +169,9 @@ def _load_json_canonical(path: Path, *, label: str) -> dict[str, object]:
 
 def _validate_result(value: dict[str, object]) -> None:
     if set(value) != RESULT_FIELDS:
-        raise ReleaseSmokeEvidenceError("smoke result must contain exactly the endpoint-observed result fields")
+        raise ReleaseSmokeEvidenceError(
+            "smoke result must contain exactly the endpoint-observed result fields, including installation"
+        )
     if value.get("schema_version") != SCHEMA_VERSION:
         raise ReleaseSmokeEvidenceError("smoke result schema_version must be '1'")
     image = value.get("container_image")
@@ -174,9 +195,33 @@ def _validate_result(value: dict[str, object]) -> None:
     if not isinstance(package_version, str) or not package_version or any(character.isspace() for character in package_version):
         raise ReleaseSmokeEvidenceError("smoke result release_binding.package_version is invalid")
     for field in RESULT_BINDING_FIELDS - {"package_version"}:
-        value = release_binding.get(field)
-        if not isinstance(value, str) or not HEX64_RE.fullmatch(value):
+        digest = release_binding.get(field)
+        if not isinstance(digest, str) or not HEX64_RE.fullmatch(digest):
             raise ReleaseSmokeEvidenceError(f"smoke result release_binding.{field} must be a lowercase SHA-256 digest")
+    installation = value.get("installation")
+    if not _exact_mapping(installation, INSTALLATION_FIELDS):
+        raise ReleaseSmokeEvidenceError("smoke result installation must contain exactly the installed/pre/post observation fields")
+    assert isinstance(installation, dict)
+    version_pattern = re.compile(rf"^{re.escape(package_version)}\+[0-9a-f]{{8}}$")
+    for field in ("ce_version", "cev3_version"):
+        installed_version = installation.get(field)
+        if not isinstance(installed_version, str) or not version_pattern.fullmatch(installed_version):
+            raise ReleaseSmokeEvidenceError(
+                f"smoke result installation.{field} must identify finalized package version {package_version}"
+            )
+    expected_observations = {
+        "verified_spec_sha256": ("signed_spec_sha256", release_binding["signed_spec_sha256"]),
+        "pre_signed_spec_sha256": ("signed_spec_sha256", release_binding["signed_spec_sha256"]),
+        "post_signed_spec_sha256": ("signed_spec_sha256", release_binding["signed_spec_sha256"]),
+        "pre_finalize_manifest_sha256": ("finalize_manifest_sha256", release_binding["finalize_manifest_sha256"]),
+        "post_finalize_manifest_sha256": ("finalize_manifest_sha256", release_binding["finalize_manifest_sha256"]),
+    }
+    for field, (binding_field, expected) in expected_observations.items():
+        observed = installation.get(field)
+        if not isinstance(observed, str) or not HEX64_RE.fullmatch(observed) or observed != expected:
+            raise ReleaseSmokeEvidenceError(
+                f"smoke result installation.{field} must match release_binding.{binding_field}"
+            )
 
 
 def _validate_observed_binding(result: dict[str, object], binding: ReleaseTreeBinding) -> None:
@@ -319,6 +364,7 @@ def _unsigned_record(binding: ReleaseTreeBinding, result: dict[str, object]) -> 
         "stages": result["stages"],
         "containment": result["containment"],
         "container_image": result["container_image"],
+        "installation": result["installation"],
         "signature": {"key_id": SIGNING_KEY_ID, "algo": SSH_ALGO, "namespace": SSH_SIG_NAMESPACE},
     }
 
@@ -356,7 +402,8 @@ def prepare_evidence(
     output = Path(unsigned_out)
     _atomic_write(output, canonical)
     signing_command = (
-        f"ssh-keygen -Y sign -f /path/to/ce-root-v1-private -n {SSH_SIG_NAMESPACE} {output}"
+        "ssh-keygen -Y sign -f /path/to/ce-root-v1-private "
+        f"-n {SSH_SIG_NAMESPACE} {shlex.quote(str(output))}"
     )
     return PreparedEvidence(
         record=record,

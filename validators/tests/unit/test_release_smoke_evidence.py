@@ -54,6 +54,15 @@ def _record(repo: Path, **overrides: object) -> dict[str, object]:
         "stages": {"install": "passed", "install_verify": "passed"},
         "containment": {"host_checkout_mount": False},
         "container_image": "registry.example.invalid/ce-smoke@sha256:" + "a" * 64,
+        "installation": {
+            "ce_version": f"{binding.package_version}+12345678",
+            "cev3_version": f"{binding.package_version}+12345678",
+            "verified_spec_sha256": binding.signed_spec_sha256,
+            "pre_signed_spec_sha256": binding.signed_spec_sha256,
+            "post_signed_spec_sha256": binding.signed_spec_sha256,
+            "pre_finalize_manifest_sha256": binding.finalize_manifest_sha256,
+            "post_finalize_manifest_sha256": binding.finalize_manifest_sha256,
+        },
         "signature": {
             "key_id": "ce-root-v1",
             "algo": "ssh-ed25519",
@@ -102,17 +111,18 @@ def _write_finalize_manifest(root: Path, **overrides: object) -> None:
 
 def _repo(tmp_path: Path) -> Path:
     root = tmp_path
-    (root / "docs").mkdir()
+    (root / "docs").mkdir(parents=True)
     (root / ".ce/release-evidence").mkdir(parents=True)
     (root / "docs/downloads/0.3.6").mkdir(parents=True)
     (root / "docs/downloads/0.3.6/SHA256SUMS").write_text("fixture\n", encoding="utf-8")
     spec = _spec()
     (root / "docs/llms-install.md").write_text(spec, encoding="utf-8")
     _write_finalize_manifest(root)
-    _write_record(
-        root / ".ce/release-evidence/release-v0.3.5.json",
-        {"historical": "unchanged prior release evidence is intentionally ignored"},
-    )
+    historical = _record(root)
+    historical["package_version"] = "0.3.5"
+    historical["installation"]["ce_version"] = "0.3.5+12345678"
+    historical["installation"]["cev3_version"] = "0.3.5+12345678"
+    _write_record(root / ".ce/release-evidence/release-v0.3.5.json", historical)
     _git(root, "init")
     _git(root, "add", ".")
     _commit(root, "base")
@@ -165,6 +175,72 @@ def test_release_evidence_accepts_exact_valid_record(tmp_path: Path):
     assert result.ok
     assert calls and calls[0][0] == "ssh-ed25519"
     assert calls[0][3] == v3_installer.PINNED_KEYS["ce-root-v1"]
+
+
+def test_release_evidence_allows_only_canonical_valid_strictly_prior_history(tmp_path: Path):
+    root = _repo(tmp_path)
+    evidence = root / ".ce/release-evidence"
+    _write_record(evidence / "release-v0.3.6.json", _record(root))
+    _amend(root, ".ce/release-evidence/release-v0.3.6.json")
+
+    assert gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True).ok
+
+
+def test_release_evidence_refuses_unchanged_future_same_alias_arbitrary_malformed_and_residue(tmp_path: Path):
+    refusal_cases = (
+        ("release-v9.9.9.json", "future"),
+        ("release-v0.3.6+duplicate.json", "same-version alias"),
+        ("arbitrary.json", "arbitrary"),
+        ("release-v0.03.5.json", "malformed version"),
+        ("README.txt", "non-JSON residue"),
+    )
+    for name, _label in refusal_cases:
+        case_root = _repo(tmp_path / name.replace("/", "_"))
+        evidence = case_root / ".ce/release-evidence"
+        _write_record(evidence / "release-v0.3.6.json", _record(case_root))
+        candidate = evidence / name
+        if name.endswith(".json"):
+            extra = _record(case_root)
+            extra["package_version"] = "9.9.9" if "9.9.9" in name else "0.3.6"
+            _write_record(candidate, extra)
+        else:
+            candidate.write_text("not evidence\n", encoding="utf-8")
+        _git(case_root, "add", ".")
+        _commit(case_root, "seed invalid unchanged history")
+        # Make a release-class commit after the invalid entry is already in the base.
+        (case_root / "docs/llms-install.md").write_text(_spec("next-signed-spec"), encoding="utf-8")
+        _write_finalize_manifest(case_root)
+        current = _record(case_root)
+        current["signature"]["value"] = base64.b64encode(b"new-current-signature").decode("ascii")
+        _write_record(evidence / "release-v0.3.6.json", current)
+        _git(case_root, "add", ".")
+        _commit(case_root, "next release candidate")
+
+        assert _codes(gate.run_with_base([case_root], "HEAD~1", verifier=lambda *_args: True)) == {gate.CODE_INVALID}
+
+
+def test_release_evidence_refuses_unchanged_malformed_or_noncanonical_prior_record(tmp_path: Path):
+    for mode in ("shape", "canonical", "signature"):
+        root = _repo(tmp_path / mode)
+        evidence = root / ".ce/release-evidence"
+        prior = evidence / "release-v0.3.5.json"
+        if mode == "shape":
+            _write_record(prior, {"package_version": "0.3.5"})
+        elif mode == "canonical":
+            prior.write_bytes(prior.read_bytes() + b"\n")
+        else:
+            value = json.loads(prior.read_text(encoding="ascii"))
+            value["signature"]["namespace"] = "wrong"
+            _write_record(prior, value)
+        _git(root, "add", ".")
+        _commit(root, "seed invalid prior record")
+        (root / "docs/llms-install.md").write_text(_spec("next-signed-spec"), encoding="utf-8")
+        _write_finalize_manifest(root)
+        _write_record(evidence / "release-v0.3.6.json", _record(root))
+        _git(root, "add", ".")
+        _commit(root, "next release candidate")
+
+        assert _codes(gate.run_with_base([root], "HEAD~1", verifier=lambda *_args: True)) == {gate.CODE_INVALID}
 
 
 def test_release_evidence_refuses_absent_altered_stale_and_unsafe_records(tmp_path: Path):

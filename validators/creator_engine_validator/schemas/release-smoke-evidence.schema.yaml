@@ -13,6 +13,7 @@ required:
   - stages
   - containment
   - container_image
+  - installation
   - signature
 properties:
   schema_version:
@@ -55,6 +56,25 @@ properties:
   container_image:
     type: string
     pattern: '^[^\s@]+@sha256:[0-9a-f]{64}$'
+  installation:
+    type: object
+    additionalProperties: false
+    required:
+      - ce_version
+      - cev3_version
+      - verified_spec_sha256
+      - pre_signed_spec_sha256
+      - post_signed_spec_sha256
+      - pre_finalize_manifest_sha256
+      - post_finalize_manifest_sha256
+    properties:
+      ce_version: {type: string, pattern: '^\S+\+[0-9a-f]{8}$'}
+      cev3_version: {type: string, pattern: '^\S+\+[0-9a-f]{8}$'}
+      verified_spec_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      pre_signed_spec_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      post_signed_spec_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      pre_finalize_manifest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      post_finalize_manifest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
   signature:
     type: object
     additionalProperties: false

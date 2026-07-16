@@ -37,6 +37,13 @@ SIGNING_KEY_ID = "ce-root-v1"
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_RE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 PACKAGE_VERSION_RE = re.compile(r"^  package_version: (\S+)$")
+EVIDENCE_NAME_RE = re.compile(
+    r"^release-v"
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-((?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\.json$"
+)
 FINALIZE_MANIFEST_FIELDS = {
     "kind",
     "schema_version",
@@ -82,6 +89,88 @@ def _string(mapping: dict[str, object], key: str) -> str | None:
 
 def _exact_keys(value: object, keys: set[str]) -> bool:
     return isinstance(value, dict) and set(value) == keys
+
+
+def _semver_from_evidence_name(name: str) -> tuple[tuple[int, int, int], tuple[str, ...] | None] | None:
+    match = EVIDENCE_NAME_RE.fullmatch(name)
+    if match is None:
+        return None
+    prerelease = tuple(match.group(4).split(".")) if match.group(4) is not None else None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3))), prerelease
+
+
+def _prerelease_lt(left: tuple[str, ...] | None, right: tuple[str, ...] | None) -> bool:
+    if left is None:
+        return False
+    if right is None:
+        return True
+    for left_item, right_item in zip(left, right):
+        if left_item == right_item:
+            continue
+        left_numeric = left_item.isdigit()
+        right_numeric = right_item.isdigit()
+        if left_numeric and right_numeric:
+            return int(left_item) < int(right_item)
+        if left_numeric != right_numeric:
+            return left_numeric
+        return left_item < right_item
+    return len(left) < len(right)
+
+
+def _semver_strictly_lower(
+    candidate: tuple[tuple[int, int, int], tuple[str, ...] | None],
+    current: tuple[tuple[int, int, int], tuple[str, ...] | None],
+) -> bool:
+    if candidate[0] != current[0]:
+        return candidate[0] < current[0]
+    return _prerelease_lt(candidate[1], current[1])
+
+
+def _validate_historical_evidence(evidence_path: Path, filename_version: str) -> list[ValidationError]:
+    """Validate historical record authenticity/shape without rebinding old hashes."""
+
+    try:
+        raw = evidence_path.read_bytes()
+        record = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return [_error(evidence_path, "", f"historical evidence must be canonical JSON: {exc}")]
+    if not isinstance(record, dict):
+        return [_error(evidence_path, "", "historical evidence must be a JSON object")]
+    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    if raw != canonical:
+        return [_error(evidence_path, "", "historical evidence must be exactly canonical compact ASCII JSON")]
+    signature = record.get("signature")
+    if not _exact_keys(signature, {"key_id", "algo", "namespace", "value"}):
+        return [_error(evidence_path, "signature", "historical evidence must carry an exact SSHSIG descriptor")]
+    assert isinstance(signature, dict)
+    if (
+        signature.get("key_id") != SIGNING_KEY_ID
+        or signature.get("algo") != install_spec_signature_guard.SSH_ED25519_ALGO
+        or signature.get("namespace") != SSH_SIG_NAMESPACE
+    ):
+        return [_error(evidence_path, "signature", "historical evidence must bind ce-root-v1/ce-release-smoke-v1")]
+    signature_value = signature.get("value")
+    try:
+        if not isinstance(signature_value, str):
+            raise ValueError("not a string")
+        base64.b64decode(signature_value.encode("ascii"), validate=True)
+    except (UnicodeEncodeError, binascii.Error, ValueError):
+        return [_error(evidence_path, "signature.value", "historical evidence signature must be valid base64")]
+    unsigned = dict(record)
+    unsigned["signature"] = {key: signature[key] for key in ("key_id", "algo", "namespace")}
+    if set(unsigned) != producer.UNSIGNED_FIELDS:
+        return [_error(evidence_path, "", "historical evidence must contain exactly the release smoke schema fields")]
+    synthetic_result = {field: unsigned[field] for field in producer.RESULT_FIELDS - {"release_binding"}}
+    synthetic_result["release_binding"] = {
+        field: unsigned[field] for field in producer.RESULT_BINDING_FIELDS
+    }
+    try:
+        producer._validate_result(synthetic_result)
+    except producer.ReleaseSmokeEvidenceError as exc:
+        return [_error(evidence_path, "", f"historical evidence shape is invalid: {exc}")]
+    if record.get("package_version") != filename_version:
+        return [_error(evidence_path, "package_version", "historical evidence filename and record version must match exactly")]
+    return []
 
 
 def _read_manifest(path: Path) -> tuple[dict[str, object] | None, str | None]:
@@ -240,6 +329,7 @@ def _validate_evidence(
         "stages",
         "containment",
         "container_image",
+        "installation",
         "signature",
     }:
         errors.append(_error(evidence_path, "", "evidence must contain exactly the release smoke schema fields"))
@@ -306,6 +396,20 @@ def _validate_evidence(
     image = _string(record, "container_image")
     if image is None or not IMAGE_RE.fullmatch(image):
         errors.append(_error(evidence_path, "container_image", "must be a digest-pinned image reference"))
+    installation = record.get("installation")
+    synthetic_result = {
+        "schema_version": record.get("schema_version"),
+        "container_image": record.get("container_image"),
+        "containment": record.get("containment"),
+        "installation": installation,
+        "release_binding": {field: record.get(field) for field in producer.RESULT_BINDING_FIELDS},
+        "summary": record.get("summary"),
+        "stages": record.get("stages"),
+    }
+    try:
+        producer._validate_result(synthetic_result)
+    except producer.ReleaseSmokeEvidenceError as exc:
+        errors.append(_error(evidence_path, "installation", str(exc)))
 
     signature = record.get("signature")
     if not _exact_keys(signature, {"key_id", "algo", "namespace", "value"}):
@@ -349,10 +453,7 @@ def run_with_base(paths: Iterable[Path], base: str, *, verifier: Verifier | None
     except producer.ReleaseSmokeEvidenceError as exc:
         return CheckResult(name=CHECK_NAME, errors=(_error(FINALIZE_MANIFEST, "", str(exc)),))
     expected_relative = (EVIDENCE_DIR / f"release-v{binding.package_version}.json").as_posix()
-    changed_evidence = sorted(
-        path for path in changed
-        if path.startswith(f"{EVIDENCE_DIR.as_posix()}/") and path.endswith(".json")
-    )
+    changed_evidence = sorted(path for path in changed if path.startswith(f"{EVIDENCE_DIR.as_posix()}/"))
     if changed_evidence != [expected_relative]:
         return CheckResult(
             name=CHECK_NAME,
@@ -368,4 +469,35 @@ def run_with_base(paths: Iterable[Path], base: str, *, verifier: Verifier | None
     evidence_path = repo_root / expected_relative
     if not evidence_path.is_file():
         return CheckResult(name=CHECK_NAME, errors=(_error(evidence_path, "", "expected smoke-evidence record is missing"),))
+    current_name = f"release-v{binding.package_version}.json"
+    current_semver = _semver_from_evidence_name(current_name)
+    if current_semver is None:
+        return CheckResult(
+            name=CHECK_NAME,
+            errors=(_error(FINALIZE_MANIFEST, "package_version", "package version is not canonical semantic version"),),
+        )
+    evidence_dir = repo_root / EVIDENCE_DIR
+    try:
+        entries = sorted(evidence_dir.iterdir(), key=lambda path: path.name)
+    except OSError as exc:
+        return CheckResult(name=CHECK_NAME, errors=(_error(EVIDENCE_DIR, "", f"could not enumerate evidence: {exc}"),))
+    historical_errors: list[ValidationError] = []
+    for entry in entries:
+        if entry.name == current_name:
+            continue
+        candidate_semver = _semver_from_evidence_name(entry.name)
+        if entry.is_symlink() or not entry.is_file() or candidate_semver is None:
+            historical_errors.append(
+                _error(entry, "", "unchanged evidence entries must be canonical release-v<semantic-version>.json regular files")
+            )
+            continue
+        if not _semver_strictly_lower(candidate_semver, current_semver):
+            historical_errors.append(
+                _error(entry, "", "unchanged evidence version must be strictly lower than the current finalized version")
+            )
+            continue
+        filename_version = entry.name[len("release-v") : -len(".json")]
+        historical_errors.extend(_validate_historical_evidence(entry, filename_version))
+    if historical_errors:
+        return CheckResult(name=CHECK_NAME, errors=tuple(historical_errors))
     return CheckResult(name=CHECK_NAME, errors=tuple(_validate_evidence(repo_root, evidence_path, verifier=verifier)))

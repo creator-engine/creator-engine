@@ -19,3 +19,7 @@ Implement the fail-closed release smoke-evidence PR-diff gate.
 - Bind the clean-container result to its observed package, spec, finalize
   manifest, and artifact-set bytes; accept only the version-derived changed
   evidence record across successive releases; and require `ce-root-v1` exactly.
+- Shell-quote the copyable OpenSSH signing operand; enumerate and validate every
+  unchanged prior evidence record; and bind the installed `ce`/`cev3` version
+  plus installer-persisted signed spec to identical pre/post finalized endpoint
+  observations and explicit finalized-tree expectations.

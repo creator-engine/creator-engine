@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -80,6 +81,15 @@ def _result(root: Path, **overrides: object) -> Path:
             "finalize_manifest_sha256": binding.finalize_manifest_sha256,
             "artifacts_sha256": binding.artifacts_sha256,
         },
+        "installation": {
+            "ce_version": f"{binding.package_version}+12345678",
+            "cev3_version": f"{binding.package_version}+12345678",
+            "verified_spec_sha256": binding.signed_spec_sha256,
+            "pre_signed_spec_sha256": binding.signed_spec_sha256,
+            "post_signed_spec_sha256": binding.signed_spec_sha256,
+            "pre_finalize_manifest_sha256": binding.finalize_manifest_sha256,
+            "post_finalize_manifest_sha256": binding.finalize_manifest_sha256,
+        },
         "summary": {"failed": 0, "stubbed": 0},
         "stages": {"install": "passed", "install_verify": "passed"},
     }
@@ -144,6 +154,36 @@ def test_prepare_emits_exact_canonical_unsigned_bytes_and_offline_instruction(tm
     assert "curl" not in prepared.signing_command
 
 
+def test_prepare_shell_quotes_whitespace_and_metacharacter_output_as_one_operand(tmp_path: Path):
+    root = _repo(tmp_path)
+    injected = tmp_path / "unexpected-command-output"
+    unsigned = tmp_path / f"release smoke; touch {injected.name}; $.json"
+
+    prepared = producer.prepare_evidence(root, _result(root), unsigned)
+    argv = shlex.split(prepared.signing_command)
+
+    assert argv == [
+        "ssh-keygen",
+        "-Y",
+        "sign",
+        "-f",
+        "/path/to/ce-root-v1-private",
+        "-n",
+        "ce-release-smoke-v1",
+        str(unsigned),
+    ]
+    completed = subprocess.run(
+        f"set -- {prepared.signing_command}; printf '%s\\n' \"$#\" \"${{@:$#}}\"",
+        shell=True,
+        executable="/bin/bash",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.splitlines() == ["8", str(unsigned)]
+    assert not injected.exists()
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -181,6 +221,30 @@ def test_prepare_refuses_missing_malformed_or_stale_observed_release_binding(tmp
     old_result.write_bytes(json.dumps(stale, sort_keys=True, separators=(",", ":")).encode("ascii"))
     with pytest.raises(producer.ReleaseSmokeEvidenceError, match="signed_spec_sha256"):
         producer.prepare_evidence(root, old_result, tmp_path / "stale-spec.json")
+
+
+def test_prepare_refuses_missing_malformed_or_mismatched_install_observation(tmp_path: Path):
+    root = _repo(tmp_path)
+    valid = json.loads(_result(root).read_text(encoding="ascii"))
+    cases = []
+    missing = dict(valid)
+    del missing["installation"]
+    cases.append(missing)
+    malformed = json.loads(json.dumps(valid))
+    malformed["installation"]["ce_version"] = "not-a-version"
+    cases.append(malformed)
+    stale_cli = json.loads(json.dumps(valid))
+    stale_cli["installation"]["cev3_version"] = "0.3.5+12345678"
+    cases.append(stale_cli)
+    drift = json.loads(json.dumps(valid))
+    drift["installation"]["post_signed_spec_sha256"] = "0" * 64
+    cases.append(drift)
+
+    for index, value in enumerate(cases):
+        path = root / f"bad-installation-{index}.json"
+        path.write_bytes(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("ascii"))
+        with pytest.raises(producer.ReleaseSmokeEvidenceError, match="installation|version|signed_spec"):
+            producer.prepare_evidence(root, path, tmp_path / f"unsigned-{index}.json")
 
 
 def test_prepare_refuses_old_result_after_valid_release_tree_bytes_change(tmp_path: Path):

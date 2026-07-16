@@ -40,11 +40,20 @@ The container is started without `--rm` so the cleanup trap can remove it with
 governed smoke worker. It runs only clean-container install and install-verify,
 never mounts the checkout, and emits deterministic JSON containing the package,
 spec, finalize-manifest, and artifact-set bindings observed from the same
-`CE_SITE` endpoint. The image must be digest-pinned and
+`CE_SITE` endpoint. The worker supplies the exact finalized-tree package and
+digest expectations explicitly. The container observes the signed spec and
+finalize manifest before and after installation, requires both observations to
+equal those expectations, and requires the installer's persisted verified spec
+plus both installed CLI version tokens to identify that same release. The image must be digest-pinned and
 `CE_REHEARSAL_CHECKOUT_MOUNT` must remain `false`.
 
 ```bash
 CE_REHEARSAL_IMAGE='registry.example/ce-smoke@sha256:<64 lowercase hex>' \
+CE_REHEARSAL_EXPECTED_PACKAGE_VERSION='<X.Y.Z>' \
+CE_REHEARSAL_EXPECTED_CANONICAL_SPEC_SHA256='<64 lowercase hex>' \
+CE_REHEARSAL_EXPECTED_SIGNED_SPEC_SHA256='<64 lowercase hex>' \
+CE_REHEARSAL_EXPECTED_FINALIZE_MANIFEST_SHA256='<64 lowercase hex>' \
+CE_REHEARSAL_EXPECTED_ARTIFACTS_SHA256='<64 lowercase hex>' \
 CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT=/secure-scratch/release-smoke-result.json \
 ./deploy/rehearsal/run-rehearsal.sh --release-smoke
 ```
@@ -66,8 +75,11 @@ The supported release-publish sequence is intentionally split across roles:
    carrier. It has no signing or publishing capability.
 
 The PR gate derives the one expected evidence path from the checked-out package
-version. It requires that exact record to be newly changed, rejects additional
-changed evidence JSON, and ignores unchanged records from prior releases.
+version. It requires that exact record to be newly changed and rejects every
+other changed evidence entry. Every unchanged entry is enumerated and must be a
+canonical, structurally valid `release-v<semantic-version>.json` record for a
+version strictly lower than the current release; future versions, same-version
+aliases, arbitrary names, malformed/non-canonical records, and residues fail.
 
 The release-finalize workflow does not run these steps, fabricate smoke output,
 or receive the smoke signing key. That separation is the authority boundary.
@@ -88,6 +100,13 @@ or receive the smoke signing key. That separation is the authority boundary.
   Default: `docker`; tests inject a hermetic fake.
 - `CE_REHEARSAL_CHECKOUT_MOUNT`: must be exactly `false` in release-smoke mode.
 - `CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT`: explicit deterministic result path.
+- `CE_REHEARSAL_EXPECTED_PACKAGE_VERSION`: exact finalized manifest package
+  version; required in release-smoke mode.
+- `CE_REHEARSAL_EXPECTED_CANONICAL_SPEC_SHA256`,
+  `CE_REHEARSAL_EXPECTED_SIGNED_SPEC_SHA256`,
+  `CE_REHEARSAL_EXPECTED_FINALIZE_MANIFEST_SHA256`, and
+  `CE_REHEARSAL_EXPECTED_ARTIFACTS_SHA256`: exact lowercase SHA-256 bindings
+  from the finalized tree; all are required in release-smoke mode.
 
 No secret, token, or credential value is accepted as a default.
 

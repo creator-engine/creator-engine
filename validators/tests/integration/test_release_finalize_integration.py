@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -211,6 +212,15 @@ def test_finalized_docs_smoke_prepare_public_finalize_and_gate_round_trip(tmp_pa
                     "finalize_manifest_sha256": release_smoke_evidence.validate_release_tree(repo).finalize_manifest_sha256,
                     "artifacts_sha256": release_smoke_evidence.validate_release_tree(repo).artifacts_sha256,
                 },
+                "installation": {
+                    "ce_version": "0.3.6+12345678",
+                    "cev3_version": "0.3.6+12345678",
+                    "verified_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "pre_signed_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "post_signed_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "pre_finalize_manifest_sha256": release_smoke_evidence.validate_release_tree(repo).finalize_manifest_sha256,
+                    "post_finalize_manifest_sha256": release_smoke_evidence.validate_release_tree(repo).finalize_manifest_sha256,
+                },
                 "summary": {"failed": 0, "stubbed": 0},
                 "stages": {"install": "passed", "install_verify": "passed"},
             },
@@ -227,7 +237,7 @@ def test_finalized_docs_smoke_prepare_public_finalize_and_gate_round_trip(tmp_pa
         check=True,
         capture_output=True,
     )
-    signing_argv = prepared.signing_command.split()
+    signing_argv = shlex.split(prepared.signing_command)
     signing_argv[signing_argv.index("/path/to/ce-root-v1-private")] = str(smoke_key)
     subprocess.run(signing_argv, check=True, capture_output=True)
     signature_base64 = base64.b64encode((tmp_path / "release-v0.3.6.unsigned.json.sig").read_bytes()).decode("ascii")

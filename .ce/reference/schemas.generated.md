@@ -1812,7 +1812,7 @@ Properties:
 
 Required fields:
 
-`schema_version`, `package_version`, `canonical_spec_sha256`, `signed_spec_sha256`, `finalize_manifest_sha256`, `artifacts_sha256`, `summary`, `stages`, `containment`, `container_image`, `signature`
+`schema_version`, `package_version`, `canonical_spec_sha256`, `signed_spec_sha256`, `finalize_manifest_sha256`, `artifacts_sha256`, `summary`, `stages`, `containment`, `container_image`, `installation`, `signature`
 
 Properties:
 
@@ -1828,6 +1828,7 @@ Properties:
 | `stages` | object | yes | additionalProperties `false` |  |
 | `containment` | object | yes | additionalProperties `false` |  |
 | `container_image` | string | yes | pattern `^[^\s@]+@sha256:[0-9a-f]{64}$` |  |
+| `installation` | object | yes | additionalProperties `false` |  |
 | `signature` | object | yes | additionalProperties `false` |  |
 
 ### `schemas/review-evidence.schema.yaml`
