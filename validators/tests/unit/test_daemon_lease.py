@@ -131,6 +131,22 @@ def _write_lease_replacement_race_hook(
     )
 
 
+def _write_os_kill_error_hook(path: Path, *, pid: int, error: str) -> None:
+    """Cause only the stale lease PID probe in the launcher child to fail."""
+
+    path.write_text(
+        "import os\n\n"
+        "_original_kill = os.kill\n"
+        f"_target_pid = {pid!r}\n\n"
+        "def _raise_for_stale_lease_pid(candidate_pid, signal_number):\n"
+        "    if candidate_pid == _target_pid and signal_number == 0:\n"
+        f"        raise {error}\n"
+        "    return _original_kill(candidate_pid, signal_number)\n\n"
+        "os.kill = _raise_for_stale_lease_pid\n",
+        encoding="utf-8",
+    )
+
+
 def _write_fake_container_engine(path: Path, argv_file: Path) -> None:
     # The fake engine path is invoked as the command; bake the output path into
     # a tiny wrapper to avoid relying on shell-specific argv quoting in tests.
@@ -691,6 +707,79 @@ def test_queue_daemon_launcher_recovers_only_same_host_dead_pid_with_fixed_audit
     assert [record["reason"] for record in records] == [
         "automatic queue-daemon same-host dead-pid recovery"
     ]
+
+
+@pytest.mark.parametrize(
+    ("case", "payload", "kill_error"),
+    [
+        ("malformed-payload", "{not json", None),
+        (
+            "missing-pid",
+            {
+                "holder_id": "old-queue",
+                "host": socket.gethostname(),
+                "acquired_at": 0.0,
+                "heartbeat_at": 0.0,
+            },
+            None,
+        ),
+        ("non-positive-pid", _payload(holder_id="old-queue", heartbeat_at=0.0, pid=0), None),
+        ("boolean-pid", _payload(holder_id="old-queue", heartbeat_at=0.0, pid=True), None),
+        ("non-integer-pid", _payload(holder_id="old-queue", heartbeat_at=0.0, pid="not-a-pid"), None),
+        (
+            "permission-error",
+            _payload(holder_id="old-queue", heartbeat_at=0.0, pid=424_242),
+            "PermissionError()",
+        ),
+        (
+            "ambiguous-oserror",
+            _payload(holder_id="old-queue", heartbeat_at=0.0, pid=424_243),
+            "OSError(5, 'I/O error')",
+        ),
+    ],
+)
+def test_queue_daemon_launcher_refuses_ineligible_automatic_recovery_without_mutating_lease(
+    tmp_path: Path,
+    case: str,
+    payload: str | dict[str, object],
+    kill_error: str | None,
+):
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    lease_path = lease_root / "queue-daemon.lease"
+    raw_payload = payload if isinstance(payload, str) else json.dumps(payload)
+    lease_path.write_text(raw_payload, encoding="utf-8")
+    fake_bin = tmp_path / "fake-queue-daemon"
+    marker = tmp_path / "should-not-run"
+    _write_fake_queue_daemon(fake_bin, marker=marker)
+    env = _queue_daemon_env(tmp_path, lease_root, fake_bin)
+    if kill_error is not None:
+        hook_dir = tmp_path / "hook"
+        hook_dir.mkdir()
+        assert isinstance(payload, dict)
+        _write_os_kill_error_hook(
+            hook_dir / "sitecustomize.py",
+            pid=payload["pid"],
+            error=kill_error,
+        )
+        env["PYTHONPATH"] = f"{hook_dir}{os.pathsep}{_repo_root() / 'validators'}"
+    script = _repo_root() / "deploy" / "queue-daemon" / "launch-queue-daemon.sh"
+
+    proc = subprocess.run(
+        ["bash", str(script)],
+        cwd=_repo_root(),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+    assert proc.returncode == 73, case
+    assert "queue-daemon singleton lease refused" in proc.stderr
+    assert not marker.exists()
+    assert lease_path.read_text(encoding="utf-8") == raw_payload
+    assert not (lease_root / "queue-daemon.lease.takeovers.jsonl").exists()
 
 
 def test_queue_daemon_launcher_refuses_cross_host_stale_lease_even_with_operator_reason(tmp_path: Path):

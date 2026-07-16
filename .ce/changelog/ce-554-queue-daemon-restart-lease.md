@@ -10,3 +10,4 @@ issue: ce-ops#554
 
 - Restrict queue-daemon startup recovery to an audited same-host lease whose positive integer PID is proven absent.
 - Preserve fail-closed refusal for malformed, live, permission-limited, and cross-host lease records while retaining SIGTERM lease release.
+- Add hermetic launcher-level coverage for malformed and ineligible automatic-recovery records without lease replacement or audit success.
