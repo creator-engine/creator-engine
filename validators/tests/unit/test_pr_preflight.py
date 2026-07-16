@@ -180,7 +180,7 @@ def test_preflight_owns_one_scratch_root_for_baseline_and_head(tmp_path: Path, m
     assert len(pytest_tmpdirs) == 1
     owned_scratch = Path(pytest_tmpdirs.pop())
     assert owned_scratch.parent == tmp_path
-    assert owned_scratch.name.startswith("ce-validate-pr-")
+    assert owned_scratch.name.startswith("cv-")
     baseline_add = next(call for call in runner.calls if call[0][:4] == ["git", "worktree", "add", "--detach"])
     assert Path(baseline_add[0][4]) == owned_scratch / "base"
     assert not owned_scratch.exists()
@@ -871,7 +871,7 @@ def test_seat_ready_pytest_env_uses_owned_scratch(tmp_path: Path, monkeypatch):
     assert env is not None
     owned_scratch = Path(env["TMPDIR"])
     assert owned_scratch.parent == tmp_path
-    assert owned_scratch.name.startswith("ce-validate-pr-")
+    assert owned_scratch.name.startswith("cv-")
     assert not owned_scratch.exists()
 
 
@@ -1550,7 +1550,7 @@ def test_pytest_env_scrubs_host_tokens_and_replaces_caller_tmpdir_with_owned_scr
     owned_scratch = Path(env["TMPDIR"])
     assert owned_scratch != Path("/custom/path")
     assert owned_scratch.parent == tmp_path
-    assert owned_scratch.name.startswith("ce-validate-pr-")
+    assert owned_scratch.name.startswith("cv-")
     assert not owned_scratch.exists()
     for key in pr_preflight.TOKEN_ENV_VARS:
         assert key not in env

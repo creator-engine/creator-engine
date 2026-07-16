@@ -1129,7 +1129,7 @@ def run_preflight(
     """
     scratch_parent = config.scratch_parent or DEFAULT_PREFLIGHT_SCRATCH_PARENT
     try:
-        scratch = tempfile.TemporaryDirectory(prefix="ce-validate-pr-", dir=str(scratch_parent))
+        scratch = tempfile.TemporaryDirectory(prefix="cv-", dir=str(scratch_parent))
     except OSError as exc:
         checks = [CheckDetail(name="preflight scratch setup", ok=False, detail=str(exc))]
         _print_summary(checks, out)
