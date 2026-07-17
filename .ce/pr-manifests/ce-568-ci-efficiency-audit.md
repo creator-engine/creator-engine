@@ -4,7 +4,7 @@ date: 2026-07-16
 declared_work_class: story
 ---
 
-# PR path manifest - ce-ops#568 CI efficiency audit
+# PR path manifest - CI efficiency audit
 
 This carrier lists the closed authorized path set for this documentation story.
 It lists itself and declares the canonical work class `story`.
