@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import json
 import os
 import re
 import shlex
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import ce_egress_self_push_broker as self_push_cli
 from creator_engine_validator import v3_cli
 
 
@@ -262,6 +264,9 @@ def test_gate_daemon_execstarts_use_explicit_systemd_defaults_and_installer_keep
     fake_python.parent.mkdir(parents=True)
     fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
     fake_python.chmod(0o755)
+    fake_broker = fake_repo / "tools" / "egress-broker" / "ce_egress_self_push_broker.py"
+    fake_broker.parent.mkdir(parents=True)
+    fake_broker.write_text("# fixture\n", encoding="utf-8")
     env_file = tmp_path / "gate-daemons.env"
     env_file.write_text(
         "CE_RATIFIER_QUEUE_CANDIDATES_PATH=/owner-only/candidates.json\n",
@@ -269,7 +274,12 @@ def test_gate_daemon_execstarts_use_explicit_systemd_defaults_and_installer_keep
     )
     broker_env_file = tmp_path / "ce-egress-broker.env"
     review_env_file = tmp_path / "ce-egress-self-review.env"
-    broker_env_file.write_text("ok\n", encoding="utf-8")
+    broker_env_file.write_text(
+        f"CE_BROKER_HOME={fake_repo}\n"
+        "CE_EGRESS_BROKER_EXPECTED_PEER_UID=1000\n"
+        "CE_EGRESS_BROKER_EXPECTED_PEER_GID=1000\n",
+        encoding="utf-8",
+    )
     review_env_file.write_text("ok\n", encoding="utf-8")
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -573,13 +583,22 @@ def test_model_drift_watcher_is_system_only_and_user_installs_skip_it(tmp_path: 
     fake_python.parent.mkdir(parents=True)
     fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
     fake_python.chmod(0o755)
+    fake_broker = fake_repo / "tools" / "egress-broker" / "ce_egress_self_push_broker.py"
+    fake_broker.parent.mkdir(parents=True)
+    fake_broker.write_text("# fixture\n", encoding="utf-8")
     env_dir = tmp_path / "env"
     env_dir.mkdir()
     gate_env = env_dir / "gate-daemons.env"
     broker_env = env_dir / "broker.env"
     review_env = env_dir / "review.env"
-    for path in (gate_env, broker_env, review_env):
-        path.write_text("ok\n", encoding="utf-8")
+    gate_env.write_text("ok\n", encoding="utf-8")
+    broker_env.write_text(
+        f"CE_BROKER_HOME={fake_repo}\n"
+        "CE_EGRESS_BROKER_EXPECTED_PEER_UID=1000\n"
+        "CE_EGRESS_BROKER_EXPECTED_PEER_GID=1000\n",
+        encoding="utf-8",
+    )
+    review_env.write_text("ok\n", encoding="utf-8")
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     (fake_bin / "systemctl").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
@@ -684,6 +703,85 @@ def test_review_pickup_openbao_deployment_settings_use_reviewer_secret_path(repo
 
 EGRESS_BROKER_UNIT = "ce-egress-broker.service"
 EGRESS_SELF_REVIEW_UNIT = "ce-egress-self-review.service"
+LEGACY_EGRESS_BROKER_UNIT = "ce-egress-broker-dev3.service"
+
+
+def _egress_installer_fixture(
+    tmp_path: Path,
+    repo_root: Path,
+    *,
+    broker_env_overrides: dict[str, str] | None = None,
+    create_stable_checkout: bool = True,
+) -> tuple[list[str], dict[str, str], Path, Path, Path]:
+    fake_repo = tmp_path / "source-repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").mkdir()
+    fake_python = fake_repo / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+
+    stable_home = tmp_path / "controller-stable" / "creator-engine"
+    if create_stable_checkout:
+        broker_script = stable_home / "tools" / "egress-broker" / "ce_egress_self_push_broker.py"
+        broker_script.parent.mkdir(parents=True)
+        (stable_home / ".git").mkdir()
+        broker_script.write_text("# stable broker fixture\n", encoding="utf-8")
+
+    env_dir = tmp_path / "env"
+    env_dir.mkdir()
+    gate_env = env_dir / "gate-daemons.env"
+    review_env = env_dir / "ce-egress-self-review.env"
+    broker_env = env_dir / "ce-egress-broker.env"
+    gate_env.write_text("CE_GATE_REPO=creator-engine/creator-engine\n", encoding="utf-8")
+    review_env.write_text("CE_EGRESS_RUN_MODE=dev\n", encoding="utf-8")
+    values = {
+        "CE_BROKER_HOME": str(stable_home),
+        "CE_EGRESS_BROKER_SOCKET": "/run/ce-egress/dev-3.sock",
+        "CE_EGRESS_BROKER_SEAT": "dev-3",
+        "CE_EGRESS_BROKER_EXPECTED_PEER_UID": "1000",
+        "CE_EGRESS_BROKER_EXPECTED_PEER_GID": "1000",
+        "CE_EGRESS_BROKER_REPO": "/srv/creator-engine",
+        "CE_EGRESS_BROKER_CONFIG": "/etc/ce-egress/broker-dev3.json",
+    }
+    values.update(broker_env_overrides or {})
+    broker_env.write_text(
+        "".join(f"{key}={value}\n" for key, value in values.items() if value != "<UNSET>"),
+        encoding="utf-8",
+    )
+    broker_env.chmod(0o644)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "systemctl.calls"
+    fake_systemctl = fake_bin / "systemctl"
+    fake_systemctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$SYSTEMCTL_CALLS\"\n",
+        encoding="utf-8",
+    )
+    fake_systemctl.chmod(0o755)
+    unit_dir = tmp_path / "units"
+    argv = [
+        "bash",
+        str(repo_root / "deploy" / "systemd" / "install-gate-daemons-systemd.sh"),
+        "--repo-root",
+        str(fake_repo),
+        "--unit-dir",
+        str(unit_dir),
+        "--env-file",
+        str(gate_env),
+        "--egress-broker-env-file",
+        str(broker_env),
+        "--egress-self-review-env-file",
+        str(review_env),
+    ]
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "SYSTEMCTL_CALLS": str(calls),
+    }
+    return argv, env, unit_dir, broker_env, calls
 
 
 def test_egress_broker_unit_parses_and_has_required_sections(repo_root: Path):
@@ -724,10 +822,10 @@ def test_egress_broker_unit_runs_host_broker_script(repo_root: Path):
     assert "--config" in exec_start
 
 
-def test_egress_broker_unit_working_directory_is_repo(repo_root: Path):
+def test_egress_broker_unit_working_directory_is_stable_checkout(repo_root: Path):
     unit = _read_unit(repo_root, EGRESS_BROKER_UNIT)
 
-    assert unit["Service"]["WorkingDirectory"] == "/workspace/creator-engine"
+    assert unit["Service"]["WorkingDirectory"] == "/opt/ce-broker/creator-engine"
 
 
 def test_egress_broker_unit_env_vars_are_parametric(repo_root: Path):
@@ -735,12 +833,202 @@ def test_egress_broker_unit_env_vars_are_parametric(repo_root: Path):
     exec_start = unit["Service"]["ExecStart"]
 
     # Required broker args must reference env vars (not hardcoded values).
-    assert "$CE_EGRESS_BROKER_SOCKET" in exec_start
-    assert "$CE_EGRESS_BROKER_SEAT" in exec_start
-    assert "$CE_EGRESS_BROKER_EXPECTED_PEER_UID" in exec_start
-    assert "$CE_EGRESS_BROKER_EXPECTED_PEER_GID" in exec_start
-    assert "$CE_EGRESS_BROKER_REPO" in exec_start
-    assert "$CE_EGRESS_BROKER_CONFIG" in exec_start
+    assert "$${CE_EGRESS_BROKER_SOCKET}" in exec_start
+    assert "$${CE_EGRESS_BROKER_SEAT}" in exec_start
+    assert "$${CE_EGRESS_BROKER_EXPECTED_PEER_UID}" in exec_start
+    assert "$${CE_EGRESS_BROKER_EXPECTED_PEER_GID}" in exec_start
+    assert "$${CE_EGRESS_BROKER_REPO}" in exec_start
+    assert "$${CE_EGRESS_BROKER_CONFIG}" in exec_start
+
+
+def test_egress_broker_unit_uses_stable_checkout_and_systemd_activation(repo_root: Path):
+    unit_path = repo_root / "deploy" / "systemd" / EGRESS_BROKER_UNIT
+    unit = _read_unit_path(unit_path)
+    service = unit["Service"]
+    exec_start = service["ExecStart"]
+
+    assert service["WorkingDirectory"] == "/opt/ce-broker/creator-engine"
+    assert service["Sockets"] == "ce-egress-broker.socket"
+    assert unit["Unit"]["Requires"] == "ce-egress-broker.socket"
+    assert 'broker_home="$${CE_BROKER_HOME:?' in exec_start
+    assert 'cd "$$broker_home"' in exec_start
+    assert "$$broker_home/tools/egress-broker/ce_egress_self_push_broker.py" in exec_start
+    assert '--expected-peer-uid "$${CE_EGRESS_BROKER_EXPECTED_PEER_UID}"' in exec_start
+    assert '--expected-peer-gid "$${CE_EGRESS_BROKER_EXPECTED_PEER_GID}"' in exec_start
+    assert '"$${LISTEN_FDS:-}" == 1' in exec_start
+    assert '"$${LISTEN_PID:-}" == "$$$$"' in exec_start
+    assert "/workspace/creator-engine" not in unit_path.read_text(encoding="utf-8")
+    assert "/home/ce-dev-" not in unit_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "missing_name",
+    (
+        "CE_BROKER_HOME",
+        "CE_EGRESS_BROKER_EXPECTED_PEER_UID",
+        "CE_EGRESS_BROKER_EXPECTED_PEER_GID",
+    ),
+)
+def test_egress_installer_fails_closed_before_systemctl_when_required_identity_missing(
+    tmp_path: Path, repo_root: Path, missing_name: str
+):
+    argv, env, unit_dir, _broker_env, calls = _egress_installer_fixture(
+        tmp_path,
+        repo_root,
+        broker_env_overrides={missing_name: "<UNSET>"},
+    )
+
+    result = subprocess.run(argv, check=False, capture_output=True, text=True, env=env)
+
+    assert result.returncode != 0
+    assert missing_name in result.stderr
+    assert not calls.exists()
+    assert not (unit_dir / EGRESS_BROKER_UNIT).exists()
+
+
+def test_egress_installer_refuses_missing_stable_checkout_before_systemctl(
+    tmp_path: Path, repo_root: Path
+):
+    argv, env, unit_dir, _broker_env, calls = _egress_installer_fixture(
+        tmp_path, repo_root, create_stable_checkout=False
+    )
+
+    result = subprocess.run(argv, check=False, capture_output=True, text=True, env=env)
+
+    assert result.returncode != 0
+    assert "stable broker checkout is missing" in result.stderr
+    assert not calls.exists()
+    assert not (unit_dir / EGRESS_BROKER_UNIT).exists()
+
+
+def test_egress_installer_migrates_observed_legacy_binder_before_enabling_pair(
+    tmp_path: Path, repo_root: Path
+):
+    argv, env, unit_dir, _broker_env, calls = _egress_installer_fixture(tmp_path, repo_root)
+    unit_dir.mkdir()
+    legacy = unit_dir / LEGACY_EGRESS_BROKER_UNIT
+    legacy.write_text(
+        "[Service]\n"
+        "WorkingDirectory=/workspace/creator-engine\n"
+        "ExecStart=/usr/bin/python3 tools/egress-broker/ce_egress_self_push_broker.py "
+        "--socket /run/ce-egress/dev-3.sock --seat dev-3 "
+        "--host-repo-path /workspace/creator-engine "
+        "--config /etc/ce-egress/broker-dev3.json\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(argv, check=False, capture_output=True, text=True, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert not legacy.exists()
+    recorded = calls.read_text(encoding="utf-8").splitlines()
+    assert recorded[0] == "--user disable --now ce-egress-broker-dev3.service"
+    assert "--user enable ce-egress-broker.socket" in recorded
+    assert "--user enable ce-egress-broker.service" in recorded
+    assert recorded.index("--user start ce-egress-broker.socket") < recorded.index(
+        "--user start ce-egress-broker.service"
+    )
+    rendered = (unit_dir / EGRESS_BROKER_UNIT).read_text(encoding="utf-8")
+    assert "--expected-peer-uid" in rendered
+    assert "--expected-peer-gid" in rendered
+    assert "Sockets=ce-egress-broker.socket" in rendered
+
+
+def test_egress_installer_reinstall_is_idempotent_and_preserves_unit_inode_and_modes(
+    tmp_path: Path, repo_root: Path
+):
+    argv, env, unit_dir, broker_env, _calls = _egress_installer_fixture(tmp_path, repo_root)
+
+    first = subprocess.run(argv, check=False, capture_output=True, text=True, env=env)
+    assert first.returncode == 0, first.stderr
+    service_path = unit_dir / EGRESS_BROKER_UNIT
+    socket_path = unit_dir / "ce-egress-broker.socket"
+    first_service_inode = service_path.stat().st_ino
+    first_socket_inode = socket_path.stat().st_ino
+
+    second = subprocess.run(argv, check=False, capture_output=True, text=True, env=env)
+
+    assert second.returncode == 0, second.stderr
+    assert service_path.stat().st_ino == first_service_inode
+    assert socket_path.stat().st_ino == first_socket_inode
+    assert service_path.stat().st_mode & 0o777 == 0o644
+    assert socket_path.stat().st_mode & 0o777 == 0o644
+    assert broker_env.stat().st_mode & 0o777 == 0o600
+    rendered = _read_unit_path(service_path)["Service"]
+    assert rendered["Sockets"] == "ce-egress-broker.socket"
+    assert str(tmp_path / "controller-stable" / "creator-engine") in rendered["ExecStart"]
+
+
+def test_observed_live_argv_is_rejected_with_config_exit_before_signer_or_server(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    config = tmp_path / "broker.json"
+    config.write_text(
+        json.dumps(
+            {
+                "repo": "creator-engine/creator-engine",
+                "installation_owner": "creator-engine",
+                "audit_log": str(tmp_path / "audit.jsonl"),
+                "policy": {
+                    "base_branch": "main",
+                    "allowed_branch_namespaces": ["ce-"],
+                    "forbidden_branches": [],
+                    "authorized_emails": [],
+                    "authorized_logins": ["contained-seat"],
+                    "max_pushes_per_window": 1,
+                    "window_seconds": 60,
+                },
+                "seats": {
+                    "dev-3": {
+                        "app_id": "1",
+                        "app_owner": "contained-seat",
+                        "pem_path": "/not-opened.pem",
+                        "installation_id": None,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    called = {"signer": False, "server": False}
+
+    def signer_factory(_path: str):
+        called["signer"] = True
+        return lambda _payload: b"signature"
+
+    def serve_fn(*_args, **_kwargs):
+        called["server"] = True
+
+    rc = self_push_cli.main(
+        [
+            "--socket",
+            "/run/ce-egress/dev-3.sock",
+            "--seat",
+            "dev-3",
+            "--host-repo-path",
+            "/workspace/creator-engine",
+            "--config",
+            str(config),
+        ],
+        serve_fn=serve_fn,
+        signer_factory=signer_factory,
+    )
+
+    assert rc == self_push_cli.EXIT_CONFIG_ERROR == 3
+    assert called == {"signer": False, "server": False}
+    assert "--expected-peer-uid is required" in capsys.readouterr().err
+
+
+def test_egress_unit_and_docs_do_not_embed_credential_values_or_seat_tokens(repo_root: Path):
+    texts = [
+        (repo_root / "deploy" / "systemd" / EGRESS_BROKER_UNIT).read_text(encoding="utf-8"),
+        (repo_root / "deploy" / "systemd" / "README.md").read_text(encoding="utf-8"),
+    ]
+    for text in texts:
+        assert re.search(r"gh[pousr]_[A-Za-z0-9]{12,}", text) is None
+        assert re.search(r"BROKER_APPROLE_SECRET_ID=[^<\s]", text) is None
+    assert "Environment=GH_TOKEN" not in texts[0]
+    assert "Environment=CE_PICKUP_TOKEN" not in texts[0]
 
 
 def test_egress_self_review_unit_socket_is_parametric(repo_root: Path):
@@ -791,6 +1079,11 @@ def test_installer_renders_egress_service_specific_env_files(tmp_path: Path, rep
     fake_python.parent.mkdir(parents=True)
     fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
     fake_python.chmod(0o755)
+    stable_home = tmp_path / "stable" / "creator-engine"
+    fake_broker = stable_home / "tools" / "egress-broker" / "ce_egress_self_push_broker.py"
+    fake_broker.parent.mkdir(parents=True)
+    (stable_home / ".git").mkdir()
+    fake_broker.write_text("# fixture\n", encoding="utf-8")
 
     env_dir = tmp_path / "env"
     env_dir.mkdir()
@@ -804,9 +1097,12 @@ def test_installer_renders_egress_service_specific_env_files(tmp_path: Path, rep
         encoding="utf-8",
     )
     egress_broker_env.write_text(
+        f"CE_BROKER_HOME={stable_home}\n"
         "CE_EGRESS_BROKER_SOCKET=/run/ce-egress/dev-3.sock\n"
         "CE_EGRESS_BROKER_SEAT=dev-3\n"
-        "CE_EGRESS_BROKER_REPO=/workspace/creator-engine\n"
+        "CE_EGRESS_BROKER_EXPECTED_PEER_UID=1000\n"
+        "CE_EGRESS_BROKER_EXPECTED_PEER_GID=1000\n"
+        "CE_EGRESS_BROKER_REPO=/srv/creator-engine\n"
         "CE_EGRESS_BROKER_CONFIG=/etc/ce-egress/broker-dev3.json\n",
         encoding="utf-8",
     )
@@ -868,6 +1164,8 @@ def test_installer_renders_egress_service_specific_env_files(tmp_path: Path, rep
     assert "CE_BROKER_HOME=/opt/ce-broker/creator-engine" in rendered_review["Service"]["Environment"]
     assert '--run-mode "${CE_EGRESS_RUN_MODE}"' in rendered_review["Service"]["ExecStart"]
     assert rendered_broker["Service"]["EnvironmentFile"] == str(egress_broker_env)
+    assert rendered_broker["Service"]["WorkingDirectory"] == str(stable_home)
+    assert str(stable_home) in rendered_broker["Service"]["ExecStart"]
     assert rendered_gate["Service"]["EnvironmentFile"] == str(gate_env)
     assert "start " not in systemctl_calls.read_text(encoding="utf-8")
 

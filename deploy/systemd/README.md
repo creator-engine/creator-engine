@@ -230,17 +230,42 @@ owns the live transition):
 Required values:
 
 ```sh
+CE_BROKER_HOME=<controller-managed-stable-checkout>
 CE_EGRESS_BROKER_SOCKET=/run/ce-egress/dev-3.sock
 CE_EGRESS_BROKER_SEAT=dev-3
 CE_EGRESS_BROKER_EXPECTED_PEER_UID=<contained-seat-uid>
 CE_EGRESS_BROKER_EXPECTED_PEER_GID=<contained-seat-gid>
-CE_EGRESS_BROKER_REPO=/workspace/creator-engine
+CE_EGRESS_BROKER_REPO=<trusted-host-repository>
 CE_EGRESS_BROKER_CONFIG=/etc/ce-egress/broker-dev3.json
 ```
 
-The daemon returns JIT credential values on this Unix stream, so it refuses to
-start without explicit expected peer UID/GID values and rejects mismatched
-`SO_PEERCRED` peers before request parsing.
+`CE_BROKER_HOME`, the UID, and the GID have no permissive defaults. The
+administrator must supply the absolute path to the controller-managed stable
+broker checkout and the numeric contained-seat peer IDs. The installer rejects
+a missing checkout, a mutable seat checkout, missing or non-numeric peer IDs,
+or a missing stable broker entrypoint before it renders, enables, or starts the
+pair. It keeps the broker environment file owner-only.
+
+`ce-egress-broker.socket` is the only pathname owner. Systemd creates and
+preserves `/run/ce-egress/dev-3.sock`; the service receives that listening file
+descriptor through the broker's existing systemd-activation contract. The
+service still passes `--socket` as the expected logical pathname, but it does
+not unlink, create, or rebind the activated socket, so restarts preserve the
+socket inode. The installer disables and removes the recognized stale
+`ce-egress-broker-dev3.service` pathname-binder before enabling the canonical
+socket/service pair; an unknown legacy unit shape is refused instead of risking
+two owners.
+
+The daemon returns JIT credential values on this Unix stream. Missing or
+invalid expected peer controls produce deterministic configuration exit code
+`3` before signer construction, OpenBao login, credential minting, socket
+adoption, or bind. After activation succeeds, mismatched `SO_PEERCRED` peers
+are rejected before request parsing. OpenBao is reached only after the peer
+controls parse and systemd activation succeeds.
+
+This repository change repairs and tests the deployment contract only. It does
+not install units, reload or start systemd, update the stable checkout, access
+OpenBao, mint credentials, or deploy the change to a live host.
 
 ## Egress Self-Review Broker Run Mode
 

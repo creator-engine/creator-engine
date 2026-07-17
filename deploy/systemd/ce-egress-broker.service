@@ -7,16 +7,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# CE_BROKER_HOME is supplied by the administrator-owned EnvironmentFile and
+# must match this controller-managed stable checkout. The installer renders
+# both coordinates together after validating the checkout and broker entrypoint.
 EnvironmentFile=%h/.config/creator-engine/ce-egress-broker.env
-WorkingDirectory=/workspace/creator-engine
+WorkingDirectory=/opt/ce-broker/creator-engine
 Sockets=ce-egress-broker.socket
-ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_push_broker.py \
-  --socket "$CE_EGRESS_BROKER_SOCKET" \
-  --seat "$CE_EGRESS_BROKER_SEAT" \
-  --expected-peer-uid "$CE_EGRESS_BROKER_EXPECTED_PEER_UID" \
-  --expected-peer-gid "$CE_EGRESS_BROKER_EXPECTED_PEER_GID" \
-  --host-repo-path "$CE_EGRESS_BROKER_REPO" \
-  --config "$CE_EGRESS_BROKER_CONFIG"
+ExecStart=/usr/bin/env bash -lc 'set -euo pipefail; expected_broker_home=/opt/ce-broker/creator-engine; broker_home="$${CE_BROKER_HOME:?CE_BROKER_HOME is required}"; peer_uid="$${CE_EGRESS_BROKER_EXPECTED_PEER_UID:?CE_EGRESS_BROKER_EXPECTED_PEER_UID is required}"; peer_gid="$${CE_EGRESS_BROKER_EXPECTED_PEER_GID:?CE_EGRESS_BROKER_EXPECTED_PEER_GID is required}"; [[ "$$peer_uid" =~ ^[0-9]+(,[0-9]+)*$$ ]] || { echo "ERROR: expected peer UID must contain only numeric ids" >&2; exit 3; }; [[ "$$peer_gid" =~ ^[0-9]+(,[0-9]+)*$$ ]] || { echo "ERROR: expected peer GID must contain only numeric ids" >&2; exit 3; }; [[ "$${LISTEN_FDS:-}" == 1 && "$${LISTEN_PID:-}" == "$$$$" && -S /proc/self/fd/3 ]] || { echo "ERROR: valid systemd socket activation is required" >&2; exit 3; }; [[ "$$broker_home" == "$$expected_broker_home" ]] || { echo "ERROR: CE_BROKER_HOME does not match the rendered stable checkout" >&2; exit 3; }; [[ -d "$$broker_home/.git" || -f "$$broker_home/.git" ]] || { echo "ERROR: stable broker checkout is unavailable" >&2; exit 3; }; broker_script="$$broker_home/tools/egress-broker/ce_egress_self_push_broker.py"; [[ -f "$$broker_script" ]] || { echo "ERROR: stable self-push broker entrypoint is unavailable" >&2; exit 3; }; cd "$$broker_home"; exec python3 "$$broker_script" --socket "$${CE_EGRESS_BROKER_SOCKET}" --seat "$${CE_EGRESS_BROKER_SEAT}" --expected-peer-uid "$${CE_EGRESS_BROKER_EXPECTED_PEER_UID}" --expected-peer-gid "$${CE_EGRESS_BROKER_EXPECTED_PEER_GID}" --host-repo-path "$${CE_EGRESS_BROKER_REPO}" --config "$${CE_EGRESS_BROKER_CONFIG}"'
 Restart=on-failure
 RestartSec=30s
 

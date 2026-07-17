@@ -28,7 +28,33 @@ secret env file; create it first with CE_GATE_REPO, CE_GATE_AUTHORIZED_REVIEWERS
 plus GH_TOKEN and/or CE_PICKUP_TOKEN as needed. Review pickup can also use the
 OpenBao token supplier when CE_PICKUP_TOKEN_SECRET_TARGET_REF and the matching
 SecretRef variables are present in the gate env file.
+
+The self-push broker env file must also name CE_BROKER_HOME, an existing
+controller-managed stable checkout, plus explicit numeric
+CE_EGRESS_BROKER_EXPECTED_PEER_UID and CE_EGRESS_BROKER_EXPECTED_PEER_GID.
 USAGE
+}
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+read_env_file_value() {
+  local file="$1"
+  local key="$2"
+  local line=""
+  local value=""
+  local found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" == "$key="* ]]; then
+      value="${line#*=}"
+      found=1
+    fi
+  done < "$file"
+  [[ "$found" -eq 1 ]] || return 1
+  printf '%s\n' "$value"
 }
 
 scope="user"
@@ -219,6 +245,7 @@ if [[ ! -f "$egress_broker_env_file" ]]; then
   cat >&2 <<EOF
 ERROR: egress broker env file is missing: $egress_broker_env_file
 Create it before starting the services. Required:
+  CE_BROKER_HOME=<controller-managed-stable-checkout>
   CE_EGRESS_BROKER_SOCKET=...
   CE_EGRESS_BROKER_SEAT=...
   CE_EGRESS_BROKER_EXPECTED_PEER_UID=...
@@ -242,6 +269,52 @@ For vault-backed seats also include BAO_ADDR/VAULT_ADDR, BAO_CACERT/VAULT_CACERT
 BROKER_APPROLE_ROLE_ID, and BROKER_APPROLE_SECRET_ID.
 EOF
   exit 1
+fi
+
+broker_home="$(read_env_file_value "$egress_broker_env_file" CE_BROKER_HOME || true)"
+expected_peer_uid="$(read_env_file_value "$egress_broker_env_file" CE_EGRESS_BROKER_EXPECTED_PEER_UID || true)"
+expected_peer_gid="$(read_env_file_value "$egress_broker_env_file" CE_EGRESS_BROKER_EXPECTED_PEER_GID || true)"
+
+[[ -n "$broker_home" ]] || fail "CE_BROKER_HOME is required in $egress_broker_env_file"
+[[ -n "$expected_peer_uid" ]] || fail "CE_EGRESS_BROKER_EXPECTED_PEER_UID is required in $egress_broker_env_file"
+[[ -n "$expected_peer_gid" ]] || fail "CE_EGRESS_BROKER_EXPECTED_PEER_GID is required in $egress_broker_env_file"
+[[ "$broker_home" == /* ]] || fail "CE_BROKER_HOME must be an absolute path"
+case "$broker_home" in
+  /workspace/creator-engine|/workspace/creator-engine/*|/home/ce-dev-*|/home/ce-dev-*/*|/home/cedev*|/home/cedev*/*)
+    fail "CE_BROKER_HOME looks like a mutable seat checkout: $broker_home"
+    ;;
+esac
+[[ "$expected_peer_uid" =~ ^[0-9]+(,[0-9]+)*$ ]] ||
+  fail "CE_EGRESS_BROKER_EXPECTED_PEER_UID must contain only numeric ids"
+[[ "$expected_peer_gid" =~ ^[0-9]+(,[0-9]+)*$ ]] ||
+  fail "CE_EGRESS_BROKER_EXPECTED_PEER_GID must contain only numeric ids"
+[[ -d "$broker_home" ]] || fail "stable broker checkout is missing: $broker_home"
+[[ -d "$broker_home/.git" || -f "$broker_home/.git" ]] ||
+  fail "CE_BROKER_HOME is not a git checkout: $broker_home"
+[[ -f "$broker_home/tools/egress-broker/ce_egress_self_push_broker.py" ]] ||
+  fail "stable self-push broker entrypoint is missing under CE_BROKER_HOME: $broker_home"
+
+# EnvironmentFile contents may include credential material. Keep the existing
+# file and values intact while enforcing an owner-only mode.
+if [[ "$scope" == "system" ]]; then
+  [[ "$EUID" -eq 0 ]] || fail "--system requires root to preserve unit and config ownership"
+  chown root:root "$egress_broker_env_file"
+fi
+chmod 0600 "$egress_broker_env_file"
+
+legacy_egress_unit="$unit_dir/ce-egress-broker-dev3.service"
+if [[ -L "$legacy_egress_unit" ]]; then
+  fail "refusing symlinked legacy egress broker unit: $legacy_egress_unit"
+fi
+if [[ -f "$legacy_egress_unit" ]]; then
+  if ! grep -q -- 'ce_egress_self_push_broker.py' "$legacy_egress_unit" ||
+     ! grep -q -- '--socket' "$legacy_egress_unit"; then
+    fail "refusing unknown legacy egress broker unit shape: $legacy_egress_unit"
+  fi
+  echo "running: ${systemctl_cmd[*]} disable --now ce-egress-broker-dev3.service"
+  "${systemctl_cmd[@]}" disable --now ce-egress-broker-dev3.service
+  rm -f -- "$legacy_egress_unit"
+  echo "migrated: ce-egress-broker-dev3.service -> ce-egress-broker.socket + ce-egress-broker.service"
 fi
 
 # This observer is intentionally isolated from the credential-bearing gate
@@ -311,16 +384,23 @@ render_unit() {
   local tmp
   local rendered_repo_root
   local rendered_env_file
+  local rendered_broker_home
   unit_name="$(basename -- "$src")"
   rendered_repo_root="$(printf '%s' "$repo_root" | sed 's/[&#]/\\&/g')"
   rendered_env_file="$(printf '%s' "$env_path" | sed 's/[&#]/\\&/g')"
-  tmp="$(mktemp)"
+  rendered_broker_home="$(printf '%s' "$broker_home" | sed 's/[&#]/\\&/g')"
+  tmp="$(mktemp "$unit_dir/.ce-systemd-unit.XXXXXX")"
   if [[ "$unit_name" == "ce-egress-self-review.service" && -n "$rendered_env_file" ]]; then
     sed \
       -e "s#^EnvironmentFile=.*#EnvironmentFile=$rendered_env_file#g" \
       "$src" > "$tmp"
   elif [[ "$unit_name" == "ce-egress-self-review.service" ]]; then
     cat "$src" > "$tmp"
+  elif [[ "$unit_name" == "ce-egress-broker.service" && -n "$rendered_env_file" ]]; then
+    sed \
+      -e "s#/opt/ce-broker/creator-engine#$rendered_broker_home#g" \
+      -e "s#^EnvironmentFile=.*#EnvironmentFile=$rendered_env_file#g" \
+      "$src" > "$tmp"
   elif [[ -n "$rendered_env_file" ]]; then
     sed \
       -e "s#^WorkingDirectory=.*#WorkingDirectory=$rendered_repo_root#g" \
