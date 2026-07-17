@@ -77,15 +77,26 @@ def test_oci_dockerfile_builds_first_party_wheel_from_repo_source() -> None:
 def test_oci_dockerfile_installs_wheelhouse_offline_and_exposes_cli() -> None:
     text = _dockerfile()
 
+    assert "COPY validators/requirements.txt /opt/creator-engine/requirements.txt" in text
+    assert "COPY validators/requirements-dev.txt /opt/creator-engine/requirements-dev.txt" in text
     assert "COPY validators/wheelhouse /opt/creator-engine/wheelhouse" in text
+    assert "COPY validators/wheelhouse-dev /opt/creator-engine/wheelhouse-dev" in text
     assert "COPY --from=wheel-builder /out/*.whl /opt/creator-engine/app/" in text
     assert "python -m pip install" in text
     assert "--no-index" in text
     assert "--find-links=/opt/creator-engine/wheelhouse" in text
+    assert "--find-links=/opt/creator-engine/wheelhouse-dev" in text
+    assert "-r /opt/creator-engine/requirements.txt" in text
+    assert "-r /opt/creator-engine/requirements-dev.txt" in text
     assert "--find-links=/opt/creator-engine/app" in text
     assert "creator-engine-validator" in text
+    assert "openssh-client" in text
+    assert "libsodium23" in text
     assert "command -v ce" in text
     assert "command -v creator-engine-validator" in text
+    assert "command -v ssh-keygen" in text
+    assert "import pytest, xdist" in text
+    assert "find_library('sodium')" in text
     assert "ce --help" in text
     assert "creator-engine-validator --help" in text
 
@@ -146,6 +157,8 @@ def test_oci_build_script_shell_syntax_and_dry_run_contract() -> None:
 
     assert not any("python3" in cmd and "pip" in cmd and "wheel" in cmd for cmd in commands)
     assert ["cp", str(REPO_ROOT / "validators" / "pyproject.toml"), str(TEST_CONTEXT / "validators" / "pyproject.toml")] in commands
+    assert ["cp", str(REPO_ROOT / "validators" / "requirements.txt"), str(TEST_CONTEXT / "validators" / "requirements.txt")] in commands
+    assert ["cp", str(REPO_ROOT / "validators" / "requirements-dev.txt"), str(TEST_CONTEXT / "validators" / "requirements-dev.txt")] in commands
     assert str(REPO_ROOT / "validators" / "creator_engine_validator") in copy_sources
     assert str(REPO_ROOT / "validators" / "wheelhouse") in copy_sources
     assert str(REPO_ROOT / "validators" / "wheelhouse-dev") in copy_sources

@@ -117,6 +117,7 @@ RUN set -eux; \
       less \
       libsodium23 \
       nodejs \
+      openssh-client \
       procps \
       psmisc \
       python3 \
@@ -155,7 +156,8 @@ RUN set -eux; \
     /opt/ce-validator-venv/bin/python --version | grep -q '^Python 3\.14\.'; \
     /opt/ce-validator-venv/bin/pytest --version; \
     /opt/ce-validator-venv/bin/python -c "import pytest, yaml, jsonschema, xdist; print('validator toolchain OK')"; \
-    /opt/ce-validator-venv/bin/python -c "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'; print('libsodium OK')"
+    /opt/ce-validator-venv/bin/python -c "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'; print('libsodium OK')"; \
+    command -v ssh-keygen
 
 COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr
 COPY deploy/vps-runsc/herdr-harness-entrypoint.sh /usr/local/bin/herdr-harness-entrypoint.sh

@@ -94,6 +94,18 @@ def test_seat_dockerfile_preserves_non_root_ce_uid_runtime() -> None:
     assert 'ENTRYPOINT ["/usr/bin/tini", "--"]' in text
 
 
+def test_seat_dockerfile_asserts_inherited_full_preflight_toolchain() -> None:
+    text = _dockerfile()
+
+    assert "command -v ce" in text
+    assert "command -v ssh-keygen" in text
+    assert "import pytest, xdist" in text
+    assert "find_library('sodium')" in text
+    assert "openssh-client" not in text
+    assert "libsodium23" not in text
+    assert "validators/wheelhouse" not in text
+
+
 def test_seat_dockerfile_excludes_fleet_only_artifacts() -> None:
     text = _dockerfile().lower()
 
