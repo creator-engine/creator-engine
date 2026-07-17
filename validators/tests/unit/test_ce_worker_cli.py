@@ -386,8 +386,10 @@ class FakeOneShotRunner:
     def __init__(self, *, returncode: int = 0, error: Exception | None = None) -> None:
         self.returncode = returncode
         self.error = error
+        self.calls = 0
 
     def run(self, argv, *, stdin: bytes, provider_credential_env_names) -> int:
+        self.calls += 1
         if self.error is not None:
             raise self.error
         return self.returncode
@@ -520,6 +522,46 @@ def test_worker_launch_zero_reports_completion(tmp_path, monkeypatch, capsys) ->
     captured = capsys.readouterr()
     assert "ce worker launch: completed cli-reporting-test" in captured.out
     assert captured.err == ""
+
+
+def test_worker_launch_rechecks_role_policy_after_planning_before_runner(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    support = __import__(
+        "validators.tests.unit.test_codex_worker_launcher",
+        fromlist=["HermeticFilesystem", "FixedVersionProbe"],
+    )
+    runner = FakeOneShotRunner()
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_codex_launcher_filesystem",
+        lambda: support.HermeticFilesystem(),
+    )
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_codex_version_probe",
+        lambda: support.FixedVersionProbe(),
+    )
+
+    def replace_role_policy_then_construct_runner():
+        (worktree / ".claude" / "agents" / "architect_research.md").write_text(
+            "# replaced after planning\n", encoding="utf-8"
+        )
+        return runner
+
+    monkeypatch.setattr(
+        ce_cli,
+        "_make_codex_one_shot_runner",
+        replace_role_policy_then_construct_runner,
+    )
+
+    assert ce_cli.main(_worker_launch_argv(worktree, brief, digest)) == 1
+    captured = capsys.readouterr()
+    assert "ce worker launch refused" in captured.err
+    assert "canonical role policy changed after planning" in captured.err
+    assert "Traceback" not in captured.err
+    assert runner.calls == 0
 
 
 def test_worker_spawn_dry_run_json_has_no_side_effect(tmp_path, monkeypatch, capsys):

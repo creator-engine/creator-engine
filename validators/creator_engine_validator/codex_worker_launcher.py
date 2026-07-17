@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import string
 import subprocess
 import tempfile
@@ -52,6 +53,7 @@ V1_SUPPORTED_ROLES = (
 )
 ROLE_ENVELOPE_SCHEMA = "CE-GOVERNED-ROLE-ENVELOPE-V1"
 MAX_DEVELOPER_INSTRUCTIONS_BYTES = 4096
+MAX_ROLE_POLICY_BYTES = 256 * 1024
 V1_ROLE_CAPABILITIES = {
     "architect_research": "read_only_research",
     "implementer": "scoped_worktree_edit_test_commit",
@@ -226,7 +228,7 @@ class LauncherFilesystem(Protocol):
     def is_file(self, path: str) -> bool: ...
     def is_readable(self, path: str) -> bool: ...
     def is_executable(self, path: str) -> bool: ...
-    def read_bytes(self, path: str) -> bytes: ...
+    def read_bytes(self, path: str, *, max_bytes: int | None = None) -> bytes: ...
 
 
 class RealLauncherFilesystem:
@@ -250,9 +252,29 @@ class RealLauncherFilesystem:
     def is_executable(self, path: str) -> bool:
         return os.access(path, os.X_OK)
 
-    def read_bytes(self, path: str) -> bytes:
-        with open(path, "rb") as handle:
-            return handle.read()
+    def read_bytes(self, path: str, *, max_bytes: int | None = None) -> bytes:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError("path is not a regular file")
+            payload = bytearray()
+            while True:
+                remaining = None if max_bytes is None else max_bytes + 1 - len(payload)
+                if remaining is not None and remaining <= 0:
+                    break
+                read_size = (
+                    64 * 1024
+                    if remaining is None
+                    else min(64 * 1024, remaining)
+                )
+                chunk = os.read(descriptor, read_size)
+                if not chunk:
+                    break
+                payload.extend(chunk)
+            return bytes(payload)
+        finally:
+            os.close(descriptor)
 
 
 class CodexVersionProbe(Protocol):
@@ -396,6 +418,8 @@ class CodexWorkerLaunchPlan:
     worktree: str
     run_id: str
     output: str
+    binary: str
+    add_dirs: tuple[str, ...]
     developer_instructions: str
     argv: tuple[str, ...]
 
@@ -418,6 +442,8 @@ class CodexWorkerLaunchPlan:
             "worktree": self.worktree,
             "run_id": self.run_id,
             "output": self.output,
+            "binary": self.binary,
+            "add_dirs": list(self.add_dirs),
             "developer_instructions": self.developer_instructions,
             "argv": list(self.argv),
         }
@@ -703,6 +729,7 @@ def _read_contained_regular_file(
     root: str,
     field: str,
     filesystem: LauncherFilesystem,
+    max_bytes: int | None = None,
 ) -> tuple[str, bytes]:
     normalized = _lexical_absolute(path, field=field)
     resolved = filesystem.realpath(normalized)
@@ -713,9 +740,11 @@ def _read_contained_regular_file(
     if not filesystem.is_file(resolved) or not filesystem.is_readable(resolved):
         raise CodexWorkerLaunchError(f"{field} must be a regular readable file")
     try:
-        payload = filesystem.read_bytes(resolved)
+        payload = filesystem.read_bytes(resolved, max_bytes=max_bytes)
     except OSError as exc:
         raise CodexWorkerLaunchError(f"{field} cannot be read") from exc
+    if max_bytes is not None and len(payload) > max_bytes:
+        raise CodexWorkerLaunchError(f"{field} exceeds the size bound")
     return resolved, payload
 
 
@@ -869,6 +898,7 @@ def load_governed_worker_input(
         root=role_root,
         field="canonical role policy",
         filesystem=fs,
+        max_bytes=MAX_ROLE_POLICY_BYTES,
     )
     brief_root = _real_directory(
         os.path.join(root, CANONICAL_BRIEF_AREA),
@@ -1097,6 +1127,8 @@ def build_launch_plan(
         worktree=root,
         run_id=chosen_run_id,
         output=output,
+        binary=binary,
+        add_dirs=add_dirs,
         developer_instructions=developer_instructions,
         argv=tuple(argv),
     )
@@ -1105,6 +1137,8 @@ def build_launch_plan(
 def _validate_launch_envelope(
     plan: CodexWorkerLaunchPlan,
     governed_input: GovernedWorkerInput,
+    *,
+    filesystem: LauncherFilesystem,
 ) -> None:
     try:
         if (
@@ -1122,30 +1156,57 @@ def _validate_launch_envelope(
         )
         if plan.developer_instructions != expected_instructions:
             raise CodexWorkerLaunchError("developer instructions mismatch")
+        root = _real_directory(plan.worktree, field="worktree", filesystem=filesystem)
+        role_root = _real_directory(
+            os.path.join(root, CANONICAL_ROLE_AREA),
+            field="canonical role policy area",
+            filesystem=filesystem,
+        )
+        current_role_path, current_role_policy = _read_contained_regular_file(
+            os.path.join(role_root, f"{plan.role}.md"),
+            root=role_root,
+            field="canonical role policy",
+            filesystem=filesystem,
+            max_bytes=MAX_ROLE_POLICY_BYTES,
+        )
+        current_role_sha256 = hashlib.sha256(current_role_policy).hexdigest()
+        if (
+            current_role_path != governed_input.role_policy_path
+            or current_role_path != plan.role_policy_path
+            or current_role_policy != governed_input.role_policy
+            or current_role_sha256 != governed_input.role_policy_sha256
+            or current_role_sha256 != plan.role_policy_sha256
+        ):
+            raise CodexWorkerLaunchError("canonical role policy changed after planning")
         encoded = toml_encode_config_value(expected_instructions)
-        expected_configs = (
+        expected_output = os.path.join(root, ".ce", "state", f"{plan.run_id}.json")
+        if plan.output != expected_output:
+            raise CodexWorkerLaunchError("deterministic output mismatch")
+        expected_argv = [
+            plan.binary,
+            "exec",
+            "--strict-config",
+            "--ephemeral",
+            "-m",
+            plan.model,
+            "-c",
             f"model_reasoning_effort={plan.effort}",
+            "-c",
             "features.multi_agent=false",
+            "-c",
             "features.multi_agent_v2=false",
+            "-c",
             f"developer_instructions={encoded}",
-        )
-        argv = plan.argv
-        if argv.count("--strict-config") != 1:
-            raise CodexWorkerLaunchError("strict config is missing or duplicated")
-        if any("model_instructions_file" in item for item in argv):
-            raise CodexWorkerLaunchError("forbidden model instructions fallback")
-        configs = tuple(
-            argv[index + 1]
-            for index, item in enumerate(argv[:-1])
-            if item == "-c"
-        )
-        if configs != expected_configs:
-            raise CodexWorkerLaunchError("config overrides are missing or reordered")
-        sandbox_indexes = [index for index, item in enumerate(argv[:-1]) if item == "-s"]
-        if len(sandbox_indexes) != 1 or argv[sandbox_indexes[0] + 1] != plan.sandbox:
-            raise CodexWorkerLaunchError("sandbox authority mismatch")
-        if not argv or argv[-1] != "-":
-            raise CodexWorkerLaunchError("verified brief stdin marker is missing")
+            "-s",
+            plan.sandbox,
+            "-C",
+            root,
+        ]
+        for directory in plan.add_dirs:
+            expected_argv.extend(("--add-dir", directory))
+        expected_argv.extend(("-o", expected_output, "-"))
+        if plan.argv != tuple(expected_argv):
+            raise CodexWorkerLaunchError("complete executable argv is not canonical")
     except CodexWorkerLaunchError as exc:
         raise CodexWorkerLaunchError(f"launch envelope mismatch: {exc}") from exc
 
@@ -1155,9 +1216,14 @@ def launch(
     *,
     governed_input: GovernedWorkerInput,
     runner: CodexOneShotRunner,
+    filesystem: LauncherFilesystem | None = None,
 ) -> int:
     """Execute only if the verified input metadata is exactly plan-bound."""
-    _validate_launch_envelope(plan, governed_input)
+    _validate_launch_envelope(
+        plan,
+        governed_input,
+        filesystem=filesystem or RealLauncherFilesystem(),
+    )
     try:
         return runner.run(
             plan.argv,

@@ -320,6 +320,18 @@ or sandbox escalation, nested delegation, or any prompt-only, foreman, or
 unguarded fallback. `model_instructions_file`, mutable ambient role prose,
 and role-policy framing on stdin are not permitted substitutes.
 
+Immediately before runner invocation, the launcher MUST reconstruct the
+complete canonical executable argument tuple from the verified plan contract
+and require exact equality, including executable, subcommand, option forms,
+ordering and count, model, worktree, add-directories, output, sandbox, every
+configuration entry, and the terminal stdin marker. At that same boundary it
+MUST reopen the canonical role policy beneath the governed repository root as
+a bounded regular nonsymlink file using a no-follow read, then require its
+current path, bytes, and digest to equal the verified input and envelope
+association. Any replacement, removal, symlink, metadata drift, extra or
+reordered argument, long-form override, duplicate option, bypass flag, or
+other mismatch is refused before the runner is called.
+
 ### d.3 Runtime engine selection is an OSD, not hardcoded
 
 Rootless **Podman** and rootless **Docker** are both acceptable v1

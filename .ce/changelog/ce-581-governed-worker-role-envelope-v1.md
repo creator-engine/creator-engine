@@ -13,5 +13,9 @@ issue: ce-ops#581
 - Keep ordinary stdin limited to the verified brief and refuse malformed,
   mismatched, widened, nested, reserved-authority, or fallback launch plans.
 - Cover all four leaf roles under an ambient foreman bootstrap with hermetic
-  direct implementer and read-only worker behavior.
+  fake-executable coverage through the production planner, launcher, and
+  subprocess runner, including direct implementer and read-only behavior.
+- Reconstruct and exactly compare the complete executable argument tuple at
+  the final boundary, and no-follow rebind the bounded canonical role-policy
+  bytes and digest immediately before runner invocation.
 - **Declared work class:** feature
