@@ -7,6 +7,7 @@ HARNESS_VERSION="ce-p3-rehearsal-s1"
 DRY_RUN=0
 LIVE=0
 LIST_STAGES=0
+RELEASE_SMOKE=0
 SELECTED_STAGE=""
 CONTAINER_ID=""
 CONTAINER_OWNED=0
@@ -20,6 +21,14 @@ CE_REHEARSAL_SITE="${CE_REHEARSAL_SITE:-https://creator-engine.dev}"
 CE_REHEARSAL_EVIDENCE_OUT="${CE_REHEARSAL_EVIDENCE_OUT:-/tmp/ce-rehearsal-evidence.json}"
 CE_REHEARSAL_KEEP_CONTAINER="${CE_REHEARSAL_KEEP_CONTAINER:-0}"
 CE_REHEARSAL_CONTAINER_NAME="${CE_REHEARSAL_CONTAINER_NAME:-ce-p3-rehearsal-$$}"
+CE_REHEARSAL_ENGINE="${CE_REHEARSAL_ENGINE:-docker}"
+CE_REHEARSAL_CHECKOUT_MOUNT="${CE_REHEARSAL_CHECKOUT_MOUNT:-false}"
+CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT="${CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT:-/tmp/ce-release-smoke-result.json}"
+CE_REHEARSAL_EXPECTED_PACKAGE_VERSION="${CE_REHEARSAL_EXPECTED_PACKAGE_VERSION:-}"
+CE_REHEARSAL_EXPECTED_CANONICAL_SPEC_SHA256="${CE_REHEARSAL_EXPECTED_CANONICAL_SPEC_SHA256:-}"
+CE_REHEARSAL_EXPECTED_SIGNED_SPEC_SHA256="${CE_REHEARSAL_EXPECTED_SIGNED_SPEC_SHA256:-}"
+CE_REHEARSAL_EXPECTED_FINALIZE_MANIFEST_SHA256="${CE_REHEARSAL_EXPECTED_FINALIZE_MANIFEST_SHA256:-}"
+CE_REHEARSAL_EXPECTED_ARTIFACTS_SHA256="${CE_REHEARSAL_EXPECTED_ARTIFACTS_SHA256:-}"
 
 STAGES=(
   provision
@@ -41,6 +50,7 @@ usage() {
 Usage:
   ${SCRIPT_NAME} --dry-run [--stage NAME]
   ${SCRIPT_NAME} --live [--stage NAME]
+  ${SCRIPT_NAME} --release-smoke
   ${SCRIPT_NAME} --list-stages
   ${SCRIPT_NAME} --help
 
@@ -48,6 +58,8 @@ Options:
   --dry-run       Print the staged plan and stub markers. Does not require
                   Docker, network, or credentials.
   --live          Affirmatively enable Docker/network execution.
+  --release-smoke Run only the governed release install/install-verify smoke
+                  and emit deterministic value-free result JSON.
   --stage NAME    Run one named stage. Use --list-stages for valid names.
   --list-stages   Print stage names and exit 0.
   --help, -h      Show this help.
@@ -58,6 +70,13 @@ Environment:
   CE_REHEARSAL_EVIDENCE_OUT      Evidence JSON path. Default: /tmp/ce-rehearsal-evidence.json
   CE_REHEARSAL_KEEP_CONTAINER    Set to 1 to keep the live container for debug.
   CE_REHEARSAL_CONTAINER_NAME    Container name. Default: ce-p3-rehearsal-\$\$
+  CE_REHEARSAL_ENGINE            Container engine command. Default: docker.
+  CE_REHEARSAL_CHECKOUT_MOUNT    Must be exactly false for release smoke.
+  CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT
+                                  Explicit deterministic result path.
+  CE_REHEARSAL_EXPECTED_PACKAGE_VERSION and EXPECTED_*_SHA256
+                                  Explicit finalized-tree bindings supplied by
+                                  the governed worker; all are required.
 
 The harness mounts no host checkout into the container. Live execution is
 fail-closed unless --live is supplied.
@@ -79,7 +98,9 @@ fail() {
 
 cleanup() {
   local status=$?
-  write_evidence || true
+  if [ "${RELEASE_SMOKE}" != "1" ]; then
+    write_evidence || true
+  fi
   if [ -n "${CONTAINER_ID:-}" ] && [ "${CONTAINER_OWNED}" = "1" ] && [ "${CE_REHEARSAL_KEEP_CONTAINER}" != "1" ]; then
     docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
   fi
@@ -254,6 +275,10 @@ parse_args() {
         LIVE=1
         shift
         ;;
+      --release-smoke)
+        RELEASE_SMOKE=1
+        shift
+        ;;
       --stage)
         [ "$#" -ge 2 ] || fail "global" "--stage requires a name"
         SELECTED_STAGE="$2"
@@ -272,6 +297,92 @@ parse_args() {
         ;;
     esac
   done
+}
+
+release_smoke_fail() {
+  log "FAIL" "release_smoke" "$1"
+  exit 1
+}
+
+run_release_smoke() {
+  local engine result_out result_tmp engine_output binding_line binding_count
+  local marker package_version canonical_spec_sha256 signed_spec_sha256 finalize_manifest_sha256 artifacts_sha256
+  local ce_version cev3_version verified_spec_sha256 pre_signed_spec_sha256 post_signed_spec_sha256
+  local pre_finalize_manifest_sha256 post_finalize_manifest_sha256 extra digest version_suffix
+  if [ "${DRY_RUN}" = "1" ] || [ "${LIVE}" = "1" ] || [ "${LIST_STAGES}" = "1" ] || [ -n "${SELECTED_STAGE}" ]; then
+    release_smoke_fail "--release-smoke is a separate governed-worker mode"
+  fi
+  if [[ ! "${CE_REHEARSAL_IMAGE}" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+    release_smoke_fail "release smoke image must be digest-pinned"
+  fi
+  if [ "${CE_REHEARSAL_CHECKOUT_MOUNT}" != "false" ]; then
+    release_smoke_fail "release smoke requires host checkout mount=false"
+  fi
+  engine="${CE_REHEARSAL_ENGINE}"
+  if ! command -v "${engine}" >/dev/null 2>&1; then
+    release_smoke_fail "container engine command is unavailable: ${engine}"
+  fi
+  result_out="${CE_REHEARSAL_RELEASE_SMOKE_RESULT_OUT}"
+  [ -n "${result_out}" ] || release_smoke_fail "release smoke result path must not be empty"
+  rm -f "${result_out}"
+  [[ "${CE_REHEARSAL_EXPECTED_PACKAGE_VERSION}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+    || release_smoke_fail "expected package version must be canonical semantic version"
+  for digest in \
+    "${CE_REHEARSAL_EXPECTED_CANONICAL_SPEC_SHA256}" \
+    "${CE_REHEARSAL_EXPECTED_SIGNED_SPEC_SHA256}" \
+    "${CE_REHEARSAL_EXPECTED_FINALIZE_MANIFEST_SHA256}" \
+    "${CE_REHEARSAL_EXPECTED_ARTIFACTS_SHA256}"; do
+    [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || release_smoke_fail "every expected finalized-tree binding must be lowercase SHA-256"
+  done
+
+  log "RUN" "release_smoke" "image=${CE_REHEARSAL_IMAGE}; checkout_mount=false"
+  if ! engine_output="$("${engine}" run --rm \
+    --env "CE_SITE=${CE_REHEARSAL_SITE}" \
+    --env "EXPECTED_PACKAGE_VERSION=${CE_REHEARSAL_EXPECTED_PACKAGE_VERSION}" \
+    --env "EXPECTED_CANONICAL_SPEC_SHA256=${CE_REHEARSAL_EXPECTED_CANONICAL_SPEC_SHA256}" \
+    --env "EXPECTED_SIGNED_SPEC_SHA256=${CE_REHEARSAL_EXPECTED_SIGNED_SPEC_SHA256}" \
+    --env "EXPECTED_FINALIZE_MANIFEST_SHA256=${CE_REHEARSAL_EXPECTED_FINALIZE_MANIFEST_SHA256}" \
+    --env "EXPECTED_ARTIFACTS_SHA256=${CE_REHEARSAL_EXPECTED_ARTIFACTS_SHA256}" \
+    "${CE_REHEARSAL_IMAGE}" \
+    bash -lc 'set -euo pipefail; apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl bash openssh-client git; smoke_dir="$(mktemp -d)"; trap "rm -rf \"${smoke_dir}\"" EXIT; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/llms-install.md" -o "${smoke_dir}/pre-llms-install.md"; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/release-finalize-manifest.yml" -o "${smoke_dir}/pre-release-finalize-manifest.yml"; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/install.sh" -o "${smoke_dir}/install.sh"; package_version="$(sed -n "s/^package_version: //p" "${smoke_dir}/pre-release-finalize-manifest.yml")"; canonical_spec_sha256="$(sed -n "s/^canonical_spec_sha256: //p" "${smoke_dir}/pre-release-finalize-manifest.yml")"; manifest_signed_spec_sha256="$(sed -n "s/^signed_spec_sha256: //p" "${smoke_dir}/pre-release-finalize-manifest.yml")"; pre_signed_spec_sha256="$(sha256sum "${smoke_dir}/pre-llms-install.md" | cut -d " " -f 1)"; pre_finalize_manifest_sha256="$(sha256sum "${smoke_dir}/pre-release-finalize-manifest.yml" | cut -d " " -f 1)"; artifacts_sha256="$(sed -n "/^artifacts:$/,$ p" "${smoke_dir}/pre-release-finalize-manifest.yml" | sha256sum | cut -d " " -f 1)"; [ "${package_version}" = "${EXPECTED_PACKAGE_VERSION}" ]; [ "${canonical_spec_sha256}" = "${EXPECTED_CANONICAL_SPEC_SHA256}" ]; [ "${manifest_signed_spec_sha256}" = "${EXPECTED_SIGNED_SPEC_SHA256}" ]; [ "${pre_signed_spec_sha256}" = "${EXPECTED_SIGNED_SPEC_SHA256}" ]; [ "${pre_finalize_manifest_sha256}" = "${EXPECTED_FINALIZE_MANIFEST_SHA256}" ]; [ "${artifacts_sha256}" = "${EXPECTED_ARTIFACTS_SHA256}" ]; CE_SITE="${CE_SITE}" bash "${smoke_dir}/install.sh"; export PATH="/root/.local/bin:${PATH}"; cev3_version="$(cev3 --version 2>/dev/null)"; ce_version="$(ce --version)"; ce --help >/dev/null; ce onboard --help >/dev/null; [[ "${cev3_version}" =~ ^${EXPECTED_PACKAGE_VERSION}\+[0-9a-f]{8}$ ]]; [[ "${ce_version}" =~ ^${EXPECTED_PACKAGE_VERSION}\+[0-9a-f]{8}$ ]]; [ "${ce_version}" = "${cev3_version}" ]; verified_spec="/root/.local/share/creator-engine/bootstrap/verified-inputs/${EXPECTED_CANONICAL_SPEC_SHA256}/llms-install.md"; [ -f "${verified_spec}" ]; verified_spec_sha256="$(sha256sum "${verified_spec}" | cut -d " " -f 1)"; [ "${verified_spec_sha256}" = "${EXPECTED_SIGNED_SPEC_SHA256}" ]; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/llms-install.md" -o "${smoke_dir}/post-llms-install.md"; curl --proto "=https" --tlsv1.2 -fsSL "${CE_SITE%/}/release-finalize-manifest.yml" -o "${smoke_dir}/post-release-finalize-manifest.yml"; post_signed_spec_sha256="$(sha256sum "${smoke_dir}/post-llms-install.md" | cut -d " " -f 1)"; post_finalize_manifest_sha256="$(sha256sum "${smoke_dir}/post-release-finalize-manifest.yml" | cut -d " " -f 1)"; [ "${post_signed_spec_sha256}" = "${pre_signed_spec_sha256}" ]; [ "${post_signed_spec_sha256}" = "${EXPECTED_SIGNED_SPEC_SHA256}" ]; [ "${post_finalize_manifest_sha256}" = "${pre_finalize_manifest_sha256}" ]; [ "${post_finalize_manifest_sha256}" = "${EXPECTED_FINALIZE_MANIFEST_SHA256}" ]; printf "CE_RELEASE_SMOKE_BINDING %s %s %s %s %s %s %s %s %s %s %s %s\n" "${package_version}" "${canonical_spec_sha256}" "${pre_signed_spec_sha256}" "${pre_finalize_manifest_sha256}" "${artifacts_sha256}" "${ce_version}" "${cev3_version}" "${verified_spec_sha256}" "${pre_signed_spec_sha256}" "${post_signed_spec_sha256}" "${pre_finalize_manifest_sha256}" "${post_finalize_manifest_sha256}"')"; then
+    release_smoke_fail "clean-container install/install_verify failed"
+  fi
+
+  binding_count="$(printf '%s\n' "${engine_output}" | grep -c '^CE_RELEASE_SMOKE_BINDING ' || true)"
+  [ "${binding_count}" = "1" ] || release_smoke_fail "clean container must emit exactly one observed release binding"
+  binding_line="$(printf '%s\n' "${engine_output}" | grep '^CE_RELEASE_SMOKE_BINDING ')"
+  read -r marker package_version canonical_spec_sha256 signed_spec_sha256 finalize_manifest_sha256 artifacts_sha256 \
+    ce_version cev3_version verified_spec_sha256 pre_signed_spec_sha256 post_signed_spec_sha256 \
+    pre_finalize_manifest_sha256 post_finalize_manifest_sha256 extra <<< "${binding_line}"
+  [ "${marker}" = "CE_RELEASE_SMOKE_BINDING" ] && [ -z "${extra:-}" ] || release_smoke_fail "observed release binding is malformed"
+  [[ "${package_version}" =~ ^[^[:space:]]+$ ]] || release_smoke_fail "observed package version is malformed"
+  for digest in "${canonical_spec_sha256}" "${signed_spec_sha256}" "${finalize_manifest_sha256}" "${artifacts_sha256}"; do
+    [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || release_smoke_fail "observed release digest is malformed"
+  done
+  [ "${package_version}" = "${CE_REHEARSAL_EXPECTED_PACKAGE_VERSION}" ] || release_smoke_fail "observed package version does not match expected finalized tree"
+  [ "${canonical_spec_sha256}" = "${CE_REHEARSAL_EXPECTED_CANONICAL_SPEC_SHA256}" ] || release_smoke_fail "observed canonical spec binding does not match expected finalized tree"
+  [ "${signed_spec_sha256}" = "${CE_REHEARSAL_EXPECTED_SIGNED_SPEC_SHA256}" ] || release_smoke_fail "observed signed spec binding does not match expected finalized tree"
+  [ "${finalize_manifest_sha256}" = "${CE_REHEARSAL_EXPECTED_FINALIZE_MANIFEST_SHA256}" ] || release_smoke_fail "observed finalize manifest binding does not match expected finalized tree"
+  [ "${artifacts_sha256}" = "${CE_REHEARSAL_EXPECTED_ARTIFACTS_SHA256}" ] || release_smoke_fail "observed artifact-set binding does not match expected finalized tree"
+  for version_token in "${ce_version}" "${cev3_version}"; do
+    [ "${version_token%%+*}" = "${package_version}" ] || release_smoke_fail "installed CLI package version does not match finalized manifest"
+    version_suffix="${version_token#*+}"
+    [[ "${version_suffix}" =~ ^[0-9a-f]{8}$ ]] || release_smoke_fail "installed CLI version token is malformed"
+  done
+  [ "${ce_version}" = "${cev3_version}" ] || release_smoke_fail "installed ce and cev3 versions identify different builds"
+  [ "${verified_spec_sha256}" = "${signed_spec_sha256}" ] || release_smoke_fail "installer-verified spec does not match finalized signed spec"
+  [ "${pre_signed_spec_sha256}" = "${signed_spec_sha256}" ] && [ "${post_signed_spec_sha256}" = "${signed_spec_sha256}" ] \
+    || release_smoke_fail "signed install spec changed across installation"
+  [ "${pre_finalize_manifest_sha256}" = "${finalize_manifest_sha256}" ] && [ "${post_finalize_manifest_sha256}" = "${finalize_manifest_sha256}" ] \
+    || release_smoke_fail "release finalize manifest changed across installation"
+
+  mkdir -p "$(dirname "${result_out}")"
+  result_tmp="${result_out}.tmp.$$"
+  printf '{"container_image":"%s","containment":{"host_checkout_mount":false},"installation":{"ce_version":"%s","cev3_version":"%s","post_finalize_manifest_sha256":"%s","post_signed_spec_sha256":"%s","pre_finalize_manifest_sha256":"%s","pre_signed_spec_sha256":"%s","verified_spec_sha256":"%s"},"release_binding":{"artifacts_sha256":"%s","canonical_spec_sha256":"%s","finalize_manifest_sha256":"%s","package_version":"%s","signed_spec_sha256":"%s"},"schema_version":"1","stages":{"install":"passed","install_verify":"passed"},"summary":{"failed":0,"stubbed":0}}' \
+    "${CE_REHEARSAL_IMAGE}" "${ce_version}" "${cev3_version}" "${post_finalize_manifest_sha256}" "${post_signed_spec_sha256}" "${pre_finalize_manifest_sha256}" "${pre_signed_spec_sha256}" "${verified_spec_sha256}" \
+    "${artifacts_sha256}" "${canonical_spec_sha256}" "${finalize_manifest_sha256}" "${package_version}" "${signed_spec_sha256}" > "${result_tmp}"
+  mv "${result_tmp}" "${result_out}"
+  log "PASS" "release_smoke" "result=${result_out}"
 }
 
 require_live_or_dry_run() {
@@ -491,6 +602,11 @@ main() {
 
   if [ "${LIST_STAGES}" = "1" ]; then
     print_stages
+    exit 0
+  fi
+
+  if [ "${RELEASE_SMOKE}" = "1" ]; then
+    run_release_smoke
     exit 0
   fi
 

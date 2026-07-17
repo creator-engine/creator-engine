@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,10 +12,11 @@ from urllib.parse import urlparse
 
 import pytest
 
-from creator_engine_validator import v3_installer
+from creator_engine_validator import release_smoke_evidence, v3_installer
 from creator_engine_validator.checks import (
     install_spec_signature_guard,
     release_artifact_parity_guard,
+    release_smoke_evidence as release_smoke_gate,
 )
 from creator_engine_validator.release_orchestrator import orchestrate_release
 from creator_engine_validator.release_publish import finalize_signed_release
@@ -166,3 +170,110 @@ def test_release_finalize_docs_copy_passes_release_guards(tmp_path: Path):
     assert resolved.identity.semver == "0.3.6"
     assert resolved.canonical_spec_sha256 == finalized_result.canonical_spec_sha256
     assert resolved.sha256s_sha256 == orchestration.stage.sha256s_sha256
+
+
+@requires_ssh_keygen
+def test_finalized_docs_smoke_prepare_public_finalize_and_gate_round_trip(tmp_path: Path):
+    repo = _copy_repo_fixture(tmp_path)
+    stage = tmp_path / "stage"
+    finalized = tmp_path / "finalized"
+    orchestrate_release(
+        repo_root=repo,
+        out=stage,
+        tag="release/v0.3.6",
+        force=True,
+        validate_pr_runner=lambda _repo: 0,
+    )
+    staged_spec = (stage / "llms-install.md").read_text(encoding="utf-8")
+    install_signing = tmp_path / "install-signing"
+    install_signing.mkdir()
+    signed_spec, install_trust_root = _sign_with_test_key(staged_spec, install_signing)
+    install_signature = install_spec_signature_guard.parse_embedded_signature_block(signed_spec)["value"]
+    finalized_result = finalize_signed_release(
+        stage=stage,
+        signature_base64=install_signature,
+        out=finalized,
+        verifier=_sshsig_verifier_with_trust_root(install_trust_root),
+    )
+    _copy_finalized_release_to_docs(finalized, repo, trust_root=install_trust_root)
+    shutil.copytree(finalized, repo / "docs", dirs_exist_ok=True)
+
+    result_path = tmp_path / "release-smoke-result.json"
+    result_path.write_bytes(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "container_image": "registry.example.invalid/ce-smoke@sha256:" + "a" * 64,
+                "containment": {"host_checkout_mount": False},
+                "release_binding": {
+                    "package_version": release_smoke_evidence.validate_release_tree(repo).package_version,
+                    "canonical_spec_sha256": release_smoke_evidence.validate_release_tree(repo).canonical_spec_sha256,
+                    "signed_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "finalize_manifest_sha256": release_smoke_evidence.validate_release_tree(repo).finalize_manifest_sha256,
+                    "artifacts_sha256": release_smoke_evidence.validate_release_tree(repo).artifacts_sha256,
+                },
+                "installation": {
+                    "ce_version": "0.3.6+12345678",
+                    "cev3_version": "0.3.6+12345678",
+                    "verified_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "pre_signed_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "post_signed_spec_sha256": release_smoke_evidence.validate_release_tree(repo).signed_spec_sha256,
+                    "pre_finalize_manifest_sha256": release_smoke_evidence.validate_release_tree(repo).finalize_manifest_sha256,
+                    "post_finalize_manifest_sha256": release_smoke_evidence.validate_release_tree(repo).finalize_manifest_sha256,
+                },
+                "summary": {"failed": 0, "stubbed": 0},
+                "stages": {"install": "passed", "install_verify": "passed"},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    )
+    unsigned = tmp_path / "release-v0.3.6.unsigned.json"
+    prepared = release_smoke_evidence.prepare_evidence(repo, result_path, unsigned)
+
+    smoke_key = tmp_path / "smoke-key"
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(smoke_key), "-C", "ce-root-v1"],
+        check=True,
+        capture_output=True,
+    )
+    signing_argv = shlex.split(prepared.signing_command)
+    signing_argv[signing_argv.index("/path/to/ce-root-v1-private")] = str(smoke_key)
+    subprocess.run(signing_argv, check=True, capture_output=True)
+    signature_base64 = base64.b64encode((tmp_path / "release-v0.3.6.unsigned.json.sig").read_bytes()).decode("ascii")
+    public = (tmp_path / "smoke-key.pub").read_text(encoding="utf-8").split()
+    smoke_trust_root = f"ce-root-v1 {public[0]} {public[1]}"
+
+    def smoke_verifier(algo: str, message: bytes, value: object, _key: object) -> bool:
+        assert algo == "ssh-ed25519"
+        assert isinstance(value, str)
+        return install_spec_signature_guard._ssh_keygen_verify_runner(
+            message=message,
+            signature=base64.b64decode(value),
+            allowed_signers=smoke_trust_root,
+            identity="ce-root-v1",
+            namespace=release_smoke_evidence.SSH_SIG_NAMESPACE,
+        )
+
+    evidence = repo / ".ce/release-evidence/release-v0.3.6.json"
+    carrier = repo / ".ce/pr-manifests/ce-559-release-smoke-evidence-gate.md"
+    release_smoke_evidence.finalize_evidence(
+        repo_root=repo,
+        unsigned_path=unsigned,
+        signature_base64=signature_base64,
+        evidence_out=evidence,
+        carrier_path=carrier,
+        base="HEAD",
+        verifier=smoke_verifier,
+        pinned_keys={"ce-root-v1": smoke_trust_root},
+    )
+    assert prepared.canonical_bytes == release_smoke_gate._canonical_record_bytes(
+        json.loads(evidence.read_text(encoding="ascii"))
+    )
+
+    _git(repo, "add", "docs", ".ce/release-evidence", ".ce/pr-manifests")
+    _git(repo, "commit", "-q", "-m", "finalized docs and public smoke evidence")
+    result = release_smoke_gate.run_with_base([repo], "HEAD~1", verifier=smoke_verifier)
+
+    assert finalized_result.version == "0.3.6"
+    assert result.ok, [error.format() for error in result.errors]

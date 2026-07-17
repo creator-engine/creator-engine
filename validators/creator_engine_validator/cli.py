@@ -296,6 +296,37 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_signed_artifact_pins.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
     verify_signed_artifact_pins.add_argument("paths", nargs="*", default=["."], help="paths to scope")
 
+    verify_release_smoke_evidence = sub.add_parser(
+        "verify-release-smoke-evidence",
+        help=(
+            "release-class PR-diff gate (requires exact signed hermetic smoke evidence when "
+            "both docs/llms-install.md and docs/release-finalize-manifest.yml change)"
+        ),
+    )
+    verify_release_smoke_evidence.add_argument("--base", required=True, help="base commit (e.g., the PR base SHA)")
+    verify_release_smoke_evidence.add_argument("paths", nargs="*", default=["."], help="paths to scope")
+
+    release_smoke_prepare = sub.add_parser(
+        "release-smoke-prepare",
+        help="validate finalized docs plus governed smoke result and emit exact offline-signing bytes",
+    )
+    release_smoke_prepare.add_argument("--repo-root", default=".", help="release publish PR checkout (default: .)")
+    release_smoke_prepare.add_argument("--result", required=True, help="deterministic endpoint-bound governed smoke result JSON")
+    release_smoke_prepare.add_argument("--unsigned-out", required=True, help="explicit path for canonical unsigned evidence bytes")
+
+    release_smoke_finalize = sub.add_parser(
+        "release-smoke-finalize",
+        help="verify a public detached SSHSIG and atomically write canonical evidence plus refreshed carrier",
+    )
+    release_smoke_finalize.add_argument("--repo-root", default=".", help="release publish PR checkout (default: .)")
+    release_smoke_finalize.add_argument("--unsigned", required=True, help="canonical unsigned evidence emitted by release-smoke-prepare")
+    smoke_sig = release_smoke_finalize.add_mutually_exclusive_group(required=True)
+    smoke_sig.add_argument("--signature-base64", help="base64 public detached SSHSIG value")
+    smoke_sig.add_argument("--signature-file", help="public detached SSHSIG file emitted by ssh-keygen -Y sign")
+    release_smoke_finalize.add_argument("--evidence-out", required=True, help="exact .ce/release-evidence/release-vX.Y.Z.json path")
+    release_smoke_finalize.add_argument("--carrier", required=True, help="existing release publish PR carrier to refresh")
+    release_smoke_finalize.add_argument("--base", default="origin/main", help="release publish PR comparison base")
+
     verify_dual_format_sync = sub.add_parser(
         "verify-dual-format-sync",
         help=(
@@ -942,6 +973,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         result = _run_signed_artifact_pins([Path(p) for p in args.paths], args.base)
         return _emit_results([result], args.json_output)
+    if subcommand == "verify-release-smoke-evidence":
+        from .checks.release_smoke_evidence import run_with_base as _run_release_smoke_evidence
+
+        result = _run_release_smoke_evidence([Path(p) for p in args.paths], args.base)
+        return _emit_results([result], args.json_output)
+    if subcommand == "release-smoke-prepare":
+        return _release_smoke_prepare(args)
+    if subcommand == "release-smoke-finalize":
+        return _release_smoke_finalize(args)
     if subcommand == "verify-dual-format-sync":
         from .checks.dual_format_sync import run_with_base as _run_dual_format_sync
 
@@ -1017,6 +1057,72 @@ def _release_stage(args) -> int:
         print(f"canonical spec: {result.canonical_spec_sha256}")
         print(f"signature placeholder: {result.signature_placeholder}")
         print(f"operator signing command: {result.signing_command}")
+    return 0
+
+
+def _release_smoke_prepare(args) -> int:
+    from .release_smoke_evidence import ReleaseSmokeEvidenceError, prepare_evidence
+
+    try:
+        result = prepare_evidence(
+            repo_root=args.repo_root,
+            result_path=args.result,
+            unsigned_out=args.unsigned_out,
+        )
+    except ReleaseSmokeEvidenceError as exc:
+        print(f"ERROR: release-smoke-prepare refused: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "unsigned_path": str(Path(args.unsigned_out).resolve()),
+        "package_version": result.package_version,
+        "finalize_manifest_sha256": result.manifest_sha256,
+        "unsigned_sha256": hashlib.sha256(result.canonical_bytes).hexdigest(),
+        "operator_signing_command": result.signing_command,
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"release-smoke-prepare: wrote {payload['unsigned_path']}")
+        print(f"unsigned sha256: {payload['unsigned_sha256']}")
+        print(f"offline Operator signing command: {result.signing_command}")
+    return 0
+
+
+def _release_smoke_finalize(args) -> int:
+    import base64
+
+    from .release_smoke_evidence import ReleaseSmokeEvidenceError, finalize_evidence
+
+    if args.signature_file:
+        try:
+            signature_base64 = base64.b64encode(Path(args.signature_file).read_bytes()).decode("ascii")
+        except OSError as exc:
+            print(f"ERROR: release-smoke-finalize refused: could not read public signature file: {exc}", file=sys.stderr)
+            return 1
+    else:
+        signature_base64 = args.signature_base64
+    try:
+        result = finalize_evidence(
+            repo_root=args.repo_root,
+            unsigned_path=args.unsigned,
+            signature_base64=signature_base64,
+            evidence_out=args.evidence_out,
+            carrier_path=args.carrier,
+            base=args.base,
+        )
+    except ReleaseSmokeEvidenceError as exc:
+        print(f"ERROR: release-smoke-finalize refused: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "evidence_path": str(result.evidence_path),
+        "carrier_path": str(result.carrier_path),
+        "evidence_sha256": hashlib.sha256(result.evidence_path.read_bytes()).hexdigest(),
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"release-smoke-finalize: verified public signature and wrote {result.evidence_path}")
+        print(f"refreshed carrier: {result.carrier_path}")
     return 0
 
 

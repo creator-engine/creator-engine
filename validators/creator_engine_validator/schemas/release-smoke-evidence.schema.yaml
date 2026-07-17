@@ -1,0 +1,86 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Creator Engine release smoke evidence
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - package_version
+  - canonical_spec_sha256
+  - signed_spec_sha256
+  - finalize_manifest_sha256
+  - artifacts_sha256
+  - summary
+  - stages
+  - containment
+  - container_image
+  - installation
+  - signature
+properties:
+  schema_version:
+    const: "1"
+  package_version:
+    type: string
+    pattern: '^\S+$'
+  canonical_spec_sha256:
+    type: string
+    pattern: '^[0-9a-f]{64}$'
+  signed_spec_sha256:
+    type: string
+    pattern: '^[0-9a-f]{64}$'
+  finalize_manifest_sha256:
+    type: string
+    pattern: '^[0-9a-f]{64}$'
+  artifacts_sha256:
+    type: string
+    pattern: '^[0-9a-f]{64}$'
+  summary:
+    type: object
+    additionalProperties: false
+    required: [failed, stubbed]
+    properties:
+      failed: {const: 0}
+      stubbed: {const: 0}
+  stages:
+    type: object
+    additionalProperties: false
+    required: [install, install_verify]
+    properties:
+      install: {const: passed}
+      install_verify: {const: passed}
+  containment:
+    type: object
+    additionalProperties: false
+    required: [host_checkout_mount]
+    properties:
+      host_checkout_mount: {const: false}
+  container_image:
+    type: string
+    pattern: '^[^\s@]+@sha256:[0-9a-f]{64}$'
+  installation:
+    type: object
+    additionalProperties: false
+    required:
+      - ce_version
+      - cev3_version
+      - verified_spec_sha256
+      - pre_signed_spec_sha256
+      - post_signed_spec_sha256
+      - pre_finalize_manifest_sha256
+      - post_finalize_manifest_sha256
+    properties:
+      ce_version: {type: string, pattern: '^\S+\+[0-9a-f]{8}$'}
+      cev3_version: {type: string, pattern: '^\S+\+[0-9a-f]{8}$'}
+      verified_spec_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      pre_signed_spec_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      post_signed_spec_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      pre_finalize_manifest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      post_finalize_manifest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+  signature:
+    type: object
+    additionalProperties: false
+    required: [key_id, algo, namespace, value]
+    properties:
+      key_id: {const: ce-root-v1}
+      algo: {const: ssh-ed25519}
+      namespace: {const: ce-release-smoke-v1}
+      value: {type: string}

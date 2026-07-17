@@ -1510,6 +1510,33 @@ def _run_preflight(
     )
     checks.append(
         _run_check(
+            "Release smoke-evidence gate",
+            lambda: (
+                _run_checked(
+                    "Release smoke-evidence gate",
+                    [
+                        py,
+                        "-m",
+                        "creator_engine_validator",
+                        "verify-release-smoke-evidence",
+                        "--base",
+                        comparison_base["value"],
+                        ".",
+                    ],
+                    config.repo_root,
+                    runner=runner,
+                    env=py_env,
+                    out=out,
+                    err=err,
+                ),
+                "passed",
+            )[1],
+            out,
+            err,
+        )
+    )
+    checks.append(
+        _run_check(
             "Support-corpus confidentiality intersection (ce ask product-lens allowlist)",
             lambda: (
                 _run_checked(

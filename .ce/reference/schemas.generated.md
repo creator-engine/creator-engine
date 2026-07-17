@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 77
+Schema files: 78
 
 ## Index
 
@@ -60,6 +60,7 @@ Schema files: 77
 | `schemas/playbook.schema.yaml` | Creator Engine playbook workflow | `object` |
 | `schemas/press-merge-bundle.schema.yaml` | Creator Engine Proposed Press-Merge Bundle | `object` |
 | `schemas/recommended-prompt.schema.yaml` | Creator Engine Hermes Recommended-Prompt Front Matter | `object` |
+| `schemas/release-smoke-evidence.schema.yaml` | Creator Engine release smoke evidence | `object` |
 | `schemas/review-evidence.schema.yaml` | Creator Engine Review Evidence Record | `object` |
 | `schemas/reviewer-authority-envelope.schema.yaml` | Creator Engine reviewer-venue side-effect-authority envelope | `object` |
 | `schemas/reviewer-registry.schema.yaml` | Creator Engine reviewer registry | `object` |
@@ -1800,6 +1801,35 @@ Properties:
 | `allowed_paths_sha256` | oneOf | yes |  |  |
 | `stop_line` | string | yes | minLength `1` |  |
 | `notes` | string | no |  |  |
+
+### `schemas/release-smoke-evidence.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine release smoke evidence |
+| `$id` | `` |
+| Root type | `object` |
+
+Required fields:
+
+`schema_version`, `package_version`, `canonical_spec_sha256`, `signed_spec_sha256`, `finalize_manifest_sha256`, `artifacts_sha256`, `summary`, `stages`, `containment`, `container_image`, `installation`, `signature`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `schema_version` | const | yes | const `1` |  |
+| `package_version` | string | yes | pattern `^\S+$` |  |
+| `canonical_spec_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `signed_spec_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `finalize_manifest_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `artifacts_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `summary` | object | yes | additionalProperties `false` |  |
+| `stages` | object | yes | additionalProperties `false` |  |
+| `containment` | object | yes | additionalProperties `false` |  |
+| `container_image` | string | yes | pattern `^[^\s@]+@sha256:[0-9a-f]{64}$` |  |
+| `installation` | object | yes | additionalProperties `false` |  |
+| `signature` | object | yes | additionalProperties `false` |  |
 
 ### `schemas/review-evidence.schema.yaml`
 
