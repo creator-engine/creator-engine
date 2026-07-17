@@ -144,6 +144,10 @@ field.
 
 ## f. Explicit Feature 003 deferral
 
+This section records the Sprint 0 Slice A historical snapshot. Feature 003 has
+since delivered `.github/workflows/validate.yml`; see the
+[CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html) for the current gate inventory.
+
 The following surfaces are deferred to Feature 003 (GitHub CI
 Governance):
 
