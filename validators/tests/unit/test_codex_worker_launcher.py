@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import codex_worker_launcher as launcher
+from creator_engine_validator import ce_cli
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -59,6 +60,7 @@ PREFIXED_EXACT_ONLY_SENSITIVE_ENV_NAMES = [
     for name in EXACT_ONLY_SENSITIVE_ENV_NAMES
     for prefix in ("LC_", "LC_LC_", "LC_LC_LC_")
 ]
+CANONICAL_ADD_DIR_ALIASES = ["./governance", "governance/.", "governance//"]
 
 
 class HermeticFilesystem(launcher.RealLauncherFilesystem):
@@ -539,6 +541,117 @@ def test_canonical_policy_rejects_symlink_replacement(worktree: Path) -> None:
     canonical.symlink_to(replacement)
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launcher policy.*symlink"):
         launcher.load_canonical_policy(worktree, filesystem=HermeticFilesystem())
+
+
+@pytest.mark.parametrize("alias", CANONICAL_ADD_DIR_ALIASES)
+def test_policy_parser_refuses_canonical_add_dir_alias_duplicates(
+    worktree: Path, alias: str
+) -> None:
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["canonical_add_dirs"].append(alias),
+    )
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError, match="canonical_add_dirs.*duplicates"
+    ):
+        policy(worktree)
+
+
+@pytest.mark.parametrize("alias", CANONICAL_ADD_DIR_ALIASES)
+def test_cli_refuses_canonical_add_dir_alias_duplicates_without_traceback(
+    worktree: Path, monkeypatch, capsys, alias: str
+) -> None:
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["canonical_add_dirs"].append(alias),
+    )
+    brief = worktree / ".ce" / "briefs" / "task.md"
+    brief.write_bytes(b"bounded cli alias test\n")
+    digest = hashlib.sha256(brief.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_launcher_filesystem", lambda: HermeticFilesystem()
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_version_probe", lambda: pytest.fail("version probe constructed")
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner constructed")
+    )
+    assert ce_cli.main(
+        [
+            "worker",
+            "launch",
+            "--role",
+            "architect_research",
+            "--venue",
+            "dev1-local",
+            "--worktree",
+            str(worktree),
+            "--brief",
+            str(brief),
+            "--brief-sha256",
+            digest,
+            "--run-id",
+            "cli-add-dir-alias-test",
+        ]
+    ) == 1
+    captured = capsys.readouterr()
+    assert "ce worker launch refused" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("alias", CANONICAL_ADD_DIR_ALIASES)
+def test_direct_policy_refuses_canonical_add_dir_alias_duplicates_before_probe(
+    worktree: Path, alias: str
+) -> None:
+    loaded = policy(worktree)
+    unsafe_policy = replace(
+        loaded,
+        canonical_add_dirs=(*loaded.canonical_add_dirs, alias),
+    )
+    probe = FixedVersionProbe()
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError, match="canonical_add_dirs.*duplicates"
+    ):
+        launcher.build_launch_plan(
+            policy=unsafe_policy,
+            governed_input=governed_input(worktree, role="architect_research"),
+            role="architect_research",
+            venue="dev1-local",
+            worktree=str(worktree),
+            filesystem=UnusedFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
+
+
+def test_direct_policy_refuses_resolved_canonical_add_dir_identity_duplicate_before_probe(
+    worktree: Path,
+) -> None:
+    loaded = policy(worktree)
+    governance = str(worktree / "governance")
+    validators = str(worktree / "validators")
+
+    class ResolvedAliasFilesystem(HermeticFilesystem):
+        def realpath(self, path: str) -> str:
+            if os.path.normpath(path) == validators:
+                return governance
+            return super().realpath(path)
+
+    probe = FixedVersionProbe()
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError, match="canonical_add_dirs.*duplicates"
+    ):
+        launcher.build_launch_plan(
+            policy=loaded,
+            governed_input=governed_input(worktree, role="architect_research"),
+            role="architect_research",
+            venue="dev1-local",
+            worktree=str(worktree),
+            filesystem=ResolvedAliasFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
 
 
 def test_worktree_and_canonical_directories_are_real_existing_directories(worktree: Path) -> None:

@@ -25,5 +25,7 @@ issue: ce-ops#566
 - Restricts inherited locale state to canonical locale variables, closing repeated
   `LC_` prefix bypasses, and governs non-string direct-policy binary templates before
   planner filesystem or version-probe use.
+- Refuses canonical and resolved duplicate add-dir identities at parser and planner
+  boundaries so lexical aliases cannot emit repeated `--add-dir` arguments.
 - Removes caller launch-surface overrides; plans retain canonical paths/digests.
 - Resolves the tracked VPS image source/digest while preserving exact-name removal, readiness, and diagnostics.

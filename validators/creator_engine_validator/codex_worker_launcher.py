@@ -459,6 +459,24 @@ def _require_string_list(value: Any, field: str) -> tuple[str, ...]:
     return values
 
 
+def _require_unique_canonical_add_dirs(values: Sequence[str]) -> None:
+    if any(not isinstance(value, str) or not value.strip() for value in values):
+        raise CodexWorkerLaunchError(
+            "policy canonical_add_dirs must contain nonempty strings"
+        )
+    normalized = tuple(os.path.normpath(value) for value in values)
+    if len(set(normalized)) != len(normalized):
+        raise CodexWorkerLaunchError(
+            "policy canonical_add_dirs contains canonical duplicates"
+        )
+
+
+def _require_canonical_add_dir_list(value: Any) -> tuple[str, ...]:
+    values = _require_string_list(value, "canonical_add_dirs")
+    _require_unique_canonical_add_dirs(values)
+    return values
+
+
 def _render_binary_template(*, template: str, version: str, venue: str) -> str:
     """Render exactly one plain ``{version}`` field and no other format syntax."""
     if not isinstance(template, str):
@@ -631,7 +649,7 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
         model=_require_string(defaults["model"], "model_defaults.model"),
         effort=_require_string(defaults["effort"], "model_defaults.effort"),
         role_provider_credentials=tuple(role_provider_credentials),
-        canonical_add_dirs=_require_string_list(raw["canonical_add_dirs"], "canonical_add_dirs"),
+        canonical_add_dirs=_require_canonical_add_dir_list(raw["canonical_add_dirs"]),
         worktree=worktree,
         source_path=source_path,
         source_sha256=hashlib.sha256(raw_bytes).hexdigest(),
@@ -733,17 +751,29 @@ def _canonical_add_dirs(
     filesystem: LauncherFilesystem,
 ) -> tuple[str, ...]:
     directories: list[str] = []
+    candidates: set[str] = set()
+    resolved_directories: set[str] = set()
     for relative in policy.canonical_add_dirs:
         if PurePath(relative).is_absolute() or ".." in PurePath(relative).parts:
             raise CodexWorkerLaunchError("policy canonical_add_dirs must be relative and nonescaping")
         candidate = os.path.normpath(os.path.join(worktree, relative))
         if not _inside(candidate, worktree) or candidate == worktree:
             raise CodexWorkerLaunchError("policy canonical_add_dirs escapes the worktree")
+        if candidate in candidates:
+            raise CodexWorkerLaunchError(
+                "policy canonical_add_dirs contains canonical duplicates"
+            )
+        candidates.add(candidate)
         resolved = filesystem.realpath(candidate)
+        if resolved in resolved_directories:
+            raise CodexWorkerLaunchError(
+                "policy canonical_add_dirs contains resolved duplicates"
+            )
         if resolved != candidate:
             raise CodexWorkerLaunchError("canonical add-dir must not be a symlink")
         if not filesystem.is_dir(resolved):
             raise CodexWorkerLaunchError("canonical add-dir must be an existing real directory")
+        resolved_directories.add(resolved)
         directories.append(resolved)
     return tuple(directories)
 
@@ -825,6 +855,7 @@ def build_launch_plan(
             version=policy.version,
             venue=venue_policy.name,
         )
+    _require_unique_canonical_add_dirs(policy.canonical_add_dirs)
     fs = filesystem or RealLauncherFilesystem()
     probe = version_probe or SubprocessCodexVersionProbe()
     root = _real_directory(worktree, field="worktree", filesystem=fs)
