@@ -39,9 +39,15 @@ Consequences:
   neither substitutes for human ratification (Feature 001 FR-017;
   Feature 002 FR-013).
 
-## b. Required CI checks (specified; executed by Feature 003)
+## b. Historical Sprint 0 CI check baseline
 
-The required check set for v0.1 is:
+The following records the v0.1/Sprint 0 policy baseline. All check names,
+future-feature expectations, and reproducibility language in this section are
+historical; this section does not define today's required CI gate inventory. See
+the [CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html) for the sole current
+observed local/CI gate inventory and its fidelity gaps.
+
+The required check set for v0.1 was:
 
 | Check | Purpose | Source |
 |---|---|---|
@@ -81,7 +87,7 @@ The policy CI must enforce when Feature 003 lands:
 
 - The canonical branch (typically `main`) MUST require:
   - At least one approving review distinct from the PR author.
-  - All required CI checks (§b) passing.
+  - All required CI checks for the candidate passing.
   - A signed-off pre-merge attestation linked from the PR.
   - For privileged-class PRs, a Source ratification record linked
     from the PR.
@@ -128,7 +134,7 @@ T17 (Independent Review Complete → CI Evidence Complete):
 
 - The required evidence at T17 is the CI status check records and
   validator outputs per Feature 002 §SDLC Transition Matrix.
-- T17 advances only after every required check in §b has passed.
+- T17 advances only after every required check for the candidate has passed.
 - A red CI run halts at T17 until resolved; the mutation does NOT
   advance to T18 (Scope Audit Complete) on stale or skipped CI
   evidence.
