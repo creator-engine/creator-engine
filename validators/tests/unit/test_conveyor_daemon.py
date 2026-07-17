@@ -35,7 +35,7 @@ from creator_engine_validator.validation_sandbox_receipt import ValidationSandbo
 
 HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 
-TEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-daemon-alloc-test-"))
+TEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="conveyor-daemon-alloc-test-"))
 TEST_ALLOCATOR = DaemonPathAllocator(
     DaemonRuntimeRoots.from_root(TEST_RUNTIME_ROOT, create=True),
     secret=b"conveyor-daemon-unit-test-secret",
@@ -74,6 +74,26 @@ ARMED_ROOTS = {
     "receipt_issuer": _receipt_issuer(),
     "validation_ledger_binding": _validation_ledger_binding(),
 }
+
+
+def _receipt_armed_roots(tmp_path: Path) -> dict[str, object]:
+    runtime_root = tmp_path / "runtime"
+    return {
+        "path_allocator": DaemonPathAllocator(
+            DaemonRuntimeRoots.from_root(runtime_root, create=True),
+            secret=b"conveyor-daemon-receipt-test-secret",
+        ),
+        "daemon_lease": FakeLease(),
+        "receipt_issuer": _receipt_issuer(),
+        "validation_ledger_binding": ConveyorValidationLedgerBinding(
+            controller_id="conveyor-daemon-test-controller",
+            lane_id="conveyor-daemon-test-lane",
+            claim_ref="claims/conveyor-daemon-test-controller/conveyor-daemon-test-lane.yaml",
+            repo_root=runtime_root,
+            side_effect_ledger_root=runtime_root / "side-effect-ledger",
+            active_work_ledger_root=runtime_root / "active-work-ledger",
+        ),
+    }
 
 
 class FakeGit:
@@ -188,12 +208,15 @@ class RealLocalGit:
 
 
 class FakeGh:
-    def __init__(self):
+    def __init__(self, *, pr_returncode: int = 0):
+        self.pr_returncode = pr_returncode
         self.calls: list[tuple[tuple[str, ...], Path]] = []
 
     def __call__(self, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
         self.calls.append((tuple(args), cwd))
         branch = tuple(args)[tuple(args).index("--head") + 1]
+        if self.pr_returncode:
+            return ConveyorCommandResult(self.pr_returncode, "", "PR create response lost\n")
         return ConveyorCommandResult(0, f"https://github.example/{branch}/pull/1\n", "")
 
 
@@ -340,7 +363,7 @@ def _fake_ledger_recorder(record_path: Path):
 
 class CountingAllocator:
     def __init__(self):
-        runtime_root = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-counting-alloc-"))
+        runtime_root = Path(tempfile.mkdtemp(prefix="conveyor-counting-alloc-"))
         self.inner = DaemonPathAllocator(
             DaemonRuntimeRoots.from_root(runtime_root, create=True),
             secret=b"conveyor-daemon-counting-secret",
@@ -1746,13 +1769,13 @@ def test_receipt_terminal_state_refuses_reentry_after_restart(tmp_path):
     first = ConveyorDaemon(
         discovery_runner=lambda: [payload],
         armed=True,
-        **ARMED_ROOTS,
+        **_receipt_armed_roots(tmp_path),
         git_runner=FakeGit(),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
         now=FakeClock(),
         ledger_writer=lambda record: None,
-        prepare_runner=FakePrepare(record_validation=True),
+        prepare_runner=FakePrepare(failing_branches={"ce-388-conveyor-discovery"}),
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
@@ -1762,7 +1785,70 @@ def test_receipt_terminal_state_refuses_reentry_after_restart(tmp_path):
     restarted = ConveyorDaemon(
         discovery_runner=lambda: [payload],
         armed=True,
-        **ARMED_ROOTS,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(failing_branches={"ce-388-conveyor-discovery"}),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+    assert restarted.results[0].status == "skipped"
+    assert restarted.results[0].reasons == ("receipt is not processable",)
+
+
+@pytest.mark.parametrize(
+    ("git_runner", "gh_runner"),
+    [
+        (FakeGit(push_returncode=1), FakeGh()),
+        (FakeGit(), FakeGh(pr_returncode=1)),
+    ],
+    ids=("push", "pr-create"),
+)
+def test_receipt_marks_post_side_effect_failure_uncertain(tmp_path, git_runner, gh_runner):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+        )()
+    )[0]
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=git_runner,
+        validate_runner=FakeValidate(),
+        gh_runner=gh_runner,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert json.loads(state_path.read_text())['receipts'][0]['state'] == "uncertain"
+
+
+def test_receipt_records_successful_pr_open(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
         git_runner=FakeGit(),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
@@ -1772,8 +1858,9 @@ def test_receipt_terminal_state_refuses_reentry_after_restart(tmp_path):
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
-    assert restarted.results[0].status == "skipped"
-    assert restarted.results[0].reasons == ("receipt is not processable",)
+
+    assert result.results[0].status == "pr-opened"
+    assert json.loads(state_path.read_text())['receipts'][0]['state'] == "pr_opened"
 
 
 def test_hostile_item_bundle_path_transport_gadget_is_rejected_never_reaches_git():
