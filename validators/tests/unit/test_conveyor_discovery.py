@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -9,7 +10,9 @@ from creator_engine_validator import conveyor_discovery
 from creator_engine_validator.conveyor_daemon import ConveyorDaemonItem
 from creator_engine_validator.conveyor_discovery import (
     ConveyorSeatDiscoveryRunner,
+    HandledSignalReceipt,
     ReadyForHarvestSignal,
+    ReceiptIdentity,
     SeatProbeSpec,
     parse_ready_for_harvest_signals,
 )
@@ -18,6 +21,11 @@ from creator_engine_validator.pickup_payload_schema import validate_discovery_pa
 SHA_ONE = "a" * 40
 SHA_TWO = "b" * 40
 SHA_THREE = "c" * 40
+
+
+def _receipt_for_payload(state_path, payload):
+    identity = payload.receipt_identity
+    return HandledSignalReceipt(state_path, identity.seat_id, identity.branch, identity.sha)
 
 
 def test_seat_probe_spec_stores_argv_as_tuple():
@@ -155,12 +163,12 @@ def test_runner_receipts_are_versioned_and_only_one_duplicate_is_processable(tmp
     )
 
     first = list(runner())
-    assert first[0].receipt.claim() is True
+    assert _receipt_for_payload(state_path, first[0]).claim() is True
     second = list(runner())
 
     assert len(first) == 1
     assert len(second) == 1
-    assert second[0].receipt.claim() is False
+    assert _receipt_for_payload(state_path, second[0]).claim() is False
     assert first[0]["branch_name"] == "ce-388-conveyor-discovery"
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state == {
@@ -202,7 +210,7 @@ def test_receipt_transitions_are_monotonic_and_new_sha_is_separate(tmp_path):
         state_path,
         probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
     )
-    first = list(runner())[0].receipt
+    first = _receipt_for_payload(state_path, list(runner())[0])
     assert first.claim() is True
     assert first.complete("failed") is True
     assert first.claim() is False
@@ -213,7 +221,7 @@ def test_receipt_transitions_are_monotonic_and_new_sha_is_separate(tmp_path):
         state_path,
         probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_TWO}",
     )
-    second = list(next_runner())[0].receipt
+    second = _receipt_for_payload(state_path, list(next_runner())[0])
     assert second.claim() is True
     assert second.complete("uncertain") is True
     assert {(entry["sha"], entry["state"]) for entry in json.loads(state_path.read_text())["receipts"]} == {
@@ -224,22 +232,24 @@ def test_receipt_transitions_are_monotonic_and_new_sha_is_separate(tmp_path):
 
 def test_new_sha_is_processable_while_prior_receipt_is_unfinished(tmp_path):
     state_path = tmp_path / "receipts.json"
-    first = list(
+    first_payload = list(
         ConveyorSeatDiscoveryRunner(
             [SeatProbeSpec("seat-1", ("probe",))],
             state_path,
             probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
         )()
-    )[0].receipt
+    )[0]
+    first = _receipt_for_payload(state_path, first_payload)
     assert first.claim() is True
 
-    second = list(
+    second_payload = list(
         ConveyorSeatDiscoveryRunner(
             [SeatProbeSpec("seat-1", ("probe",))],
             state_path,
             probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_TWO}",
         )()
-    )[0].receipt
+    )[0]
+    second = _receipt_for_payload(state_path, second_payload)
 
     assert second.claim() is True
     assert {(entry["sha"], entry["state"]) for entry in json.loads(state_path.read_text())["receipts"]} == {
@@ -256,7 +266,8 @@ def test_receipt_lock_failure_fails_closed_and_preserves_state(tmp_path, monkeyp
             state_path,
             probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
         )()
-    )[0].receipt
+    )[0]
+    receipt = _receipt_for_payload(state_path, receipt)
     original = state_path.read_text(encoding="utf-8")
 
     def fail_lock(*_args):
@@ -278,7 +289,8 @@ def test_receipt_replace_failure_fails_closed_and_preserves_state(tmp_path, monk
             state_path,
             probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
         )()
-    )[0].receipt
+    )[0]
+    receipt = _receipt_for_payload(state_path, receipt)
     original = state_path.read_text(encoding="utf-8")
 
     def fail_replace(*_args):
@@ -300,7 +312,7 @@ def test_concurrent_claims_have_one_winner_and_atomic_json(tmp_path):
         state_path,
         probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
     )
-    receipt = list(runner())[0].receipt
+    receipt = _receipt_for_payload(state_path, list(runner())[0])
     with ThreadPoolExecutor(max_workers=2) as pool:
         claims = list(pool.map(lambda _ignored: receipt.claim(), range(2)))
 
@@ -319,10 +331,81 @@ def test_emitted_payload_passes_schema_and_daemon_mapping(tmp_path):
 
     assert set(payload) == {"issue", "branch_name", "pr_title", "pr_body"}
     assert validate_discovery_payload(payload).to_dict() == payload
+    assert payload.receipt_identity == ReceiptIdentity("seat-1", "ce-388-conveyor-discovery", SHA_ONE)
+    assert not hasattr(payload, "receipt")
+    assert not hasattr(payload.receipt_identity, "state_path")
     item = ConveyorDaemonItem.from_mapping(payload)
     assert item.branch == "ce-388-conveyor-discovery"
     assert item.issue == "388"
     assert SHA_ONE in payload["pr_body"]
+
+
+def test_receipt_state_fsyncs_parent_directory_after_replace(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+    events: list[str] = []
+    parent_fd: int | None = None
+    real_replace = conveyor_discovery.os.replace
+    real_open = conveyor_discovery.os.open
+    real_fsync = conveyor_discovery.os.fsync
+    real_close = conveyor_discovery.os.close
+
+    def record_replace(source, target):
+        events.append("replace")
+        return real_replace(source, target)
+
+    def record_open(path, flags, *args):
+        nonlocal parent_fd
+        fd = real_open(path, flags, *args)
+        if Path(path) == state_path.parent:
+            parent_fd = fd
+            events.append("parent-open")
+        return fd
+
+    def record_fsync(fd):
+        if fd == parent_fd:
+            events.append("parent-fsync")
+        return real_fsync(fd)
+
+    def record_close(fd):
+        if fd == parent_fd:
+            events.append("parent-close")
+        return real_close(fd)
+
+    monkeypatch.setattr(conveyor_discovery.os, "replace", record_replace)
+    monkeypatch.setattr(conveyor_discovery.os, "open", record_open)
+    monkeypatch.setattr(conveyor_discovery.os, "fsync", record_fsync)
+    monkeypatch.setattr(conveyor_discovery.os, "close", record_close)
+
+    conveyor_discovery._write_receipt_state(state_path, [])
+
+    assert events == ["replace", "parent-open", "parent-fsync", "parent-close"]
+
+
+def test_receipt_parent_fsync_failure_refuses_write_and_cleans_temp(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+    real_open = conveyor_discovery.os.open
+    real_fsync = conveyor_discovery.os.fsync
+    parent_fd: int | None = None
+
+    def record_open(path, flags, *args):
+        nonlocal parent_fd
+        fd = real_open(path, flags, *args)
+        if Path(path) == state_path.parent:
+            parent_fd = fd
+        return fd
+
+    def fail_parent_fsync(fd):
+        if fd == parent_fd:
+            raise OSError("directory fsync denied")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(conveyor_discovery.os, "open", record_open)
+    monkeypatch.setattr(conveyor_discovery.os, "fsync", fail_parent_fsync)
+
+    with pytest.raises(ValueError, match="receipt_state_write_failed:OSError"):
+        conveyor_discovery._write_receipt_state(state_path, [])
+
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_branch_without_issue_prefix_uses_safe_default_issue(tmp_path):

@@ -68,12 +68,25 @@ class HandledSignalReceipt:
         return _receipt_ledger(self.state_path).complete(self, state)
 
 
-class ReceiptDiscoveryPayload(dict[str, str]):
-    """Schema-shaped discovery data carrying a non-serialised local receipt."""
+@dataclass(frozen=True)
+class ReceiptIdentity:
+    """Data-only coordinates for a receipt owned by the armed daemon."""
 
-    def __init__(self, payload: Mapping[str, str], receipt: HandledSignalReceipt) -> None:
+    seat_id: str
+    branch: str
+    sha: str
+
+    def __post_init__(self) -> None:
+        if not self.seat_id or not self.branch or SHA_PATTERN.fullmatch(self.sha) is None:
+            raise ValueError("receipt_identity_invalid")
+
+
+class ReceiptDiscoveryPayload(dict[str, str]):
+    """Schema-shaped discovery data carrying receipt identity, never capability."""
+
+    def __init__(self, payload: Mapping[str, str], receipt_identity: ReceiptIdentity) -> None:
         super().__init__(payload)
-        self.receipt = receipt
+        self.receipt_identity = receipt_identity
 
 
 class ConveyorSeatDiscoveryRunner:
@@ -139,7 +152,12 @@ class ConveyorSeatDiscoveryRunner:
                         detail=str(exc),
                     )
                     return tuple(payloads)
-                payloads.append(ReceiptDiscoveryPayload(payload, receipt))
+                payloads.append(
+                    ReceiptDiscoveryPayload(
+                        payload,
+                        ReceiptIdentity(receipt.seat_id, receipt.branch, receipt.sha),
+                    )
+                )
                 emitted.add(key)
 
         return tuple(payloads)
@@ -410,6 +428,11 @@ def _write_receipt_state(state_path: Path, receipts: list[dict[str, str]]) -> No
             os.fsync(handle.fileno())
         try:
             os.replace(tmp_name, state_path)
+            parent_fd = os.open(state_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
         except OSError as exc:
             raise ValueError(f"receipt_state_write_failed:{type(exc).__name__}") from exc
     finally:
@@ -445,7 +468,10 @@ def _emit_audit(
 
 __all__ = [
     "ConveyorSeatDiscoveryRunner",
+    "HandledSignalReceipt",
     "ReadyForHarvestSignal",
+    "ReceiptDiscoveryPayload",
+    "ReceiptIdentity",
     "SeatProbeSpec",
     "parse_ready_for_harvest_signals",
     "payload_for_signal",
