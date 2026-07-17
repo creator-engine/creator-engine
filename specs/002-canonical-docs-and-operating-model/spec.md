@@ -1523,22 +1523,26 @@ them.
 
 ### 15. `docs/devops/CI_CD_STRATEGY.md`
 
-- **Purpose**: Define what Creator Engine governs about CI/CD even
-  though `.github/` automation is deferred to Feature 003.
+- **Purpose**: Define what Creator Engine governs about CI/CD while preserving
+  the historical Sprint 0 deferral of `.github/` automation to Feature 003.
 - **Required sections**: (a) verifies-not-ratifies invariant
-  (Feature 002 FR-013); (b) required CI checks (tests, lint,
-  typecheck, build, Creator Engine validator) — specified, executed
-  by Feature 003; (c) protected-branch policy summary (deferred
-  Feature 003); (d) CI mutation-class ratification policy (CI
+  (Feature 002 FR-013); (b) historical v0.1/Sprint 0 required-check baseline
+  (tests, lint, typecheck, build, Creator Engine validator), with the current
+  observed required-check inventory maintained in the
+  [CI/CD efficiency audit](../../docs/devops/CI_CD_EFFICIENCY_AUDIT.html)
+  rather than duplicated into §b; (c) historical protected-branch policy
+  summary from the Feature 003 deferral epoch; (d) CI mutation-class
+  ratification policy (CI
   changes are themselves a privileged mutation requiring Source
   ratification per Feature 001 FR-008); (e) CI evidence linkage to
   SDLC transition T17; (f) explicit Feature 003 deferral.
-- **Source-of-truth relationship**: REFERENCE — Feature 003 ratifies
-  CI workflow content; Feature 002 specifies the policy CI must
-  obey.
+- **Source-of-truth relationship**: REFERENCE — Feature 003 ratifies CI
+  workflow content; Feature 002 specifies the policy CI must obey and preserves
+  the historical deferral record.
 - **Acceptance criteria**: verifies-not-ratifies invariant explicit;
-  Feature 003 deferral explicit; CI evidence linkage to T17 stated;
-  no `.github/` workflow content authored.
+  historical Feature 003 deferral explicit; CI evidence linkage to T17 stated;
+  an auditable current required-check inventory is linked; no `.github/`
+  workflow content authored by the Sprint 0 slice.
 
 ### 16. `docs/devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`
 

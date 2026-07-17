@@ -5,8 +5,8 @@
 **Source-of-truth relationship**: REFERENCE. This document defers to
 Feature 001 Definition of Done (FR-014) and validator requirements
 (FR-025–FR-027a), and to the verifies-not-ratifies invariant at
-Feature 002 FR-013. CI execution is deferred to Feature 003; this
-document specifies the testing posture the future CI must obey.
+Feature 002 FR-013. At the Sprint 0 authoring epoch, CI execution was deferred
+to Feature 003; this document specifies the testing posture CI must obey.
 
 This document is the engineering-practice complement of
 [`./QA_STRATEGY.md`](./QA_STRATEGY.md). The QA strategy says *which
@@ -103,11 +103,11 @@ examples MUST complete in under sixty seconds on a developer
 workstation with no external network requests. Performance
 regressions are themselves test failures.
 
-## d. CI verification expectations (Feature 003 deferral)
+## d. CI verification expectations (historical Feature 003 baseline)
 
-CI is mechanical validation. CI verifies; CI does NOT ratify. CI's
-expected check set (per
-[`../devops/CI_CD_STRATEGY.md`](../devops/CI_CD_STRATEGY.md) §b):
+CI is mechanical validation. CI verifies; CI does NOT ratify. The following
+was the expected v0.1/Sprint 0 check baseline recorded in
+[`../devops/CI_CD_STRATEGY.md`](../devops/CI_CD_STRATEGY.md) §b:
 
 - `pytest` on `validators/tests/`.
 - Lint and typecheck on the validator source.
@@ -118,19 +118,20 @@ expected check set (per
   Feature 001) (`python -m creator_engine_validator scan-no-limitless`).
 - Schema validation against `schemas/*.schema.yaml`.
 
-CI workflow content (`.github/workflows/`) and check definitions are
-deferred to Feature 003. Until Feature 003 lands, the same check set
-runs locally per the offline install in
+The [CI/CD efficiency audit](../devops/CI_CD_EFFICIENCY_AUDIT.html) is the sole
+current observed local/CI gate inventory. At the Sprint 0 epoch, CI workflow
+content (`.github/workflows/`) and check definitions were deferred to Feature
+003, and the same baseline ran locally per the offline install in
 [`../../validators/README.md`](../../validators/README.md). The
-operating-model SDLC transition T17 still exists; its evidence is
-captured manually (`pytest -q` output, validator output) and
+operating-model SDLC transition T17 remains in force; before CI was wired, its
+evidence was captured manually (`pytest -q` output, validator output) and
 attached to the pre-merge attestation per
 [`../governance/ATTESTATION_MODEL.md`](../governance/ATTESTATION_MODEL.md)
-§a until CI is wired.
+§a.
 
 CI changes are themselves a privileged
 `governance`/`security`/`deploy` mutation per Feature 001 FR-008.
-Tests covering CI configuration land with the Feature 003 batch.
+Tests covering CI configuration were assigned to the Feature 003 batch.
 
 ## e. Evidence-capture format
 
@@ -192,7 +193,7 @@ inputs to the attestation record; none of them is ratification.
 This TESTING_STRATEGY.md satisfies Feature 002 Canonical Document
 Specification #14: every required section is present; the
 self-claim rejection invariant is cited (Feature 001 FR-014); the
-Feature 003 CI execution deferral is explicit; the
+historical Feature 003 CI execution deferral is explicit; the
 testing-level-to-mutation-class table in
 [`./QA_STRATEGY.md`](./QA_STRATEGY.md) §b is the authoritative
 shared table, cross-referenced here.

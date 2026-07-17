@@ -71,14 +71,14 @@ must accompany merge.
 - PR creation, comments, status checks, merges, release tags, and
   environments.
 - Branch protection settings, PR template files, environment gates —
-  all of which live under `.github/` and are deferred per below.
+  all of which live under `.github/`; their historical deferrals are recorded
+  below.
 
-**Deferral status**: `.github/` workflows, PR template files, branch
-protection (as live GitHub settings), and environment gates are
-deferred to Feature 003 (branch protection / PR templates) and
-Feature 006 (deploy environments). Feature 002 specifies the policy
-GitHub must obey when those features land but does not author any
-`.github/` content.
+**Deferral status**: At this map's Sprint 0 authoring epoch, `.github/`
+workflows, PR template files, and branch protection (as live GitHub settings)
+were deferred to Feature 003, while environment gates were deferred to Feature
+006. Feature 002 specifies the policy GitHub must obey but did not itself
+author `.github/` content.
 
 **Authority note**: branch protection, PR template, environment
 gate, and merge-policy changes are themselves privileged
@@ -92,10 +92,10 @@ NOT ratify.
 
 **What Creator Engine governs**:
 
-- The required CI checks (specified in
-  [`../devops/CI_CD_STRATEGY.md`](../devops/CI_CD_STRATEGY.md) §b):
-  tests, lint, typecheck, build, Creator Engine validator, schema
-  validation.
+- The historical v0.1/Sprint 0 required-check baseline recorded in
+  [`../devops/CI_CD_STRATEGY.md`](../devops/CI_CD_STRATEGY.md) §b. The
+  [CI/CD efficiency audit](../devops/CI_CD_EFFICIENCY_AUDIT.html) is the sole
+  current observed local/CI gate inventory.
 - The verifies-not-ratifies invariant (FR-013).
 - The CI evidence linkage to SDLC transition T17.
 - The rule that CI policy or workflow changes are themselves
@@ -106,9 +106,10 @@ NOT ratify.
 - Test execution, lint/typecheck execution, validator execution,
   status check reporting, run logs, and build artifacts.
 
-**Deferral status**: CI workflow content (`.github/workflows/`), CI
-check definitions, and CI infrastructure are deferred to Feature 003.
-Feature 002 specifies the policy; Feature 003 wires the workflows.
+**Deferral status**: At the Sprint 0 authoring epoch, CI workflow content
+(`.github/workflows/`), check definitions, and infrastructure were deferred to
+Feature 003. Feature 002 specifies the policy; Feature 003 subsequently wired
+the workflow. Current observed gate inventory remains in the linked audit.
 
 **Authority note**: CI passing does not advance a privileged-class
 mutation past T19 (Ratification Complete). CI output becomes
@@ -199,6 +200,6 @@ treatment lives in
 This integration-map.md satisfies Feature 002 Canonical Document
 Specification #8: every integration boundary row names ownership
 (Creator Engine governs vs external owns) and deferral status;
-`.github/` is explicitly listed as a Feature 003 deferral; Spec Kit
+`.github/` is explicitly listed as a historical Feature 003 deferral; Spec Kit
 byte-identical invariant is stated; the trust boundaries summary
 links to the SAD.
