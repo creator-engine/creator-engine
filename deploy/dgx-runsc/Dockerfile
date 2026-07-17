@@ -147,9 +147,11 @@ ENV PATH="/opt/ce-validator-venv/bin:${PATH}"
 RUN set -eux; \
     ldconfig; \
     /opt/ce-validator-venv/bin/python --version | grep -q '^Python 3\\.14\\.'; \
+    command -v ce; \
     /opt/ce-validator-venv/bin/ce --help >/dev/null; \
     /opt/ce-validator-venv/bin/python -c "import pytest, yaml, jsonschema, xdist; print('validator toolchain OK')"; \
-    /opt/ce-validator-venv/bin/python -c "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'"
+    /opt/ce-validator-venv/bin/python -c "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'"; \
+    command -v ssh-keygen
 
 COPY --from=herdr-builder /build/herdr/target/release/herdr /usr/local/bin/herdr
 COPY deploy/dgx-runsc/herdr-harness-entrypoint.sh /usr/local/bin/ce-herdr-harness-entrypoint

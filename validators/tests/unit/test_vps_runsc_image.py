@@ -11,6 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VPS_DIR = REPO_ROOT / "deploy" / "vps-runsc"
 DOCKERFILE = VPS_DIR / "Dockerfile"
+DGX_DOCKERFILE = REPO_ROOT / "deploy" / "dgx-runsc" / "Dockerfile"
 ENTRYPOINT = VPS_DIR / "herdr-harness-entrypoint.sh"
 README = VPS_DIR / "README.md"
 
@@ -96,6 +97,8 @@ def test_dockerfile_bakes_ci_parity_validator_venv() -> None:
     # libsodium for the PCO-024 Ed25519 verification path.
     assert "libsodium23" in text
     assert "find_library('sodium')" in text
+    assert "openssh-client" in text
+    assert "command -v ssh-keygen" in text
 
 
 def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> None:
@@ -120,6 +123,25 @@ def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> No
         in text
     )
     assert 'CMD ["tui"]' in text
+
+
+def test_dgx_dockerfile_preserves_full_preflight_toolchain() -> None:
+    text = DGX_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "ARG CODEX_VERSION=0.144.1" in text
+    assert (
+        "ARG CODEX_SHA256=9513fa3f5f4ad444ac1e40d972aef0e2664834ec54da987d54aba0dc2f13ea07"
+        in text
+    )
+    assert "codex-aarch64-unknown-linux-musl.tar.gz" in text
+    assert "check_for_update_on_startup = false" in text
+    assert "openssh-client" in text
+    assert "libsodium23" in text
+    assert "command -v ssh-keygen" in text
+    assert "command -v ce" in text
+    assert "/opt/ce-validator-venv/bin/python --version | grep -q '^Python 3" in text
+    assert "import pytest, yaml, jsonschema, xdist" in text
+    assert "find_library('sodium')" in text
 
 
 def test_dockerfile_installs_durable_governed_ce_launcher(tmp_path: Path) -> None:

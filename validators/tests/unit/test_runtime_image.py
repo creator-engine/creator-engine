@@ -74,6 +74,8 @@ def test_runtime_dockerfile_installs_validator_from_wheel_seam_offline() -> None
 
     assert "COPY validators/pyproject.toml validators/pyproject.toml" in text
     assert "COPY validators/creator_engine_validator validators/creator_engine_validator" in text
+    assert "COPY validators/requirements.txt /opt/creator-engine/requirements.txt" in text
+    assert "COPY validators/requirements-dev.txt /opt/creator-engine/requirements-dev.txt" in text
     assert "COPY validators/wheelhouse-dev /opt/build-tools" in text
     assert "python -m pip install --no-index --find-links=/opt/build-tools setuptools" in text
     assert "python -m pip wheel" in text
@@ -81,13 +83,22 @@ def test_runtime_dockerfile_installs_validator_from_wheel_seam_offline() -> None
     assert "--no-build-isolation" in text
     assert "ARG CE_VALIDATOR_WHEEL=/opt/creator-engine/app/creator_engine_validator-*.whl" in text
     assert "COPY validators/wheelhouse /opt/creator-engine/wheelhouse" in text
+    assert "COPY validators/wheelhouse-dev /opt/creator-engine/wheelhouse-dev" in text
     assert "COPY --from=wheel-builder /out/*.whl /opt/creator-engine/app/" in text
     assert "python -m pip install" in text
     assert "--no-index" in text
     assert "--find-links=/opt/creator-engine/wheelhouse" in text
+    assert "--find-links=/opt/creator-engine/wheelhouse-dev" in text
+    assert "-r /opt/creator-engine/requirements.txt" in text
+    assert "-r /opt/creator-engine/requirements-dev.txt" in text
+    assert "openssh-client" in text
+    assert "libsodium23" in text
     assert "command -v ce" in text
     assert "command -v cev3" in text
     assert "command -v creator-engine-validator" in text
+    assert "command -v ssh-keygen" in text
+    assert "import pytest, xdist" in text
+    assert "find_library('sodium')" in text
 
 
 def test_runtime_dockerfile_installs_gate_daemon_runtime_dependencies_from_pinned_repos() -> None:

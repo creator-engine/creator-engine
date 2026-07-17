@@ -75,6 +75,8 @@ RUN set -eux; \
       bash \
       gh \
       git \
+      libsodium23 \
+      openssh-client \
       tini; \
     rm -rf /var/lib/apt/lists/*; \
     group_name="$(getent group "${CE_GID}" | cut -d: -f1 || true)"; \
@@ -86,12 +88,24 @@ RUN set -eux; \
     install -d -m 0755 -o "${CE_UID}" -g "${CE_GID}" /workspace/creator-engine; \
     git config --system --add safe.directory /workspace/creator-engine
 
+COPY validators/requirements.txt /opt/creator-engine/requirements.txt
+COPY validators/requirements-dev.txt /opt/creator-engine/requirements-dev.txt
 COPY validators/wheelhouse /opt/creator-engine/wheelhouse
+COPY validators/wheelhouse-dev /opt/creator-engine/wheelhouse-dev
 COPY --from=wheel-builder /out/*.whl /opt/creator-engine/app/
 
 RUN set -eux; \
     wheel_path="$(find /opt/creator-engine/app -maxdepth 1 -name "$(basename "${CE_VALIDATOR_WHEEL}")" -print -quit)"; \
     test -n "${wheel_path}"; \
+    python -m pip install \
+      --no-index \
+      --find-links=/opt/creator-engine/wheelhouse \
+      -r /opt/creator-engine/requirements.txt; \
+    python -m pip install \
+      --no-index \
+      --find-links=/opt/creator-engine/wheelhouse \
+      --find-links=/opt/creator-engine/wheelhouse-dev \
+      -r /opt/creator-engine/requirements-dev.txt; \
     python -m pip install \
       --no-index \
       --find-links=/opt/creator-engine/wheelhouse \
@@ -101,6 +115,9 @@ RUN set -eux; \
     command -v creator-engine-validator; \
     command -v gh; \
     command -v git; \
+    command -v ssh-keygen; \
+    python -c "import pytest, xdist"; \
+    python -c "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'"; \
     ce --help >/tmp/ce-help.txt; \
     cev3 --help >/tmp/cev3-help.txt; \
     creator-engine-validator --help >/tmp/creator-engine-validator-help.txt
