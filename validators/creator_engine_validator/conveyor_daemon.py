@@ -28,7 +28,12 @@ from .conveyor import (
     validation_sandbox_spec_from_command,
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
-from .conveyor_discovery import HandledSignalReceipt, ReceiptDiscoveryPayload, ReceiptIdentity
+from .conveyor_discovery import (
+    HandledSignalReceipt,
+    ReceiptDiscoveryPayload,
+    ReceiptDurabilityUncertainError,
+    ReceiptIdentity,
+)
 from .daemon_lease import DaemonLease
 from .checks.path_manifest_fidelity import branch_slug, extract_manifest_paths_from_file
 from .forge.daemon_allocation import (
@@ -153,7 +158,10 @@ class ConveyorDaemonItem:
     identity: str | None = None
     allocation_receipt: DaemonPathReceipt | None = None
     receipt_identity: ReceiptIdentity | None = None
-    requires_receipt_identity: bool = False
+
+    def __post_init__(self) -> None:
+        if self.receipt_identity is not None and self.receipt_identity.branch != self.branch:
+            raise ValueError("receipt_identity_branch_mismatch")
 
     @classmethod
     def from_mapping(
@@ -168,8 +176,6 @@ class ConveyorDaemonItem:
         # are audited by the shared schema and never reach item construction.
         parsed = validate_discovery_payload(payload, audit_sink=audit_sink, source="conveyor_daemon")
         receipt_identity = payload.receipt_identity if isinstance(payload, ReceiptDiscoveryPayload) else None
-        if receipt_identity is not None and receipt_identity.branch != parsed.branch_name:
-            raise ValueError("receipt_identity_branch_mismatch")
         return cls(
             branch=parsed.branch_name,
             issue=parsed.issue,
@@ -181,7 +187,6 @@ class ConveyorDaemonItem:
             pr_title=parsed.pr_title,
             pr_body=parsed.pr_body,
             receipt_identity=receipt_identity,
-            requires_receipt_identity=True,
         )
 
     @property
@@ -407,6 +412,8 @@ class ConveyorDaemon:
                 missing.append("receipt_issuer")
             if self.validation_ledger_binding is None:
                 missing.append("validation_ledger_binding")
+            if self.receipt_state_path is None:
+                missing.append("receipt_state_path")
             if missing:
                 raise ValueError(f"armed conveyor daemon requires injected {', '.join(missing)}")
 
@@ -488,45 +495,44 @@ class ConveyorDaemon:
                 self._log(f"conveyor dry-run plan {item.branch}: {', '.join(PLAN_ACTIONS)}")
             else:
                 receipt: HandledSignalReceipt | None = None
-                if item.receipt_identity is None and item.requires_receipt_identity:
+                if item.receipt_identity is None:
                     results.append(
                         self._failed(item, ("receipt identity is required for armed processing",))
                     )
                     continue
-                if item.receipt_identity is not None:
-                    if self.receipt_state_path is None:
-                        results.append(
-                            self._failed(item, ("receipt identity refused: daemon receipt state path is not configured",))
-                        )
-                        continue
-                    receipt = HandledSignalReceipt(
-                        self.receipt_state_path,
-                        item.receipt_identity.seat_id,
-                        item.receipt_identity.branch,
-                        item.receipt_identity.sha,
+                assert self.receipt_state_path is not None
+                receipt = HandledSignalReceipt(
+                    self.receipt_state_path,
+                    item.receipt_identity.seat_id,
+                    item.receipt_identity.branch,
+                    item.receipt_identity.sha,
+                    audit_sink=self._audit_discovery_payload_rejection,
+                )
+                try:
+                    claimed = receipt.claim()
+                except ValueError as exc:
+                    results.append(
+                        self._failed(item, (f"receipt state refused: {exc}",))
                     )
-                    try:
-                        claimed = receipt.claim()
-                    except ValueError as exc:
-                        results.append(
-                            self._failed(item, (f"receipt state refused: {exc}",))
+                    continue
+                if not claimed:
+                    results.append(
+                        ConveyorDaemonItemResult(
+                            status="skipped",
+                            branch=item.branch,
+                            key=item.key,
+                            reasons=("receipt is not processable",),
                         )
-                        continue
-                    if not claimed:
-                        results.append(
-                            ConveyorDaemonItemResult(
-                                status="skipped",
-                                branch=item.branch,
-                                key=item.key,
-                                reasons=("receipt is not processable",),
-                            )
-                        )
-                        continue
+                    )
+                    continue
                 result = self._process_armed(item)
                 if receipt is not None:
                     terminal_state = _receipt_terminal_state(result)
                     try:
                         completed = receipt.complete(terminal_state)
+                    except ReceiptDurabilityUncertainError:
+                        completed = False
+                        completion_reason = "receipt terminal durability is uncertain"
                     except ValueError as exc:
                         completed = False
                         completion_reason = f"receipt completion refused: {exc}"
@@ -539,6 +545,7 @@ class ConveyorDaemon:
                             prepare_result=result.prepare_result,
                             landing_result=result.landing_result,
                             ledger_records=result.ledger_records,
+                            side_effect_started=result.side_effect_started,
                         )
                 if result.status == "pr-opened":
                     self._completed_keys.add(item.key)

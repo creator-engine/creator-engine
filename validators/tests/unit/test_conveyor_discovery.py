@@ -364,6 +364,8 @@ def test_receipt_state_fsyncs_parent_directory_after_replace(tmp_path, monkeypat
     def record_fsync(fd):
         if fd == parent_fd:
             events.append("parent-fsync")
+        else:
+            events.append("temp-fsync")
         return real_fsync(fd)
 
     def record_close(fd):
@@ -378,7 +380,7 @@ def test_receipt_state_fsyncs_parent_directory_after_replace(tmp_path, monkeypat
 
     conveyor_discovery._write_receipt_state(state_path, [])
 
-    assert events == ["replace", "parent-open", "parent-fsync", "parent-close"]
+    assert events == ["temp-fsync", "replace", "parent-open", "parent-fsync", "parent-close"]
 
 
 def test_receipt_parent_fsync_failure_refuses_write_and_cleans_temp(tmp_path, monkeypatch):
@@ -402,10 +404,58 @@ def test_receipt_parent_fsync_failure_refuses_write_and_cleans_temp(tmp_path, mo
     monkeypatch.setattr(conveyor_discovery.os, "open", record_open)
     monkeypatch.setattr(conveyor_discovery.os, "fsync", fail_parent_fsync)
 
-    with pytest.raises(ValueError, match="receipt_state_write_failed:OSError"):
+    with pytest.raises(ValueError, match="receipt_state_durability_uncertain:OSError"):
         conveyor_discovery._write_receipt_state(state_path, [])
 
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_receipt_temp_fsync_failure_refuses_write_and_cleans_temp(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+
+    def fail_temp_fsync(_fd):
+        raise OSError("temp fsync denied")
+
+    monkeypatch.setattr(conveyor_discovery.os, "fsync", fail_temp_fsync)
+
+    with pytest.raises(ValueError, match="receipt_state_write_failed:OSError"):
+        conveyor_discovery._write_receipt_state(state_path, [])
+
+    assert not state_path.exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_completion_writes_guarded_terminal_before_clearing_guard(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+    receipt = _receipt_for_payload(
+        state_path,
+        list(
+            ConveyorSeatDiscoveryRunner(
+                [SeatProbeSpec("seat-1", ("probe",))],
+                state_path,
+                probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+            )()
+        )[0],
+    )
+    assert receipt.claim() is True
+    writes: list[list[dict[str, object]]] = []
+    real_write = conveyor_discovery._write_receipt_state
+
+    def record_write(path, entries):
+        writes.append([dict(entry) for entry in entries])
+        return real_write(path, entries)
+
+    monkeypatch.setattr(conveyor_discovery, "_write_receipt_state", record_write)
+
+    assert receipt.complete("pr_opened") is True
+    assert [entry["state"] for entry in (writes[0][0], writes[1][0], writes[2][0])] == [
+        "processing",
+        "pr_opened",
+        "pr_opened",
+    ]
+    assert writes[0][0]["completion_pending"] is True
+    assert writes[1][0]["completion_pending"] is True
+    assert "completion_pending" not in writes[2][0]
 
 
 def test_branch_without_issue_prefix_uses_safe_default_issue(tmp_path):
