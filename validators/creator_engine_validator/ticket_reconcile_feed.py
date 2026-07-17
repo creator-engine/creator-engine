@@ -28,8 +28,19 @@ ReferenceParser = Callable[[str, str], Sequence[int]]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PARSER_PATH = _REPO_ROOT / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
-_TOKEN_ENV_NAMES = frozenset(
-    {"GH_TOKEN", "GITHUB_TOKEN", "CE_OPS_READ_TOKEN", "CE_PR_READ_TOKEN"}
+_SCOPED_GH_ENV_EXCLUSIONS = frozenset(
+    {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "CE_OPS_READ_TOKEN",
+        "CE_PR_READ_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "GH_DEBUG",
+        "GH_HOST",
+        "GH_CONFIG_DIR",
+        "GITHUB_API_URL",
+    }
 )
 
 _ISSUES_QUERY = """
@@ -380,9 +391,11 @@ def _parse_reference_numbers(title: str, body: str) -> Sequence[int]:
         values = _load_reference_parser()(title, body)
     except TicketReconcileFeedError:
         raise
-    except Exception as exc:
-        raise TicketReconcileFeedError(f"canonical reference parser failed: {exc}") from exc
+    except Exception:
+        raise TicketReconcileFeedError("canonical reference parser failed") from None
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise TicketReconcileFeedError("canonical reference parser returned malformed output")
+    if any(type(value) is not int or value <= 0 for value in values):
         raise TicketReconcileFeedError("canonical reference parser returned malformed output")
     return values
 
@@ -410,7 +423,7 @@ def _validate_token_pair(ticket_token: Any, pr_token: Any) -> tuple[str, str]:
 
 def _scoped_gh_env(token: str) -> dict[str, str]:
     child = dict(os.environ)
-    for name in _TOKEN_ENV_NAMES:
+    for name in _SCOPED_GH_ENV_EXCLUSIONS:
         child.pop(name, None)
     child["GH_TOKEN"] = token
     return child

@@ -175,10 +175,20 @@ def test_nonzero_and_malformed_json_fail_closed_without_leaking_token():
 
 
 def test_ticket_and_pr_credentials_are_isolated_in_child_environments(monkeypatch):
-    monkeypatch.setenv("GH_TOKEN", "ambient")
-    monkeypatch.setenv("GITHUB_TOKEN", "also-ambient")
-    monkeypatch.setenv("CE_OPS_READ_TOKEN", "parent-ticket")
-    monkeypatch.setenv("CE_PR_READ_TOKEN", "parent-pr")
+    excluded = {
+        "GH_TOKEN": "ambient",
+        "GITHUB_TOKEN": "also-ambient",
+        "CE_OPS_READ_TOKEN": "parent-ticket",
+        "CE_PR_READ_TOKEN": "parent-pr",
+        "GH_ENTERPRISE_TOKEN": "enterprise-ambient",
+        "GITHUB_ENTERPRISE_TOKEN": "github-enterprise-ambient",
+        "GH_DEBUG": "api",
+        "GH_HOST": "untrusted.example",
+        "GH_CONFIG_DIR": "/tmp/untrusted-gh-config",
+        "GITHUB_API_URL": "https://untrusted.example/api/v3",
+    }
+    for name, value in excluded.items():
+        monkeypatch.setenv(name, value)
     runner = FakeGraphqlRunner([_page([])], [_page([])])
 
     feed.collect_inputs(
@@ -196,9 +206,7 @@ def test_ticket_and_pr_credentials_are_isolated_in_child_environments(monkeypatc
     assert ticket_env["GH_TOKEN"] == "ticket-only"
     assert pr_env["GH_TOKEN"] == "pr-only"
     for child_env in (ticket_env, pr_env):
-        assert "GITHUB_TOKEN" not in child_env
-        assert "CE_OPS_READ_TOKEN" not in child_env
-        assert "CE_PR_READ_TOKEN" not in child_env
+        assert (excluded.keys() - {"GH_TOKEN"}).isdisjoint(child_env)
     assert all("ticket-only" not in " ".join(call[0]) for call in runner.calls)
     assert all("pr-only" not in " ".join(call[0]) for call in runner.calls)
 
@@ -208,14 +216,14 @@ def test_ticket_and_pr_credentials_are_isolated_in_child_environments(monkeypatc
     [
         (None, None),
         (None, "pr"),
-        ("ticket", None),
+        ("unique-ticket-token", None),
         ("", "pr"),
-        ("ticket", ""),
+        ("unique-ticket-token", ""),
         ("   ", "pr"),
-        ("ticket", "\t"),
+        ("unique-ticket-token", "\t"),
         ("same", "same"),
         (7, "pr"),
-        ("ticket", object()),
+        ("unique-ticket-token", object()),
     ],
 )
 def test_invalid_credential_pairs_fail_before_runner_without_values(
@@ -324,13 +332,13 @@ def test_malformed_nodes_fail_closed(issue_nodes, pr_nodes, reason):
         ("number", "1"),
         ("number", []),
         ("number", {}),
-        ("number", object()),
+        ("number", None),
         ("title", None),
         ("title", False),
         ("title", 7.5),
         ("title", []),
         ("title", {}),
-        ("title", object()),
+        ("title", 0),
     ],
 )
 def test_malformed_issue_scalar_types_fail_closed_without_candidates(field, value):
@@ -355,19 +363,19 @@ def test_malformed_issue_scalar_types_fail_closed_without_candidates(field, valu
         ("number", "7"),
         ("number", []),
         ("number", {}),
-        ("number", object()),
+        ("number", None),
         ("title", None),
         ("title", []),
         ("headRefName", 7),
         ("headRefName", {}),
         ("body", False),
-        ("body", object()),
+        ("body", 0),
         ("mergedAt", None),
         ("mergedAt", True),
         ("mergedAt", 7.5),
         ("mergedAt", []),
         ("mergedAt", {}),
-        ("mergedAt", object()),
+        ("mergedAt", ""),
     ],
 )
 def test_malformed_pr_scalar_types_fail_closed_without_candidates(field, value):
@@ -417,6 +425,66 @@ def test_complete_zero_match_json_is_valid_and_raw_pr_body_is_not_emitted(monkey
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"matches": []}
     assert "RAW-SECRET-BODY" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    "values",
+    [["518"], [518.9], [True], [{}], [[518]], [0], [-518], [None]],
+)
+def test_canonical_parser_rejects_malformed_number_elements(monkeypatch, values):
+    monkeypatch.setattr(feed, "_load_reference_parser", lambda: lambda _title, _body: values)
+
+    with pytest.raises(
+        feed.TicketReconcileFeedError,
+        match="^canonical reference parser returned malformed output$",
+    ):
+        feed._parse_reference_numbers("title", "body")
+
+
+def test_main_parser_failure_does_not_emit_raw_body_or_read_token(monkeypatch, capsys):
+    body = "RAW-SECRET-BODY"
+    token = "injected-read-secret"
+    monkeypatch.setenv("CE_OPS_READ_TOKEN", token)
+    monkeypatch.setenv("CE_PR_READ_TOKEN", "separate-pr-token")
+    monkeypatch.setattr(
+        feed,
+        "collect_inputs",
+        lambda *_args, **_kwargs: (
+            [feed.OpenTicket(number=518)],
+            [
+                feed.MergedPullRequest(
+                    number=90,
+                    head_branch="ce-518-change",
+                    body=body,
+                )
+            ],
+        ),
+    )
+
+    def failing_parser(_title, parser_body):
+        raise RuntimeError(parser_body)
+
+    monkeypatch.setattr(feed, "_load_reference_parser", lambda: failing_parser)
+
+    assert (
+        feed.main(
+            [
+                "--ticket-repo",
+                _TICKET_REPO,
+                "--pr-repo",
+                _PR_REPO,
+                "--since-days",
+                "365",
+                "--json",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert "canonical reference parser failed" in captured.err
+    assert body not in captured.out + captured.err
+    assert token not in captured.out + captured.err
 
 
 def test_missing_token_fails_before_collection(monkeypatch, capsys):
