@@ -16,6 +16,7 @@ issue: ce-ops#566
   supersede path and ratchets the authoritative active assertion count to 118.
 - Enforces the full exact v1 role-by-venue sandbox matrix in trusted parser/planner
   code before probe or runner construction.
+- Refuses duplicate direct-policy role cells before matrix normalization.
 - Runs Codex under cleanup-bound isolated home/config directories and a role-policy-bound
   environment, and reports execution errors or nonzero exits as fail-closed refusals.
 - Removes caller launch-surface overrides; plans retain canonical paths/digests.

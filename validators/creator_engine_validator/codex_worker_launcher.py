@@ -217,6 +217,11 @@ def _require_trusted_v1_matrix(policy: CodexOneShotPolicy) -> None:
     )
     trusted = {venue: dict(matrix) for venue, matrix in V1_ROLE_SANDBOX_MATRIX}
     for venue in policy.venues:
+        role_names = tuple(role for role, _sandbox in venue.role_sandboxes)
+        if len(role_names) != len(V1_SUPPORTED_ROLES) or len(set(role_names)) != len(role_names):
+            raise CodexWorkerLaunchError(
+                f"v1 venue {venue.name} must define exactly one cell for each supported role"
+            )
         matrix = dict(venue.role_sandboxes)
         _require_exact_v1_names(tuple(matrix), V1_SUPPORTED_ROLES, "supported-role")
         if matrix != trusted[venue.name]:

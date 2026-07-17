@@ -325,6 +325,40 @@ def test_planner_revalidates_every_non_implementer_v1_matrix_cell_before_version
     assert probe.calls == []
 
 
+@pytest.mark.parametrize(
+    ("venue_name", "role", "unsafe_sandbox"),
+    [
+        ("dev1-local", "architect_research", "workspace-write"),
+        ("vps-tmux", "reviewer", "read-only"),
+    ],
+)
+def test_planner_refuses_unsafe_first_duplicate_role_cell_before_version_probe(
+    worktree: Path, venue_name: str, role: str, unsafe_sandbox: str
+) -> None:
+    loaded = policy(worktree)
+    venue = loaded.venue(venue_name)
+    unsafe_venue = replace(
+        venue,
+        role_sandboxes=((role, unsafe_sandbox), *venue.role_sandboxes),
+    )
+    unsafe_policy = replace(
+        loaded,
+        venues=tuple(unsafe_venue if item.name == venue.name else item for item in loaded.venues),
+    )
+    probe = FixedVersionProbe()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="exactly one cell"):
+        launcher.build_launch_plan(
+            policy=unsafe_policy,
+            governed_input=governed_input(worktree, role=role),
+            role=role,
+            venue=venue_name,
+            worktree=str(worktree),
+            filesystem=HermeticFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
+
+
 def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path) -> None:
     built = plan(worktree)
     assert built.model == "gpt-5.6-terra"
