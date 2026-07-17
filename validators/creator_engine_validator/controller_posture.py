@@ -115,7 +115,13 @@ def _ring0_confirmed(*, harness: str, repo_root: Path) -> bool:
     gates = {gate.name: gate.status for gate in report.gates}
     return all(
         gates.get(name) == "PASS"
-        for name in ("plan", "foreman-dispatch-contract", "harness-governance", "visibility")
+        for name in (
+            "plan",
+            "foreman-dispatch-contract",
+            "harness-governance",
+            "visibility",
+            "harness-binary",
+        )
     )
 
 
@@ -157,9 +163,9 @@ def _derive_allowed_posture(
     approval_wall_armed: bool,
     signing_deputy_status: str,
 ) -> str:
-    if approval_wall_armed and signing_deputy_status in _GATE_CAPABLE_SIGNING_STATUSES:
-        return "gate-capable"
     if role in {"controller", "foreman"} and ring0_confirmed and ring1_active:
+        if approval_wall_armed and signing_deputy_status in _GATE_CAPABLE_SIGNING_STATUSES:
+            return "gate-capable"
         return "foreman"
     return "read-only"
 

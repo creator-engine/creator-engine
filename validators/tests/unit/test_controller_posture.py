@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator import ce_cli
 from creator_engine_validator import controller_posture
 
@@ -92,6 +94,97 @@ def test_posture_text_is_stable_and_read_only(monkeypatch, tmp_path: Path, capsy
         "allowed_posture: foreman\n"
     )
     assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "missing_gate",
+    (
+        "plan",
+        "foreman-dispatch-contract",
+        "harness-governance",
+        "visibility",
+        "harness-binary",
+    ),
+)
+def test_ring0_requires_every_selected_preflight_gate(monkeypatch, tmp_path: Path, missing_gate: str):
+    selected_gates = (
+        "plan",
+        "foreman-dispatch-contract",
+        "harness-governance",
+        "visibility",
+        "harness-binary",
+    )
+    report = controller_posture.launch_runtime.LaunchPreflightReport(
+        gates=tuple(
+            controller_posture.launch_runtime.LaunchPreflightGate(
+                name=name,
+                status="WOULD-REFUSE" if name == missing_gate else "PASS",
+            )
+            for name in selected_gates
+        )
+    )
+    monkeypatch.setattr(controller_posture.launch_runtime, "preflight_launch", lambda **kwargs: report)
+
+    assert controller_posture._ring0_confirmed(harness="codex", repo_root=tmp_path) is False
+
+
+def test_ring0_is_confirmed_only_when_all_selected_preflight_gates_pass(monkeypatch, tmp_path: Path):
+    selected_gates = (
+        "plan",
+        "foreman-dispatch-contract",
+        "harness-governance",
+        "visibility",
+        "harness-binary",
+    )
+    report = controller_posture.launch_runtime.LaunchPreflightReport(
+        gates=tuple(
+            controller_posture.launch_runtime.LaunchPreflightGate(name=name, status="PASS")
+            for name in selected_gates
+        )
+    )
+    monkeypatch.setattr(controller_posture.launch_runtime, "preflight_launch", lambda **kwargs: report)
+
+    assert controller_posture._ring0_confirmed(harness="codex", repo_root=tmp_path) is True
+
+
+@pytest.mark.parametrize(
+    ("role", "ring0_confirmed", "ring1_active"),
+    (
+        ("unknown", True, True),
+        ("worker", True, True),
+        ("controller", False, True),
+        ("controller", True, False),
+    ),
+)
+def test_gate_capable_requires_the_complete_foreman_base(
+    role: str,
+    ring0_confirmed: bool,
+    ring1_active: bool,
+):
+    assert (
+        controller_posture._derive_allowed_posture(
+            role=role,
+            ring0_confirmed=ring0_confirmed,
+            ring1_active=ring1_active,
+            approval_wall_armed=True,
+            signing_deputy_status="openbao-backed",
+        )
+        == "read-only"
+    )
+
+
+@pytest.mark.parametrize("role", ("controller", "foreman"))
+def test_gate_capable_requires_armed_wall_and_accepted_signing_after_foreman_base(role: str):
+    assert (
+        controller_posture._derive_allowed_posture(
+            role=role,
+            ring0_confirmed=True,
+            ring1_active=True,
+            approval_wall_armed=True,
+            signing_deputy_status="openbao-backed",
+        )
+        == "gate-capable"
+    )
 
 
 def test_invalid_status_env_values_fall_back_to_safe_defaults(monkeypatch, tmp_path: Path):
