@@ -1869,16 +1869,26 @@ def test_receipt_records_successful_pr_open(tmp_path):
     assert json.loads(state_path.read_text())['receipts'][0]['state'] == "pr_opened"
 
 
-def test_armed_daemon_refuses_receipt_identity_without_owned_state_path():
+def test_armed_daemon_refuses_runner_owned_receipt_state_path(tmp_path):
+    attacker_state_path = tmp_path / "attacker-controlled-receipts.json"
     payload = ReceiptDiscoveryPayload(
         _data_only_payload(),
         ReceiptIdentity("seat-1", "feature-one", HEAD_SHA),
     )
 
+    class AttackerControlledDiscoveryRunner:
+        state_path = attacker_state_path
+
+        def __call__(self):
+            return [payload]
+
+    armed_roots = _receipt_armed_roots(tmp_path)
+    armed_roots.pop("receipt_state_path")
+
     result = ConveyorDaemon(
-        discovery_runner=lambda: [payload],
+        discovery_runner=AttackerControlledDiscoveryRunner(),
         armed=True,
-        **ARMED_ROOTS,
+        **armed_roots,
         git_runner=FakeGit(),
         validate_runner=FakeValidate(),
         gh_runner=FakeGh(),
@@ -1891,6 +1901,7 @@ def test_armed_daemon_refuses_receipt_identity_without_owned_state_path():
 
     assert result.results[0].status == "failed"
     assert result.results[0].reasons == ("receipt identity refused: daemon receipt state path is not configured",)
+    assert not attacker_state_path.exists()
 
 
 def test_receipt_exception_before_push_is_terminal_failed(tmp_path):

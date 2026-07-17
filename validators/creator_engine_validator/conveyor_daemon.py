@@ -329,12 +329,9 @@ class ConveyorDaemon:
         self.gh_runner = gh_runner
         self.now = now
         self.ledger_writer = ledger_writer or (_jsonl_ledger_writer(Path(ledger_path)) if ledger_path is not None else None)
-        configured_receipt_state_path = receipt_state_path
-        if configured_receipt_state_path is None:
-            configured_receipt_state_path = getattr(discovery_runner, "state_path", None)
         self.receipt_state_path = (
-            Path(configured_receipt_state_path).resolve()
-            if configured_receipt_state_path is not None
+            Path(receipt_state_path).resolve()
+            if receipt_state_path is not None
             else None
         )
         self.log_runner = log_runner
