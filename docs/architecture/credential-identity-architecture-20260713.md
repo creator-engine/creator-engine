@@ -16,8 +16,10 @@ short-lived identity for each permitted action.
 
 ## Evidence Anchors
 
-The following tracked-source anchors support the findings in this record.
-They describe design and implementation evidence, not live operation.
+The following tracked-source anchors support the findings in this record. Most
+describe design and implementation evidence; the OpenBao arming runbook also
+records bounded verification of a deployed VPS substrate without proving that
+credential migration or dynamic workload identity is operational.
 
 - Credential migration inventory: `docs/devops/openbao/secret-migration-inventory.tsv:2-5,7-14`.
 - Legacy credential lookup and child-process injection boundary:
@@ -34,24 +36,29 @@ They describe design and implementation evidence, not live operation.
 - Per-call signing and legacy fallback behavior:
   `tools/egress-broker/egress_broker/config.py:61-75,216-233` and
   `tools/egress-broker/egress_broker/minter.py:23-28,209-222,302-320`.
+- Bounded deployed-substrate evidence and its explicit verification limits:
+  `docs/devops/openbao-approval-wall-arming.md:9-43`.
+- JIT credential mint, expiry, replacement, and revocation behavior:
+  `tools/egress-broker/README.md:160-184` and
+  `tools/egress-broker/egress_broker/jit_credential.py:106-202,283-299,392-496,505-581`.
 
 ## Identity Scorecard
 
 | Enterprise identity-plane property | Score | Finding |
 | --- | --- | --- |
-| Central identity and secret plane | PARTIAL | A backend direction and value-free interfaces exist; no production deployment or completed migration is evidenced. |
+| Central identity and secret plane | PARTIAL | A tracked VPS record verifies an active and enabled OpenBao 2.5.5 substrate that was initialized and unsealed with raft HA active; authenticated backend verification and completed credential migration remain unproven. |
 | OIDC federation | MISSING | No tracked issuer, trust configuration, claims mapping, or federated workload flow is evidenced. |
 | SPIFFE/SVID workload identity and attestation | MISSING | No trust domain, workload API, attestor, SVID lifecycle, or verifier is tracked. |
-| Per-action, short-lived issuance | PARTIAL | The broker design can mint scoped, revocable installation tokens, but the live path is explicitly unwired. |
+| Per-action, short-lived issuance | PARTIAL | Tracked broker code mints scoped, revocable installation tokens; deployment and use as a universal live path remain unproven. |
 | No actor-held standing credential | PARTIAL | Execution-boundary protections are strong, while legacy per-seat write credentials and signing fallbacks remain. |
 | Policy outside the actor | PARTIAL | Broker policy, envelope checks, and launch validation are externalized, but not yet a universal runtime policy decision and enforcement point. |
-| Dynamic secrets, rotation, and revocation | MISSING | Current backend use is principally static custody plus bootstrap; no dynamic secret engine or automated lifecycle is demonstrated. |
-| Auditing and incident evidence | PARTIAL | Audit and recovery prerequisites are designed, with no tracked production evidence of operation. |
+| Dynamic secrets, rotation, and revocation | PARTIAL | The JIT broker implements scoped-token mint, timed and lazy expiry, single-active replacement, and explicit revoke; an OpenBao-native leased-secret engine remains unproven. |
+| Auditing and incident evidence | PARTIAL | A tracked VPS audit-file path was present, but authenticated audit configuration, audit receipts, and approval-wall arming remain unverified. |
 
-The record therefore has three MISSING and five PARTIAL properties. The larger
-gap is federated, attested workload identity with dynamic issuance; host-local
-custody of standing credentials is the highest immediate exposure within that
-gap.
+The record therefore has two MISSING and six PARTIAL properties. The larger gap
+is federated, attested workload identity with backend-native leased issuance;
+host-local custody of standing credentials is the highest immediate exposure
+within that gap.
 
 ## Threat Framing
 
@@ -103,16 +110,20 @@ The work separates into four product categories:
    mapping, audiences, time-to-live, revocation semantics, a SPIFFE trust
    domain, workload attestation, SVID rotation, selector policy, and broker
    verification.
-4. **Dynamic lifecycle:** replace static runtime-secret reads with leased
-   credentials, explicit rotation ownership, revocation drills, and expiry
-   telemetry; preserve authoritative identity, registry, and recovery-state
-   continuity.
+4. **Dynamic lifecycle:** extend the tracked broker lifecycle with
+   backend-native leased credentials, explicit rotation ownership, revocation
+   drills, and expiry telemetry; preserve authoritative identity, registry, and
+   recovery-state continuity.
 
 ## Explicit Unknowns
 
-This record did not inspect live credential files, service environments, file
-permissions, credential scopes or expiry, backend deployment state, audit
-receipts, or forge state. It cannot assert current production custody or whether
-any migration is already operational. A separate review must confirm that this
-redacted record remains faithful to its evidence before it is used as planning
-input.
+This record did not directly inspect live credential files, service
+environments, file permissions, credential scopes or expiry, audit
+configuration or receipts, or forge state, and it did not independently
+re-verify the VPS state recorded by the OpenBao arming runbook. That tracked
+runbook evidences an active, initialized, unsealed raft-HA OpenBao substrate and
+the presence of an audit-file path; authenticated `/v1/sys/audit` and `ce-kv`
+verification, approval-wall arming, credential migration, and dynamic workload
+identity remain incomplete or unproven. A separate review must confirm that
+this redacted record remains faithful to its evidence before it is used as
+planning input.

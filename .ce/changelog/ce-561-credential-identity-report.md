@@ -13,3 +13,7 @@ scope: docs/architecture
 - Recorded the remaining identity and lifecycle design work without exposing
   credential material, environment-specific custody details, or operational
   instructions.
+- Reconciled the scorecard with tracked bounded OpenBao substrate evidence and
+  the broker's partial JIT expiry and revocation lifecycle, while preserving
+  explicit limits around authenticated audit verification, migration, and
+  dynamic workload identity.
