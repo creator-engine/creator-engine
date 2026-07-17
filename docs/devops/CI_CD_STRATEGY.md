@@ -169,5 +169,6 @@ stated; no `.github/` workflow content is authored.
 ## CI efficiency audit
 
 The repository-native [CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html)
-maps shared local/CI gates, records known fidelity gaps, and separates safe
-measurement work from changes that require safety ratification.
+maps shared local/CI gates, records known fidelity gaps, and separates observed
+evidence and technical-risk assessments from proposals that remain subject to
+the existing ratification and change-control contract.
