@@ -769,7 +769,7 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert any(
         "conveyor validation audit" in message
         and '"action": "conveyor_validation_phase_audit"' in message
-        and '"tree_sha": "' in message
+        and '"tree_sha"' not in message
         and '"nonce"' not in message
         and '"signature"' not in message
         for message in logs
@@ -780,6 +780,75 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
         and '"status": "success"' in message
         for message in logs
     )
+
+
+@pytest.mark.parametrize(
+    ("land_runner", "expected_publish_status"),
+    [(FakeLand(), "success"), (FakeLand(behind=1), "failed")],
+    ids=("success-and-retry", "failure-and-retry"),
+)
+def test_receipt_coordinates_are_absent_from_success_failure_and_retry_audits(
+    tmp_path, land_runner, expected_publish_status
+):
+    branch = "feature-one"
+    seat_id = "seat-private-coordinate"
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec(seat_id, ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST {branch} {HEAD_SHA}",
+        )()
+    )[0]
+    logs: list[str] = []
+
+    def build_daemon():
+        return ConveyorDaemon(
+            discovery_runner=lambda: [payload],
+            armed=True,
+            **_receipt_armed_roots(tmp_path),
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+            log_runner=logs.append,
+            prepare_runner=FakePrepare(record_validation=True),
+            land_runner=land_runner,
+            validation_sandbox_runner=FakeValidationSandboxRunner(
+                side_effect_path=tmp_path / branch / HEAD_SHA,
+                side_effect_record={
+                    "effect_kind": "validation_sandbox_run",
+                    "subject_git_sha": HEAD_SHA,
+                    "lane_id": seat_id,
+                },
+            ),
+        )
+
+    first = build_daemon().run_once()
+    retry = build_daemon().run_once()
+
+    assert first.results[0].status == (
+        "pr-opened" if expected_publish_status == "success" else "failed"
+    )
+    assert retry.results[0].status == "skipped"
+    audit_renderings = [message for message in logs if "audit" in message]
+    assert any("conveyor allocation audit" in message for message in audit_renderings)
+    assert any("conveyor validation audit" in message for message in audit_renderings)
+    assert any(
+        "conveyor publish audit" in message
+        and f'"status": "{expected_publish_status}"' in message
+        for message in audit_renderings
+    )
+    assert any("receipt_terminal_sealed" in message for message in audit_renderings)
+    assert payload.receipt_identity is not None
+    assert payload.receipt_identity.seat_id == seat_id
+    assert payload.receipt_identity.branch == branch
+    assert payload.receipt_identity.sha == HEAD_SHA
+    for rendering in audit_renderings:
+        assert seat_id not in rendering
+        assert branch not in rendering
+        assert HEAD_SHA not in rendering
 
 
 def test_armed_path_without_validation_record_fails_before_push_or_pr():
@@ -1004,7 +1073,7 @@ def test_publish_time_local_transport_config_mutation_is_refused_before_push_or_
     assert any("conveyor publish audit" in message and "transport_config" in message for message in logs)
 
 
-def test_validation_audit_summarizes_side_effect_record_without_nonce_or_signature():
+def test_validation_audit_reduces_side_effect_record_to_value_free_presence():
     item = _item()
     logs: list[str] = []
     side_effect_record = {
@@ -1034,8 +1103,10 @@ def test_validation_audit_summarizes_side_effect_record_without_nonce_or_signatu
     validation_audits = [message for message in logs if "conveyor validation audit" in message]
     assert len(validation_audits) == 1
     audit = validation_audits[0]
-    assert '"effect_kind": "validation_sandbox_run"' in audit
-    assert f'"subject_git_sha": "{HEAD_SHA}"' in audit
+    assert '"side_effect_present": true' in audit
+    assert "validation_sandbox_run" not in audit
+    assert "subject_git_sha" not in audit
+    assert HEAD_SHA not in audit
     assert "nonce" not in audit
     assert "signature" not in audit
     assert "unexpected_payload" not in audit
