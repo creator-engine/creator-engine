@@ -32,6 +32,7 @@ from .conveyor_discovery import (
     HandledSignalReceipt,
     ReceiptDiscoveryPayload,
     ReceiptIdentity,
+    _receipt_fingerprint,
     normalize_receipt_state_path,
 )
 from .daemon_lease import DaemonLease
@@ -192,7 +193,7 @@ class ConveyorDaemonItem:
     @property
     def key(self) -> str:
         if self.receipt_identity is not None:
-            return f"{self.receipt_identity.seat_id}:{self.receipt_identity.branch}:{self.receipt_identity.sha}"
+            return f"receipt-{_receipt_fingerprint(self.receipt_identity)}"
         return self.identity or branch_slug(self.branch)
 
     def harvest_spec(
@@ -885,7 +886,7 @@ class ConveyorDaemon:
         try:
             cleaned = self.path_allocator.cleanup(receipt)
         except DaemonAllocationError as exc:
-            return {"status": "failed", "cleaned": False, "error": str(exc)}
+            return {"status": "failed", "cleaned": False, "error_type": type(exc).__name__}
         return {"status": "success", "cleaned": cleaned}
 
     def _audit_allocation(
@@ -897,17 +898,7 @@ class ConveyorDaemon:
         cleanup_result: Mapping[str, Any],
     ) -> None:
         assert self.path_allocator is not None
-        roots = self.path_allocator.roots
-        paths: list[dict[str, str]] = []
-        for field_name, kind, path in allocation.iter_paths():
-            confined = roots.confine_path(path, kind)
-            paths.append(
-                {
-                    "field": field_name,
-                    "root_kind": kind,
-                    "relative_path": str(confined.relative_to(roots.root_for(kind))),
-                }
-            )
+        paths = tuple({"field": field_name, "root_kind": kind} for field_name, kind, _path in allocation.iter_paths())
         record = {
             "action": "conveyor_allocation_audit",
             "phase": "allocation",
@@ -1107,7 +1098,6 @@ class ConveyorDaemon:
                 self._audit_validation(
                     item=item,
                     allocation=allocation,
-                    tree_sha=sandbox_run.receipt.tree_sha,
                     result=result,
                     side_effect_path=sandbox_run.side_effect_path,
                     side_effect_record=sandbox_run.side_effect_record,
@@ -1121,7 +1111,6 @@ class ConveyorDaemon:
         *,
         item: ConveyorDaemonItem,
         allocation: DaemonPathAllocation,
-        tree_sha: str,
         result: ConveyorCommandResult,
         side_effect_path: Path | None,
         side_effect_record: Mapping[str, Any] | None,
@@ -1130,11 +1119,9 @@ class ConveyorDaemon:
             "action": "conveyor_validation_phase_audit",
             "allocation_id": allocation.allocation_id,
             "item_key": item.key,
-            "tree_sha": tree_sha,
             "status": "success" if result.returncode == 0 else "failed",
             "returncode": result.returncode,
-            "side_effect_path": None if side_effect_path is None else str(side_effect_path),
-            "side_effect_record": _validation_side_effect_summary(side_effect_record),
+            "side_effect_present": side_effect_path is not None or bool(side_effect_record),
         }
         self._log(f"conveyor validation audit: {json.dumps(record, sort_keys=True, default=str)}")
 
@@ -1149,10 +1136,8 @@ class ConveyorDaemon:
         record = {
             "action": "conveyor_publish_phase_audit",
             "item_key": item.key,
-            "branch": landed.branch,
-            "head_sha": landed.head_sha or "",
             "status": status,
-            "checks": dict(checks),
+            "checks": tuple(sorted(str(check) for check in checks)),
         }
         self._log(f"conveyor publish audit: {json.dumps(record, sort_keys=True, default=str)}")
 

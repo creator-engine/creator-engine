@@ -10,6 +10,7 @@ import re
 import secrets
 import stat
 import subprocess
+import sys
 import fcntl
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import contextmanager
@@ -111,7 +112,6 @@ class ReceiptIdentity:
     def __post_init__(self) -> None:
         if not self.seat_id or not self.branch or SHA_PATTERN.fullmatch(self.sha) is None:
             raise ValueError("receipt_identity_invalid")
-
 
 class ReceiptDiscoveryPayload(dict[str, str]):
     """Schema-shaped discovery data carrying receipt identity, never capability."""
@@ -747,7 +747,10 @@ def _receipt_record(receipt: HandledSignalReceipt, state: str) -> dict[str, str]
 
 def _encoded_receipt_state(receipts: list[dict[str, Any]]) -> bytes:
     payload = {"receipts": sorted(receipts, key=lambda item: (item["seat_id"], item["branch"], item["sha"])), "version": RECEIPT_VERSION}
-    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    raw = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if len(raw) > _MAX_LEDGER_BYTES:
+        raise ReceiptPersistenceError("receipt_state_too_large")
+    return raw
 def _name_matches_inode(location: _SecureReceiptDirectory, name: str, expected: os.stat_result) -> bool:
     try:
         current = _stat_at(location.fd, name)
@@ -783,6 +786,9 @@ def _cleanup_created_temp(location: _SecureReceiptDirectory, temp_name: str, tem
         os.unlink(temp_name, dir_fd=location.fd); os.fsync(location.fd)
     except OSError as exc:
         raise ReceiptPersistenceError("receipt_temp_cleanup_failed") from exc
+def _discard_created_temp(location: _SecureReceiptDirectory, temp_name: str, temp_metadata: os.stat_result) -> None:
+    try: _cleanup_created_temp(location, temp_name, temp_metadata)
+    except ReceiptPersistenceError: pass
 def _write_all(fd: int, payload: bytes) -> None:
     view = memoryview(payload); offset = 0
     while offset < len(view):
@@ -828,8 +834,7 @@ def _write_receipt_state(location: _SecureReceiptDirectory, receipts: list[dict[
                 location.published = True
                 raise ReceiptDurabilityUncertainError("receipt_publication_uncertain") from exc
             if temp_is_temp and old_ledger_remains:
-                _cleanup_created_temp(location, temp_name, temp_metadata)
-                temp_name = None
+                _discard_created_temp(location, temp_name, temp_metadata); temp_name = None
                 raise ReceiptPersistenceError("receipt_state_write_failed") from exc
             location.published = True
             raise ReceiptDurabilityUncertainError("receipt_publication_uncertain") from exc
@@ -849,21 +854,21 @@ def _write_receipt_state(location: _SecureReceiptDirectory, receipts: list[dict[
         if location.published:
             raise ReceiptDurabilityUncertainError("receipt_durability_uncertain") from exc
         if temp_name is not None and temp_metadata is not None:
-            _cleanup_created_temp(location, temp_name, temp_metadata); temp_name = None
+            _discard_created_temp(location, temp_name, temp_metadata); temp_name = None
         raise
     except OSError as exc:
         if location.published:
             raise ReceiptDurabilityUncertainError("receipt_durability_uncertain") from exc
         if temp_name is not None and temp_metadata is not None:
-            _cleanup_created_temp(location, temp_name, temp_metadata); temp_name = None
+            _discard_created_temp(location, temp_name, temp_metadata); temp_name = None
         raise ReceiptPersistenceError("receipt_state_write_failed") from exc
     finally:
         if temp_fd is not None:
             close_error = _close_fd(temp_fd)
-            if close_error is not None:
+            if close_error is not None and sys.exc_info()[0] is None:
                 error_type = ReceiptDurabilityUncertainError if location.published else ReceiptPersistenceError
                 raise error_type("receipt_descriptor_close_failed") from close_error
-def _receipt_fingerprint(receipt: HandledSignalReceipt) -> str:
+def _receipt_fingerprint(receipt: HandledSignalReceipt | ReceiptIdentity) -> str:
     coordinates = "\x00".join((receipt.seat_id, receipt.branch, receipt.sha)).encode("utf-8")
     return hashlib.sha256(coordinates).hexdigest()
 

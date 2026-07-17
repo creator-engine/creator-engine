@@ -795,6 +795,104 @@ def test_lock_eexist_race_never_chmods_or_cleans_foreign_lock(tmp_path):
     assert stat.S_IMODE(lock_path.stat().st_mode) == 0o644
 
 
+def test_lock_name_substitution_after_acquisition_never_mutates_foreign_object(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    lock_path = tmp_path / ".receipts.json.lock"
+    displaced_lock = tmp_path / "displaced-lock"
+    real_flock = conveyor_discovery.fcntl.flock
+    substituted = False
+
+    def substitute_after_acquisition(fd, operation):
+        nonlocal substituted
+        result = real_flock(fd, operation)
+        if operation == conveyor_discovery.fcntl.LOCK_EX and not substituted:
+            substituted = True
+            lock_path.rename(displaced_lock)
+            lock_path.write_text("foreign-lock-canary", encoding="utf-8")
+            lock_path.chmod(0o600)
+        return result
+
+    monkeypatch.setattr(conveyor_discovery.fcntl, "flock", substitute_after_acquisition)
+    runner = ConveyorSeatDiscoveryRunner(
+        [SeatProbeSpec("seat-1", ("probe",))],
+        state_path,
+        probe_runner=lambda argv: f"READY-FOR-HARVEST safe-branch {SHA_ONE}",
+    )
+
+    assert list(runner()) == []
+    assert lock_path.read_text(encoding="utf-8") == "foreign-lock-canary"
+    assert displaced_lock.exists()
+    assert not state_path.exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_read_and_encoded_ledger_boundaries_accept_maximum_and_reject_first_extra_byte(
+    tmp_path, monkeypatch
+):
+    receipt = {
+        "seat_id": "seat-1",
+        "branch": "b",
+        "sha": SHA_ONE,
+        "state": "observed",
+    }
+    maximum = conveyor_discovery._encoded_receipt_state([receipt])
+    first_rejected = conveyor_discovery._encoded_receipt_state(
+        [{**receipt, "branch": "bb"}]
+    )
+    assert len(first_rejected) == len(maximum) + 1
+    monkeypatch.setattr(conveyor_discovery, "_MAX_LEDGER_BYTES", len(maximum))
+
+    assert conveyor_discovery._encoded_receipt_state([receipt]) == maximum
+    with pytest.raises(
+        conveyor_discovery.ReceiptPersistenceError, match="receipt_state_too_large"
+    ):
+        conveyor_discovery._encoded_receipt_state([{**receipt, "branch": "bb"}])
+
+    ledger_path = tmp_path / "boundary-ledger"
+    ledger_path.write_bytes(maximum)
+    fd = os.open(ledger_path, os.O_RDONLY)
+    try:
+        assert conveyor_discovery._read_all(fd) == maximum
+    finally:
+        os.close(fd)
+    ledger_path.write_bytes(maximum + b"x")
+    fd = os.open(ledger_path, os.O_RDONLY)
+    try:
+        with pytest.raises(
+            conveyor_discovery.ReceiptPersistenceError, match="receipt_state_too_large"
+        ):
+            conveyor_discovery._read_all(fd)
+    finally:
+        os.close(fd)
+
+
+def test_readable_maximum_ledger_rejects_larger_encoding_before_temp_and_preserves_bytes(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    existing = {
+        "seat_id": "seat-1",
+        "branch": "existing-branch",
+        "sha": SHA_ONE,
+        "state": "observed",
+    }
+    original = conveyor_discovery._encoded_receipt_state([existing])
+    _write_private_ledger(state_path, original.decode("utf-8"))
+    monkeypatch.setattr(conveyor_discovery, "_MAX_LEDGER_BYTES", len(original))
+
+    runner = ConveyorSeatDiscoveryRunner(
+        [SeatProbeSpec("seat-2", ("probe",))],
+        state_path,
+        probe_runner=lambda argv: f"READY-FOR-HARVEST added-branch {SHA_TWO}",
+    )
+
+    assert list(runner()) == []
+    assert state_path.read_bytes() == original
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_temp_name_collision_is_retried_without_touching_foreign_file(tmp_path, monkeypatch):
     state_path = tmp_path / "receipts.json"
     collision = tmp_path / ".receipts.json.collision.tmp"
@@ -1041,7 +1139,56 @@ def test_close_fault_after_replace_is_uncertain_and_preserves_terminal(tmp_path,
     assert json.loads(state_path.read_text())["receipts"][0]["state"] == "pr_opened"
 
 
-def test_temp_cleanup_fault_is_wrapped_and_never_removes_unknown_objects(tmp_path, monkeypatch):
+def test_temp_close_fault_does_not_hide_active_primary_or_leave_partial_publication(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-private-coordinate", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST secret-branch {SHA_ONE}",
+        )()
+    )[0]
+    receipt = _receipt_for_payload(state_path, payload)
+    original = state_path.read_bytes()
+    real_write = conveyor_discovery.os.write
+    real_close = conveyor_discovery.os.close
+    primary_active = False
+    close_failed = False
+
+    def fail_temp_write(fd, data):
+        nonlocal primary_active
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            primary_active = True
+            raise OSError("secret-branch write coordinate")
+        return real_write(fd, data)
+
+    def fail_temp_close_while_primary_active(fd):
+        nonlocal close_failed
+        metadata = os.fstat(fd)
+        real_close(fd)
+        if primary_active and stat.S_ISREG(metadata.st_mode) and not close_failed:
+            close_failed = True
+            raise OSError("seat-private-coordinate close detail")
+
+    monkeypatch.setattr(conveyor_discovery.os, "write", fail_temp_write)
+    monkeypatch.setattr(conveyor_discovery.os, "close", fail_temp_close_while_primary_active)
+
+    with pytest.raises(conveyor_discovery.ReceiptPersistenceError) as caught:
+        receipt.claim()
+
+    assert str(caught.value) == "receipt_state_write_failed"
+    assert "secret-branch" not in str(caught.value)
+    assert "seat-private-coordinate" not in str(caught.value)
+    assert close_failed is True
+    assert state_path.read_bytes() == original
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_temp_cleanup_fault_does_not_hide_primary_or_remove_unknown_objects(
+    tmp_path, monkeypatch
+):
     state_path = tmp_path / "receipts.json"
     payload = list(
         ConveyorSeatDiscoveryRunner(
@@ -1068,8 +1215,12 @@ def test_temp_cleanup_fault_is_wrapped_and_never_removes_unknown_objects(tmp_pat
         "unlink",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("cleanup denied")),
     )
-    with pytest.raises(conveyor_discovery.ReceiptPersistenceError, match="receipt_temp_cleanup_failed"):
+    with pytest.raises(
+        conveyor_discovery.ReceiptPersistenceError, match="receipt_state_write_failed"
+    ) as caught:
         receipt.claim()
+    assert "temp fsync denied" not in str(caught.value)
+    assert "cleanup denied" not in str(caught.value)
     assert json.loads(state_path.read_text())["receipts"][0]["state"] == "observed"
     assert len(list(tmp_path.glob("*.tmp"))) == 1
 
