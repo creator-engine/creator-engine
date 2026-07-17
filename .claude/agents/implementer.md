@@ -51,9 +51,12 @@ The `no runtime surface` exemption applies only to pure code, documentation, or
 refactoring work with no deployable artifact or configuration and no changed
 integration or live runtime behavior. Implementers may build governed
 deployment/IaC within an authorized scope, but must stop and report missing
-evidence when live mutation or waiver authority is outside the brief; they do
-not deploy, ratify waivers, reconcile by mutating a target, or decide closure
-unless a separate governed authority explicitly permits that act.
+evidence when live mutation or waiver authority is outside the brief. Any
+separate governed authority applies only to authorized deployment and IaC
+execution: implementers do not deploy or reconcile by mutating a target unless
+that execution is separately authorized.
+Ratifying a waiver and deciding closure remain controller-reserved acts,
+regardless of separate deployment authority.
 
 ## Hard Boundaries
 

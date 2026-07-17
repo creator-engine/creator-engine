@@ -850,6 +850,21 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     )
 
 
+def test_implementer_reserved_acts_cannot_be_overridden_by_deployment_authority():
+    root = Path(__file__).resolve().parents[3]
+    policy_text = (root / ".claude" / "agents" / "implementer.md").read_text(encoding="utf-8")
+    policy = " ".join(policy_text.split())
+
+    assert (
+        "separate governed authority applies only to authorized deployment and IaC execution" in policy
+    )
+    assert (
+        "Ratifying a waiver and deciding closure remain controller-reserved acts" in policy
+    )
+    assert "regardless of separate deployment authority" in policy
+    assert "decide closure unless a separate governed authority" not in policy
+
+
 def test_missing_state_root_is_zero_active_assertions_for_cli_and_registered_check(tmp_path: Path):
     state_root = tmp_path / ".ce" / "state"
 
