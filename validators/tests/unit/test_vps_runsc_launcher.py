@@ -131,8 +131,18 @@ def make_live_fake_docker(root: Path) -> Path:
         "  exit 0\n"
         "fi\n"
         "if [ \"$1\" = \"exec\" ]; then\n"
+        "  if [ \"$3\" = \"test\" ] && [ \"$4\" = \"-S\" ]; then\n"
+        "    [ \"$5\" = \"/run/creator-engine/herdr/herdr.sock\" ] || exit 96\n"
+        "    [ \"${CE_TEST_HERDR_SOCKET_LIVE:-1}\" = \"1\" ] || exit 1\n"
+        "    exit 0\n"
+        "  fi\n"
         "  case \" $* \" in\n"
         "    *' pane list'*)\n"
+        "      [ \"$*\" = \"exec ${CE_VPS_CONTAINER_NAME:-ce-vps-codex} herdr pane list\" ] || exit 95\n"
+        "      if [ \"${CE_TEST_HERDR_PANE_LIST_LIVE:-1}\" != \"1\" ]; then\n"
+        "        printf '{\"panes\":[]}\\n'\n"
+        "        exit 0\n"
+        "      fi\n"
         "      if [ -n \"${CE_TEST_DOCKER_LOG:-}\" ]; then\n"
         "        printf '%s\\n' 'pane-list={\"panes\":[{\"id\":\"w1:p1\"}]}' >> \"${CE_TEST_DOCKER_LOG}\"\n"
         "      fi\n"
@@ -146,6 +156,9 @@ def make_live_fake_docker(root: Path) -> Path:
         encoding="utf-8",
     )
     docker.chmod(0o755)
+    sleep = fake_bin / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    sleep.chmod(0o755)
     return fake_bin
 
 
@@ -494,8 +507,9 @@ def test_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
     commands = docker_log.splitlines()
     assert any(command == "rm -f ce-vps-codex" for command in commands)
     assert any(command.startswith("run -d --name ce-vps-codex ") for command in commands)
-    assert any(command.startswith("exec ce-vps-codex test -S ") for command in commands)
-    assert any(command.startswith("exec --env HERDR_SOCKET_PATH=") and " ce-vps-codex herdr pane list" in command for command in commands)
+    assert "exec ce-vps-codex test -S /run/creator-engine/herdr/herdr.sock" in commands
+    assert "exec ce-vps-codex herdr pane list" in commands
+    assert not any(command.startswith("exec --env ") for command in commands)
     assert "ancestor=" not in docker_log
     assert "pane-list={\"panes\":[{\"id\":\"w1:p1\"}]}" in docker_log
     # The relaunch must not replay stale herdr windows (e.g. w2/w3 from a stale
@@ -506,6 +520,40 @@ def test_detach_relaunch_backs_up_stale_herdr_session_before_docker_run(
     for stale_window in ("w2", "w3"):
         assert f"{stale_window}:" not in docker_log
         assert f'"id":"{stale_window}"' not in docker_log
+
+
+def test_detach_readiness_refuses_non_live_canonical_socket(tmp_path: Path) -> None:
+    result = run_live_wrapper_with_fake_docker(
+        tmp_path,
+        "--detach",
+        "tui",
+        CE_TEST_HERDR_SOCKET_LIVE="0",
+    )
+
+    assert result.returncode == 69
+    assert "herdr never became ready in container ce-vps-codex" in result.stderr
+    docker_log = (tmp_path / "docker-invocations.log").read_text(encoding="utf-8")
+    commands = docker_log.splitlines()
+    assert "exec ce-vps-codex test -S /run/creator-engine/herdr/herdr.sock" in commands
+    assert "exec ce-vps-codex herdr pane list" not in commands
+    assert not any(command.startswith("exec --env ") for command in commands)
+
+
+def test_detach_readiness_refuses_stale_socket_without_live_pane(tmp_path: Path) -> None:
+    result = run_live_wrapper_with_fake_docker(
+        tmp_path,
+        "--detach",
+        "tui",
+        CE_TEST_HERDR_PANE_LIST_LIVE="0",
+    )
+
+    assert result.returncode == 69
+    assert "herdr never became ready in container ce-vps-codex" in result.stderr
+    docker_log = (tmp_path / "docker-invocations.log").read_text(encoding="utf-8")
+    commands = docker_log.splitlines()
+    assert "exec ce-vps-codex test -S /run/creator-engine/herdr/herdr.sock" in commands
+    assert "exec ce-vps-codex herdr pane list" in commands
+    assert not any(command.startswith("exec --env ") for command in commands)
 
 
 def test_detach_relaunch_dry_run_does_not_mutate_stale_herdr_session(

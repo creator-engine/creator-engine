@@ -109,6 +109,12 @@ bounded loop (up to ~60 tries, 0.5s apart). If herdr never responds it fails
 loudly, naming the container and printing the teardown command. On success it
 prints the attach hint and the retire command.
 
+The image owns the fixed client route at
+`HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock`, so exact-name
+`docker exec` commands need no per-invocation environment override. The
+governed pane still starts through `/usr/bin/env -i`; its explicit allowlist
+omits `HERDR_SOCKET_PATH`, `HERDR_SOCKET`, and every other socket carrier.
+
 The **canonical drive path** is then to attach to herdr:
 
 ```bash
@@ -120,9 +126,9 @@ No host tmux is part of that path. To verify herdr drive without tmux:
 ```bash
 command -v tmux >/dev/null && echo "tmux present but unused" || echo "tmux absent OK"
 CE_VPS_REPO="$PWD" deploy/vps-runsc/run-vps-runsc.sh tui
-docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-vps-codex herdr pane list
-docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-vps-codex herdr pane read w1:p1
-docker exec --env HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock ce-vps-codex herdr pane send w1:p1 $'printf detached-herdr-ok\\n\\n'
+docker exec ce-vps-codex herdr pane list
+docker exec ce-vps-codex herdr pane read w1:p1
+docker exec ce-vps-codex herdr pane send w1:p1 $'printf detached-herdr-ok\\n\\n'
 ```
 
 In workspaces where Docker/runsc/herdr are unavailable, the deterministic
@@ -376,7 +382,8 @@ The printed argv must include `CE_DGX_HARNESS=claude`. It must not include
 `CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `OPENAI_API_KEY`,
 `BAO_TOKEN`, `CE_DGX_HERDR_SOCKET_PATH`, raw `HERDR_SOCKET` carriers, or any
 host socket bind mount. The herdr control socket path is substrate-internal and
-resolved by the image entrypoint default only.
+resolved by the image-owned fixed default for exact-name `docker exec`
+clients. The governed pane's `/usr/bin/env -i` boundary remains socket-scrubbed.
 
 ## Caveats
 

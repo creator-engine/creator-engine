@@ -148,6 +148,7 @@ COPY --from=validator-venv-builder /opt/ce-validator-venv /opt/ce-validator-venv
 
 ENV CE_VALIDATOR_VENV=/opt/ce-validator-venv
 ENV PATH="/opt/ce-validator-venv/bin:${PATH}"
+ENV HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock
 
 RUN set -eux; \
     ldconfig; \
