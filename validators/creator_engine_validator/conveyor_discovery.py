@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import subprocess
@@ -30,6 +31,10 @@ DIFF_ECHO_PATTERN = re.compile(r"^\s*(?:\d+\s*[: ]?\s*)?\+\s*READY-FOR-HARVEST\b
 SIGNAL_PREFIX_PATTERN = re.compile(r"^\s*(?:[•\-*>]\s*)?READY-FOR-HARVEST\b")
 SIGNAL_TAIL_PATTERN = re.compile(r"\s+(?P<branch>\S+)\s+(?P<sha>\S+)")
 ISSUE_PREFIX_PATTERN = re.compile(r"^ce-(?P<issue>\d+)-")
+
+
+class ReceiptDurabilityUncertainError(ValueError):
+    """A terminal receipt replacement may be visible but was not proven durable."""
 
 
 @dataclass(frozen=True)
@@ -60,12 +65,13 @@ class HandledSignalReceipt:
     seat_id: str
     branch: str
     sha: str
+    audit_sink: AuditSink | None = None
 
     def claim(self) -> bool:
-        return _receipt_ledger(self.state_path).claim(self)
+        return _receipt_ledger(self.state_path, self.audit_sink).claim(self)
 
     def complete(self, state: str) -> bool:
-        return _receipt_ledger(self.state_path).complete(self, state)
+        return _receipt_ledger(self.state_path, self.audit_sink).complete(self, state)
 
 
 @dataclass(frozen=True)
@@ -319,7 +325,16 @@ class _SignalReceiptLedger:
         with _locked_receipt_state(self.state_path) as state:
             entries = _receipt_entries(state)
             entry = _find_receipt(entries, receipt)
-            if entry is None or entry["state"] != "observed":
+            if entry is None:
+                return False
+            if entry.get("completion_pending") is True:
+                _emit_audit(
+                    self.audit_sink,
+                    "receipt_terminal_durability_unproven",
+                    receipt_fingerprint=_receipt_fingerprint(receipt),
+                )
+                return False
+            if entry["state"] != "observed":
                 return False
             entry["state"] = "processing"
             _write_receipt_state(self.state_path, entries)
@@ -333,7 +348,11 @@ class _SignalReceiptLedger:
             entry = _find_receipt(entries, receipt)
             if entry is None or entry["state"] != "processing":
                 return False
+            entry["completion_pending"] = True
+            _write_receipt_state(self.state_path, entries)
             entry["state"] = state
+            _write_receipt_state(self.state_path, entries)
+            entry.pop("completion_pending")
             _write_receipt_state(self.state_path, entries)
             return True
 
@@ -347,32 +366,42 @@ def _locked_receipt_state(state_path: Path) -> Iterable[Mapping[str, Any]]:
     lock_path = state_path.with_name(f".{state_path.name}.lock")
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("a+", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-            try:
-                if not state_path.exists():
-                    yield {"version": RECEIPT_VERSION, "receipts": []}
-                    return
-                try:
-                    raw = state_path.read_text(encoding="utf-8")
-                    data = json.loads(raw)
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise ValueError(f"receipt_state_unreadable:{type(exc).__name__}") from exc
-                yield data
-            finally:
-                fcntl.flock(lock_file, fcntl.LOCK_UN)
     except OSError as exc:
         raise ValueError(f"receipt_state_lock_unavailable:{type(exc).__name__}") from exc
+    try:
+        lock_file = lock_path.open("a+", encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"receipt_state_lock_unavailable:{type(exc).__name__}") from exc
+    with lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        except OSError as exc:
+            raise ValueError(f"receipt_state_lock_unavailable:{type(exc).__name__}") from exc
+        try:
+            if not state_path.exists():
+                yield {"version": RECEIPT_VERSION, "receipts": []}
+                return
+            try:
+                raw = state_path.read_text(encoding="utf-8")
+                data = json.loads(raw)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"receipt_state_unreadable:{type(exc).__name__}") from exc
+            yield data
+        finally:
+            try:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+            except OSError as exc:
+                raise ValueError(f"receipt_state_lock_unavailable:{type(exc).__name__}") from exc
 
 
-def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, str]]:
+def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(data, Mapping):
         raise ValueError("receipt_state_not_mapping")
     version = data.get("version")
     receipts = data.get("receipts")
     if version != RECEIPT_VERSION or not isinstance(receipts, list):
         raise ValueError("receipt_state_schema_invalid")
-    parsed: list[dict[str, str]] = []
+    parsed: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for item in receipts:
         if not isinstance(item, Mapping):
@@ -386,13 +415,24 @@ def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, str]]:
         if key in seen:
             raise ValueError("receipt_key_duplicate")
         seen.add(key)
-        parsed.append({"seat_id": seat_id, "branch": branch, "sha": sha, "state": state})
+        completion_pending = item.get("completion_pending", False)
+        if not isinstance(completion_pending, bool):
+            raise ValueError("receipt_completion_pending_invalid")
+        parsed_entry: dict[str, Any] = {
+            "seat_id": seat_id,
+            "branch": branch,
+            "sha": sha,
+            "state": state,
+        }
+        if completion_pending:
+            parsed_entry["completion_pending"] = True
+        parsed.append(parsed_entry)
     return parsed
 
 
 def _find_receipt(
-    entries: list[dict[str, str]], receipt: HandledSignalReceipt
-) -> dict[str, str] | None:
+    entries: list[dict[str, Any]], receipt: HandledSignalReceipt
+) -> dict[str, Any] | None:
     for entry in entries:
         if (entry["seat_id"], entry["branch"], entry["sha"]) == (
             receipt.seat_id,
@@ -412,7 +452,7 @@ def _receipt_record(receipt: HandledSignalReceipt, state: str) -> dict[str, str]
     }
 
 
-def _write_receipt_state(state_path: Path, receipts: list[dict[str, str]]) -> None:
+def _write_receipt_state(state_path: Path, receipts: list[dict[str, Any]]) -> None:
     payload = {
         "receipts": sorted(receipts, key=lambda item: (item["seat_id"], item["branch"], item["sha"])),
         "version": RECEIPT_VERSION,
@@ -421,25 +461,38 @@ def _write_receipt_state(state_path: Path, receipts: list[dict[str, str]]) -> No
         prefix=f".{state_path.name}.", suffix=".tmp", dir=str(state_path.parent), text=True
     )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise ValueError(f"receipt_state_write_failed:{type(exc).__name__}") from exc
         try:
             os.replace(tmp_name, state_path)
+        except OSError as exc:
+            raise ValueError(f"receipt_state_write_failed:{type(exc).__name__}") from exc
+        try:
             parent_fd = os.open(state_path.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(parent_fd)
             finally:
                 os.close(parent_fd)
         except OSError as exc:
-            raise ValueError(f"receipt_state_write_failed:{type(exc).__name__}") from exc
+            raise ReceiptDurabilityUncertainError(
+                f"receipt_state_durability_uncertain:{type(exc).__name__}"
+            ) from exc
     finally:
         try:
             os.unlink(tmp_name)
         except FileNotFoundError:
             pass
+
+
+def _receipt_fingerprint(receipt: HandledSignalReceipt) -> str:
+    coordinates = "\x00".join((receipt.seat_id, receipt.branch, receipt.sha)).encode("utf-8")
+    return hashlib.sha256(coordinates).hexdigest()
 
 
 def _sha_detail(token: str) -> str:
