@@ -63,11 +63,59 @@ def test_main_assembles_armed_daemon_from_env(monkeypatch: pytest.MonkeyPatch, t
     assert daemon_kwargs["gh_runner"] is not None
     assert daemon_kwargs["now"] is not None
     assert daemon_kwargs["ledger_writer"] is not None
+    assert daemon_kwargs["receipt_state_path"] == Path(env["CE_CONVEYOR_DAEMON_DISCOVERY_STATE"])
     assert daemon_kwargs["path_allocator"] is not None
     assert daemon_kwargs["daemon_lease"] is lease
     assert daemon_kwargs["receipt_issuer"] is not None
     assert lease.released is True
     assert constructed[-1] == ("run_once",)
+
+
+def test_build_daemon_pins_production_receipt_identity_to_controller_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    env = _base_env(tmp_path)
+    config = runner.load_config(env)
+    captured = {}
+
+    class FakeDaemon:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(runner, "ConveyorDaemon", FakeDaemon)
+
+    runner._build_daemon(
+        config,
+        FakeLease(),
+        probe_runner=lambda _argv: (
+            "READY-FOR-HARVEST ce-497-signal-receipt-ledger "
+            "0123456789abcdef0123456789abcdef01234567"
+        ),
+    )
+
+    payload = next(iter(captured["discovery_runner"]()))
+    assert payload.receipt_identity is not None
+    assert captured["receipt_state_path"] is config.discovery_state
+    assert captured["discovery_runner"].state_path is config.discovery_state
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    ["relative/state.json", "/", "/tmp/../state.json", "/tmp/./state.json", "/tmp/x\x00y"],
+)
+def test_load_config_rejects_nonlexical_receipt_state_paths(tmp_path: Path, unsafe: str):
+    env = _base_env(tmp_path)
+    env["CE_CONVEYOR_DAEMON_DISCOVERY_STATE"] = unsafe
+    with pytest.raises(runner.ConfigError, match="safe absolute path"):
+        runner.load_config(env)
+
+
+def test_load_config_normalizes_receipt_state_once_without_following_links(tmp_path: Path):
+    env = _base_env(tmp_path)
+    env["CE_CONVEYOR_DAEMON_DISCOVERY_STATE"] = f"{tmp_path}//private///receipts.json"
+    config = runner.load_config(env)
+    assert config.discovery_state == tmp_path / "private" / "receipts.json"
 
 
 @pytest.mark.parametrize(

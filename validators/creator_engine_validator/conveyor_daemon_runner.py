@@ -23,7 +23,7 @@ from .conveyor_daemon import (
 )
 from .conveyor_discovery import (
     ConveyorSeatDiscoveryRunner,
-    SeatProbeSpec,
+    ReceiptPersistenceError, SeatProbeSpec, normalize_receipt_state_path,
     parse_ready_for_harvest_signals,
     subprocess_probe_runner,
 )
@@ -119,8 +119,10 @@ def _require_env(env: Mapping[str, str], name: str) -> str:
 def _optional_path(env: Mapping[str, str], name: str) -> Path | None:
     value = env.get(name)
     return Path(value) if value else None
-
-
+def _receipt_state_path(raw: str) -> Path:
+    try: return normalize_receipt_state_path(raw)
+    except ReceiptPersistenceError as exc:
+        raise ConfigError("CE_CONVEYOR_DAEMON_DISCOVERY_STATE must be a safe absolute path") from exc
 def _parse_positive_float(
     env: Mapping[str, str],
     name: str,
@@ -203,7 +205,7 @@ def load_config(env: Mapping[str, str] | None = None) -> ConveyorDaemonConfig:
     return ConveyorDaemonConfig(
         seat_probes=_parse_seat_probes(_require_env(source, "CE_CONVEYOR_DAEMON_SEAT_PROBES")),
         runtime_root=Path(_require_env(source, "CE_CONVEYOR_DAEMON_RUNTIME_ROOT")),
-        discovery_state=Path(_require_env(source, "CE_CONVEYOR_DAEMON_DISCOVERY_STATE")),
+        discovery_state=_receipt_state_path(_require_env(source, "CE_CONVEYOR_DAEMON_DISCOVERY_STATE")),
         gh_token=_require_env(source, "GH_TOKEN"),
         signing_secret=_load_signing_secret(source),
         repo_root=Path(source.get("CE_CONVEYOR_DAEMON_REPO_ROOT") or DEFAULT_REPO_ROOT),
@@ -381,6 +383,7 @@ def _build_daemon(
         gh_runner=_gh_runner_factory(config.gh_token),
         now=_utc_now,
         ledger_writer=_jsonl_ledger_writer(ledger_path),
+        receipt_state_path=config.discovery_state,
         log_runner=_log,
         repo_root=roots.repo_root,
         bundle_root=roots.bundle_root,

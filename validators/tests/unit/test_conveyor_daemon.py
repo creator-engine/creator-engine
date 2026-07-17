@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -11,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from creator_engine_validator import conveyor_discovery
 from creator_engine_validator.conveyor import (
     ConveyorBundleLandingResult,
     ConveyorCommandResult,
@@ -27,17 +31,26 @@ from creator_engine_validator.conveyor_daemon import (
     ConveyorValidationLedgerBinding,
     _PUBLISH_TRANSPORT_CONFIG_PATTERN,
 )
+from creator_engine_validator.conveyor_discovery import (
+    ConveyorSeatDiscoveryRunner,
+    ReceiptDiscoveryPayload,
+    ReceiptIdentity,
+    SeatProbeSpec,
+    _receipt_ledger,
+)
 from creator_engine_validator.forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
 from creator_engine_validator.validation_sandbox_receipt import ValidationSandboxReceiptIssuer
 
 
 HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 
-TEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-daemon-alloc-test-"))
+TEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="conveyor-daemon-alloc-test-"))
 TEST_ALLOCATOR = DaemonPathAllocator(
     DaemonRuntimeRoots.from_root(TEST_RUNTIME_ROOT, create=True),
     secret=b"conveyor-daemon-unit-test-secret",
 )
+TEST_RECEIPT_STATE = TEST_RUNTIME_ROOT / "receipts.json"
+_TEST_RECEIPT_SEQUENCE = 0
 
 
 class FakeLease:
@@ -71,7 +84,29 @@ ARMED_ROOTS = {
     "daemon_lease": FakeLease(),
     "receipt_issuer": _receipt_issuer(),
     "validation_ledger_binding": _validation_ledger_binding(),
+    "receipt_state_path": TEST_RECEIPT_STATE,
 }
+
+
+def _receipt_armed_roots(tmp_path: Path) -> dict[str, object]:
+    runtime_root = tmp_path / "runtime"
+    return {
+        "path_allocator": DaemonPathAllocator(
+            DaemonRuntimeRoots.from_root(runtime_root, create=True),
+            secret=b"conveyor-daemon-receipt-test-secret",
+        ),
+        "daemon_lease": FakeLease(),
+        "receipt_issuer": _receipt_issuer(),
+        "validation_ledger_binding": ConveyorValidationLedgerBinding(
+            controller_id="conveyor-daemon-test-controller",
+            lane_id="conveyor-daemon-test-lane",
+            claim_ref="claims/conveyor-daemon-test-controller/conveyor-daemon-test-lane.yaml",
+            repo_root=runtime_root,
+            side_effect_ledger_root=runtime_root / "side-effect-ledger",
+            active_work_ledger_root=runtime_root / "active-work-ledger",
+        ),
+        "receipt_state_path": tmp_path / "receipts.json",
+    }
 
 
 class FakeGit:
@@ -186,12 +221,15 @@ class RealLocalGit:
 
 
 class FakeGh:
-    def __init__(self):
+    def __init__(self, *, pr_returncode: int = 0):
+        self.pr_returncode = pr_returncode
         self.calls: list[tuple[tuple[str, ...], Path]] = []
 
     def __call__(self, args: Sequence[str], cwd: Path) -> ConveyorCommandResult:
         self.calls.append((tuple(args), cwd))
         branch = tuple(args)[tuple(args).index("--head") + 1]
+        if self.pr_returncode:
+            return ConveyorCommandResult(self.pr_returncode, "", "PR create response lost\n")
         return ConveyorCommandResult(0, f"https://github.example/{branch}/pull/1\n", "")
 
 
@@ -338,7 +376,7 @@ def _fake_ledger_recorder(record_path: Path):
 
 class CountingAllocator:
     def __init__(self):
-        runtime_root = Path(tempfile.mkdtemp(dir="/tmp", prefix="conveyor-counting-alloc-"))
+        runtime_root = Path(tempfile.mkdtemp(prefix="conveyor-counting-alloc-"))
         self.inner = DaemonPathAllocator(
             DaemonRuntimeRoots.from_root(runtime_root, create=True),
             secret=b"conveyor-daemon-counting-secret",
@@ -363,7 +401,16 @@ class CountingAllocator:
         return self.inner.cleanup(receipt)
 
 
-def _item(branch: str = "Feature/One") -> ConveyorDaemonItem:
+def _observed_test_receipt_identity(branch: str) -> ReceiptIdentity:
+    global _TEST_RECEIPT_SEQUENCE
+    _TEST_RECEIPT_SEQUENCE += 1
+    sha = hashlib.sha1(f"{branch}:{_TEST_RECEIPT_SEQUENCE}".encode("utf-8")).hexdigest()
+    identity = ReceiptIdentity("test-seat", branch, sha)
+    _receipt_ledger(TEST_RECEIPT_STATE).observe(identity.seat_id, identity.branch, identity.sha)
+    return identity
+
+
+def _item(branch: str = "Feature/One", *, observed_receipt_identity: bool = True) -> ConveyorDaemonItem:
     allocation, receipt = TEST_ALLOCATOR.allocate_conveyor_paths(
         repo=branch.lower().replace("/", "-"),
         branch_name=branch,
@@ -376,6 +423,9 @@ def _item(branch: str = "Feature/One") -> ConveyorDaemonItem:
         title=f"Land {branch}",
         body="- Conveyor item.",
         allocation_receipt=receipt,
+        receipt_identity=(
+            _observed_test_receipt_identity(branch) if observed_receipt_identity else None
+        ),
     )
 
 
@@ -535,7 +585,7 @@ def test_dry_run_plans_no_mutation():
     ledger: list[ConveyorDaemonLedgerRecord] = []
 
     result = ConveyorDaemon(
-        discovery_runner=lambda: [_item()],
+        discovery_runner=lambda: [_item(observed_receipt_identity=False)],
         prepare_runner=prepare,
         land_runner=land,
         ledger_writer=ledger.append,
@@ -548,6 +598,83 @@ def test_dry_run_plans_no_mutation():
     assert prepare.calls == []
     assert land.calls == []
     assert ledger == []
+
+
+def test_armed_constructor_requires_controller_receipt_state_path():
+    armed_roots = dict(ARMED_ROOTS)
+    armed_roots.pop("receipt_state_path")
+    with pytest.raises(ValueError, match="receipt_state_path"):
+        ConveyorDaemon(
+            discovery_runner=lambda: [],
+            armed=True,
+            **armed_roots,
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+        )
+
+
+def test_typed_item_receipt_identity_branch_mismatch_is_rejected():
+    with pytest.raises(ValueError, match="receipt_identity_branch_mismatch"):
+        ConveyorDaemonItem(
+            branch="feature-one",
+            receipt_identity=ReceiptIdentity("seat-1", "feature-two", HEAD_SHA),
+        )
+
+
+def test_armed_typed_item_without_receipt_identity_fails_before_all_processing():
+    prepare = FakePrepare()
+    land = FakeLand()
+    git = FakeGit()
+    gh = FakeGh()
+    item = dataclasses.replace(_item(), receipt_identity=None)
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=land,
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("receipt identity is required for armed processing",)
+    assert prepare.calls == []
+    assert land.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+
+
+def test_armed_typed_item_with_observed_matching_identity_claims_then_executes():
+    item = _item()
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    assert item.receipt_identity is not None
+    entries = json.loads(TEST_RECEIPT_STATE.read_text(encoding="utf-8"))["receipts"]
+    assert any(
+        entry["sha"] == item.receipt_identity.sha and entry["state"] == "pr_opened"
+        for entry in entries
+    )
 
 
 def test_armed_path_calls_prepare_land_push_pr_and_ledger():
@@ -631,7 +758,7 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
         and '"allocation_id"' in message
         and '"action": "conveyor_allocation_audit"' in message
         and '"phase": "allocation"' in message
-        and '"item_key": "feature-one"' in message
+        and f'"item_key": "{item.key}"' in message
         and '"root_kind"' in message
         and '"mode_check"' in message
         and '"cleanup": {"cleaned": true, "status": "success"}' in message
@@ -642,7 +769,7 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
     assert any(
         "conveyor validation audit" in message
         and '"action": "conveyor_validation_phase_audit"' in message
-        and '"tree_sha": "' in message
+        and '"tree_sha"' not in message
         and '"nonce"' not in message
         and '"signature"' not in message
         for message in logs
@@ -653,6 +780,75 @@ def test_armed_path_calls_prepare_land_push_pr_and_ledger():
         and '"status": "success"' in message
         for message in logs
     )
+
+
+@pytest.mark.parametrize(
+    ("land_runner", "expected_publish_status"),
+    [(FakeLand(), "success"), (FakeLand(behind=1), "failed")],
+    ids=("success-and-retry", "failure-and-retry"),
+)
+def test_receipt_coordinates_are_absent_from_success_failure_and_retry_audits(
+    tmp_path, land_runner, expected_publish_status
+):
+    branch = "feature-one"
+    seat_id = "seat-private-coordinate"
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec(seat_id, ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST {branch} {HEAD_SHA}",
+        )()
+    )[0]
+    logs: list[str] = []
+
+    def build_daemon():
+        return ConveyorDaemon(
+            discovery_runner=lambda: [payload],
+            armed=True,
+            **_receipt_armed_roots(tmp_path),
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+            log_runner=logs.append,
+            prepare_runner=FakePrepare(record_validation=True),
+            land_runner=land_runner,
+            validation_sandbox_runner=FakeValidationSandboxRunner(
+                side_effect_path=tmp_path / branch / HEAD_SHA,
+                side_effect_record={
+                    "effect_kind": "validation_sandbox_run",
+                    "subject_git_sha": HEAD_SHA,
+                    "lane_id": seat_id,
+                },
+            ),
+        )
+
+    first = build_daemon().run_once()
+    retry = build_daemon().run_once()
+
+    assert first.results[0].status == (
+        "pr-opened" if expected_publish_status == "success" else "failed"
+    )
+    assert retry.results[0].status == "skipped"
+    audit_renderings = [message for message in logs if "audit" in message]
+    assert any("conveyor allocation audit" in message for message in audit_renderings)
+    assert any("conveyor validation audit" in message for message in audit_renderings)
+    assert any(
+        "conveyor publish audit" in message
+        and f'"status": "{expected_publish_status}"' in message
+        for message in audit_renderings
+    )
+    assert any("receipt_terminal_sealed" in message for message in audit_renderings)
+    assert payload.receipt_identity is not None
+    assert payload.receipt_identity.seat_id == seat_id
+    assert payload.receipt_identity.branch == branch
+    assert payload.receipt_identity.sha == HEAD_SHA
+    for rendering in audit_renderings:
+        assert seat_id not in rendering
+        assert branch not in rendering
+        assert HEAD_SHA not in rendering
 
 
 def test_armed_path_without_validation_record_fails_before_push_or_pr():
@@ -877,7 +1073,7 @@ def test_publish_time_local_transport_config_mutation_is_refused_before_push_or_
     assert any("conveyor publish audit" in message and "transport_config" in message for message in logs)
 
 
-def test_validation_audit_summarizes_side_effect_record_without_nonce_or_signature():
+def test_validation_audit_reduces_side_effect_record_to_value_free_presence():
     item = _item()
     logs: list[str] = []
     side_effect_record = {
@@ -907,8 +1103,10 @@ def test_validation_audit_summarizes_side_effect_record_without_nonce_or_signatu
     validation_audits = [message for message in logs if "conveyor validation audit" in message]
     assert len(validation_audits) == 1
     audit = validation_audits[0]
-    assert '"effect_kind": "validation_sandbox_run"' in audit
-    assert f'"subject_git_sha": "{HEAD_SHA}"' in audit
+    assert '"side_effect_present": true' in audit
+    assert "validation_sandbox_run" not in audit
+    assert "subject_git_sha" not in audit
+    assert HEAD_SHA not in audit
     assert "nonce" not in audit
     assert "signature" not in audit
     assert "unexpected_payload" not in audit
@@ -1162,6 +1360,7 @@ def test_armed_run_heartbeats_lease():
         now=FakeClock(),
         ledger_writer=lambda record: None,
         validation_ledger_binding=_validation_ledger_binding(),
+        receipt_state_path=TEST_RECEIPT_STATE,
     )
 
     daemon.run_once()
@@ -1202,6 +1401,7 @@ def test_armed_run_heartbeats_before_each_item_boundary():
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
         validation_ledger_binding=_validation_ledger_binding(),
+        receipt_state_path=TEST_RECEIPT_STATE,
     ).run_once()
 
     assert [item.status for item in result.results] == ["pr-opened", "pr-opened"]
@@ -1234,6 +1434,7 @@ def test_armed_run_heartbeat_failure_before_item_stops_without_processing_item()
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
         validation_ledger_binding=_validation_ledger_binding(),
+        receipt_state_path=TEST_RECEIPT_STATE,
     ).run_once()
 
     assert [item.status for item in result.results] == ["pr-opened", "failed"]
@@ -1293,8 +1494,9 @@ def test_armed_push_failure_records_ledger_and_skips_pr_open():
         validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
-    assert result.results[0].status == "failed"
+    assert result.results[0].status == "uncertain"
     assert result.results[0].reasons == ("push failed: push denied",)
+    assert result.results[0].side_effect_started is True
     assert [(record.action, record.status, record.returncode) for record in ledger] == [
         ("validate", "success", 0),
         ("push", "failed", 1),
@@ -1414,7 +1616,7 @@ def test_data_only_discovery_mapping_plans_without_payload_paths():
     assert not any("payload audit" in message for message in logs)
 
 
-def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
+def test_armed_data_only_discovery_mapping_without_receipt_identity_fails_closed():
     prepare = FakePrepare(record_validation=True)
     git = FakeGit()
     gh = FakeGh()
@@ -1435,15 +1637,16 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
         validation_ledger_binding=_validation_ledger_binding(),
+        receipt_state_path=TEST_RECEIPT_STATE,
     ).run_once()
 
-    assert result.results[0].status == "pr-opened"
-    assert allocator.allocate_calls == [{"repo": "feature-one", "branch_name": "feature-one"}]
-    assert len(allocator.allocations) == 1
-    allocation = allocator.allocations[0]
-    assert prepare.calls[0].worktree_path == allocation.worktree_path
-    assert (("push", "--", "origin", "feature-one:feature-one"), allocation.repo_path) in git.calls
-    assert len(gh.calls) == 1
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("receipt identity is required for armed processing",)
+    assert allocator.allocate_calls == []
+    assert allocator.allocations == []
+    assert prepare.calls == []
+    assert git.calls == []
+    assert gh.calls == []
 
 
 def test_direct_item_with_paths_and_no_receipt_fails_before_prepare_land_git_or_gh():
@@ -1490,6 +1693,7 @@ def test_forged_receipt_from_another_allocator_instance_is_refused_before_prepar
         title="Land Feature/One",
         body="- Conveyor item.",
         allocation_receipt=foreign_receipt,
+        receipt_identity=_observed_test_receipt_identity("Feature/One"),
     )
 
     result = ConveyorDaemon(
@@ -1655,7 +1859,21 @@ def test_hostile_item_ref_shape_is_rejected_before_git_or_gh(field: str, value: 
     git = FakeGit()
     gh = FakeGh()
 
-    hostile_item = dataclasses.replace(_item(), **{field: value})
+    item = _item()
+    replacements = {field: value}
+    if field == "branch":
+        assert item.receipt_identity is not None
+        replacements["receipt_identity"] = ReceiptIdentity(
+            item.receipt_identity.seat_id,
+            value,
+            item.receipt_identity.sha,
+        )
+        _receipt_ledger(TEST_RECEIPT_STATE).observe(
+            item.receipt_identity.seat_id,
+            value,
+            item.receipt_identity.sha,
+        )
+    hostile_item = dataclasses.replace(item, **replacements)
 
     result = ConveyorDaemon(
         discovery_runner=lambda: [hostile_item],
@@ -1709,8 +1927,9 @@ def test_landed_branch_shape_is_rejected_before_push_or_pr_open():
 def test_idempotent_re_discovery_skips_completed_item():
     git = FakeGit()
     gh = FakeGh()
+    item = _item()
     daemon = ConveyorDaemon(
-        discovery_runner=lambda: [_item()],
+        discovery_runner=lambda: [item],
         armed=True,
         **ARMED_ROOTS,
         git_runner=git,
@@ -1729,6 +1948,495 @@ def test_idempotent_re_discovery_skips_completed_item():
     assert second.results[0].status == "skipped"
     assert [call for call, _cwd in git.calls].count(("push", "--", "origin", "feature-one:feature-one")) == 1
     assert len(gh.calls) == 1
+
+
+def test_receipt_terminal_state_refuses_reentry_after_restart(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+        )()
+    )[0]
+
+    first = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(failing_branches={"ce-388-conveyor-discovery"}),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+    assert first.results[0].status == "failed"
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "failed"
+
+    restarted = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(failing_branches={"ce-388-conveyor-discovery"}),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+    assert restarted.results[0].status == "skipped"
+    assert restarted.results[0].reasons == ("receipt is not processable",)
+
+
+@pytest.mark.parametrize(
+    ("git_runner", "gh_runner", "expected_ledger"),
+    [
+        (
+            FakeGit(push_returncode=1),
+            FakeGh(),
+            (("validate", "success", 0), ("push", "failed", 1)),
+        ),
+        (
+            FakeGit(),
+            FakeGh(pr_returncode=1),
+            (("validate", "success", 0), ("push", "success", 0), ("pr-open", "failed", 1)),
+        ),
+    ],
+    ids=("push", "pr-create"),
+)
+def test_receipt_marks_post_side_effect_failure_uncertain(tmp_path, git_runner, gh_runner, expected_ledger):
+    state_path = tmp_path / "receipts.json"
+    ledger: list[ConveyorDaemonLedgerRecord] = []
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=git_runner,
+        validate_runner=FakeValidate(),
+        gh_runner=gh_runner,
+        now=FakeClock(),
+        ledger_writer=ledger.append,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "uncertain"
+    assert result.results[0].side_effect_started is True
+    assert [(record.action, record.status, record.returncode) for record in ledger] == list(
+        expected_ledger
+    )
+    assert json.loads(state_path.read_text())['receipts'][0]['state'] == "uncertain"
+
+
+def test_receipt_records_successful_pr_open(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    assert json.loads(state_path.read_text())['receipts'][0]['state'] == "pr_opened"
+
+
+def test_completion_parent_fsync_error_returns_uncertain_and_leaves_terminal_seal(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    real_fsync = conveyor_discovery.os.fsync
+    parent_fsync_calls = 0
+
+    def fail_terminal_parent_fsync(fd):
+        nonlocal parent_fsync_calls
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            parent_fsync_calls += 1
+            if parent_fsync_calls == 6:
+                raise OSError("terminal directory fsync denied")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(conveyor_discovery.os, "fsync", fail_terminal_parent_fsync)
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    entry = json.loads(state_path.read_text(encoding="utf-8"))["receipts"][0]
+    assert result.results[0].status == "uncertain"
+    assert result.results[0].reasons == ("receipt completion durability is uncertain",)
+    assert result.results[0].side_effect_started is True
+    assert entry["state"] == "pr_opened"
+    assert entry["completion_sealed"] is True
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_sealed_visible_terminal_is_audited_blocked_after_restart_and_never_reexecutes(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    identity = payload.receipt_identity
+    receipt = conveyor_discovery.HandledSignalReceipt(
+        state_path, identity.seat_id, identity.branch, identity.sha
+    )
+    assert receipt.claim() is True
+    real_fsync = conveyor_discovery.os.fsync
+    directory_fsyncs = 0
+
+    def fail_sealed_terminal_parent_fsync(fd):
+        nonlocal directory_fsyncs
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            directory_fsyncs += 1
+        if directory_fsyncs == 3:
+            raise OSError("terminal directory fsync denied")
+        return real_fsync(fd)
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(conveyor_discovery.os, "fsync", fail_sealed_terminal_parent_fsync)
+        with pytest.raises(conveyor_discovery.ReceiptDurabilityUncertainError):
+            receipt.complete("pr_opened")
+
+    prepare = FakePrepare()
+    logs: list[str] = []
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert result.results[0].status == "skipped"
+    assert result.results[0].reasons == ("receipt is not processable",)
+    assert prepare.calls == []
+    assert len(logs) == 1
+    assert "receipt_terminal_sealed" in logs[0]
+    assert identity.seat_id not in logs[0]
+    assert identity.branch not in logs[0]
+    assert identity.sha not in logs[0]
+    assert str(state_path) not in logs[0]
+
+
+def test_processing_receipt_recovery_blocks_restart_without_rerunning_side_effects(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    identity = payload.receipt_identity
+    receipt = conveyor_discovery.HandledSignalReceipt(
+        state_path, identity.seat_id, identity.branch, identity.sha
+    )
+    assert receipt.claim() is True
+
+    def fail_terminal_replace(*_args, **_kwargs):
+        raise OSError("terminal replace denied")
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(conveyor_discovery.os, "replace", fail_terminal_replace)
+        with pytest.raises(conveyor_discovery.ReceiptPersistenceError, match="receipt_state_write_failed"):
+            receipt.complete("pr_opened")
+
+    prepare = FakePrepare()
+    logs: list[str] = []
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert result.results[0].status == "skipped"
+    assert prepare.calls == []
+    assert len(logs) == 1
+    assert "receipt_processing_recovery_required" in logs[0]
+    assert identity.seat_id not in logs[0]
+    assert identity.branch not in logs[0]
+    assert identity.sha not in logs[0]
+
+
+def test_armed_daemon_refuses_runner_owned_receipt_state_path(tmp_path):
+    attacker_state_path = tmp_path / "attacker-controlled-receipts.json"
+    payload = ReceiptDiscoveryPayload(
+        _data_only_payload(),
+        ReceiptIdentity("seat-1", "feature-one", HEAD_SHA),
+    )
+
+    class AttackerControlledDiscoveryRunner:
+        state_path = attacker_state_path
+
+        def __call__(self):
+            return [payload]
+
+    armed_roots = _receipt_armed_roots(tmp_path)
+    armed_roots.pop("receipt_state_path")
+
+    with pytest.raises(ValueError, match="receipt_state_path"):
+        ConveyorDaemon(
+            discovery_runner=AttackerControlledDiscoveryRunner(),
+            armed=True,
+            **armed_roots,
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=FakeGh(),
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+            prepare_runner=FakePrepare(),
+            land_runner=FakeLand(),
+            validation_sandbox_runner=FakeValidationSandboxRunner(),
+        )
+
+    assert not attacker_state_path.exists()
+
+
+def test_receipt_exception_before_push_is_terminal_failed(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+        )()
+    )[0]
+
+    def raise_before_push(*_args, **_kwargs):
+        raise RuntimeError("prepare exploded")
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=raise_before_push,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "failed"
+
+
+def test_receipt_exception_during_push_is_uncertain(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+        )()
+    )[0]
+
+    class PushRaises(FakeGit):
+        def __call__(self, args, cwd, env):
+            if tuple(args) == ("push", "--", "origin", "ce-388-conveyor-discovery:ce-388-conveyor-discovery"):
+                raise RuntimeError("push response lost")
+            return super().__call__(args, cwd, env)
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=PushRaises(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "uncertain"
+    assert result.results[0].side_effect_started is True
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "uncertain"
+
+
+@pytest.mark.parametrize("completion_outcome", ["false", "exception"])
+def test_post_side_effect_completion_ambiguity_is_value_free_uncertain_once_and_restart_safe(
+    tmp_path, monkeypatch, completion_outcome
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-secret", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    completion_calls = 0
+
+    def ambiguous_complete(_receipt, _state):
+        nonlocal completion_calls
+        completion_calls += 1
+        if completion_outcome == "exception":
+            raise RuntimeError("secret rejected value")
+        return False
+
+    prepare = FakePrepare(record_validation=True)
+    gh = FakeGh()
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(
+            conveyor_discovery.HandledSignalReceipt,
+            "complete",
+            ambiguous_complete,
+        )
+        result = ConveyorDaemon(
+            discovery_runner=lambda: [payload],
+            armed=True,
+            **_receipt_armed_roots(tmp_path),
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=gh,
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+            prepare_runner=prepare,
+            land_runner=FakeLand(),
+            validation_sandbox_runner=FakeValidationSandboxRunner(),
+        ).run_once()
+
+    assert completion_calls == 1
+    assert result.results[0].status == "uncertain"
+    assert result.results[0].reasons == ("receipt completion durability is uncertain",)
+    assert str(state_path) not in str(result.results[0].reasons)
+    assert "secret" not in str(result.results[0].reasons)
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "processing"
+
+    prepare_calls = len(prepare.calls)
+    gh_calls = len(gh.calls)
+    restarted = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+    assert restarted.results[0].status == "skipped"
+    assert len(prepare.calls) == prepare_calls
+    assert len(gh.calls) == gh_calls
+
+
+def test_pre_side_effect_completion_exception_is_stable_failed_once_and_does_not_crash(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-secret", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    completion_calls = 0
+
+    def fail_complete(_receipt, _state):
+        nonlocal completion_calls
+        completion_calls += 1
+        raise OSError("secret completion path")
+
+    def fail_prepare(*_args, **_kwargs):
+        raise RuntimeError("prepare failed")
+
+    monkeypatch.setattr(conveyor_discovery.HandledSignalReceipt, "complete", fail_complete)
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=fail_prepare,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert completion_calls == 1
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("receipt completion persistence failed",)
+    assert str(state_path) not in str(result.results[0].reasons)
+    assert "secret" not in str(result.results[0].reasons)
 
 
 def test_hostile_item_bundle_path_transport_gadget_is_rejected_never_reaches_git():
