@@ -41,6 +41,13 @@ VENUE_REQUIRED_KEYS = frozenset(
 )
 POLICY_KIND = "codex-one-shot-launch-policy"
 POLICY_SCHEMA_VERSION = "1"
+V1_SUPPORTED_ROLES = (
+    "architect_research",
+    "implementer",
+    "reviewer",
+    "verification",
+)
+V1_VENUES = ("dgx-relay", "vps-tmux", "dev1-local", "in-seat")
 ALLOWED_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
 ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES = frozenset({"OPENAI_API_KEY"})
 SAFE_RUNTIME_ENV_NAMES = frozenset({"LANG", "PATH", "TERM"})
@@ -167,6 +174,26 @@ class CodexOneShotPolicy:
             if candidate == role:
                 return credentials
         raise CodexWorkerLaunchError(f"role {role} has no provider credential policy")
+
+
+def _require_exact_v1_names(actual: Sequence[str], expected: tuple[str, ...], field: str) -> None:
+    if len(actual) != len(expected) or set(actual) != set(expected):
+        raise CodexWorkerLaunchError(f"policy must define the exact v1 {field} set")
+
+
+def _require_trusted_v1_matrix(policy: CodexOneShotPolicy) -> None:
+    """Revalidate trusted v1 invariants even for directly constructed policies."""
+    _require_exact_v1_names(policy.supported_roles, V1_SUPPORTED_ROLES, "supported-role")
+    _require_exact_v1_names(
+        tuple(venue.name for venue in policy.venues), V1_VENUES, "venue"
+    )
+    for venue in policy.venues:
+        matrix = dict(venue.role_sandboxes)
+        _require_exact_v1_names(tuple(matrix), V1_SUPPORTED_ROLES, "supported-role")
+        if matrix["implementer"] is not None:
+            raise CodexWorkerLaunchError(
+                f"v1 implementer sandbox at venue {venue.name} must be null"
+            )
 
 
 @dataclass(frozen=True)
@@ -382,6 +409,7 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
     roles = _require_string_list(raw["supported_roles"], "supported_roles")
     if any(not _ROLE_RE.fullmatch(role) for role in roles):
         raise CodexWorkerLaunchError("policy supported_roles contains an invalid role name")
+    _require_exact_v1_names(roles, V1_SUPPORTED_ROLES, "supported-role")
     raw_credentials = raw["role_provider_credentials"]
     if not isinstance(raw_credentials, dict) or set(raw_credentials) != set(roles):
         raise CodexWorkerLaunchError(
@@ -412,6 +440,7 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
     raw_venues = raw["venues"]
     if not isinstance(raw_venues, dict) or not raw_venues:
         raise CodexWorkerLaunchError("policy venues must be a nonempty mapping")
+    _require_exact_v1_names(tuple(raw_venues), V1_VENUES, "venue")
     venues: list[VenuePolicy] = []
     for raw_name, raw_venue in raw_venues.items():
         name = _require_string(raw_name, "venue")
@@ -435,6 +464,10 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
         role_sandboxes: list[tuple[str, str | None]] = []
         for role in roles:
             sandbox = matrix[role]
+            if role == "implementer" and sandbox is not None:
+                raise CodexWorkerLaunchError(
+                    f"v1 implementer sandbox at venue {name} must be null"
+                )
             if sandbox is not None:
                 sandbox = _require_string(sandbox, f"venues.{name}.role_sandboxes.{role}")
                 if sandbox not in ALLOWED_SANDBOXES:
@@ -445,8 +478,6 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
                     )
                 if role != "implementer" and sandbox == "danger-full-access":
                     raise CodexWorkerLaunchError("read-only roles may not receive danger-full-access")
-                if role == "implementer" and sandbox == "read-only":
-                    raise CodexWorkerLaunchError("implementer may not receive an unusable read-only sandbox")
             role_sandboxes.append((role, sandbox))
         venues.append(VenuePolicy(name, template, attestation, tuple(role_sandboxes)))
     defaults = raw["model_defaults"]
@@ -641,6 +672,7 @@ def build_launch_plan(
     version_probe: CodexVersionProbe | None = None,
 ) -> CodexWorkerLaunchPlan:
     """Build a deterministic digest/path-only plan after all preflights pass."""
+    _require_trusted_v1_matrix(policy)
     fs = filesystem or RealLauncherFilesystem()
     probe = version_probe or SubprocessCodexVersionProbe()
     root = _real_directory(worktree, field="worktree", filesystem=fs)

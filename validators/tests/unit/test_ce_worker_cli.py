@@ -8,6 +8,7 @@ fail-closed seams (Podman unavailable on this host).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -274,6 +275,31 @@ def _one_shot_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
     return worktree, brief, hashlib.sha256(brief.read_bytes()).hexdigest()
 
 
+def _mutate_one_shot_policy(worktree: Path, mutation: str) -> None:
+    path = worktree / "governance" / "policies" / "codex-one-shot-launch-v1.yaml"
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if mutation in {"workspace-write", "danger-full-access"}:
+        venue = raw["venues"]["dev1-local"]
+        venue["role_sandboxes"]["implementer"] = mutation
+        if mutation == "danger-full-access":
+            venue["outer_isolation_attestation"] = "caller-claimed"
+    elif mutation == "add-venue":
+        raw["venues"]["caller-relay"] = copy.deepcopy(raw["venues"]["dgx-relay"])
+    elif mutation == "replace-venue":
+        raw["venues"]["caller-relay"] = raw["venues"].pop("dgx-relay")
+    elif mutation == "remove-venue":
+        raw["venues"].pop("dgx-relay")
+    elif mutation == "add-role":
+        raw["supported_roles"].append("operator")
+    elif mutation == "replace-role":
+        raw["supported_roles"][raw["supported_roles"].index("reviewer")] = "operator"
+    elif mutation == "remove-role":
+        raw["supported_roles"].remove("reviewer")
+    else:  # pragma: no cover - closed test vocabulary
+        raise AssertionError(mutation)
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
 def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, monkeypatch, capsys):
     worktree, brief, digest = _one_shot_worktree(tmp_path)
     called = []
@@ -371,6 +397,45 @@ def test_worker_launch_refuses_implementer_native_venues_before_runner_construct
         "--brief-sha256", digest, "--run-id", "cli-refusal-test",
     ]) == 1
     assert "not attested for required isolation" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "workspace-write",
+        "danger-full-access",
+        "add-venue",
+        "replace-venue",
+        "remove-venue",
+        "add-role",
+        "replace-role",
+        "remove-role",
+    ],
+)
+def test_worker_launch_refuses_mutated_v1_policy_before_probe_or_runner_construction(
+    tmp_path, monkeypatch, capsys, mutation
+) -> None:
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    _mutate_one_shot_policy(worktree, mutation)
+    support = __import__(
+        "validators.tests.unit.test_codex_worker_launcher",
+        fromlist=["HermeticFilesystem"],
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_launcher_filesystem", lambda: support.HermeticFilesystem()
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_version_probe", lambda: pytest.fail("version probe constructed")
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner constructed")
+    )
+    assert ce_cli.main([
+        "worker", "launch", "--role", "implementer", "--venue", "dev1-local",
+        "--worktree", str(worktree), "--brief", str(brief),
+        "--brief-sha256", digest, "--run-id", "cli-mutated-policy-test",
+    ]) == 1
+    assert "ce worker launch refused" in capsys.readouterr().err
 
 
 def test_worker_launch_oserror_is_governed_refusal_without_traceback(

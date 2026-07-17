@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import replace
 from pathlib import Path
 import shutil
 import subprocess
 
 import pytest
+import yaml
 
 from creator_engine_validator import codex_worker_launcher as launcher
 
@@ -83,6 +85,13 @@ def worktree(tmp_path: Path) -> Path:
 
 def policy(worktree: Path) -> launcher.CodexOneShotPolicy:
     return launcher.load_canonical_policy(worktree, filesystem=HermeticFilesystem())
+
+
+def rewrite_policy(worktree: Path, mutate) -> None:
+    path = worktree / "governance" / "policies" / POLICY_PATH.name
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    mutate(raw)
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
 def governed_input(
@@ -172,6 +181,87 @@ def test_role_venue_matrix_is_complete_and_fail_closed(
             loaded.sandbox_for(role=role, venue=venue)
     else:
         assert loaded.sandbox_for(role=role, venue=venue) == sandbox
+
+
+@pytest.mark.parametrize("venue", ["dgx-relay", "vps-tmux", "dev1-local", "in-seat"])
+@pytest.mark.parametrize("sandbox", ["workspace-write", "danger-full-access"])
+def test_policy_parser_refuses_every_non_null_v1_implementer_sandbox(
+    worktree: Path, venue: str, sandbox: str
+) -> None:
+    def mutate(raw) -> None:
+        raw["venues"][venue]["role_sandboxes"]["implementer"] = sandbox
+        if sandbox == "danger-full-access":
+            raw["venues"][venue]["outer_isolation_attestation"] = "caller-claimed"
+
+    rewrite_policy(worktree, mutate)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="v1 implementer.*must be null"):
+        policy(worktree)
+
+
+@pytest.mark.parametrize("mutation", ["add", "replace", "remove"])
+def test_policy_parser_refuses_mutated_v1_venue_set(worktree: Path, mutation: str) -> None:
+    def mutate(raw) -> None:
+        if mutation == "add":
+            raw["venues"]["caller-relay"] = dict(raw["venues"]["dgx-relay"])
+        elif mutation == "replace":
+            raw["venues"]["caller-relay"] = raw["venues"].pop("dgx-relay")
+        else:
+            raw["venues"].pop("dgx-relay")
+
+    rewrite_policy(worktree, mutate)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="exact v1 venue"):
+        policy(worktree)
+
+
+@pytest.mark.parametrize("mutation", ["add", "replace", "remove"])
+def test_policy_parser_refuses_mutated_v1_supported_role_set(
+    worktree: Path, mutation: str
+) -> None:
+    def mutate(raw) -> None:
+        roles = raw["supported_roles"]
+        if mutation == "add":
+            roles.append("operator")
+        elif mutation == "replace":
+            roles[roles.index("reviewer")] = "operator"
+        else:
+            roles.remove("reviewer")
+
+    rewrite_policy(worktree, mutate)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="exact v1 supported-role"):
+        policy(worktree)
+
+
+@pytest.mark.parametrize("sandbox", ["workspace-write", "danger-full-access"])
+def test_planner_revalidates_trusted_v1_implementer_refusal_before_version_probe(
+    worktree: Path, sandbox: str
+) -> None:
+    loaded = policy(worktree)
+    venue = loaded.venue("dev1-local")
+    unsafe_matrix = tuple(
+        (role, sandbox if role == "implementer" else value)
+        for role, value in venue.role_sandboxes
+    )
+    unsafe_venue = replace(
+        venue,
+        outer_isolation_attestation=("caller-claimed" if sandbox == "danger-full-access" else None),
+        role_sandboxes=unsafe_matrix,
+    )
+    unsafe_policy = replace(
+        loaded,
+        venues=tuple(unsafe_venue if item.name == venue.name else item for item in loaded.venues),
+    )
+    probe = FixedVersionProbe()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="v1 implementer.*must be null"):
+        launcher.build_launch_plan(
+            policy=unsafe_policy,
+            governed_input=governed_input(worktree, role="implementer"),
+            role="implementer",
+            venue="dev1-local",
+            worktree=str(worktree),
+            filesystem=HermeticFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
 
 
 def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path) -> None:
