@@ -1421,8 +1421,9 @@ def test_armed_push_failure_records_ledger_and_skips_pr_open():
         validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
-    assert result.results[0].status == "failed"
+    assert result.results[0].status == "uncertain"
     assert result.results[0].reasons == ("push failed: push denied",)
+    assert result.results[0].side_effect_started is True
     assert [(record.action, record.status, record.returncode) for record in ledger] == [
         ("validate", "success", 0),
         ("push", "failed", 1),
@@ -1920,20 +1921,29 @@ def test_receipt_terminal_state_refuses_reentry_after_restart(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("git_runner", "gh_runner"),
+    ("git_runner", "gh_runner", "expected_ledger"),
     [
-        (FakeGit(push_returncode=1), FakeGh()),
-        (FakeGit(), FakeGh(pr_returncode=1)),
+        (
+            FakeGit(push_returncode=1),
+            FakeGh(),
+            (("validate", "success", 0), ("push", "failed", 1)),
+        ),
+        (
+            FakeGit(),
+            FakeGh(pr_returncode=1),
+            (("validate", "success", 0), ("push", "success", 0), ("pr-open", "failed", 1)),
+        ),
     ],
     ids=("push", "pr-create"),
 )
-def test_receipt_marks_post_side_effect_failure_uncertain(tmp_path, git_runner, gh_runner):
+def test_receipt_marks_post_side_effect_failure_uncertain(tmp_path, git_runner, gh_runner, expected_ledger):
     state_path = tmp_path / "receipts.json"
+    ledger: list[ConveyorDaemonLedgerRecord] = []
     payload = list(
         ConveyorSeatDiscoveryRunner(
             [SeatProbeSpec("seat-1", ("probe",))],
             state_path,
-            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
         )()
     )[0]
 
@@ -1945,13 +1955,17 @@ def test_receipt_marks_post_side_effect_failure_uncertain(tmp_path, git_runner, 
         validate_runner=FakeValidate(),
         gh_runner=gh_runner,
         now=FakeClock(),
-        ledger_writer=lambda record: None,
+        ledger_writer=ledger.append,
         prepare_runner=FakePrepare(record_validation=True),
         land_runner=FakeLand(),
         validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
-    assert result.results[0].status == "failed"
+    assert result.results[0].status == "uncertain"
+    assert result.results[0].side_effect_started is True
+    assert [(record.action, record.status, record.returncode) for record in ledger] == list(
+        expected_ledger
+    )
     assert json.loads(state_path.read_text())['receipts'][0]['state'] == "uncertain"
 
 
@@ -2258,7 +2272,8 @@ def test_receipt_exception_during_push_is_uncertain(tmp_path):
         validation_sandbox_runner=FakeValidationSandboxRunner(),
     ).run_once()
 
-    assert result.results[0].status == "failed"
+    assert result.results[0].status == "uncertain"
+    assert result.results[0].side_effect_started is True
     assert json.loads(state_path.read_text())["receipts"][0]["state"] == "uncertain"
 
 

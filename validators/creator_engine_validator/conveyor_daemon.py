@@ -706,7 +706,7 @@ class ConveyorDaemon:
                 )
             )
             if push_result.returncode != 0:
-                return self._failed(
+                return self._uncertain(
                     item,
                     (f"push failed: {_command_detail(push_result)}",),
                     prepare_result=prepared,
@@ -729,7 +729,7 @@ class ConveyorDaemon:
                 )
             )
             if pr_result.returncode != 0:
-                return self._failed(
+                return self._uncertain(
                     item,
                     (f"pr-open failed: {_command_detail(pr_result)}",),
                     prepare_result=prepared,
@@ -749,7 +749,8 @@ class ConveyorDaemon:
                 side_effect_started=publish_started,
             )
         except Exception as exc:
-            return self._failed(
+            result_factory = self._uncertain if publish_started else self._failed
+            return result_factory(
                 item,
                 (f"exception: {exc}",),
                 ledger_records=records,
