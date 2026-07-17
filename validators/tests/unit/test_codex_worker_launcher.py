@@ -1189,12 +1189,16 @@ def test_launch_refuses_omitted_mismatched_or_authority_widened_envelope_before_
     ]
     for mutation in mutations:
         runner = RecordingRunner()
-        with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        with pytest.raises(
+            launcher.CodexWorkerLaunchError,
+            match="complete launch plan and executable argv are not canonical",
+        ):
             launcher.launch(
                 mutation,
                 request=launch_request_from_plan(built),
                 governed_input=worker_input,
                 runner=runner,
+                filesystem=HermeticFilesystem(),
             )
         assert runner.calls == []
 
@@ -1256,12 +1260,16 @@ def test_launch_refuses_every_noncanonical_argv_mutation_before_runner(
     built = plan(worktree, governed_input=worker_input)
     runner = RecordingRunner()
 
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
         launcher.launch(
             replace(built, argv=tuple(mutate_argv(built.argv))),
             request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
+            filesystem=HermeticFilesystem(),
         )
 
     assert runner.calls == []
@@ -1290,12 +1298,16 @@ def test_launch_refuses_coordinated_valid_venue_mutation_before_runner(
     )
     runner = RecordingRunner()
 
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
         launcher.launch(
             replace(built, venue="dgx-relay"),
             request=request,
             governed_input=worker_input,
             runner=runner,
+            filesystem=HermeticFilesystem(),
         )
 
     assert runner.calls == []
@@ -1319,7 +1331,10 @@ def test_launch_refuses_coordinated_alternate_valid_run_request_before_runner(
     alternate_output = str(worktree / ".ce" / "state" / f"{alternate_run_id}.json")
     runner = RecordingRunner()
 
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
         launcher.launch(
             replace(
                 built,
@@ -1330,6 +1345,7 @@ def test_launch_refuses_coordinated_alternate_valid_run_request_before_runner(
             request=request,
             governed_input=worker_input,
             runner=runner,
+            filesystem=HermeticFilesystem(),
         )
 
     assert runner.calls == []
@@ -1430,12 +1446,16 @@ def test_launch_refuses_coordinated_plan_and_argv_mutation_before_runner(
     built = plan(worktree, governed_input=worker_input)
     runner = RecordingRunner()
 
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
         launcher.launch(
             mutation(built, worktree),
             request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
+            filesystem=HermeticFilesystem(),
         )
 
     assert runner.calls == []
@@ -1463,12 +1483,16 @@ def test_launch_refuses_coordinated_existing_output_node_before_runner(
     )
     runner = RecordingRunner()
 
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
         launcher.launch(
             mutated,
             request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
+            filesystem=HermeticFilesystem(),
         )
 
     assert runner.calls == []
