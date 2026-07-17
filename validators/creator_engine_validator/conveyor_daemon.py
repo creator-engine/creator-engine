@@ -28,7 +28,7 @@ from .conveyor import (
     validation_sandbox_spec_from_command,
 )
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
-from .conveyor_discovery import HandledSignalReceipt, ReceiptDiscoveryPayload
+from .conveyor_discovery import HandledSignalReceipt, ReceiptDiscoveryPayload, ReceiptIdentity
 from .daemon_lease import DaemonLease
 from .checks.path_manifest_fidelity import branch_slug, extract_manifest_paths_from_file
 from .forge.daemon_allocation import (
@@ -152,7 +152,7 @@ class ConveyorDaemonItem:
     pr_base: str | None = None
     identity: str | None = None
     allocation_receipt: DaemonPathReceipt | None = None
-    receipt: HandledSignalReceipt | None = None
+    receipt_identity: ReceiptIdentity | None = None
 
     @classmethod
     def from_mapping(
@@ -166,7 +166,9 @@ class ConveyorDaemonItem:
         # control fields such as validate_command/base/remote or local paths
         # are audited by the shared schema and never reach item construction.
         parsed = validate_discovery_payload(payload, audit_sink=audit_sink, source="conveyor_daemon")
-        receipt = payload.receipt if isinstance(payload, ReceiptDiscoveryPayload) else None
+        receipt_identity = payload.receipt_identity if isinstance(payload, ReceiptDiscoveryPayload) else None
+        if receipt_identity is not None and receipt_identity.branch != parsed.branch_name:
+            raise ValueError("receipt_identity_branch_mismatch")
         return cls(
             branch=parsed.branch_name,
             issue=parsed.issue,
@@ -177,13 +179,13 @@ class ConveyorDaemonItem:
             declared_work_class="story",
             pr_title=parsed.pr_title,
             pr_body=parsed.pr_body,
-            receipt=receipt,
+            receipt_identity=receipt_identity,
         )
 
     @property
     def key(self) -> str:
-        if self.receipt is not None:
-            return f"{self.receipt.seat_id}:{self.receipt.branch}:{self.receipt.sha}"
+        if self.receipt_identity is not None:
+            return f"{self.receipt_identity.seat_id}:{self.receipt_identity.branch}:{self.receipt_identity.sha}"
         return self.identity or branch_slug(self.branch)
 
     def harvest_spec(
@@ -264,6 +266,7 @@ class ConveyorDaemonItemResult:
     landing_result: ConveyorBundleLandingResult | None = None
     pr_url: str | None = None
     ledger_records: tuple[ConveyorDaemonLedgerRecord, ...] = ()
+    side_effect_started: bool = False
 
 
 @dataclass(frozen=True)
@@ -298,6 +301,7 @@ class ConveyorDaemon:
         now: NowRunner | None = None,
         ledger_writer: LedgerWriter | None = None,
         ledger_path: Path | str | None = None,
+        receipt_state_path: Path | str | None = None,
         log_runner: LogRunner | None = None,
         prepare_runner: PrepareRunner = prepare_harvest,
         land_runner: LandRunner = land_bundle,
@@ -325,6 +329,14 @@ class ConveyorDaemon:
         self.gh_runner = gh_runner
         self.now = now
         self.ledger_writer = ledger_writer or (_jsonl_ledger_writer(Path(ledger_path)) if ledger_path is not None else None)
+        configured_receipt_state_path = receipt_state_path
+        if configured_receipt_state_path is None:
+            configured_receipt_state_path = getattr(discovery_runner, "state_path", None)
+        self.receipt_state_path = (
+            Path(configured_receipt_state_path).resolve()
+            if configured_receipt_state_path is not None
+            else None
+        )
         self.log_runner = log_runner
         self.prepare_runner = prepare_runner
         self.land_runner = land_runner
@@ -476,9 +488,21 @@ class ConveyorDaemon:
                 )
                 self._log(f"conveyor dry-run plan {item.branch}: {', '.join(PLAN_ACTIONS)}")
             else:
-                if item.receipt is not None:
+                receipt: HandledSignalReceipt | None = None
+                if item.receipt_identity is not None:
+                    if self.receipt_state_path is None:
+                        results.append(
+                            self._failed(item, ("receipt identity refused: daemon receipt state path is not configured",))
+                        )
+                        continue
+                    receipt = HandledSignalReceipt(
+                        self.receipt_state_path,
+                        item.receipt_identity.seat_id,
+                        item.receipt_identity.branch,
+                        item.receipt_identity.sha,
+                    )
                     try:
-                        claimed = item.receipt.claim()
+                        claimed = receipt.claim()
                     except ValueError as exc:
                         results.append(
                             self._failed(item, (f"receipt state refused: {exc}",))
@@ -495,10 +519,10 @@ class ConveyorDaemon:
                         )
                         continue
                 result = self._process_armed(item)
-                if item.receipt is not None:
+                if receipt is not None:
                     terminal_state = _receipt_terminal_state(result)
                     try:
-                        completed = item.receipt.complete(terminal_state)
+                        completed = receipt.complete(terminal_state)
                     except ValueError as exc:
                         completed = False
                         completion_reason = f"receipt completion refused: {exc}"
@@ -531,6 +555,7 @@ class ConveyorDaemon:
 
     def _process_armed(self, item: ConveyorDaemonItem) -> ConveyorDaemonItemResult:
         records: list[ConveyorDaemonLedgerRecord] = []
+        publish_started = False
         assert self.path_allocator is not None
         allocation: DaemonPathAllocation | None = None
         receipt: DaemonPathReceipt | None = None
@@ -650,6 +675,7 @@ class ConveyorDaemon:
             )
 
             push_args = _git_push_args(self.remote, landed.branch)
+            publish_started = True
             push_result = _coerce_result(
                 self.git_runner(
                     push_args,
@@ -674,8 +700,10 @@ class ConveyorDaemon:
                     prepare_result=prepared,
                     landing_result=landed,
                     ledger_records=records,
+                    side_effect_started=publish_started,
                 )
 
+            publish_started = True
             pr_result = _coerce_result(self.gh_runner(_pr_create_args(self.base, item, landed), item.repo_path))
             pr_url = _first_stdout_line(pr_result.stdout)
             records.append(
@@ -695,6 +723,7 @@ class ConveyorDaemon:
                     prepare_result=prepared,
                     landing_result=landed,
                     ledger_records=records,
+                    side_effect_started=publish_started,
                 )
 
             return ConveyorDaemonItemResult(
@@ -705,9 +734,15 @@ class ConveyorDaemon:
                 landing_result=landed,
                 pr_url=pr_url,
                 ledger_records=tuple(records),
+                side_effect_started=publish_started,
             )
         except Exception as exc:
-            return self._failed(item, (f"exception: {exc}",), ledger_records=records)
+            return self._failed(
+                item,
+                (f"exception: {exc}",),
+                ledger_records=records,
+                side_effect_started=publish_started,
+            )
         finally:
             if allocation is not None and receipt is not None:
                 cleanup_result = self._cleanup_allocation(receipt)
@@ -1295,6 +1330,7 @@ class ConveyorDaemon:
         prepare_result: ConveyorHarvestResult | None = None,
         landing_result: ConveyorBundleLandingResult | None = None,
         ledger_records: Sequence[ConveyorDaemonLedgerRecord] = (),
+        side_effect_started: bool = False,
     ) -> ConveyorDaemonItemResult:
         reason_tuple = tuple(str(reason) for reason in reasons)
         self._log(f"conveyor item failed {item.branch}: {'; '.join(reason_tuple)}")
@@ -1306,6 +1342,7 @@ class ConveyorDaemon:
             prepare_result=prepare_result,
             landing_result=landing_result,
             ledger_records=tuple(ledger_records),
+            side_effect_started=side_effect_started,
         )
 
     def _timestamp(self) -> str:
@@ -1352,14 +1389,11 @@ def _coerce_result(result: ConveyorCommandResult | tuple[int, str, str]) -> Conv
 
 
 def _receipt_terminal_state(result: ConveyorDaemonItemResult) -> str:
-    """Preserve indeterminate transport outcomes for later reconciliation."""
+    """Preserve only post-publish outcomes for later reconciliation."""
 
     if result.status == "pr-opened":
         return "pr_opened"
-    if any(
-        reason.startswith(("exception:", "push failed:", "pr-open failed:"))
-        for reason in result.reasons
-    ):
+    if result.side_effect_started:
         return "uncertain"
     return "failed"
 
