@@ -853,7 +853,8 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
         role_sandboxes: list[tuple[str, str | None]] = []
         for role in roles:
             sandbox = matrix[role]
-            if role == "implementer" and sandbox is not None:
+            trusted_sandbox = dict(dict(V1_ROLE_SANDBOX_MATRIX)[name])[role]
+            if role == "implementer" and sandbox is not None and trusted_sandbox is None:
                 raise CodexWorkerLaunchError(
                     f"v1 implementer sandbox at venue {name} must be null"
                 )
@@ -1061,13 +1062,13 @@ def _derive_run_id(
     return "codex-one-shot-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
-def _preflight_binary(
+def _resolve_policy_binary(
     *,
     policy: CodexOneShotPolicy,
     venue: VenuePolicy,
     filesystem: LauncherFilesystem,
-    version_probe: CodexVersionProbe,
 ) -> str:
+    """Resolve one policy-selected executable without trusting a launch plan."""
     declared = _lexical_absolute(
         _render_binary_template(
             template=venue.codex_binary_template,
@@ -1089,6 +1090,21 @@ def _preflight_binary(
         raise CodexWorkerLaunchError("Codex binary symlink escapes the declared version root")
     if not filesystem.is_file(resolved) or not filesystem.is_executable(resolved):
         raise CodexWorkerLaunchError("policy Codex binary must be an existing regular executable")
+    return resolved
+
+
+def _preflight_binary(
+    *,
+    policy: CodexOneShotPolicy,
+    venue: VenuePolicy,
+    filesystem: LauncherFilesystem,
+    version_probe: CodexVersionProbe,
+) -> str:
+    resolved = _resolve_policy_binary(
+        policy=policy,
+        venue=venue,
+        filesystem=filesystem,
+    )
     try:
         actual_version = version_probe.probe(resolved)
     except CodexWorkerLaunchError:
@@ -1100,6 +1116,34 @@ def _preflight_binary(
             f"Codex version probe mismatch: expected {policy.version}, got {actual_version}"
         )
     return resolved
+
+
+def _canonical_output(
+    *,
+    root: str,
+    run_id: str,
+    filesystem: LauncherFilesystem,
+) -> str:
+    """Reapply the complete run-id and output-node posture at a boundary."""
+    if not _RUN_ID_RE.fullmatch(run_id):
+        raise CodexWorkerLaunchError("run_id must be lowercase slug text")
+    state_root = _real_directory(
+        os.path.join(root, ".ce", "state"),
+        field="worktree state root",
+        filesystem=filesystem,
+    )
+    output = os.path.join(state_root, f"{run_id}.json")
+    if not _inside(output, state_root):
+        raise CodexWorkerLaunchError(
+            "deterministic output escapes the real worktree state root"
+        )
+    if filesystem.realpath(output) != output:
+        raise CodexWorkerLaunchError("deterministic output must not be a symlink")
+    if filesystem.lexists(output) and not filesystem.is_file(output):
+        raise CodexWorkerLaunchError(
+            "deterministic output must be a regular file when it already exists"
+        )
+    return output
 
 
 def build_launch_plan(
@@ -1142,9 +1186,6 @@ def build_launch_plan(
     )
     encoded_developer_instructions = toml_encode_config_value(developer_instructions)
     add_dirs = _canonical_add_dirs(policy, root, filesystem=fs)
-    state_root = _real_directory(
-        os.path.join(root, ".ce", "state"), field="worktree state root", filesystem=fs
-    )
     binary = _preflight_binary(
         policy=policy, venue=venue_policy, filesystem=fs, version_probe=probe
     )
@@ -1157,13 +1198,7 @@ def build_launch_plan(
     )
     if not _RUN_ID_RE.fullmatch(chosen_run_id):
         raise CodexWorkerLaunchError("run_id must be lowercase slug text")
-    output = os.path.join(state_root, f"{chosen_run_id}.json")
-    if not _inside(output, state_root):
-        raise CodexWorkerLaunchError("deterministic output escapes the real worktree state root")
-    if fs.realpath(output) != output:
-        raise CodexWorkerLaunchError("deterministic output must not be a symlink")
-    if fs.lexists(output) and not fs.is_file(output):
-        raise CodexWorkerLaunchError("deterministic output must be a regular file when it already exists")
+    output = _canonical_output(root=root, run_id=chosen_run_id, filesystem=fs)
     argv = [
         binary,
         "exec",
@@ -1219,21 +1254,6 @@ def _validate_launch_envelope(
     filesystem: LauncherFilesystem,
 ) -> None:
     try:
-        if (
-            plan.role != governed_input.role
-            or plan.role_policy_path != governed_input.role_policy_path
-            or plan.role_policy_sha256 != governed_input.role_policy_sha256
-            or plan.brief_path != governed_input.brief_path
-            or plan.brief_sha256 != governed_input.brief_sha256
-        ):
-            raise CodexWorkerLaunchError("governed input metadata mismatch")
-        expected_instructions = build_governed_role_envelope(
-            governed_input=governed_input,
-            worktree=plan.worktree,
-            sandbox=plan.sandbox,
-        )
-        if plan.developer_instructions != expected_instructions:
-            raise CodexWorkerLaunchError("developer instructions mismatch")
         root = _real_directory(plan.worktree, field="worktree", filesystem=filesystem)
         policy_root = _real_directory(
             os.path.join(root, "governance", "policies"),
@@ -1248,19 +1268,14 @@ def _validate_launch_envelope(
                 filesystem=filesystem,
             )
         )
-        current_policy_sha256 = hashlib.sha256(current_policy_bytes).hexdigest()
-        if (
-            current_policy_path != plan.policy_path
-            or current_policy_sha256 != plan.policy_sha256
-        ):
-            raise CodexWorkerLaunchError("canonical launcher policy changed after planning")
-        expected_credentials = _provider_credentials_from_policy_bytes(
-            current_policy_bytes, role=plan.role
+        current_policy = _parse_policy(
+            current_policy_bytes,
+            worktree=root,
+            source_path=current_policy_path,
         )
-        if plan.provider_credential_env_names != expected_credentials:
-            raise CodexWorkerLaunchError(
-                "provider credential tuple does not match canonical role policy"
-            )
+        role = governed_input.role
+        venue = current_policy.venue(plan.venue)
+        sandbox = venue.sandbox_for(role)
         role_root = _real_directory(
             os.path.join(root, CANONICAL_ROLE_AREA),
             field="canonical role policy area",
@@ -1268,7 +1283,7 @@ def _validate_launch_envelope(
         )
         current_role_path, current_role_policy, current_role_binding = (
             _read_contained_regular_file(
-            os.path.join(role_root, f"{plan.role}.md"),
+                os.path.join(role_root, f"{role}.md"),
             root=role_root,
             field="canonical role policy",
             filesystem=filesystem,
@@ -1278,26 +1293,41 @@ def _validate_launch_envelope(
         current_role_sha256 = hashlib.sha256(current_role_policy).hexdigest()
         if (
             current_role_path != governed_input.role_policy_path
-            or current_role_path != plan.role_policy_path
             or current_role_policy != governed_input.role_policy
             or current_role_sha256 != governed_input.role_policy_sha256
-            or current_role_sha256 != plan.role_policy_sha256
             or current_role_binding != governed_input.role_policy_binding
         ):
             raise CodexWorkerLaunchError("canonical role policy changed after planning")
+        expected_instructions = build_governed_role_envelope(
+            governed_input=governed_input,
+            worktree=root,
+            sandbox=sandbox,
+        )
         encoded = toml_encode_config_value(expected_instructions)
-        expected_output = os.path.join(root, ".ce", "state", f"{plan.run_id}.json")
-        if plan.output != expected_output:
-            raise CodexWorkerLaunchError("deterministic output mismatch")
+        expected_output = _canonical_output(
+            root=root,
+            run_id=plan.run_id,
+            filesystem=filesystem,
+        )
+        expected_binary = _resolve_policy_binary(
+            policy=current_policy,
+            venue=venue,
+            filesystem=filesystem,
+        )
+        expected_add_dirs = _canonical_add_dirs(
+            current_policy,
+            root,
+            filesystem=filesystem,
+        )
         expected_argv = [
-            plan.binary,
+            expected_binary,
             "exec",
             "--strict-config",
             "--ephemeral",
             "-m",
-            plan.model,
+            current_policy.model,
             "-c",
-            f"model_reasoning_effort={plan.effort}",
+            f"model_reasoning_effort={current_policy.effort}",
             "-c",
             "features.multi_agent=false",
             "-c",
@@ -1305,15 +1335,40 @@ def _validate_launch_envelope(
             "-c",
             f"developer_instructions={encoded}",
             "-s",
-            plan.sandbox,
+            sandbox,
             "-C",
             root,
         ]
-        for directory in plan.add_dirs:
+        for directory in expected_add_dirs:
             expected_argv.extend(("--add-dir", directory))
         expected_argv.extend(("-o", expected_output, "-"))
-        if plan.argv != tuple(expected_argv):
-            raise CodexWorkerLaunchError("complete executable argv is not canonical")
+        expected_plan = CodexWorkerLaunchPlan(
+            policy_id=current_policy.policy_id,
+            policy_version=current_policy.version,
+            policy_path=current_policy.source_path,
+            policy_sha256=current_policy.source_sha256,
+            role=role,
+            role_policy_path=governed_input.role_policy_path,
+            role_policy_sha256=governed_input.role_policy_sha256,
+            brief_path=governed_input.brief_path,
+            brief_sha256=governed_input.brief_sha256,
+            venue=venue.name,
+            sandbox=sandbox,
+            model=current_policy.model,
+            effort=current_policy.effort,
+            provider_credential_env_names=current_policy.provider_credentials_for(role),
+            worktree=root,
+            run_id=plan.run_id,
+            output=expected_output,
+            binary=expected_binary,
+            add_dirs=expected_add_dirs,
+            developer_instructions=expected_instructions,
+            argv=tuple(expected_argv),
+        )
+        if plan != expected_plan:
+            raise CodexWorkerLaunchError(
+                "complete launch plan and executable argv are not canonical"
+            )
     except CodexWorkerLaunchError as exc:
         raise CodexWorkerLaunchError(f"launch envelope mismatch: {exc}") from exc
 

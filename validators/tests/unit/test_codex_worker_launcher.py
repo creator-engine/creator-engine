@@ -337,26 +337,19 @@ def _hermetic_subprocess_policy(
 ) -> launcher.CodexOneShotPolicy:
     loaded = policy(worktree)
     template = str(binary).replace(loaded.version, "{version}")
-    venues = []
-    for venue in loaded.venues:
-        cells = venue.role_sandboxes
-        if role == "implementer" and venue.name == "dev1-local":
-            cells = tuple(
-                (candidate, "workspace-write" if candidate == role else sandbox)
-                for candidate, sandbox in cells
+
+    def stage_hermetic_policy(raw) -> None:
+        for venue_policy in raw["venues"].values():
+            venue_policy["codex_binary_template"] = template
+        if role == "implementer":
+            raw["venues"]["dev1-local"]["outer_isolation_attestation"] = (
+                "hermetic disposable worktree"
             )
-        venues.append(
-            replace(
-                venue,
-                codex_binary_template=template,
-                outer_isolation_attestation=(
-                    "hermetic disposable worktree"
-                    if role == "implementer"
-                    else venue.outer_isolation_attestation
-                ),
-                role_sandboxes=cells,
+            raw["venues"]["dev1-local"]["role_sandboxes"]["implementer"] = (
+                "workspace-write"
             )
-        )
+
+    rewrite_policy(worktree, stage_hermetic_policy)
     if role == "implementer":
         trusted_matrix = tuple(
             (
@@ -374,7 +367,7 @@ def _hermetic_subprocess_policy(
             for venue, cells in launcher.V1_ROLE_SANDBOX_MATRIX
         )
         monkeypatch.setattr(launcher, "V1_ROLE_SANDBOX_MATRIX", trusted_matrix)
-    return replace(loaded, venues=tuple(venues))
+    return policy(worktree)
 
 
 @pytest.fixture
@@ -903,6 +896,13 @@ def test_production_subprocess_path_enforces_hermetic_leaf_behavior_matrix(
     writes: bool,
 ) -> None:
     worker_input = governed_input(worktree, role=role)
+    binary = _write_hermetic_codex_executable(worktree)
+    hermetic_policy = _hermetic_subprocess_policy(
+        worktree,
+        binary=binary,
+        role=role,
+        monkeypatch=monkeypatch,
+    )
     foreman_digest = _initialize_disposable_foreman_repo(worktree)
     before = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -911,14 +911,8 @@ def test_production_subprocess_path_enforces_hermetic_leaf_behavior_matrix(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    binary = _write_hermetic_codex_executable(worktree)
     built = launcher.build_launch_plan(
-        policy=_hermetic_subprocess_policy(
-            worktree,
-            binary=binary,
-            role=role,
-            monkeypatch=monkeypatch,
-        ),
+        policy=hermetic_policy,
         governed_input=worker_input,
         role=role,
         venue="dev1-local",
@@ -1034,6 +1028,13 @@ def test_production_subprocess_path_refuses_nested_reserved_or_fallback_requests
         brief_path=brief,
         brief_sha256=hashlib.sha256(brief.read_bytes()).hexdigest(),
     )
+    binary = _write_hermetic_codex_executable(worktree)
+    hermetic_policy = _hermetic_subprocess_policy(
+        worktree,
+        binary=binary,
+        role="implementer",
+        monkeypatch=monkeypatch,
+    )
     foreman_digest = _initialize_disposable_foreman_repo(worktree)
     before = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -1042,14 +1043,8 @@ def test_production_subprocess_path_refuses_nested_reserved_or_fallback_requests
         capture_output=True,
         text=True,
     ).stdout.strip()
-    binary = _write_hermetic_codex_executable(worktree)
     built = launcher.build_launch_plan(
-        policy=_hermetic_subprocess_policy(
-            worktree,
-            binary=binary,
-            role="implementer",
-            monkeypatch=monkeypatch,
-        ),
+        policy=hermetic_policy,
         governed_input=worker_input,
         role="implementer",
         venue="dev1-local",
@@ -1231,6 +1226,146 @@ def test_launch_refuses_every_noncanonical_argv_mutation_before_runner(
             governed_input=worker_input,
             runner=runner,
         )
+
+    assert runner.calls == []
+
+
+def _replace_argv_value(
+    argv: tuple[str, ...], old: str, new: str
+) -> tuple[str, ...]:
+    assert argv.count(old) == 1
+    return tuple(new if item == old else item for item in argv)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda built, worktree: replace(
+            built,
+            binary="/tmp/untrusted-codex",
+            argv=("/tmp/untrusted-codex", *built.argv[1:]),
+        ),
+        lambda built, worktree: replace(
+            built,
+            model="untrusted-model",
+            argv=_replace_argv_value(
+                built.argv, built.model, "untrusted-model"
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            effort="low",
+            argv=_replace_argv_value(
+                built.argv,
+                f"model_reasoning_effort={built.effort}",
+                "model_reasoning_effort=low",
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            add_dirs=(str(worktree / ".ce"), *built.add_dirs[1:]),
+            argv=_replace_argv_value(
+                built.argv, built.add_dirs[0], str(worktree / ".ce")
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            sandbox="workspace-write",
+            argv=_replace_argv_value(
+                built.argv, built.sandbox, "workspace-write"
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            run_id="../escape",
+            output=str(worktree.parent / "escape.json"),
+            argv=_replace_argv_value(
+                built.argv, built.output, str(worktree.parent / "escape.json")
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            run_id="bad/slash",
+            output=str(worktree / ".ce" / "state" / "bad" / "slash.json"),
+            argv=_replace_argv_value(
+                built.argv,
+                built.output,
+                str(worktree / ".ce" / "state" / "bad" / "slash.json"),
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            binary="/tmp/untrusted-codex",
+            model="untrusted-model",
+            effort="low",
+            add_dirs=(str(worktree / ".ce"), *built.add_dirs[1:]),
+            argv=_replace_argv_value(
+                _replace_argv_value(
+                    _replace_argv_value(
+                        ("/tmp/untrusted-codex", *built.argv[1:]),
+                        built.model,
+                        "untrusted-model",
+                    ),
+                    f"model_reasoning_effort={built.effort}",
+                    "model_reasoning_effort=low",
+                ),
+                built.add_dirs[0],
+                str(worktree / ".ce"),
+            ),
+        ),
+    ],
+    ids=[
+        "binary-plus-argv",
+        "model-plus-argv",
+        "effort-plus-argv",
+        "add-dirs-plus-argv",
+        "sandbox-plus-argv",
+        "traversal-run-id-output-plus-argv",
+        "malformed-run-id-output-plus-argv",
+        "combined-policy-derived-fields-plus-argv",
+    ],
+)
+def test_launch_refuses_coordinated_plan_and_argv_mutation_before_runner(
+    worktree: Path, mutation
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            mutation(built, worktree),
+            governed_input=worker_input,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("node_kind", ["symlink", "directory"])
+def test_launch_refuses_coordinated_existing_output_node_before_runner(
+    worktree: Path, node_kind: str
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    run_id = "coordinated-output-node"
+    output = worktree / ".ce" / "state" / f"{run_id}.json"
+    if node_kind == "symlink":
+        outside = worktree.parent / "outside-output.json"
+        outside.write_text("outside\n", encoding="utf-8")
+        output.symlink_to(outside)
+    else:
+        output.mkdir()
+    mutated = replace(
+        built,
+        run_id=run_id,
+        output=str(output),
+        argv=_replace_argv_value(built.argv, built.output, str(output)),
+    )
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(mutated, governed_input=worker_input, runner=runner)
 
     assert runner.calls == []
 

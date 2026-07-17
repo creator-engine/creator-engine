@@ -321,10 +321,14 @@ unguarded fallback. `model_instructions_file`, mutable ambient role prose,
 and role-policy framing on stdin are not permitted substitutes.
 
 Immediately before runner invocation, the launcher MUST reconstruct the
-complete canonical executable argument tuple from the verified plan contract
-and require exact equality, including executable, subcommand, option forms,
-ordering and count, model, worktree, add-directories, output, sandbox, every
-configuration entry, and the terminal stdin marker. The provider-credential
+complete canonical launch plan and executable argument tuple from the
+reopened canonical launcher policy, governed input, and independently
+validated venue/run request; mutable plan fields are not an authority source.
+It MUST reapply run-ID syntax, worktree-relative output containment, and
+no-follow output-node posture, then require exact equality including
+executable, subcommand, option forms, ordering and count, model, worktree,
+add-directories, output, sandbox, every configuration entry, and the terminal
+stdin marker. The provider-credential
 environment-name tuple is a separate runner channel and MUST independently
 equal, in order and count, the tuple granted to the selected role by the
 digest-bound canonical launcher policy; omission, addition, duplication,
