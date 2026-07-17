@@ -48,6 +48,34 @@ V1_SUPPORTED_ROLES = (
     "verification",
 )
 V1_VENUES = ("dgx-relay", "vps-tmux", "dev1-local", "in-seat")
+V1_ROLE_SANDBOX_MATRIX = (
+    (
+        "dgx-relay",
+        (
+            ("architect_research", "read-only"),
+            ("implementer", None),
+            ("reviewer", "read-only"),
+            ("verification", "read-only"),
+        ),
+    ),
+    (
+        "vps-tmux",
+        tuple((role, None) for role in V1_SUPPORTED_ROLES),
+    ),
+    (
+        "dev1-local",
+        (
+            ("architect_research", "read-only"),
+            ("implementer", None),
+            ("reviewer", "read-only"),
+            ("verification", "read-only"),
+        ),
+    ),
+    (
+        "in-seat",
+        tuple((role, None) for role in V1_SUPPORTED_ROLES),
+    ),
+)
 ALLOWED_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
 ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES = frozenset({"OPENAI_API_KEY"})
 SAFE_RUNTIME_ENV_NAMES = frozenset({"LANG", "PATH", "TERM"})
@@ -187,12 +215,13 @@ def _require_trusted_v1_matrix(policy: CodexOneShotPolicy) -> None:
     _require_exact_v1_names(
         tuple(venue.name for venue in policy.venues), V1_VENUES, "venue"
     )
+    trusted = {venue: dict(matrix) for venue, matrix in V1_ROLE_SANDBOX_MATRIX}
     for venue in policy.venues:
         matrix = dict(venue.role_sandboxes)
         _require_exact_v1_names(tuple(matrix), V1_SUPPORTED_ROLES, "supported-role")
-        if matrix["implementer"] is not None:
+        if matrix != trusted[venue.name]:
             raise CodexWorkerLaunchError(
-                f"v1 implementer sandbox at venue {venue.name} must be null"
+                f"v1 role sandbox cells at venue {venue.name} must match the exact trusted matrix"
             )
 
 
@@ -483,7 +512,7 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
     defaults = raw["model_defaults"]
     if not isinstance(defaults, dict) or set(defaults) != {"model", "effort"}:
         raise CodexWorkerLaunchError("policy model_defaults must contain only model and effort")
-    return CodexOneShotPolicy(
+    policy = CodexOneShotPolicy(
         policy_id=_require_string(raw["policy_id"], "policy_id"),
         version=version,
         supported_roles=roles,
@@ -496,6 +525,8 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
         source_path=source_path,
         source_sha256=hashlib.sha256(raw_bytes).hexdigest(),
     )
+    _require_trusted_v1_matrix(policy)
+    return policy
 
 
 def load_canonical_policy(

@@ -14,8 +14,8 @@ issue: ce-ops#566
   and validator-binary read-only boundary is mechanically enforced.
 - Reconciles the protocol-backed Brain assertion through the accepted two-phase
   supersede path and ratchets the authoritative active assertion count to 118.
-- Enforces the exact v1 role and venue sets in trusted parser/planner code and
-  refuses every non-null implementer sandbox before probe or runner construction.
+- Enforces the full exact v1 role-by-venue sandbox matrix in trusted parser/planner
+  code before probe or runner construction.
 - Runs Codex under cleanup-bound isolated home/config directories and a role-policy-bound
   environment, and reports execution errors or nonzero exits as fail-closed refusals.
 - Removes caller launch-surface overrides; plans retain canonical paths/digests.

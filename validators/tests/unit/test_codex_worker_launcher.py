@@ -17,6 +17,24 @@ from creator_engine_validator import codex_worker_launcher as launcher
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POLICY_PATH = REPO_ROOT / "governance" / "policies" / "codex-one-shot-launch-v1.yaml"
 PINNED_BINARY = "/opt/creator-engine/codex/0.145.0-alpha.9/bin/codex"
+NON_IMPLEMENTER_MATRIX_MUTATIONS = [
+    (venue, role, "workspace-write" if sandbox == "read-only" else "read-only")
+    for venue, values in {
+        "dgx-relay": {
+            "architect_research": "read-only",
+            "reviewer": "read-only",
+            "verification": "read-only",
+        },
+        "dev1-local": {
+            "architect_research": "read-only",
+            "reviewer": "read-only",
+            "verification": "read-only",
+        },
+        "vps-tmux": {"architect_research": None, "reviewer": None, "verification": None},
+        "in-seat": {"architect_research": None, "reviewer": None, "verification": None},
+    }.items()
+    for role, sandbox in values.items()
+]
 
 
 class HermeticFilesystem(launcher.RealLauncherFilesystem):
@@ -198,6 +216,18 @@ def test_policy_parser_refuses_every_non_null_v1_implementer_sandbox(
         policy(worktree)
 
 
+@pytest.mark.parametrize(("venue", "role", "sandbox"), NON_IMPLEMENTER_MATRIX_MUTATIONS)
+def test_policy_parser_refuses_every_mutated_non_implementer_v1_matrix_cell(
+    worktree: Path, venue: str, role: str, sandbox: str
+) -> None:
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["venues"][venue]["role_sandboxes"].__setitem__(role, sandbox),
+    )
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="exact trusted matrix"):
+        policy(worktree)
+
+
 @pytest.mark.parametrize("mutation", ["add", "replace", "remove"])
 def test_policy_parser_refuses_mutated_v1_venue_set(worktree: Path, mutation: str) -> None:
     def mutate(raw) -> None:
@@ -251,12 +281,43 @@ def test_planner_revalidates_trusted_v1_implementer_refusal_before_version_probe
         venues=tuple(unsafe_venue if item.name == venue.name else item for item in loaded.venues),
     )
     probe = FixedVersionProbe()
-    with pytest.raises(launcher.CodexWorkerLaunchError, match="v1 implementer.*must be null"):
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="exact trusted matrix"):
         launcher.build_launch_plan(
             policy=unsafe_policy,
             governed_input=governed_input(worktree, role="implementer"),
             role="implementer",
             venue="dev1-local",
+            worktree=str(worktree),
+            filesystem=HermeticFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
+
+
+@pytest.mark.parametrize(("venue_name", "role", "sandbox"), NON_IMPLEMENTER_MATRIX_MUTATIONS)
+def test_planner_revalidates_every_non_implementer_v1_matrix_cell_before_version_probe(
+    worktree: Path, venue_name: str, role: str, sandbox: str
+) -> None:
+    loaded = policy(worktree)
+    venue = loaded.venue(venue_name)
+    unsafe_venue = replace(
+        venue,
+        role_sandboxes=tuple(
+            (candidate, sandbox if candidate == role else value)
+            for candidate, value in venue.role_sandboxes
+        ),
+    )
+    unsafe_policy = replace(
+        loaded,
+        venues=tuple(unsafe_venue if item.name == venue.name else item for item in loaded.venues),
+    )
+    probe = FixedVersionProbe()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="exact trusted matrix"):
+        launcher.build_launch_plan(
+            policy=unsafe_policy,
+            governed_input=governed_input(worktree, role=role),
+            role=role,
+            venue=venue_name,
             worktree=str(worktree),
             filesystem=HermeticFilesystem(),
             version_probe=probe,

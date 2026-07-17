@@ -295,6 +295,12 @@ def _mutate_one_shot_policy(worktree: Path, mutation: str) -> None:
         raw["supported_roles"][raw["supported_roles"].index("reviewer")] = "operator"
     elif mutation == "remove-role":
         raw["supported_roles"].remove("reviewer")
+    elif mutation == "widen-read-only-role":
+        raw["venues"]["dev1-local"]["role_sandboxes"]["architect_research"] = (
+            "workspace-write"
+        )
+    elif mutation == "revive-null-read-only-role":
+        raw["venues"]["vps-tmux"]["role_sandboxes"]["reviewer"] = "read-only"
     else:  # pragma: no cover - closed test vocabulary
         raise AssertionError(mutation)
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
@@ -410,6 +416,8 @@ def test_worker_launch_refuses_implementer_native_venues_before_runner_construct
         "add-role",
         "replace-role",
         "remove-role",
+        "widen-read-only-role",
+        "revive-null-read-only-role",
     ],
 )
 def test_worker_launch_refuses_mutated_v1_policy_before_probe_or_runner_construction(
