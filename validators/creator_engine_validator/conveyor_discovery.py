@@ -334,6 +334,20 @@ class _SignalReceiptLedger:
                     receipt_fingerprint=_receipt_fingerprint(receipt),
                 )
                 return False
+            if entry.get("completion_sealed") is True:
+                _emit_audit(
+                    self.audit_sink,
+                    "receipt_terminal_sealed",
+                    receipt_fingerprint=_receipt_fingerprint(receipt),
+                )
+                return False
+            if entry["state"] == "processing":
+                _emit_audit(
+                    self.audit_sink,
+                    "receipt_processing_recovery_required",
+                    receipt_fingerprint=_receipt_fingerprint(receipt),
+                )
+                return False
             if entry["state"] != "observed":
                 return False
             entry["state"] = "processing"
@@ -346,13 +360,14 @@ class _SignalReceiptLedger:
         with _locked_receipt_state(self.state_path) as data:
             entries = _receipt_entries(data)
             entry = _find_receipt(entries, receipt)
-            if entry is None or entry["state"] != "processing":
+            if (
+                entry is None
+                or entry["state"] != "processing"
+                or entry.get("completion_pending") is True
+            ):
                 return False
-            entry["completion_pending"] = True
-            _write_receipt_state(self.state_path, entries)
             entry["state"] = state
-            _write_receipt_state(self.state_path, entries)
-            entry.pop("completion_pending")
+            entry["completion_sealed"] = True
             _write_receipt_state(self.state_path, entries)
             return True
 
@@ -418,6 +433,13 @@ def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         completion_pending = item.get("completion_pending", False)
         if not isinstance(completion_pending, bool):
             raise ValueError("receipt_completion_pending_invalid")
+        completion_sealed = item.get("completion_sealed")
+        if "completion_pending" in item and "completion_sealed" in item:
+            raise ValueError("receipt_completion_markers_conflict")
+        if "completion_sealed" in item and (
+            completion_sealed is not True or state not in RECEIPT_TERMINAL_STATES
+        ):
+            raise ValueError("receipt_completion_sealed_invalid")
         parsed_entry: dict[str, Any] = {
             "seat_id": seat_id,
             "branch": branch,
@@ -426,6 +448,8 @@ def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         }
         if completion_pending:
             parsed_entry["completion_pending"] = True
+        if completion_sealed is True:
+            parsed_entry["completion_sealed"] = True
         parsed.append(parsed_entry)
     return parsed
 

@@ -353,9 +353,9 @@ def test_receipt_state_fsyncs_parent_directory_after_replace(tmp_path, monkeypat
         events.append("replace")
         return real_replace(source, target)
 
-    def record_open(path, flags, *args):
+    def record_open(path, flags, *args, **kwargs):
         nonlocal parent_fd
-        fd = real_open(path, flags, *args)
+        fd = real_open(path, flags, *args, **kwargs)
         if Path(path) == state_path.parent:
             parent_fd = fd
             events.append("parent-open")
@@ -425,7 +425,7 @@ def test_receipt_temp_fsync_failure_refuses_write_and_cleans_temp(tmp_path, monk
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_completion_writes_guarded_terminal_before_clearing_guard(tmp_path, monkeypatch):
+def test_completion_writes_one_sealed_terminal_after_claim(tmp_path, monkeypatch):
     state_path = tmp_path / "receipts.json"
     receipt = _receipt_for_payload(
         state_path,
@@ -448,14 +448,158 @@ def test_completion_writes_guarded_terminal_before_clearing_guard(tmp_path, monk
     monkeypatch.setattr(conveyor_discovery, "_write_receipt_state", record_write)
 
     assert receipt.complete("pr_opened") is True
-    assert [entry["state"] for entry in (writes[0][0], writes[1][0], writes[2][0])] == [
-        "processing",
-        "pr_opened",
-        "pr_opened",
+    assert writes == [
+        [
+            {
+                "seat_id": "seat-1",
+                "branch": "ce-388-conveyor-discovery",
+                "sha": SHA_ONE,
+                "state": "pr_opened",
+                "completion_sealed": True,
+            }
+        ]
     ]
-    assert writes[0][0]["completion_pending"] is True
-    assert writes[1][0]["completion_pending"] is True
-    assert "completion_pending" not in writes[2][0]
+
+
+def test_terminal_seal_parent_fsync_failure_leaves_visible_seal_and_audits(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+    receipt = _receipt_for_payload(
+        state_path,
+        list(
+            ConveyorSeatDiscoveryRunner(
+                [SeatProbeSpec("seat-1", ("probe",))],
+                state_path,
+                probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+            )()
+        )[0],
+    )
+    assert receipt.claim() is True
+    real_open = conveyor_discovery.os.open
+    real_fsync = conveyor_discovery.os.fsync
+    parent_fd: int | None = None
+
+    def record_open(path, flags, *args):
+        nonlocal parent_fd
+        fd = real_open(path, flags, *args)
+        if Path(path) == state_path.parent:
+            parent_fd = fd
+        return fd
+
+    def fail_sealed_terminal_parent_fsync(fd):
+        if fd == parent_fd:
+            raise OSError("terminal directory fsync denied")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(conveyor_discovery.os, "open", record_open)
+    monkeypatch.setattr(conveyor_discovery.os, "fsync", fail_sealed_terminal_parent_fsync)
+
+    with pytest.raises(conveyor_discovery.ReceiptDurabilityUncertainError):
+        receipt.complete("pr_opened")
+
+    assert json.loads(state_path.read_text())["receipts"][0]["completion_sealed"] is True
+    audits: list[dict[str, object]] = []
+    restarted = HandledSignalReceipt(
+        state_path, "seat-1", "ce-388-conveyor-discovery", SHA_ONE, audit_sink=audits.append
+    )
+    assert restarted.claim() is False
+    assert audits == [
+        {
+            "action": "conveyor_discovery_rejected",
+            "source": "conveyor_discovery",
+            "reason": "receipt_terminal_sealed",
+            "receipt_fingerprint": conveyor_discovery._receipt_fingerprint(restarted),
+        }
+    ]
+
+
+def test_terminal_seal_replace_failure_leaves_processing_and_audits_recovery(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+    receipt = _receipt_for_payload(
+        state_path,
+        list(
+            ConveyorSeatDiscoveryRunner(
+                [SeatProbeSpec("seat-1", ("probe",))],
+                state_path,
+                probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+            )()
+        )[0],
+    )
+    assert receipt.claim() is True
+
+    def fail_replace(*_args):
+        raise OSError("terminal replace denied")
+
+    monkeypatch.setattr(conveyor_discovery.os, "replace", fail_replace)
+    with pytest.raises(ValueError, match="receipt_state_write_failed:OSError"):
+        receipt.complete("pr_opened")
+
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "processing"
+    audits: list[dict[str, object]] = []
+    restarted = HandledSignalReceipt(
+        state_path, "seat-1", "ce-388-conveyor-discovery", SHA_ONE, audit_sink=audits.append
+    )
+    assert restarted.claim() is False
+    assert audits[0]["reason"] == "receipt_processing_recovery_required"
+    assert "seat-1" not in str(audits)
+    assert "ce-388-conveyor-discovery" not in str(audits)
+    assert SHA_ONE not in str(audits)
+
+
+@pytest.mark.parametrize(
+    ("entry", "error"),
+    [
+        ({"state": "processing", "completion_sealed": True}, "receipt_completion_sealed_invalid"),
+        ({"state": "failed", "completion_sealed": False}, "receipt_completion_sealed_invalid"),
+        (
+            {"state": "failed", "completion_sealed": True, "completion_pending": True},
+            "receipt_completion_markers_conflict",
+        ),
+    ],
+)
+def test_receipt_validation_rejects_invalid_completion_seal_markers(entry, error):
+    with pytest.raises(ValueError, match=error):
+        conveyor_discovery._receipt_entries(
+            {
+                "version": 1,
+                "receipts": [
+                    {
+                        "seat_id": "seat-1",
+                        "branch": "ce-388-conveyor-discovery",
+                        "sha": SHA_ONE,
+                        **entry,
+                    }
+                ],
+            }
+        )
+
+
+def test_legacy_pending_processing_receipt_remains_fail_closed(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "receipts": [
+                    {
+                        "seat_id": "seat-1",
+                        "branch": "ce-388-conveyor-discovery",
+                        "sha": SHA_ONE,
+                        "state": "processing",
+                        "completion_pending": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    audits: list[dict[str, object]] = []
+    receipt = HandledSignalReceipt(
+        state_path, "seat-1", "ce-388-conveyor-discovery", SHA_ONE, audit_sink=audits.append
+    )
+
+    assert receipt.complete("failed") is False
+    assert receipt.claim() is False
+    assert audits[0]["reason"] == "receipt_terminal_durability_unproven"
 
 
 def test_branch_without_issue_prefix_uses_safe_default_issue(tmp_path):
