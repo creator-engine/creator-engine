@@ -148,15 +148,17 @@ governance artifacts.
 Creator-Engine-governed spec, plan, or tasks artifact. Repo-visible
 artifacts are canonical; tracker entries are non-canonical.
 
-## e. Per-integration deferrals (Features 003–006)
+## e. Historical per-integration deferrals and current delivery state (Features 003–006)
 
-This section is the consolidated deferral table for integrations.
-Each row names the integration surface, the owning future feature,
-and the rationale.
+This section consolidates the Sprint 0 deferral record for integrations and,
+where delivery has since occurred, records the current state. Each row names
+the integration surface, its historical owning feature or current delivery
+state, and the rationale. The historical record remains ratified history; it
+does not make delivered workflow wiring future work.
 
-| Integration surface | Owning future feature | Why deferred |
+| Integration surface | Historical owner / current state | Why deferred or current obligation |
 |---|---|---|
-| `.github/workflows/` baseline CI workflow | Feature 003 (GitHub CI Governance) | Feature 002 specifies the policy CI must obey; wiring CI is a separate ratified batch. CI policy changes are themselves privileged `governance`/`security`/`deploy` mutations per FR-008. |
+| `.github/workflows/` baseline CI workflow | Feature 003 (GitHub CI Governance) at the Sprint 0 deferral epoch; subsequently wired by Feature 003 | At Sprint 0, Feature 002 specified the policy CI must obey and deferred workflow wiring to Feature 003. The live workflow is now delivered; CI policy or workflow changes remain privileged `governance`/`security`/`deploy` mutations per FR-008. |
 | PR template file under `.github/` | Feature 003 | The PR template must surface scope, validation evidence, review evidence, mutation classes, deferrals, and Source ratification requirements; its content and its activation under GitHub are a ratified mutation. |
 | Branch protection settings on GitHub | Feature 003 | Branch protection is a live GitHub setting change; itself a privileged `governance` mutation requiring Source ratification. |
 | Codex reviewer identity record | Feature 004 (Independent Review / QA Agent Evidence) | Identity is privileged per FR-008; instantiating an agent identity requires its own ratified spec. Feature 002 names the role and reserves its surfaces. |

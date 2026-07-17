@@ -1389,15 +1389,18 @@ them.
 - **Required sections**: (a) Spec Kit integration boundary
   (Feature 001 wrapper sidecars and Spec Kit-byte-identical
   invariant); (b) GitHub integration boundary (PR/merge mechanics;
-  `.github/` deferred to Feature 003); (c) CI integration boundary
+  the Sprint 0 `.github/` deferral to Feature 003, distinguished from
+  Feature 003's subsequently delivered live workflow wiring); (c) CI integration boundary
   (mechanical validation; verifies-not-ratifies); (d) tracker-
   agnostic work-item model; (e) per-integration deferrals citing
   Features 003–006; (f) trust boundaries summary.
 - **Source-of-truth relationship**: REFERENCE — defers to Feature 001
   wrapper sidecar contracts and to the operating model doc.
 - **Acceptance criteria**: every integration boundary row names
-  ownership (Creator Engine governs vs external owns) and deferral
-  status; `.github/` explicitly listed as Feature 003 deferral.
+  ownership (Creator Engine governs vs external owns) and historical
+  deferral or current delivery status; the Sprint 0 `.github/` Feature 003
+  deferral is explicit, and the delivered live workflow is not presented as
+  future work.
 
 ### 9. `docs/architecture/parallel-agent-development-model.md`
 
@@ -1509,17 +1512,19 @@ them.
 - **Required sections**: (a) when test writing is mandatory
   (Feature 001 FR-025 and operating-model transition T14);
   (b) test placement convention; (c) validator self-tests
-  (Feature 001 FR-025–FR-027); (d) CI verification expectations
-  (Feature 003 deferral); (e) evidence-capture format;
+  (Feature 001 FR-025–FR-027); (d) CI verification expectations,
+  including the historical Feature 003 deferral and the subsequently delivered
+  live workflow; (e) evidence-capture format;
   (f) "agent says it works" rejection invariant (Feature 001
   FR-014).
 - **Source-of-truth relationship**: REFERENCE — defers to
   Feature 001 Definition of Done (FR-014) and validator requirements
-  (FR-025–FR-027); CI execution deferred to Feature 003.
+  (FR-025–FR-027); preserves the Sprint 0 CI-execution deferral to Feature 003
+  while recognizing the subsequently delivered live workflow.
 - **Acceptance criteria**: every required section present;
-  self-claim rejection invariant cited; Feature 003 CI execution
-  deferral explicit; testing-level-to-mutation-class table aligned
-  with QA_STRATEGY.md.
+  self-claim rejection invariant cited; the historical Feature 003 CI-execution
+  deferral and current live-workflow state explicit; testing-level-to-mutation-class
+  table aligned with QA_STRATEGY.md.
 
 ### 15. `docs/devops/CI_CD_STRATEGY.md`
 
