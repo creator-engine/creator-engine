@@ -1983,7 +1983,7 @@ def test_receipt_records_successful_pr_open(tmp_path):
     assert json.loads(state_path.read_text())['receipts'][0]['state'] == "pr_opened"
 
 
-def test_completion_parent_fsync_error_never_returns_pr_opened_and_leaves_durability_guard(
+def test_completion_parent_fsync_error_returns_uncertain_and_leaves_terminal_seal(
     tmp_path, monkeypatch
 ):
     state_path = tmp_path / "receipts.json"
@@ -1994,16 +1994,35 @@ def test_completion_parent_fsync_error_never_returns_pr_opened_and_leaves_durabi
             probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
         )()
     )[0]
+    real_open = conveyor_discovery.os.open
+    real_close = conveyor_discovery.os.close
     real_fsync = conveyor_discovery.os.fsync
-    fsync_calls = 0
+    parent_fd: int | None = None
+    parent_fsync_calls = 0
+
+    def record_open(path, flags, *args, **kwargs):
+        nonlocal parent_fd
+        fd = real_open(path, flags, *args, **kwargs)
+        if Path(path) == state_path.parent:
+            parent_fd = fd
+        return fd
+
+    def record_close(fd):
+        nonlocal parent_fd
+        if fd == parent_fd:
+            parent_fd = None
+        return real_close(fd)
 
     def fail_terminal_parent_fsync(fd):
-        nonlocal fsync_calls
-        fsync_calls += 1
-        if fsync_calls == 6:
-            raise OSError("terminal directory fsync denied")
+        nonlocal parent_fsync_calls
+        if fd == parent_fd:
+            parent_fsync_calls += 1
+            if parent_fsync_calls == 2:
+                raise OSError("terminal directory fsync denied")
         return real_fsync(fd)
 
+    monkeypatch.setattr(conveyor_discovery.os, "open", record_open)
+    monkeypatch.setattr(conveyor_discovery.os, "close", record_close)
     monkeypatch.setattr(conveyor_discovery.os, "fsync", fail_terminal_parent_fsync)
 
     result = ConveyorDaemon(
@@ -2021,15 +2040,15 @@ def test_completion_parent_fsync_error_never_returns_pr_opened_and_leaves_durabi
     ).run_once()
 
     entry = json.loads(state_path.read_text(encoding="utf-8"))["receipts"][0]
-    assert result.results[0].status == "failed"
+    assert result.results[0].status == "uncertain"
     assert result.results[0].reasons == ("receipt terminal durability is uncertain",)
     assert result.results[0].side_effect_started is True
     assert entry["state"] == "pr_opened"
-    assert entry["completion_pending"] is True
+    assert entry["completion_sealed"] is True
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_guarded_visible_terminal_is_audited_blocked_after_restart_and_never_reexecutes(
+def test_sealed_visible_terminal_is_audited_blocked_after_restart_and_never_reexecutes(
     tmp_path, monkeypatch
 ):
     state_path = tmp_path / "receipts.json"
@@ -2045,19 +2064,26 @@ def test_guarded_visible_terminal_is_audited_blocked_after_restart_and_never_ree
         state_path, identity.seat_id, identity.branch, identity.sha
     )
     assert receipt.claim() is True
+    real_open = conveyor_discovery.os.open
     real_fsync = conveyor_discovery.os.fsync
-    fsync_calls = 0
+    parent_fd: int | None = None
 
-    def fail_guarded_terminal_parent_fsync(fd):
-        nonlocal fsync_calls
-        fsync_calls += 1
-        if fsync_calls == 4:
+    def record_open(path, flags, *args, **kwargs):
+        nonlocal parent_fd
+        fd = real_open(path, flags, *args, **kwargs)
+        if Path(path) == state_path.parent:
+            parent_fd = fd
+        return fd
+
+    def fail_sealed_terminal_parent_fsync(fd):
+        if fd == parent_fd:
             raise OSError("terminal directory fsync denied")
         return real_fsync(fd)
 
     with monkeypatch.context() as patch_context:
-        patch_context.setattr(conveyor_discovery.os, "fsync", fail_guarded_terminal_parent_fsync)
-        with pytest.raises(ValueError, match="receipt_state_durability_uncertain:OSError"):
+        patch_context.setattr(conveyor_discovery.os, "open", record_open)
+        patch_context.setattr(conveyor_discovery.os, "fsync", fail_sealed_terminal_parent_fsync)
+        with pytest.raises(conveyor_discovery.ReceiptDurabilityUncertainError):
             receipt.complete("pr_opened")
 
     prepare = FakePrepare()
@@ -2080,11 +2106,61 @@ def test_guarded_visible_terminal_is_audited_blocked_after_restart_and_never_ree
     assert result.results[0].reasons == ("receipt is not processable",)
     assert prepare.calls == []
     assert len(logs) == 1
-    assert "receipt_terminal_durability_unproven" in logs[0]
+    assert "receipt_terminal_sealed" in logs[0]
     assert identity.seat_id not in logs[0]
     assert identity.branch not in logs[0]
     assert identity.sha not in logs[0]
     assert str(state_path) not in logs[0]
+
+
+def test_processing_receipt_recovery_blocks_restart_without_rerunning_side_effects(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    identity = payload.receipt_identity
+    receipt = conveyor_discovery.HandledSignalReceipt(
+        state_path, identity.seat_id, identity.branch, identity.sha
+    )
+    assert receipt.claim() is True
+
+    def fail_terminal_replace(*_args):
+        raise OSError("terminal replace denied")
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(conveyor_discovery.os, "replace", fail_terminal_replace)
+        with pytest.raises(ValueError, match="receipt_state_write_failed:OSError"):
+            receipt.complete("pr_opened")
+
+    prepare = FakePrepare()
+    logs: list[str] = []
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        log_runner=logs.append,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+    ).run_once()
+
+    assert result.results[0].status == "skipped"
+    assert prepare.calls == []
+    assert len(logs) == 1
+    assert "receipt_processing_recovery_required" in logs[0]
+    assert identity.seat_id not in logs[0]
+    assert identity.branch not in logs[0]
+    assert identity.sha not in logs[0]
 
 
 def test_armed_daemon_refuses_runner_owned_receipt_state_path(tmp_path):

@@ -539,7 +539,8 @@ class ConveyorDaemon:
                     else:
                         completion_reason = "receipt completion refused"
                     if not completed:
-                        result = self._failed(
+                        result_factory = self._uncertain if result.side_effect_started else self._failed
+                        result = result_factory(
                             item,
                             (*result.reasons, completion_reason),
                             prepare_result=result.prepare_result,
@@ -1347,6 +1348,29 @@ class ConveyorDaemon:
         self._log(f"conveyor item failed {item.branch}: {'; '.join(reason_tuple)}")
         return ConveyorDaemonItemResult(
             status="failed",
+            branch=item.branch,
+            key=item.key,
+            reasons=reason_tuple,
+            prepare_result=prepare_result,
+            landing_result=landing_result,
+            ledger_records=tuple(ledger_records),
+            side_effect_started=side_effect_started,
+        )
+
+    def _uncertain(
+        self,
+        item: ConveyorDaemonItem,
+        reasons: Sequence[str],
+        *,
+        prepare_result: ConveyorHarvestResult | None = None,
+        landing_result: ConveyorBundleLandingResult | None = None,
+        ledger_records: Sequence[ConveyorDaemonLedgerRecord] = (),
+        side_effect_started: bool = False,
+    ) -> ConveyorDaemonItemResult:
+        reason_tuple = tuple(str(reason) for reason in reasons)
+        self._log(f"conveyor item uncertain {item.branch}: {'; '.join(reason_tuple)}")
+        return ConveyorDaemonItemResult(
+            status="uncertain",
             branch=item.branch,
             key=item.key,
             reasons=reason_tuple,
