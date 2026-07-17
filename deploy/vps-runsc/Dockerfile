@@ -167,11 +167,21 @@ RUN set -eux; \
       'set -euo pipefail' \
       'exec node /usr/local/lib/node_modules/@openai/codex/bin/codex.js "$@"' \
       >/usr/local/bin/codex; \
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'export PYTHONPATH=/workspace/creator-engine/validators' \
+      'exec /opt/ce-validator-venv/bin/python3 -m creator_engine_validator.ce_cli "$@"' \
+      >/usr/local/bin/ce; \
+    chown root:root /usr/local/bin/ce; \
     chmod 0755 /usr/local/bin/herdr /usr/local/bin/herdr-harness-entrypoint.sh; \
     chmod 0755 /usr/local/bin/codex; \
+    chmod 0755 /usr/local/bin/ce; \
     test -x /usr/local/bin/herdr; \
     test -x /usr/local/bin/herdr-harness-entrypoint.sh; \
     test -x /usr/local/bin/codex; \
+    test -x /usr/local/bin/ce; \
+    test "$(stat -c '%U:%G:%a' /usr/local/bin/ce)" = 'root:root:755'; \
     node --version
 
 USER ${CE_VPS_UID}:${CE_VPS_GID}

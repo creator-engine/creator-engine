@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
 
@@ -118,6 +120,96 @@ def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> No
         in text
     )
     assert 'CMD ["tui"]' in text
+
+
+def test_dockerfile_installs_durable_governed_ce_launcher(tmp_path: Path) -> None:
+    """ce-ops#572: the image, rather than a writable live layer, owns `ce`."""
+    text = _dockerfile()
+
+    launcher = re.search(
+        r"printf '%s\\n' \\\n(?P<body>(?:\s+'.*' \\\n)+)\s+>/usr/local/bin/ce;",
+        text,
+    )
+    assert launcher is not None
+    launcher_lines = re.findall(
+        r"^\s*'(?P<line>[^']*)' \\\s*$", launcher.group("body"), re.M
+    )
+    assert launcher_lines == [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "export PYTHONPATH=/workspace/creator-engine/validators",
+        'exec /opt/ce-validator-venv/bin/python3 -m creator_engine_validator.ce_cli "$@"',
+    ]
+
+    # The last ownership/mode operations in the production RUN command must
+    # still leave the wrapper root-owned and seat-executable.
+    production_run = text[launcher.start() : text.index("\n\nUSER ", launcher.start())]
+    operation_prefix = r"(?:^|;\s*\\?\s*)"
+    ownership_operations = re.findall(
+        operation_prefix + r"chown (?P<args>[^;]+)", production_run
+    )
+    mode_operations = re.findall(
+        operation_prefix + r"chmod (?P<args>[^;]+)", production_run
+    )
+    assert ownership_operations
+    assert mode_operations
+    assert shlex.split(ownership_operations[-1].replace("\\\n", "").strip()) == [
+        "root:root",
+        "/usr/local/bin/ce",
+    ]
+    assert shlex.split(mode_operations[-1].replace("\\\n", "").strip()) == [
+        "0755",
+        "/usr/local/bin/ce",
+    ]
+    assert re.search(operation_prefix + r"test -x /usr/local/bin/ce", production_run)
+    assert "root:root:755" in production_run
+
+    # Parse the production exec rather than a separately-maintained expected
+    # command.  The pinned interpreter and one quoted expansion are its only
+    # allowed argv tokens.
+    exec_line = launcher_lines[-1]
+    assert exec_line.startswith("exec ")
+    assert shlex.split(exec_line.removeprefix("exec ")) == [
+        "/opt/ce-validator-venv/bin/python3",
+        "-m",
+        "creator_engine_validator.ce_cli",
+        "$@",
+    ]
+
+    # Materialize the actual wrapper with only its absolute interpreter
+    # replaced by a local argv recorder.  This proves the quoted "$@" keeps
+    # whitespace and shell metacharacters as distinct arguments.
+    fake_interpreter = tmp_path / "argv-recorder"
+    argv_path = tmp_path / "argv"
+    fake_interpreter.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\" > \"$CE_TEST_ARGV_PATH\"\n",
+        encoding="utf-8",
+    )
+    fake_interpreter.chmod(0o755)
+    wrapper = tmp_path / "ce"
+    wrapper.write_text(
+        "\n".join(launcher_lines).replace(
+            "/opt/ce-validator-venv/bin/python3", str(fake_interpreter), 1
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    supplied_args = ["worker run", "semi;colon", "dollar$sign", "quote'\"mix"]
+    result = subprocess.run(
+        [str(wrapper), *supplied_args],
+        check=False,
+        env={"CE_TEST_ARGV_PATH": str(argv_path), "PATH": "/usr/bin:/bin"},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert argv_path.read_text(encoding="utf-8").splitlines() == [
+        "-m",
+        "creator_engine_validator.ce_cli",
+        *supplied_args,
+    ]
 
 
 def test_entrypoint_is_fail_closed_and_routes_harness_through_herdr() -> None:
