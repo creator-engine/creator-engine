@@ -1,8 +1,12 @@
 import contextlib
 from datetime import datetime
 import io
+import os
 from pathlib import Path
+import shutil
+import stat
 import sys
+import tempfile
 
 import pytest
 
@@ -105,6 +109,42 @@ def tenants_root(repo_root: Path) -> Path:
 @pytest.fixture
 def validators_root(repo_root: Path) -> Path:
     return repo_root / "validators"
+
+
+@pytest.fixture
+def unix_socket_tmp_path() -> Path:
+    """Provide a short, private AF_UNIX endpoint root for one test.
+
+    ``tmp_path`` can be intentionally long (and receives audit/config data), while
+    AF_UNIX endpoint names have a platform-specific length limit.  This fixture
+    creates its own ``0700`` directory directly under the system temporary root
+    and verifies it with ``lstat`` before yielding it, so it never accepts or
+    traverses a symlink as the socket root.
+    """
+    root = Path(tempfile.mkdtemp(prefix="ce-unix-", dir=tempfile.gettempdir()))
+    root_stat = os.lstat(root)
+    if (
+        stat.S_ISLNK(root_stat.st_mode)
+        or not stat.S_ISDIR(root_stat.st_mode)
+        or root_stat.st_uid != os.getuid()
+        or stat.S_IMODE(root_stat.st_mode) != 0o700
+    ):
+        raise RuntimeError("refusing unsafe AF_UNIX temporary directory")
+
+    try:
+        yield root
+    finally:
+        try:
+            root_stat = os.lstat(root)
+        except FileNotFoundError:
+            pass
+        else:
+            if stat.S_ISLNK(root_stat.st_mode):
+                root.unlink()
+            elif stat.S_ISDIR(root_stat.st_mode):
+                shutil.rmtree(root)
+            else:
+                root.unlink()
 
 
 @pytest.fixture
