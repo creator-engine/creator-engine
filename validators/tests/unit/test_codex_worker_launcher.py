@@ -1235,6 +1235,93 @@ def test_launch_refuses_every_noncanonical_argv_mutation_before_runner(
     assert runner.calls == []
 
 
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        ("OPENAI_API_KEY",),
+        ("OPENAI_API_KEY", "OPENAI_API_KEY"),
+        ("OPENAI_API_KEY", "GITHUB_TOKEN"),
+    ],
+    ids=["empty-to-provider", "duplicate", "cross-role"],
+)
+def test_launch_refuses_reviewer_credential_tuple_mutation_before_runner(
+    worktree: Path, credentials: tuple[str, ...]
+) -> None:
+    worker_input = governed_input(worktree, role="reviewer")
+    built = plan(worktree, governed_input=worker_input, role="reviewer")
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(built, provider_credential_env_names=credentials),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        (),
+        ("OPENAI_API_KEY", "OPENAI_API_KEY"),
+        ("GITHUB_TOKEN",),
+    ],
+    ids=["provider-to-empty", "duplicate", "cross-role"],
+)
+def test_launch_refuses_provider_role_credential_tuple_mutation_before_runner(
+    worktree: Path, credentials: tuple[str, ...]
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input, role="architect_research")
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(built, provider_credential_env_names=credentials),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+def test_launch_refuses_reordered_role_credential_tuple_before_runner(
+    worktree: Path, monkeypatch
+) -> None:
+    second_name = "SECOND_PROVIDER_KEY"
+    monkeypatch.setattr(
+        launcher,
+        "ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES",
+        frozenset({"OPENAI_API_KEY", second_name}),
+    )
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["role_provider_credentials"].__setitem__(
+            "architect_research", ["OPENAI_API_KEY", second_name]
+        ),
+    )
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input, role="architect_research")
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(
+                built,
+                provider_credential_env_names=(second_name, "OPENAI_API_KEY"),
+            ),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
 @pytest.mark.parametrize("mutation", ["replace", "symlink", "remove", "oversize"])
 def test_launch_reopens_and_rebinds_canonical_role_policy_before_runner(
     worktree: Path, mutation: str
@@ -1255,6 +1342,56 @@ def test_launch_reopens_and_rebinds_canonical_role_policy_before_runner(
 
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
         launcher.launch(built, governed_input=worker_input, runner=runner)
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("mutation", ["same-byte-replace", "chmod"])
+def test_launch_refuses_role_policy_identity_or_mode_drift_before_runner(
+    worktree: Path, mutation: str
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    role_path = Path(worker_input.role_policy_path)
+    if mutation == "same-byte-replace":
+        replacement = role_path.with_suffix(".replacement")
+        replacement.write_bytes(role_path.read_bytes())
+        replacement.chmod(role_path.stat().st_mode)
+        replacement.replace(role_path)
+    else:
+        role_path.chmod(role_path.stat().st_mode ^ 0o022)
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            built,
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+def test_launch_refuses_role_policy_ownership_drift_before_runner(worktree: Path) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    runner = RecordingRunner()
+
+    class OwnershipDriftFilesystem(HermeticFilesystem):
+        def read_bytes_with_binding(self, path: str, *, max_bytes: int | None = None):
+            payload, binding = super().read_bytes_with_binding(path, max_bytes=max_bytes)
+            if os.path.normpath(path) == worker_input.role_policy_path:
+                binding = replace(binding, uid=binding.uid + 1)
+            return payload, binding
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            built,
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=OwnershipDriftFilesystem(),
+        )
 
     assert runner.calls == []
 

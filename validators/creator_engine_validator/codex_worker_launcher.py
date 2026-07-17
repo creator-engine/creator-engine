@@ -221,6 +221,17 @@ def _isolated_child_environment(
         yield child_env
 
 
+@dataclass(frozen=True)
+class RegularFileBinding:
+    """Descriptor-bound identity and security metadata for a verified file."""
+
+    device: int
+    inode: int
+    mode: int
+    uid: int
+    gid: int
+
+
 class LauncherFilesystem(Protocol):
     def realpath(self, path: str) -> str: ...
     def lexists(self, path: str) -> bool: ...
@@ -229,6 +240,9 @@ class LauncherFilesystem(Protocol):
     def is_readable(self, path: str) -> bool: ...
     def is_executable(self, path: str) -> bool: ...
     def read_bytes(self, path: str, *, max_bytes: int | None = None) -> bytes: ...
+    def read_bytes_with_binding(
+        self, path: str, *, max_bytes: int | None = None
+    ) -> tuple[bytes, RegularFileBinding]: ...
 
 
 class RealLauncherFilesystem:
@@ -253,10 +267,17 @@ class RealLauncherFilesystem:
         return os.access(path, os.X_OK)
 
     def read_bytes(self, path: str, *, max_bytes: int | None = None) -> bytes:
+        payload, _binding = self.read_bytes_with_binding(path, max_bytes=max_bytes)
+        return payload
+
+    def read_bytes_with_binding(
+        self, path: str, *, max_bytes: int | None = None
+    ) -> tuple[bytes, RegularFileBinding]:
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
         try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
                 raise OSError("path is not a regular file")
             payload = bytearray()
             while True:
@@ -272,7 +293,23 @@ class RealLauncherFilesystem:
                 if not chunk:
                     break
                 payload.extend(chunk)
-            return bytes(payload)
+            closed_read = os.fstat(descriptor)
+            binding = RegularFileBinding(
+                device=opened.st_dev,
+                inode=opened.st_ino,
+                mode=stat.S_IMODE(opened.st_mode),
+                uid=opened.st_uid,
+                gid=opened.st_gid,
+            )
+            if binding != RegularFileBinding(
+                device=closed_read.st_dev,
+                inode=closed_read.st_ino,
+                mode=stat.S_IMODE(closed_read.st_mode),
+                uid=closed_read.st_uid,
+                gid=closed_read.st_gid,
+            ):
+                raise OSError("file metadata changed during read")
+            return bytes(payload), binding
         finally:
             os.close(descriptor)
 
@@ -393,6 +430,7 @@ class GovernedWorkerInput:
     role: str
     role_policy_path: str
     role_policy_sha256: str
+    role_policy_binding: RegularFileBinding
     brief_path: str
     brief_sha256: str
     role_policy: bytes
@@ -730,7 +768,7 @@ def _read_contained_regular_file(
     field: str,
     filesystem: LauncherFilesystem,
     max_bytes: int | None = None,
-) -> tuple[str, bytes]:
+) -> tuple[str, bytes, RegularFileBinding]:
     normalized = _lexical_absolute(path, field=field)
     resolved = filesystem.realpath(normalized)
     if resolved != normalized:
@@ -740,12 +778,14 @@ def _read_contained_regular_file(
     if not filesystem.is_file(resolved) or not filesystem.is_readable(resolved):
         raise CodexWorkerLaunchError(f"{field} must be a regular readable file")
     try:
-        payload = filesystem.read_bytes(resolved, max_bytes=max_bytes)
+        payload, binding = filesystem.read_bytes_with_binding(
+            resolved, max_bytes=max_bytes
+        )
     except OSError as exc:
         raise CodexWorkerLaunchError(f"{field} cannot be read") from exc
     if max_bytes is not None and len(payload) > max_bytes:
         raise CodexWorkerLaunchError(f"{field} exceeds the size bound")
-    return resolved, payload
+    return resolved, payload, binding
 
 
 def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> CodexOneShotPolicy:
@@ -849,6 +889,43 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
     return policy
 
 
+def _provider_credentials_from_policy_bytes(
+    raw_bytes: bytes, *, role: str
+) -> tuple[str, ...]:
+    """Recover one role's exact credential tuple from the bound policy bytes."""
+    try:
+        raw = yaml.safe_load(raw_bytes)
+    except yaml.YAMLError as exc:
+        raise CodexWorkerLaunchError("cannot parse canonical launcher policy") from exc
+    if not isinstance(raw, dict):
+        raise CodexWorkerLaunchError("canonical launcher policy must be a mapping")
+    credentials_by_role = raw.get("role_provider_credentials")
+    if not isinstance(credentials_by_role, dict) or role not in credentials_by_role:
+        raise CodexWorkerLaunchError(
+            f"role {role} has no provider credential policy"
+        )
+    raw_credentials = credentials_by_role[role]
+    if not isinstance(raw_credentials, list) or any(
+        not isinstance(name, str) for name in raw_credentials
+    ):
+        raise CodexWorkerLaunchError(
+            f"policy role_provider_credentials.{role} must be a string list"
+        )
+    credentials = tuple(raw_credentials)
+    if len(set(credentials)) != len(credentials):
+        raise CodexWorkerLaunchError(
+            f"policy role_provider_credentials.{role} must not contain duplicates"
+        )
+    if any(
+        name not in ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES
+        for name in credentials
+    ):
+        raise CodexWorkerLaunchError(
+            f"policy role_provider_credentials.{role} contains a non-provider credential"
+        )
+    return credentials
+
+
 def load_canonical_policy(
     worktree: str | os.PathLike[str],
     *,
@@ -862,7 +939,7 @@ def load_canonical_policy(
         field="canonical launcher policy area",
         filesystem=fs,
     )
-    path, raw = _read_contained_regular_file(
+    path, raw, _binding = _read_contained_regular_file(
         os.path.join(root, CANONICAL_POLICY_RELATIVE_PATH),
         root=policy_root,
         field="canonical launcher policy",
@@ -893,7 +970,7 @@ def load_governed_worker_input(
         field="canonical role policy area",
         filesystem=fs,
     )
-    role_path, role_bytes = _read_contained_regular_file(
+    role_path, role_bytes, role_binding = _read_contained_regular_file(
         os.path.join(role_root, f"{role}.md"),
         root=role_root,
         field="canonical role policy",
@@ -911,7 +988,7 @@ def load_governed_worker_input(
         if ".." in PurePath(brief_path).parts:
             raise CodexWorkerLaunchError("governed brief escapes its canonical area")
         candidate = os.path.join(root, brief_path)
-    brief_resolved, brief_bytes = _read_contained_regular_file(
+    brief_resolved, brief_bytes, _brief_binding = _read_contained_regular_file(
         candidate,
         root=brief_root,
         field="governed brief",
@@ -925,6 +1002,7 @@ def load_governed_worker_input(
         role=role,
         role_policy_path=role_path,
         role_policy_sha256=role_sha256,
+        role_policy_binding=role_binding,
         brief_path=brief_resolved,
         brief_sha256=actual_brief_sha256,
         role_policy=role_bytes,
@@ -1157,17 +1235,45 @@ def _validate_launch_envelope(
         if plan.developer_instructions != expected_instructions:
             raise CodexWorkerLaunchError("developer instructions mismatch")
         root = _real_directory(plan.worktree, field="worktree", filesystem=filesystem)
+        policy_root = _real_directory(
+            os.path.join(root, "governance", "policies"),
+            field="canonical launcher policy area",
+            filesystem=filesystem,
+        )
+        current_policy_path, current_policy_bytes, _policy_binding = (
+            _read_contained_regular_file(
+                os.path.join(root, CANONICAL_POLICY_RELATIVE_PATH),
+                root=policy_root,
+                field="canonical launcher policy",
+                filesystem=filesystem,
+            )
+        )
+        current_policy_sha256 = hashlib.sha256(current_policy_bytes).hexdigest()
+        if (
+            current_policy_path != plan.policy_path
+            or current_policy_sha256 != plan.policy_sha256
+        ):
+            raise CodexWorkerLaunchError("canonical launcher policy changed after planning")
+        expected_credentials = _provider_credentials_from_policy_bytes(
+            current_policy_bytes, role=plan.role
+        )
+        if plan.provider_credential_env_names != expected_credentials:
+            raise CodexWorkerLaunchError(
+                "provider credential tuple does not match canonical role policy"
+            )
         role_root = _real_directory(
             os.path.join(root, CANONICAL_ROLE_AREA),
             field="canonical role policy area",
             filesystem=filesystem,
         )
-        current_role_path, current_role_policy = _read_contained_regular_file(
+        current_role_path, current_role_policy, current_role_binding = (
+            _read_contained_regular_file(
             os.path.join(role_root, f"{plan.role}.md"),
             root=role_root,
             field="canonical role policy",
             filesystem=filesystem,
             max_bytes=MAX_ROLE_POLICY_BYTES,
+            )
         )
         current_role_sha256 = hashlib.sha256(current_role_policy).hexdigest()
         if (
@@ -1176,6 +1282,7 @@ def _validate_launch_envelope(
             or current_role_policy != governed_input.role_policy
             or current_role_sha256 != governed_input.role_policy_sha256
             or current_role_sha256 != plan.role_policy_sha256
+            or current_role_binding != governed_input.role_policy_binding
         ):
             raise CodexWorkerLaunchError("canonical role policy changed after planning")
         encoded = toml_encode_config_value(expected_instructions)

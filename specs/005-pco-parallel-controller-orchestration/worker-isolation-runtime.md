@@ -324,11 +324,16 @@ Immediately before runner invocation, the launcher MUST reconstruct the
 complete canonical executable argument tuple from the verified plan contract
 and require exact equality, including executable, subcommand, option forms,
 ordering and count, model, worktree, add-directories, output, sandbox, every
-configuration entry, and the terminal stdin marker. At that same boundary it
+configuration entry, and the terminal stdin marker. The provider-credential
+environment-name tuple is a separate runner channel and MUST independently
+equal, in order and count, the tuple granted to the selected role by the
+digest-bound canonical launcher policy; omission, addition, duplication,
+reordering, or cross-role substitution is refused. At that same boundary it
 MUST reopen the canonical role policy beneath the governed repository root as
 a bounded regular nonsymlink file using a no-follow read, then require its
-current path, bytes, and digest to equal the verified input and envelope
-association. Any replacement, removal, symlink, metadata drift, extra or
+current path, bytes, digest, descriptor identity, permission mode, and
+ownership to equal the verified input and envelope association. Any
+replacement, removal, symlink, metadata drift, extra or
 reordered argument, long-form override, duplicate option, bypass flag, or
 other mismatch is refused before the runner is called.
 

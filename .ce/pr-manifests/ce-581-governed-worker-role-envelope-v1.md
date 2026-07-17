@@ -5,7 +5,8 @@ This per-PR carrier (`.ce/pr-manifests/<branch-slug>.md`) lists the closed autho
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** feature
-- **Review correction:** final-boundary canonical argv and role-policy
+- **Review correction:** final-boundary canonical argv and provider-credential
+  tuple binding plus descriptor-identity/security-metadata role-policy
   rebinding, with production-path hermetic subprocess evidence.
 
 AUTHORIZED_PATHS_COUNT=6
