@@ -21,6 +21,7 @@ from typing import Any, Sequence
 
 from . import brain_runtime
 from . import brain_probe
+from . import state_root_probe
 from ._versions import V3_LOCAL_STATE_ROOT
 from .runtime_evidence_spine import CONTENT_HASH_FIELD
 from .seat_class import resolve_seat_class
@@ -223,6 +224,32 @@ def require_foreman_dispatch_contract(contract: Any | None = None) -> dict[str, 
     return copy.deepcopy(rec)
 
 
+def _write_private_runtime_ledger(path: Path, text: str) -> None:
+    """Create bootstrap-sync outputs at the state-root's ratified private modes."""
+
+    missing: list[Path] = []
+    current = path.parent
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700)
+    tmp = path.parent / f"{path.name}.tmp.{os.getpid()}.{os.urandom(8).hex()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+    try:
+        payload = text.encode("utf-8")
+        offset = 0
+        while offset < len(payload):
+            written = os.write(fd, payload[offset:])
+            if written <= 0:
+                raise OSError("short brain-ledger write")
+            offset += written
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    tmp.replace(path)
+
+
 def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
     role = _require_non_empty_string("role", request.role)
     seat_class = resolve_seat_class(request.seat_class)
@@ -232,9 +259,17 @@ def bootstrap(request: BootstrapRequest) -> dict[str, Any]:
         if request.repo_root is None
         else Path(request.repo_root)
     )
+    # DF-1 B3/D2 stop line: the ledger sync below may write. Prove the selected
+    # controller state root before that first mutation; the probe never repairs.
+    state_root_probe.probe_state_root(
+        request.state_root,
+        expected_uid=os.geteuid(),
+        mode="writable-boot",
+    )
     sync = brain_runtime.sync_authoritative_ledger(
         state_root=request.state_root,
         repo_root=repo_root,
+        write=_write_private_runtime_ledger,
     )
     ledger_path = brain_runtime.ledger_path(request.state_root)
 

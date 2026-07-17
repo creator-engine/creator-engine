@@ -12,6 +12,13 @@ from creator_engine_validator import ce_cli
 def _write(path: Path, text: str = "") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    current = path.parent
+    while current != current.parent:
+        current.chmod(0o700)
+        if current.name == ".ce":
+            break
+        current = current.parent
+    path.chmod(0o600)
 
 
 def _seed_takeover_state(root: Path, predecessor: str = "ce-controller") -> None:
@@ -126,6 +133,9 @@ def test_takeover_dry_run_json_emits_evidence_packet(tmp_path, monkeypatch, caps
     assert payload["host_id"] == ce_cli.launch_runtime.takeover_evidence_host_id()
     assert payload["predecessor"] == {"requested": "ce-controller", "detected": True}
     assert payload["selected_harness"] == "claude"
+    assert payload["state_root_diagnostic"]["mode"] == "read-only-diagnostic"
+    assert payload["state_root_diagnostic"]["writable_durability"] == "not-proven"
+    assert payload["state_root_diagnostic"]["nonce_created"] is False
     assert payload["ring0_verify"]["ok"] is True
     assert payload["initial_state"] == "AWAITING-OPERATOR"
     assert {action["execute"] for action in payload["hydration_plan"]} == {False}

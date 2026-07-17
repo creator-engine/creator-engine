@@ -14,12 +14,41 @@ def _write_ledger(state_root: Path, records: list[dict]) -> None:
     path = rt.ledger_path(state_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(rt.serialize_ledger(records), encoding="utf-8")
+    for directory in (state_root.parent, state_root, path.parent):
+        directory.chmod(0o700)
+    path.chmod(0o600)
 
 
 def _write_authoritative_ledger(repo_root: Path, records: list[dict]) -> None:
     path = rt.authoritative_ledger_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(rt.serialize_ledger(records), encoding="utf-8")
+
+
+def test_state_root_probe_precedes_sync_and_refusal_blocks_sync(tmp_path: Path, monkeypatch):
+    state_root = tmp_path / ".ce" / "state"
+    calls: list[str] = []
+
+    def refuse(*_args, **_kwargs):
+        calls.append("probe")
+        raise bootstrap.state_root_probe.StateRootProbeRefused.for_code(
+            "SRP-MODE",
+            state_root=state_root,
+            expected_uid=0,
+            mode="writable-boot",
+        )
+
+    monkeypatch.setattr(bootstrap.state_root_probe, "probe_state_root", refuse)
+    monkeypatch.setattr(
+        bootstrap.brain_runtime,
+        "sync_authoritative_ledger",
+        lambda **_kwargs: calls.append("sync"),
+    )
+
+    with pytest.raises(bootstrap.state_root_probe.StateRootProbeRefused):
+        bootstrap.bootstrap(bootstrap.BootstrapRequest(state_root=state_root))
+
+    assert calls == ["probe"]
 
 
 def _records_with_assertions(state_root: Path) -> list[dict]:
@@ -282,6 +311,10 @@ def test_corrected_assertion_is_reflected_on_next_bootstrap(tmp_path: Path):
 def test_authoritative_correction_is_synced_on_next_bootstrap(tmp_path: Path):
     repo_root = tmp_path / "repo"
     state_root = repo_root / ".ce" / "state"
+    state_root.mkdir(parents=True, mode=0o700)
+    repo_root.chmod(0o700)
+    state_root.parent.chmod(0o700)
+    state_root.chmod(0o700)
     asserted = rt.assert_claim(
         assertion_id="brain-assertion-bootstrap-0001",
         claim={"subject": "lane", "predicate": "seat", "object": "worker"},
@@ -294,6 +327,9 @@ def test_authoritative_correction_is_synced_on_next_bootstrap(tmp_path: Path):
     _write_authoritative_ledger(repo_root, [asserted.record])
 
     before = bootstrap.build_bootstrap_payload(state_root=state_root)
+    runtime_ledger = rt.ledger_path(state_root)
+    assert runtime_ledger.stat().st_mode & 0o7777 == 0o600
+    assert runtime_ledger.parent.stat().st_mode & 0o7777 == 0o700
 
     correction = rt.correct_claim(
         assertion_id="brain-assertion-bootstrap-0001",
@@ -318,6 +354,9 @@ def test_authoritative_correction_is_synced_on_next_bootstrap(tmp_path: Path):
 
 def test_missing_ledger_refuses_bootstrap(tmp_path: Path):
     state_root = tmp_path / ".ce" / "state"
+    state_root.mkdir(parents=True, mode=0o700)
+    state_root.parent.chmod(0o700)
+    state_root.chmod(0o700)
 
     with pytest.raises(bootstrap.BrainBootstrapRefused) as ei:
         bootstrap.build_bootstrap_payload(

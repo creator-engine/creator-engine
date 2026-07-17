@@ -6,6 +6,14 @@ G2.* gate identifiers remain roadmap/governance work IDs, not public semver.
 
 ## [Unreleased]
 
+### Added
+
+- **ce-df1-b3-d2-state-root-durability-probe**: Add a fail-closed,
+  descriptor-pinned controller `.ce/state` gate that enforces private
+  ownership/modes and ACL/type/ancestor safety, then proves same-filesystem
+  nonce durability before live launch or brain-ledger mutation. Takeover and
+  continuity remain read-only with writable durability `not-proven`.
+
 ## v0.3.6 — NIGHT-6: heartbeat ladders + checkpoint protocol + forge spawn + ratifier queue (train 2, 2026-07-12)
 
 ### Highlights

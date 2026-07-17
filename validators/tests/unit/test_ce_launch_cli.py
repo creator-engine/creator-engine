@@ -15,7 +15,7 @@ import subprocess
 import pytest
 import yaml
 
-from creator_engine_validator import brain_runtime, ce_cli
+from creator_engine_validator import brain_runtime, ce_cli, state_root_probe
 from creator_engine_validator.tmux_adapter import TmuxPane
 
 
@@ -171,6 +171,61 @@ def _write_brain_ledger(state_root: Path) -> None:
     path = brain_runtime.ledger_path(state_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(brain_runtime.serialize_ledger([result.record]), encoding="utf-8")
+    state_root.parent.chmod(0o700)
+    state_root.chmod(0o700)
+    path.parent.chmod(0o700)
+    path.chmod(0o600)
+
+
+def test_live_launch_probe_refusal_precedes_seat_mutation_and_spawn(
+    tmp_path, monkeypatch, use_fake_tmux
+):
+    calls: list[str] = []
+
+    def refuse(*_args, **_kwargs):
+        calls.append("probe")
+        raise state_root_probe.StateRootProbeRefused.for_code(
+            "SRP-MISSING",
+            state_root=tmp_path / ".ce" / "state",
+            expected_uid=0,
+            mode="writable-boot",
+        )
+
+    monkeypatch.setattr(ce_cli.launch_runtime.state_root_probe, "probe_state_root", refuse)
+    monkeypatch.setattr(
+        ce_cli.launch_runtime,
+        "_evaluate_seat_surface_reuse",
+        lambda **_kwargs: calls.append("mutate"),
+    )
+    adapter = FakeAdapter()
+
+    with pytest.raises(ce_cli.launch_runtime.StateRootLaunchRefused):
+        ce_cli.launch_runtime.launch(
+            harness="hermes",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            backend="host",
+        )
+
+    assert calls == ["probe"]
+    assert adapter.spawned == []
+
+
+def test_launch_dry_run_does_not_call_state_root_probe(tmp_path, monkeypatch, use_fake_tmux):
+    monkeypatch.setattr(
+        ce_cli.launch_runtime.state_root_probe,
+        "probe_state_root",
+        lambda *_args, **_kwargs: pytest.fail("dry-run must not probe or create a nonce"),
+    )
+
+    result = ce_cli.launch_runtime.launch(
+        harness="hermes",
+        repo_root=tmp_path,
+        tmux_adapter=FakeAdapter(),
+        dry_run=True,
+    )
+
+    assert result.spawned is False
 
 
 def _fake_codex(tmp_path: Path, monkeypatch) -> Path:
@@ -228,6 +283,12 @@ def _write_default_runtime_policy(tmp_path: Path) -> Path:
     path = tmp_path / ".ce" / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(record, sort_keys=True), encoding="utf-8")
+    current = path.parent
+    state_root = tmp_path / ".ce" / "state"
+    while current != state_root.parent:
+        current.chmod(0o700)
+        current = current.parent
+    path.chmod(0o600)
     return path
 
 

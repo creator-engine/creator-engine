@@ -10,6 +10,13 @@ from creator_engine_validator import continuity_drill_runtime as drill
 def _write(path: Path, text: str = "") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    current = path.parent
+    while current != current.parent:
+        current.chmod(0o700)
+        if current.name == ".ce":
+            break
+        current = current.parent
+    path.chmod(0o600)
 
 
 def _seed_takeover_state(root: Path, predecessor: str = "ce-controller") -> None:
@@ -157,9 +164,42 @@ def test_continuity_drill_json_proves_benign_gate_cycle_without_mutation(
     assert {action["execute"] for action in payload["benign_gate_cycle"]["takeover_actions"]} == {False}
     assert payload["takeover_evidence"]["dry_run"] is True
     assert payload["takeover_evidence"]["predecessor"]["detected"] is True
+    assert payload["takeover_evidence"]["state_root_diagnostic"]["writable_durability"] == "not-proven"
     assert payload["standby_liveness"]["ok"] is True
     assert payload["status"] == "GREEN"
     assert payload["clean"] is True
+    after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+    assert after == before
+
+
+def test_unsafe_state_root_diagnostic_makes_drill_red_without_mutation(
+    tmp_path, monkeypatch, capsys
+):
+    _seed_takeover_state(tmp_path)
+    _patch_drill_pass(monkeypatch)
+    (tmp_path / ".ce" / "state").chmod(0o755)
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+
+    rc = ce_cli.main(
+        [
+            "continuity-drill",
+            "--from",
+            "ce-controller",
+            "--harness",
+            "claude",
+            "--repo-root",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    diagnostic = payload["takeover_evidence"]["state_root_diagnostic"]
+    assert rc == 1
+    assert payload["status"] == "RED"
+    assert diagnostic["status"] == "refused"
+    assert "SRP-MODE" in diagnostic["error_codes"]
+    assert diagnostic["nonce_created"] is False
     after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
     assert after == before
 

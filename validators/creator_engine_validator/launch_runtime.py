@@ -49,6 +49,7 @@ from . import (
     runtime_backend_bridge,
     seat_lifecycle,
     seat_sentinel,
+    state_root_probe,
 )
 from .checks import ce_runtime_policy
 from .loader import LoaderError, load_yaml
@@ -204,6 +205,12 @@ class BrainBootstrapLaunchRefused(LaunchError):
     """ce-ops#178: Knowledge-SSOT bootstrap refused before controller spawn."""
 
     code = "G6-LAUNCH-BRAIN-BOOTSTRAP-REFUSED"
+
+
+class StateRootLaunchRefused(LaunchError):
+    """DF-1 B3/D2 state-root durability gate refused live launch."""
+
+    code = "G6-LAUNCH-STATE-ROOT-REFUSED"
 
 
 class SeatLifecycleRegistrationFailed(LaunchError):
@@ -1730,6 +1737,10 @@ def _build_controller_brain_bootstrap(repo_root: Path | str | None) -> dict[str,
             "refusing Controller launch before spawn: "
             f"{details}; recovery: run `ce brain init` from the tenant repo root"
         ) from exc
+    except state_root_probe.StateRootProbeRefused as exc:
+        raise StateRootLaunchRefused(
+            f"refusing Controller launch before state mutation: {exc}"
+        ) from exc
     config = _controller_recall_config_from_env()
     if not config.configured:
         payload["recall_status"] = _status_payload(
@@ -1973,6 +1984,20 @@ def launch(
                 f"no live launcher session {session!r} to resume; refusing to spawn a hidden seat"
             )
         return LaunchResult(plan=plan, spawned=False, attached=True)
+
+    # DF-1 B3/D2: this is the last read-only point before seat-surface archive/
+    # creation and brain-ledger synchronization. Dry-run and resume returned
+    # above; every new live controller boot must prove writable durability.
+    try:
+        state_root_probe.probe_state_root(
+            _brain_state_root(repo_root),
+            expected_uid=os.geteuid(),
+            mode="writable-boot",
+        )
+    except state_root_probe.StateRootProbeRefused as exc:
+        raise StateRootLaunchRefused(
+            f"refusing Controller launch before state mutation: {exc}"
+        ) from exc
 
     seat_surface_gate = _evaluate_seat_surface_reuse(
         repo_root=repo_root,

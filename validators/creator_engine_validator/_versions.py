@@ -403,6 +403,12 @@ V3_LOCAL_STATE_ROOT = ".ce/state"
 #     only shrinks; a new residue in the v3 surface fails ``v3_naming_hygiene``. ---
 BASELINE_V3_NAMING_ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
 
+# Explicit shared durable-infrastructure modules whose classification is worth
+# recording even though shared is the taxonomy default. DF-1 B3/D2 is consumed
+# by both shared brain bootstrap and v1 launch/read-only compositions; it
+# imports no version-specific runtime and confers no authority.
+EXPLICIT_SHARED_MODULES: frozenset[str] = frozenset({"state_root_probe"})
+
 
 def classify(rel_module: str) -> str:
     """Return the version line (``v1`` / ``v3`` / ``shared``) for a module.
@@ -415,4 +421,6 @@ def classify(rel_module: str) -> str:
         return V1
     if rel_module in V3_RUNTIME:
         return V3
+    if rel_module in EXPLICIT_SHARED_MODULES:
+        return SHARED
     return SHARED

@@ -6,11 +6,12 @@ not start a controller, re-arm watchers, sign, or mutate live state.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from . import brain_runtime, launch_runtime
+from . import brain_runtime, launch_runtime, state_root_probe
 from .loader import LoaderError, load_yaml
 
 INITIAL_STATE = "AWAITING-OPERATOR"
@@ -120,6 +121,7 @@ class TakeoverPlan:
     brain_hydration: dict[str, Any]
     hydration_actions: tuple[dict[str, Any], ...]
     rearm_plan: ReArmPlan
+    state_root_diagnostic: state_root_probe.StateRootProbeResult
 
     @property
     def predecessor_detected(self) -> bool:
@@ -160,6 +162,7 @@ class TakeoverPlan:
             "selected_harness": self.harness,
             "repo_root": str(self.repo_root),
             "dry_run": self.dry_run,
+            "state_root_diagnostic": self.state_root_diagnostic.to_dict(),
             "ring0_verify": {
                 "ok": self.ring0_ok,
                 "launch_runtime_report": self.ring0_report.to_dict(),
@@ -241,6 +244,11 @@ def build_plan(
         )
 
     root = Path(repo_root).resolve()
+    state_root_diagnostic = state_root_probe.probe_state_root(
+        root / ".ce" / "state",
+        expected_uid=os.geteuid(),
+        mode="read-only-diagnostic",
+    )
     evidence = _detect_predecessor_state(root, predecessor)
     ring0 = launch_runtime.preflight_launch(
         harness=harness,
@@ -263,6 +271,7 @@ def build_plan(
         brain_hydration=brain_hydration,
         hydration_actions=actions,
         rearm_plan=rearm_plan,
+        state_root_diagnostic=state_root_diagnostic,
     )
 
 

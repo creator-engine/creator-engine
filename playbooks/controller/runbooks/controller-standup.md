@@ -39,6 +39,59 @@ git rev-parse --verify origin/main
 
 PASS iff both git refs resolve and `HARNESS` is one of `claude|codex`.
 
+## Step 0 - Pre-Provision And Validate The Controller State Root
+
+Live controller boot never creates, chmods, chowns, clears ACLs, or removes
+residue to make `.ce/state` pass. Complete this step in a maintenance window,
+with every controller and same-UID writer stopped. Processes sharing the
+expected UID are one ratified Unix trust domain; this check is not the #569
+single-controller fence.
+
+For a new tenant, create a real directory rather than a symlink:
+
+```bash
+install -d -m 0700 .ce/state
+test ! -L .ce/state
+test "$(stat -c %u .ce/state)" = "$(id -u)"
+test "$(stat -c %a .ce/state)" = 700
+```
+
+For an existing tree, first take and verify the #497 controller-state snapshot.
+Then, while writers remain stopped, audit the tree and its lexical ancestors.
+Directories must be expected-UID `0700`; regular files must be expected-UID
+`0600`, or `0700` only when owner execution is required. Symlinks, sockets,
+FIFOs, devices, special bits, access/default POSIX ACLs, and foreign ownership
+are refusals. Existing `0644` files require offline migration; boot does not
+weaken or repair this policy.
+
+```bash
+find .ce/state -xdev -printf '%y %U %m %P\n' | LC_ALL=C sort
+getfacl -R -p .ce/state
+find .ce/state -xdev -type d -exec chmod 0700 -- {} +
+find .ce/state -xdev -type f ! -perm /0100 -exec chmod 0600 -- {} +
+find .ce/state -xdev -type f -perm /0100 -exec chmod 0700 -- {} +
+setfacl -R -b .ce/state
+setfacl -R -k .ce/state
+```
+
+Do not batch-delete a `.ce-state-root-probe-nonce.*` entry. A reserved-prefix
+entry may be evidence of a crashed or concurrent writer and is never stale by
+PID or age. Stop all writers, inspect its owner/type/mode and the surrounding
+state, record the security incident or maintenance evidence, remove only the
+audited entry, and fsync `.ce/state` before retrying. Removal without a recorded
+Operator security exception is prohibited.
+
+If migration or rollback cannot be proven, keep the failed tree offline and
+prefer a fresh private root: stop writers, move the failed root aside without
+following links, create a new expected-UID `0700` `.ce/state`, and restore only
+verified snapshot material after applying this same private-mode/ACL audit.
+Never roll back by symlinking to the failed or snapshot tree.
+
+PASS iff the root is pre-provisioned and its complete offline audit is clean.
+This PASS proves filesystem posture only: it grants no approval, merge,
+promotion, signing, credential, lease, fencing, or controller identity
+authority. Any failure halts standup before Step 1.
+
 ## Step 1 - Knowledge Hydration
 
 Read these files top-to-bottom:

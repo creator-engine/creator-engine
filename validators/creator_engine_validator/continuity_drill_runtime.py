@@ -118,6 +118,7 @@ class DrillRecord:
         return bool(
             self.takeover_plan.predecessor_detected
             and self.takeover_plan.ring0_ok
+            and self.takeover_plan.state_root_diagnostic.status != "refused"
             and self.gate_cycle["no_side_effects"]
             and not self.gate_cycle["forbidden_mechanics_present"]
         )
@@ -439,6 +440,16 @@ def _gate_cycle_proof(
                 "predecessor_detected": takeover_plan.predecessor_detected,
                 "evidence_gap_count": len(takeover_plan.evidence_gaps),
             },
+        },
+        {
+            "name": "diagnose-state-root",
+            "status": (
+                "WOULD-REFUSE"
+                if takeover_plan.state_root_diagnostic.status == "refused"
+                else "NOT-PROVEN"
+            ),
+            "execute": False,
+            "evidence": takeover_plan.state_root_diagnostic.to_dict(),
         },
         {
             "name": "verify-ring0-harness",
