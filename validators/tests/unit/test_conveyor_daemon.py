@@ -28,7 +28,12 @@ from creator_engine_validator.conveyor_daemon import (
     ConveyorValidationLedgerBinding,
     _PUBLISH_TRANSPORT_CONFIG_PATTERN,
 )
-from creator_engine_validator.conveyor_discovery import ConveyorSeatDiscoveryRunner, SeatProbeSpec
+from creator_engine_validator.conveyor_discovery import (
+    ConveyorSeatDiscoveryRunner,
+    ReceiptDiscoveryPayload,
+    ReceiptIdentity,
+    SeatProbeSpec,
+)
 from creator_engine_validator.forge.daemon_allocation import DaemonPathAllocator, DaemonRuntimeRoots
 from creator_engine_validator.validation_sandbox_receipt import ValidationSandboxReceiptIssuer
 
@@ -93,6 +98,7 @@ def _receipt_armed_roots(tmp_path: Path) -> dict[str, object]:
             side_effect_ledger_root=runtime_root / "side-effect-ledger",
             active_work_ledger_root=runtime_root / "active-work-ledger",
         ),
+        "receipt_state_path": tmp_path / "receipts.json",
     }
 
 
@@ -1861,6 +1867,95 @@ def test_receipt_records_successful_pr_open(tmp_path):
 
     assert result.results[0].status == "pr-opened"
     assert json.loads(state_path.read_text())['receipts'][0]['state'] == "pr_opened"
+
+
+def test_armed_daemon_refuses_receipt_identity_without_owned_state_path():
+    payload = ReceiptDiscoveryPayload(
+        _data_only_payload(),
+        ReceiptIdentity("seat-1", "feature-one", HEAD_SHA),
+    )
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("receipt identity refused: daemon receipt state path is not configured",)
+
+
+def test_receipt_exception_before_push_is_terminal_failed(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+        )()
+    )[0]
+
+    def raise_before_push(*_args, **_kwargs):
+        raise RuntimeError("prepare exploded")
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=raise_before_push,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "failed"
+
+
+def test_receipt_exception_during_push_is_uncertain(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {HEAD_SHA}",
+        )()
+    )[0]
+
+    class PushRaises(FakeGit):
+        def __call__(self, args, cwd, env):
+            if tuple(args) == ("push", "--", "origin", "ce-388-conveyor-discovery:ce-388-conveyor-discovery"):
+                raise RuntimeError("push response lost")
+            return super().__call__(args, cwd, env)
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=PushRaises(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=FakePrepare(record_validation=True),
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "failed"
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "uncertain"
 
 
 def test_hostile_item_bundle_path_transport_gadget_is_rejected_never_reaches_git():
