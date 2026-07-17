@@ -120,6 +120,44 @@ def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> No
     assert 'CMD ["tui"]' in text
 
 
+def test_dockerfile_installs_durable_governed_ce_launcher() -> None:
+    """ce-ops#572: the image, rather than a writable live layer, owns `ce`."""
+    text = _dockerfile()
+
+    launcher = re.search(r"printf '%s\\n' \\\n(?P<body>(?:\s+'.*' \\\n)+)\s+>/usr/local/bin/ce;", text)
+    assert launcher is not None
+    launcher_text = launcher.group(0)
+
+    # A root-built, 0755 file is executable by the seat but cannot be altered
+    # by its unprivileged user. Keep those properties explicit in the recipe.
+    assert "chown root:root /usr/local/bin/ce" in text
+    assert "chmod 0755 /usr/local/bin/ce" in text
+    assert "test -x /usr/local/bin/ce" in text
+    assert "root:root:755" in text
+
+    # The wrapper is deliberately pinned to the offline validator venv, not
+    # the image's system Python or an ambient command/PATH lookup.
+    assert "/opt/ce-validator-venv/bin/python3 -m creator_engine_validator.ce_cli" in launcher_text
+    assert "PYTHONPATH=/workspace/creator-engine/validators" in launcher_text
+    assert '"$@"' in launcher_text
+    assert "python3 -m creator_engine_validator.ce_cli" not in launcher_text.replace(
+        "/opt/ce-validator-venv/bin/python3", ""
+    )
+    assert "eval" not in launcher_text
+    assert "pip install" not in launcher_text
+    assert "curl" not in launcher_text
+    assert "TOKEN" not in launcher_text
+
+    # With the normal repository bind, this is the unprivileged-seat help
+    # contract; every argument remains a distinct item through the quoted $@.
+    expected_help = (
+        "PYTHONPATH=/workspace/creator-engine/validators "
+        "/opt/ce-validator-venv/bin/python3 -m creator_engine_validator.ce_cli "
+        "worker run --help"
+    )
+    assert expected_help.endswith("creator_engine_validator.ce_cli worker run --help")
+
+
 def test_entrypoint_is_fail_closed_and_routes_harness_through_herdr() -> None:
     text = _entrypoint()
 
