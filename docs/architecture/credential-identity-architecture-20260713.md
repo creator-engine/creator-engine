@@ -46,7 +46,7 @@ credential migration or dynamic workload identity is operational.
 
 | Enterprise identity-plane property | Score | Finding |
 | --- | --- | --- |
-| Central identity and secret plane | PARTIAL | A tracked VPS record verifies an active and enabled OpenBao 2.5.5 substrate that was initialized and unsealed with raft HA active; authenticated backend verification and completed credential migration remain unproven. |
+| Central identity and secret plane | PARTIAL | A tracked VPS record verifies an active and enabled OpenBao 2.5.x substrate that was initialized and unsealed with raft HA active; authenticated backend verification and completed credential migration remain unproven. |
 | OIDC federation | MISSING | No tracked issuer, trust configuration, claims mapping, or federated workload flow is evidenced. |
 | SPIFFE/SVID workload identity and attestation | MISSING | No trust domain, workload API, attestor, SVID lifecycle, or verifier is tracked. |
 | Per-action, short-lived issuance | PARTIAL | Tracked broker code mints scoped, revocable installation tokens; deployment and use as a universal live path remain unproven. |
