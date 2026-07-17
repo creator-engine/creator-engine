@@ -43,6 +43,22 @@ MALFORMED_BINARY_TEMPLATES = [
     "/opt/creator-engine/codex/{version:>20}/bin/codex",
     "/opt/creator-engine/codex/{version}/{other}/codex",
 ]
+NON_STRING_BINARY_TEMPLATES = [None, 17, False, ["{version}"], {"field": "version"}]
+EXACT_ONLY_SENSITIVE_ENV_NAMES = [
+    "AWS_ACCESS_KEY_ID",
+    "GITHUB_API_URL",
+    "GH_HOST",
+    "GH_CONFIG_DIR",
+    "GH_DEBUG",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GPG_AGENT_INFO",
+]
+PREFIXED_EXACT_ONLY_SENSITIVE_ENV_NAMES = [
+    f"{prefix}{name}"
+    for name in EXACT_ONLY_SENSITIVE_ENV_NAMES
+    for prefix in ("LC_", "LC_LC_", "LC_LC_LC_")
+]
 
 
 class HermeticFilesystem(launcher.RealLauncherFilesystem):
@@ -389,6 +405,31 @@ def test_planner_refuses_unsafe_first_duplicate_role_cell_before_version_probe(
 @pytest.mark.parametrize("template", MALFORMED_BINARY_TEMPLATES)
 def test_planner_refuses_structurally_malformed_binary_template_before_version_probe(
     worktree: Path, template: str
+) -> None:
+    loaded = policy(worktree)
+    venue = loaded.venue("dev1-local")
+    unsafe_venue = replace(venue, codex_binary_template=template)
+    unsafe_policy = replace(
+        loaded,
+        venues=tuple(unsafe_venue if item.name == venue.name else item for item in loaded.venues),
+    )
+    probe = FixedVersionProbe()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="binary template"):
+        launcher.build_launch_plan(
+            policy=unsafe_policy,
+            governed_input=governed_input(worktree, role="architect_research"),
+            role="architect_research",
+            venue="dev1-local",
+            worktree=str(worktree),
+            filesystem=UnusedFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
+
+
+@pytest.mark.parametrize("template", NON_STRING_BINARY_TEMPLATES)
+def test_planner_refuses_non_string_binary_template_before_filesystem_or_version_probe(
+    worktree: Path, template: object
 ) -> None:
     loaded = policy(worktree)
     venue = loaded.venue("dev1-local")
@@ -774,3 +815,38 @@ def test_production_runner_scrubs_credential_shaped_locale_names(
     ) == 0
     assert credential_name not in captured
     assert captured["LC_ALL"] == "C.UTF-8"
+
+
+@pytest.mark.parametrize("credential_name", PREFIXED_EXACT_ONLY_SENSITIVE_ENV_NAMES)
+def test_shared_child_environment_refuses_prefixed_exact_only_sensitive_names(
+    monkeypatch, credential_name: str
+) -> None:
+    captured: list[dict[str, str]] = []
+
+    def fake_run(argv, **kwargs):
+        captured.append(dict(kwargs["env"]))
+        if argv[-1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, "codex-cli 0.145.0-alpha.9\n", "")
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    source = {
+        credential_name: "secret",
+        "LC_ALL": "C.UTF-8",
+        "LC_CTYPE": "C.UTF-8",
+        "LC_MESSAGES": "C.UTF-8",
+    }
+    assert launcher.SubprocessCodexVersionProbe(environ=source).probe(PINNED_BINARY) == (
+        "0.145.0-alpha.9"
+    )
+    assert launcher.SubprocessCodexOneShotRunner(environ=source).run(
+        ["/pinned/codex", "exec"],
+        stdin=b"verified",
+        provider_credential_env_names=(),
+    ) == 0
+    assert len(captured) == 2
+    for child_env in captured:
+        assert credential_name not in child_env
+        assert child_env["LC_ALL"] == "C.UTF-8"
+        assert child_env["LC_CTYPE"] == "C.UTF-8"
+        assert child_env["LC_MESSAGES"] == "C.UTF-8"

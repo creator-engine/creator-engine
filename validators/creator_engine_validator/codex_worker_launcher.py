@@ -81,6 +81,17 @@ V1_ROLE_SANDBOX_MATRIX = (
 ALLOWED_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
 ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES = frozenset({"OPENAI_API_KEY"})
 SAFE_RUNTIME_ENV_NAMES = frozenset({"LANG", "PATH", "TERM"})
+SAFE_LOCALE_ENV_NAMES = frozenset(
+    {
+        "LC_ALL",
+        "LC_COLLATE",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+        "LC_MONETARY",
+        "LC_NUMERIC",
+        "LC_TIME",
+    }
+)
 _EXACT_CREDENTIAL_ENV_NAMES = frozenset(
     {
         "GH_TOKEN",
@@ -157,7 +168,7 @@ def _isolated_child_environment(
             name: value
             for name, value in source.items()
             if name in SAFE_RUNTIME_ENV_NAMES
-            or (name.startswith("LC_") and not _is_credential_env_name(name))
+            or (name in SAFE_LOCALE_ENV_NAMES and not _is_credential_env_name(name))
         }
         child_env.update(
             {
@@ -450,6 +461,10 @@ def _require_string_list(value: Any, field: str) -> tuple[str, ...]:
 
 def _render_binary_template(*, template: str, version: str, venue: str) -> str:
     """Render exactly one plain ``{version}`` field and no other format syntax."""
+    if not isinstance(template, str):
+        raise CodexWorkerLaunchError(
+            f"policy venue {venue} has an invalid binary template"
+        )
     try:
         parsed = tuple(string.Formatter().parse(template))
     except ValueError as exc:
