@@ -84,6 +84,7 @@ def collect_inputs(
     injected UTC clock.
     """
 
+    ticket_token, pr_token = _validate_token_pair(ticket_token, pr_token)
     if since_days < 0:
         raise TicketReconcileFeedError("since_days must be non-negative")
     instant = now if now is not None else dt.datetime.now(dt.timezone.utc)
@@ -91,8 +92,13 @@ def collect_inputs(
         raise TicketReconcileFeedError("now must be timezone-aware")
     cutoff = instant.astimezone(dt.timezone.utc) - dt.timedelta(days=since_days)
 
-    tickets = _collect_tickets(ticket_repo, runner=runner, token=ticket_token)
-    prs_with_dates = _collect_prs(pr_repo, runner=runner, token=pr_token)
+    try:
+        tickets = _collect_tickets(ticket_repo, runner=runner, token=ticket_token)
+        prs_with_dates = _collect_prs(pr_repo, runner=runner, token=pr_token)
+    except TicketReconcileFeedError as exc:
+        raise TicketReconcileFeedError(
+            _redact_tokens(str(exc), (ticket_token, pr_token))
+        ) from None
     prs = [pr for pr, merged_at in prs_with_dates if merged_at >= cutoff]
     return tickets, prs
 
@@ -148,7 +154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _collect_tickets(repo: str, *, runner: Runner, token: str | None) -> list[OpenTicket]:
+def _collect_tickets(repo: str, *, runner: Runner, token: str) -> list[OpenTicket]:
     nodes = _collect_connection(
         repo,
         connection_name="issues",
@@ -160,7 +166,7 @@ def _collect_tickets(repo: str, *, runner: Runner, token: str | None) -> list[Op
 
 
 def _collect_prs(
-    repo: str, *, runner: Runner, token: str | None
+    repo: str, *, runner: Runner, token: str
 ) -> list[tuple[MergedPullRequest, dt.datetime]]:
     nodes = _collect_connection(
         repo,
@@ -178,7 +184,7 @@ def _collect_connection(
     connection_name: str,
     query: str,
     runner: Runner,
-    token: str | None,
+    token: str,
 ) -> list[Any]:
     owner, name = _split_repo(repo)
     cursor: str | None = None
@@ -205,7 +211,6 @@ def _collect_connection(
             connection_name=connection_name,
             command=command,
             stderr=stderr,
-            token=token,
         )
         page_nodes = connection.get("nodes")
         page_info = connection.get("pageInfo")
@@ -215,7 +220,9 @@ def _collect_connection(
             )
         has_next = page_info.get("hasNextPage")
         end_cursor = page_info.get("endCursor")
-        if not isinstance(has_next, bool):
+        if type(has_next) is not bool or not (
+            end_cursor is None or type(end_cursor) is str
+        ):
             raise TicketReconcileFeedError(
                 _format_failure(command, stderr, reason="malformed GraphQL pageInfo")
             )
@@ -234,15 +241,20 @@ def _collect_connection(
 
 
 def _run_gh_json(
-    command: list[str], *, runner: Runner, token: str | None
+    command: list[str], *, runner: Runner, token: str
 ) -> tuple[Any, str]:
-    kwargs: dict[str, Any] = {"capture_output": True, "text": True, "check": False}
-    if token is not None:
-        kwargs["env"] = _scoped_gh_env(token)
+    kwargs: dict[str, Any] = {
+        "capture_output": True,
+        "text": True,
+        "check": False,
+        "env": _scoped_gh_env(token),
+    }
     try:
         completed = runner(command, **kwargs)
     except OSError as exc:
-        raise TicketReconcileFeedError(_format_failure(command, str(exc))) from exc
+        raise TicketReconcileFeedError(
+            _format_failure(command, _redact(str(exc), token))
+        ) from None
 
     stderr = _redact(str(getattr(completed, "stderr", "") or ""), token)
     if getattr(completed, "returncode", 1) != 0:
@@ -273,7 +285,6 @@ def _extract_connection(
     connection_name: str,
     command: Sequence[str],
     stderr: str,
-    token: str | None,
 ) -> Mapping[str, Any]:
     data = payload.get("data")
     if not isinstance(data, Mapping):
@@ -281,7 +292,10 @@ def _extract_connection(
             _format_failure(command, stderr, reason="malformed GraphQL data")
         )
     rate_limit = data.get("rateLimit")
-    if not isinstance(rate_limit, Mapping) or not isinstance(rate_limit.get("remaining"), int):
+    if (
+        not isinstance(rate_limit, Mapping)
+        or type(rate_limit.get("remaining")) is not int
+    ):
         raise TicketReconcileFeedError(
             _format_failure(command, stderr, reason="malformed GraphQL rateLimit")
         )
@@ -307,7 +321,7 @@ def _parse_ticket(item: Any, index: int) -> OpenTicket:
         raise TicketReconcileFeedError(f"malformed issue node at index {index}")
     return OpenTicket(
         number=_positive_int(item["number"], f"issue[{index}].number"),
-        title=_text(item["title"]),
+        title=_required_text(item["title"], f"issue[{index}].title"),
     )
 
 
@@ -319,9 +333,9 @@ def _parse_pr(item: Any, index: int) -> tuple[MergedPullRequest, dt.datetime]:
     return (
         MergedPullRequest(
             number=_positive_int(item["number"], f"pr[{index}].number"),
-            title=_text(item["title"]),
-            head_branch=_text(item["headRefName"]),
-            body=_text(item["body"]),
+            title=_required_text(item["title"], f"pr[{index}].title"),
+            head_branch=_required_text(item["headRefName"], f"pr[{index}].headRefName"),
+            body=_required_text(item["body"], f"pr[{index}].body"),
         ),
         merged_at,
     )
@@ -380,6 +394,20 @@ def _required_token(env_name: str) -> str:
     return token
 
 
+def _validate_token_pair(ticket_token: Any, pr_token: Any) -> tuple[str, str]:
+    if (
+        type(ticket_token) is not str
+        or not ticket_token.strip()
+        or type(pr_token) is not str
+        or not pr_token.strip()
+        or ticket_token == pr_token
+    ):
+        raise TicketReconcileFeedError(
+            "ticket and PR read tokens must be nonempty and distinct"
+        )
+    return ticket_token, pr_token
+
+
 def _scoped_gh_env(token: str) -> dict[str, str]:
     child = dict(os.environ)
     for name in _TOKEN_ENV_NAMES:
@@ -396,21 +424,17 @@ def _split_repo(repo: str) -> tuple[str, str]:
 
 
 def _positive_int(value: Any, field: str) -> int:
-    if isinstance(value, bool):
+    if type(value) is not int or value <= 0:
         raise TicketReconcileFeedError(f"malformed GraphQL output: {field} must be positive")
-    try:
-        number = int(value)
-    except (TypeError, ValueError) as exc:
+    return value
+
+
+def _required_text(value: Any, field: str) -> str:
+    if type(value) is not str:
         raise TicketReconcileFeedError(
-            f"malformed GraphQL output: {field} must be positive"
-        ) from exc
-    if number <= 0:
-        raise TicketReconcileFeedError(f"malformed GraphQL output: {field} must be positive")
-    return number
-
-
-def _text(value: Any) -> str:
-    return "" if value is None else str(value)
+            f"malformed GraphQL output: {field} must be text"
+        )
+    return value
 
 
 def _non_negative_int(value: str) -> int:
@@ -425,6 +449,12 @@ def _non_negative_int(value: str) -> int:
 
 def _redact(value: str, token: str | None) -> str:
     return value.replace(token, "<redacted>") if token else value
+
+
+def _redact_tokens(value: str, tokens: Sequence[str]) -> str:
+    for token in sorted(tokens, key=len, reverse=True):
+        value = value.replace(token, "<redacted>")
+    return value
 
 
 def _format_failure(command: Sequence[str], stderr: str, *, reason: str | None = None) -> str:

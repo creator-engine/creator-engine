@@ -12,6 +12,8 @@ from creator_engine_validator import ticket_reconcile_feed as feed
 
 _TICKET_REPO = "synthetic-org/synthetic-ops"
 _PR_REPO = "synthetic-org/synthetic-code"
+_TICKET_TOKEN = "ticket-only"
+_PR_TOKEN = "pr-only"
 _NOW = dt.datetime(2026, 7, 17, 12, 0, tzinfo=dt.timezone.utc)
 _WORKFLOW = (
     Path(__file__).resolve().parents[3]
@@ -21,6 +23,12 @@ _WORKFLOW = (
 
 def _page(nodes, *, has_next=False, cursor=None):
     return {"nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": cursor}}
+
+
+def _collect_inputs(*args, **kwargs):
+    kwargs.setdefault("ticket_token", _TICKET_TOKEN)
+    kwargs.setdefault("pr_token", _PR_TOKEN)
+    return feed.collect_inputs(*args, **kwargs)
 
 
 class FakeGraphqlRunner:
@@ -70,7 +78,7 @@ def test_complete_cursor_traversal_and_local_utc_date_filter_avoid_search_ceilin
         ],
     )
 
-    tickets, prs = feed.collect_inputs(
+    tickets, prs = _collect_inputs(
         _TICKET_REPO, _PR_REPO, 365, runner=runner, now=_NOW
     )
 
@@ -99,7 +107,7 @@ def test_malformed_or_incomplete_page_fails_closed(page, reason):
     runner = FakeGraphqlRunner([page], [_page([])])
 
     with pytest.raises(feed.TicketReconcileFeedError, match=reason):
-        feed.collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
 
 
 def test_repeated_cursor_fails_closed():
@@ -109,7 +117,7 @@ def test_repeated_cursor_fails_closed():
     )
 
     with pytest.raises(feed.TicketReconcileFeedError, match="incomplete GraphQL pagination"):
-        feed.collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
 
 
 def test_graphql_rate_limit_and_authentication_fail_closed():
@@ -123,21 +131,27 @@ def test_graphql_rate_limit_and_authentication_fail_closed():
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
 
     with pytest.raises(feed.TicketReconcileFeedError, match="rate limit exhausted"):
-        feed.collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=rate_limited, now=_NOW)
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=rate_limited, now=_NOW)
 
     def unauthorized(command, **_kwargs):
         payload = {"errors": [{"type": "FORBIDDEN", "message": "denied"}]}
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
 
     with pytest.raises(feed.TicketReconcileFeedError, match="authentication/rate-limit"):
-        feed.collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=unauthorized, now=_NOW)
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=unauthorized, now=_NOW)
 
 
 def test_nonzero_and_malformed_json_fail_closed_without_leaking_token():
     secret = "ghp_top_secret_value"
+    pr_secret = "pr-other-secret"
 
     def failed(command, **_kwargs):
-        return subprocess.CompletedProcess(command, 1, stdout="", stderr=f"denied {secret}")
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr=f"denied {secret} and {pr_secret}",
+        )
 
     with pytest.raises(feed.TicketReconcileFeedError) as excinfo:
         feed.collect_inputs(
@@ -147,15 +161,17 @@ def test_nonzero_and_malformed_json_fail_closed_without_leaking_token():
             runner=failed,
             now=_NOW,
             ticket_token=secret,
+            pr_token=pr_secret,
         )
     assert secret not in str(excinfo.value)
+    assert pr_secret not in str(excinfo.value)
     assert "<redacted>" in str(excinfo.value)
 
     def malformed(command, **_kwargs):
         return subprocess.CompletedProcess(command, 0, stdout="{", stderr="context")
 
     with pytest.raises(feed.TicketReconcileFeedError, match="malformed JSON"):
-        feed.collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=malformed, now=_NOW)
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=malformed, now=_NOW)
 
 
 def test_ticket_and_pr_credentials_are_isolated_in_child_environments(monkeypatch):
@@ -185,6 +201,72 @@ def test_ticket_and_pr_credentials_are_isolated_in_child_environments(monkeypatc
         assert "CE_PR_READ_TOKEN" not in child_env
     assert all("ticket-only" not in " ".join(call[0]) for call in runner.calls)
     assert all("pr-only" not in " ".join(call[0]) for call in runner.calls)
+
+
+@pytest.mark.parametrize(
+    "ticket_token,pr_token",
+    [
+        (None, None),
+        (None, "pr"),
+        ("ticket", None),
+        ("", "pr"),
+        ("ticket", ""),
+        ("   ", "pr"),
+        ("ticket", "\t"),
+        ("same", "same"),
+        (7, "pr"),
+        ("ticket", object()),
+    ],
+)
+def test_invalid_credential_pairs_fail_before_runner_without_values(
+    ticket_token, pr_token
+):
+    calls = []
+
+    def runner(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("runner must not be called")
+
+    with pytest.raises(
+        feed.TicketReconcileFeedError,
+        match="^ticket and PR read tokens must be nonempty and distinct$",
+    ) as excinfo:
+        feed.collect_inputs(
+            _TICKET_REPO,
+            _PR_REPO,
+            1,
+            runner=runner,
+            now=_NOW,
+            ticket_token=ticket_token,
+            pr_token=pr_token,
+        )
+
+    assert calls == []
+    for token in (ticket_token, pr_token):
+        if isinstance(token, str) and token.strip():
+            assert token not in str(excinfo.value)
+
+
+def test_runner_oserror_is_redacted_without_credential_in_argv():
+    secret = "ghp_oserror_secret"
+
+    def failed(command, **_kwargs):
+        assert secret not in " ".join(command)
+        raise OSError(f"credential {secret} rejected")
+
+    with pytest.raises(feed.TicketReconcileFeedError) as excinfo:
+        feed.collect_inputs(
+            _TICKET_REPO,
+            _PR_REPO,
+            1,
+            runner=failed,
+            now=_NOW,
+            ticket_token=secret,
+            pr_token="separate-pr-secret",
+        )
+
+    assert secret not in str(excinfo.value)
+    assert "<redacted>" in str(excinfo.value)
 
 
 def test_parser_loader_uses_dynamic_file_seam_and_fails_closed(tmp_path, monkeypatch):
@@ -231,7 +313,77 @@ def test_malformed_nodes_fail_closed(issue_nodes, pr_nodes, reason):
     runner = FakeGraphqlRunner([_page(issue_nodes)], [_page(pr_nodes)])
 
     with pytest.raises(feed.TicketReconcileFeedError, match=reason):
-        feed.collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("number", True),
+        ("number", 1.0),
+        ("number", "1"),
+        ("number", []),
+        ("number", {}),
+        ("number", object()),
+        ("title", None),
+        ("title", False),
+        ("title", 7.5),
+        ("title", []),
+        ("title", {}),
+        ("title", object()),
+    ],
+)
+def test_malformed_issue_scalar_types_fail_closed_without_candidates(field, value):
+    node = {"number": 518, "title": "ticket"}
+    node[field] = value
+    runner = FakeGraphqlRunner([_page([node])], [_page([])])
+
+    with pytest.raises(
+        feed.TicketReconcileFeedError,
+        match=rf"issue\[0\]\.{field} must be",
+    ):
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
+
+    assert len(runner.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("number", True),
+        ("number", 7.9),
+        ("number", "7"),
+        ("number", []),
+        ("number", {}),
+        ("number", object()),
+        ("title", None),
+        ("title", []),
+        ("headRefName", 7),
+        ("headRefName", {}),
+        ("body", False),
+        ("body", object()),
+        ("mergedAt", None),
+        ("mergedAt", True),
+        ("mergedAt", 7.5),
+        ("mergedAt", []),
+        ("mergedAt", {}),
+        ("mergedAt", object()),
+    ],
+)
+def test_malformed_pr_scalar_types_fail_closed_without_candidates(field, value):
+    node = _pr(90, "2026-07-17T00:00:00Z")
+    node[field] = value
+    runner = FakeGraphqlRunner([_page([])], [_page([node])])
+
+    expected = (
+        "must be a timestamp"
+        if field == "mergedAt"
+        else rf"pr\[0\]\.{field} must be"
+    )
+    with pytest.raises(feed.TicketReconcileFeedError, match=expected):
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=runner, now=_NOW)
+
+    assert len(runner.calls) == 2
 
 
 def test_complete_zero_match_json_is_valid_and_raw_pr_body_is_not_emitted(monkeypatch, capsys):
@@ -286,6 +438,30 @@ def test_missing_token_fails_before_collection(monkeypatch, capsys):
         == 2
     )
     assert "required read token environment is absent" in capsys.readouterr().err
+
+
+def test_cli_rejects_same_credential_without_leaking_its_value(monkeypatch, capsys):
+    secret = "shared-read-secret"
+    monkeypatch.setenv("CE_OPS_READ_TOKEN", secret)
+    monkeypatch.setenv("CE_PR_READ_TOKEN", secret)
+
+    assert (
+        feed.main(
+            [
+                "--ticket-repo",
+                _TICKET_REPO,
+                "--pr-repo",
+                _PR_REPO,
+                "--since-days",
+                "1",
+                "--json",
+            ]
+        )
+        == 2
+    )
+    stderr = capsys.readouterr().err
+    assert "ticket and PR read tokens must be nonempty and distinct" in stderr
+    assert secret not in stderr
 
 
 def test_workflow_is_daily_manual_dry_run_only_and_fail_closed_for_artifacts():
