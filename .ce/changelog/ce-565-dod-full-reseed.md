@@ -4,7 +4,6 @@ date: 2026-07-16
 kind: added
 scope: worker roles and controller dispatch
 issue: ce-ops#565
-work_class: story
 ---
 
 **Define deployable-capability closure evidence.**

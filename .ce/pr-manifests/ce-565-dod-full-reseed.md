@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=5c4dc3a778c335c85712d7ab31dc44a2070d07fa875f5ffc402feabf625c321d
+AUTHORIZED_PATHS_SHA256=8d0dd6771e3bc377e6b68a9fba697f246ce48e6a7e633fd34b955d1db64a2bac
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce-565-dod-full-reseed.md
 .ce/pr-manifests/ce-565-dod-full-reseed.md
 .claude/agents/README.md
@@ -20,4 +21,5 @@ AUTHORIZED_PATHS_SHA256=5c4dc3a778c335c85712d7ab31dc44a2070d07fa875f5ffc402feabf
 .claude/agents/reviewer.md
 .claude/agents/verification.md
 playbooks/controller/briefs/dispatch.md
+validators/tests/unit/test_ce_brain_drift.py
 ```
