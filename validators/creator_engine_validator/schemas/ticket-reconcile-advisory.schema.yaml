@@ -1,0 +1,138 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/ticket-reconcile-advisory.schema.yaml"
+title: Ticket reconciliation advisory evidence
+description: Strict offline snapshot input and value-free advisory output for reconciliation.
+oneOf:
+  - $ref: "#/$defs/snapshot"
+  - $ref: "#/$defs/advisory_packet"
+$defs:
+  repository:
+    type: string
+    pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}/[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'
+  timestamp:
+    type: string
+    pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$'
+  sha:
+    type: string
+    pattern: "^[0-9a-f]{40}([0-9a-f]{24})?$"
+  bounded_text:
+    type: string
+    minLength: 1
+    maxLength: 16384
+    pattern: '^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$'
+  snapshot:
+    type: object
+    additionalProperties: false
+    required: [kind, schema_version, snapshot_digest, ticket_repository, pull_request_repository, observed_at, pagination, tickets, pull_requests]
+    properties:
+      kind: {const: ticket-reconcile-snapshot}
+      schema_version: {const: "1"}
+      snapshot_digest: {$ref: "#/$defs/sha", minLength: 64, maxLength: 64}
+      ticket_repository: {$ref: "#/$defs/repository"}
+      pull_request_repository: {$ref: "#/$defs/repository"}
+      observed_at: {$ref: "#/$defs/timestamp"}
+      pagination:
+        type: object
+        additionalProperties: false
+        required: [complete, page_count, cursors, terminal_cursor]
+        properties:
+          complete: {type: boolean}
+          page_count: {type: integer, minimum: 1, maximum: 100}
+          cursors:
+            type: array
+            minItems: 1
+            maxItems: 100
+            uniqueItems: true
+            items:
+              anyOf:
+                - {type: "null"}
+                - {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.=-]+$'}
+          terminal_cursor: {type: "null"}
+      tickets:
+        type: array
+        maxItems: 1000
+        items:
+          type: object
+          additionalProperties: false
+          required: [number, state, labels, kind, updated_at]
+          properties:
+            number: {type: integer, minimum: 1, maximum: 2147483647}
+            state: {const: open}
+            labels:
+              type: array
+              maxItems: 32
+              uniqueItems: true
+              items: {type: string, minLength: 1, maxLength: 80, pattern: '^[^\u0000-\u001f\u007f]+$'}
+            kind: {enum: [standard, directive]}
+            updated_at: {$ref: "#/$defs/timestamp"}
+            partial_slice: {type: boolean}
+      pull_requests:
+        type: array
+        maxItems: 1000
+        items:
+          type: object
+          additionalProperties: false
+          required: [number, repository, merged_at, merge_commit_sha, head_branch, title, body, changed_changelog_fragments]
+          properties:
+            number: {type: integer, minimum: 1, maximum: 2147483647}
+            repository: {$ref: "#/$defs/repository"}
+            merged_at: {$ref: "#/$defs/timestamp"}
+            merge_commit_sha:
+              anyOf:
+                - {$ref: "#/$defs/sha"}
+                - {type: "null"}
+            head_branch: {$ref: "#/$defs/bounded_text"}
+            title: {$ref: "#/$defs/bounded_text"}
+            body: {$ref: "#/$defs/bounded_text"}
+            changed_changelog_fragments:
+              type: array
+              maxItems: 64
+              items: {$ref: "#/$defs/bounded_text"}
+  advisory_packet:
+    type: object
+    additionalProperties: false
+    required: [kind, schema_version, mode, snapshot_digest, repositories, observation_timestamp, completeness, policy_version, disposition, evidence_codes, proposed_action]
+    properties:
+      kind: {const: ticket-reconcile-advisory}
+      schema_version: {const: "1"}
+      mode: {const: advisory}
+      snapshot_digest: {$ref: "#/$defs/sha", minLength: 64, maxLength: 64}
+      repositories:
+        type: object
+        additionalProperties: false
+        required: [ticket, pull_request]
+        properties:
+          ticket: {$ref: "#/$defs/repository"}
+          pull_request: {$ref: "#/$defs/repository"}
+      observation_timestamp: {$ref: "#/$defs/timestamp"}
+      completeness:
+        type: object
+        additionalProperties: false
+        required: [complete, page_count]
+        properties:
+          complete: {type: boolean}
+          page_count: {type: integer, minimum: 1, maximum: 100}
+      policy_version: {const: "1"}
+      candidate_key: {$ref: "#/$defs/sha"}
+      ticket:
+        type: object
+        additionalProperties: false
+        required: [repository, number]
+        properties:
+          repository: {$ref: "#/$defs/repository"}
+          number: {type: integer, minimum: 1}
+      pull_request:
+        type: object
+        additionalProperties: false
+        required: [repository, number]
+        properties:
+          repository: {$ref: "#/$defs/repository"}
+          number: {type: integer, minimum: 1}
+      merge_commit_sha: {$ref: "#/$defs/sha"}
+      evidence_codes:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: {enum: [branch, changelog, explicit-closing-ref, incomplete-pagination, missing-merge-sha, multiple-viable-prs, partial-slice, post-merge-ticket-update, repository-ambiguity]}
+      disposition: {enum: [ADVISORY_PROPOSAL, NEEDS_ACCEPTANCE_EVIDENCE, REQUIRES_HUMAN_RECHECK]}
+      proposed_action: {enum: [HUMAN_REVIEW_CLOSURE, NONE]}
