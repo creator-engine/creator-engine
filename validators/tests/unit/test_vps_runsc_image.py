@@ -101,7 +101,7 @@ def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> No
 
     assert "install -d -m 0700" in text
     assert "/run/creator-engine/herdr" in text
-    assert "ENV HERDR_SOCKET_PATH" not in text
+    assert text.count("ENV HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock") == 1
     assert "USER ${CE_VPS_UID}:${CE_VPS_GID}" in text
     assert "tini" in text
     assert "nodejs" in text
@@ -195,6 +195,10 @@ def test_entrypoint_harness_env_has_no_socket_or_ambient_ce_dgx_carriers() -> No
     assert "CE_DGX_HARNESS_MODE" not in harness_env_region
     assert set(re.findall(r"\bCE_DGX[A-Z0-9_]*", harness_env_region)) == {"CE_DGX_HARNESS"}
 
+    dockerfile = _dockerfile()
+    assert "ENV HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock" in dockerfile
+    assert 'governed_harness=(/usr/bin/env -i "${harness_env[@]}"' in text
+
 
 def test_readme_documents_contained_codex_config_and_node_package_mount() -> None:
     text = _readme()
@@ -208,3 +212,18 @@ def test_readme_documents_contained_codex_config_and_node_package_mount() -> Non
     assert "CE_VPS_CODEX_PACKAGE_ROOT" in text
     assert "/usr/local/lib/node_modules/@openai/codex" in text
     assert "standalone Codex bundles" in text
+
+
+def test_readme_documents_plain_exact_name_herdr_route_and_scrubbed_pane() -> None:
+    text = _readme()
+
+    for command in (
+        "docker exec ce-vps-codex herdr pane list",
+        "docker exec ce-vps-codex herdr pane read w1:p1",
+        "docker exec ce-vps-codex herdr pane send w1:p1",
+    ):
+        assert command in text
+    assert "docker exec --env HERDR_SOCKET_PATH=" not in text
+    assert "image owns the fixed client route" in text
+    assert "governed pane still starts through `/usr/bin/env -i`" in text
+    assert "omits `HERDR_SOCKET_PATH`, `HERDR_SOCKET`, and every other socket carrier" in text

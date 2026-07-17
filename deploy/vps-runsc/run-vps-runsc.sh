@@ -702,7 +702,7 @@ raise SystemExit(0 if has_pane(data) else 1)
   herdr_ready() {
     local pane_list
     docker exec "${CE_VPS_CONTAINER_NAME}" test -S "${herdr_socket_path}" >/dev/null 2>&1 || return 1
-    pane_list="$(docker exec --env "HERDR_SOCKET_PATH=${herdr_socket_path}" "${CE_VPS_CONTAINER_NAME}" herdr pane list 2>/dev/null)" || return 1
+    pane_list="$(docker exec "${CE_VPS_CONTAINER_NAME}" herdr pane list 2>/dev/null)" || return 1
     herdr_pane_list_has_entries <<<"${pane_list}"
   }
 
