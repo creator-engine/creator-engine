@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CE CI Efficiency Audit: Preserve Safety, Remove Fidelity Drift</title>
+  <style>
+    :root { color-scheme: light dark; --ink: #17202a; --paper: #fff; --muted: #4f5b66; --line: #aeb7c0; --accent: #075985; --safe: #065f46; --warn: #9a3412; --soft: #e0f2fe; }
+    * { box-sizing: border-box; }
+    body { background: var(--paper); color: var(--ink); font: 1rem/1.55 system-ui, sans-serif; margin: 0; }
+    main { margin: auto; max-width: 76rem; padding: 2rem 1.25rem 4rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { font-size: clamp(2rem, 5vw, 3.3rem); max-width: 22ch; }
+    h2 { border-bottom: 2px solid var(--line); margin-top: 2.8rem; padding-bottom: .35rem; }
+    a { color: var(--accent); }
+    .lede { font-size: 1.18rem; max-width: 70ch; }
+    .notice { background: #fff7ed; border-left: .4rem solid var(--warn); padding: 1rem 1.2rem; }
+    .diagram { background: var(--soft); border: 1px solid var(--line); border-radius: .5rem; padding: 1rem; }
+    .flow { align-items: stretch; display: flex; flex-wrap: wrap; gap: .6rem; justify-content: center; list-style: none; margin: 0; padding: 0; }
+    .flow li { background: var(--paper); border: 2px solid var(--accent); border-radius: .4rem; font-weight: 650; max-width: 14rem; padding: .75rem; text-align: center; }
+    .flow li:not(:last-child)::after { content: "→"; display: inline-block; font-size: 1.6rem; margin: 0 -.9rem 0 .9rem; vertical-align: middle; }
+    .flow small { display: block; font-weight: 400; }
+    .scroll { overflow-x: auto; }
+    table { border-collapse: collapse; min-width: 62rem; width: 100%; }
+    caption { font-weight: 700; margin-bottom: .5rem; text-align: left; }
+    th, td { border: 1px solid var(--line); padding: .65rem; text-align: left; vertical-align: top; }
+    th { background: var(--soft); }
+    .recommendation { border-left: .4rem solid var(--safe); margin: 1rem 0; padding: .15rem 1rem; }
+    .ratify { border-left-color: var(--warn); }
+    footer { color: var(--muted); font-size: .92rem; margin-top: 3rem; }
+    @media (prefers-color-scheme: dark) { :root { --ink: #edf2f7; --paper: #111827; --muted: #cbd5e1; --line: #64748b; --accent: #7dd3fc; --safe: #6ee7b7; --warn: #fdba74; --soft: #0c4a6e; } .notice { background: #431407; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p>Creator Engine · CI/CD strategy companion · 16 July 2026</p>
+      <h1>CE CI Efficiency Audit: Preserve Safety, Remove Fidelity Drift</h1>
+      <p class="lede">Creator Engine's local and CI validation share substantial safety coverage, but their orchestration and PR-data inputs diverge. The practical sequence is to measure gates, consolidate shared definitions, and ratify any change that can weaken a safety property.</p>
+    </header>
+
+    <aside class="notice" aria-label="Timing evidence limitation">
+      <strong>Timing limitation:</strong> trustworthy live CI timing telemetry was unavailable for this audit. The documented full-suite range (about 1–4 minutes) and <code>check-examples</code> range (about 60–90 seconds) are documentation, not measurements.
+    </aside>
+
+    <section aria-labelledby="pipeline-heading">
+      <h2 id="pipeline-heading">Validation pipeline</h2>
+      <div class="diagram" role="img" aria-label="Author carrier and local input flow through local base and head preflight, push, CI with event-snapshot pull-request metadata and a server-resolved base, required pull-request gates, and merge-group validation.">
+        <ol class="flow">
+          <li>Author carrier / local input<small>declared work class, scope, paths</small></li>
+          <li>Local base + head preflight<small><code>ce validate-pr</code></small></li>
+          <li>Push<small>candidate branch</small></li>
+          <li>CI event-snapshot PR metadata + live base<small>event payload body; server-resolved comparison</small></li>
+          <li>Required PR gates<small>tests, sizing, coupling, manifest</small></li>
+          <li>Merge group<small>combined candidate validation</small></li>
+        </ol>
+      </div>
+    </section>
+
+    <section aria-labelledby="gap-heading">
+      <h2 id="gap-heading">The current fidelity gap</h2>
+      <p><strong>Observed:</strong> local preflight can derive the work class and coupling exemption from carrier or local input, while CI evaluates the pull-request body snapshot in <code>GITHUB_EVENT_PATH</code> and a server-resolved comparison base. A carrier can therefore be locally coherent while the event-snapshot body is stale or otherwise different. Editing the live PR body and rerunning the same workflow event can still validate the old event-snapshot text; a new pull-request event supplies a new snapshot. Fetching the live body during validation would be a separate workflow proposal subject to the existing ratification and change-control contract.</p>
+      <p><strong>Observed:</strong> local baseline comparison carries identical baseline/head failure IDs. <strong>Inference:</strong> this avoids blocking an author on an inherited failure, but the lack of freshness or identity constraints could normalize a long-lived failure. These are fidelity and safety design questions, not evidence that any present gate should be removed.</p>
+    </section>
+
+    <section aria-labelledby="score-heading">
+      <h2 id="score-heading">Component evidence matrix</h2>
+      <div class="scroll">
+        <table>
+          <caption>Scores classify observed safety value only: 1 = informational, 2 = narrow supplementary coverage, 3 = meaningful but bounded coverage, 4 = strong prevention or detection, and 5 = critical fail-closed or repository-wide protection. They are not efficiency or cost scores; unavailable timing evidence does not change them.</caption>
+          <thead><tr><th scope="col">Component</th><th scope="col">Trigger / entrypoint</th><th scope="col">Observed safety property</th><th scope="col">Known cost evidence</th><th scope="col">Observed fidelity gap</th><th scope="col">Safety-value score (1–5) and rationale</th></tr></thead>
+          <tbody>
+            <tr><td>Pytest suite</td><td>Validate workflow; <code>pr_preflight.DEFAULT_TEST_COMMAND</code></td><td>Regression coverage</td><td>Documented 1–4 min range; not measured in this audit</td><td>CI runs head once; local runs base and head</td><td><strong>5</strong> — repository-wide regression protection is a critical release signal.</td></tr>
+            <tr><td>Baseline comparison</td><td>Local <code>_run_baseline_diff_tests</code></td><td>Inherited failure IDs do not newly block a candidate</td><td>Unavailable</td><td>Identical failure IDs carry; no freshness policy</td><td><strong>3</strong> — meaningful inherited-failure isolation is bounded by the missing freshness policy.</td></tr>
+            <tr><td><code>check-examples</code></td><td>Preflight and pytest sweep fixture</td><td>Schema and fixture contracts</td><td>Documented 60–90 s range; not measured in this audit</td><td>Separate invocation may duplicate sweep semantics</td><td><strong>3</strong> — meaningful but bounded schema and fixture contract coverage.</td></tr>
+            <tr><td>YAML, schema, docs</td><td>Workflow and local YAML parsing</td><td>Artifact validity</td><td>Unavailable</td><td>Shared intent with separate orchestration</td><td><strong>4</strong> — strongly detects malformed governance and configuration artifacts.</td></tr>
+            <tr><td>Work sizing</td><td>CI event-snapshot PR body; local carrier or input</td><td>Rejects under-declared scope</td><td>Unavailable</td><td>Two work-class sources</td><td><strong>4</strong> — strongly prevents under-declared ceremony despite the input-fidelity gap.</td></tr>
+            <tr><td>Test coupling</td><td>CI event-snapshot PR body; local carrier fallback</td><td>Requires tests with source changes</td><td>Unavailable</td><td>Exemption source can differ</td><td><strong>4</strong> — strongly prevents untested source changes while inputs are aligned.</td></tr>
+            <tr><td>Path manifest / carrier</td><td>CI pull-request gate; local preflight</td><td>Closed authorized path set</td><td>Unavailable</td><td><code>contained-seat</code> tolerates only the singleton <code>path_manifest_carrier_required</code> error; all other manifest errors fail</td><td><strong>5</strong> — critical fail-closed protection binds the candidate to its authorized path set.</td></tr>
+            <tr><td>Confidentiality / support scans</td><td>Standalone local preflight checks; Validate's full repository pytest suite</td><td>Pre-push scanners and repository contract tests guard public/support surfaces</td><td>Unavailable</td><td>No standalone named Validate workflow steps; the full pytest step includes confidentiality and support-corpus contract tests</td><td><strong>5</strong> — critical repository-wide protection prevents disclosure and support-corpus drift.</td></tr>
+            <tr><td>Version, harness, brain gates</td><td>Both planes, mostly through shared calls</td><td>Current-surface and state integrity</td><td>Unavailable</td><td>Duplicated orchestration</td><td><strong>4</strong> — strongly detects drift across current surfaces, promotion state, and brain state.</td></tr>
+            <tr><td>Permissions / install / portability</td><td>Partly divergent local and CI checks</td><td>Least privilege and provenance</td><td>Unavailable</td><td>Serial local ceremony differs by plane</td><td><strong>4</strong> — strongly protects least privilege, provenance, and reproducible installation.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="recommendations-heading">
+      <h2 id="recommendations-heading">Ranked recommendations</h2>
+      <p><strong>Governance boundary:</strong> every recommendation below is a proposal. Any workflow, required-check, validator, or evidence-schema mutation remains subject to the existing ratification and change-control contract. A technical-risk assessment does not grant authority to mutate those surfaces.</p>
+      <article class="recommendation"><h3>1. Proposal: one machine-readable gate manifest</h3><p><strong>Technical-risk assessment:</strong> centralizing gate identifiers could reduce definition drift, while a parity test can preserve fail-closed behavior. <strong>Governance:</strong> design and implementation require the applicable ratification before changing workflow or validator behavior.</p></article>
+      <article class="recommendation"><h3>2. Proposal: one declared-work-class payload</h3><p><strong>First push:</strong> generate and locally validate the carrier-derived payload, and record that evidence without claiming comparison to a PR that does not yet exist. <strong>After PR creation:</strong> update the live PR body from the payload, then verify body/carrier parity locally and in CI after a new pull-request event supplies an updated body snapshot; rerunning an older event does not establish live-body parity. <strong>Governance:</strong> ratify the mechanism and failure contract before implementation, including any proposal to fetch the live body during validation.</p></article>
+      <article class="recommendation"><h3>3. Proposal: publish timing evidence</h3><p><strong>Technical-risk assessment:</strong> secret-safe per-gate duration, cache-status, test-count, and comparison-base artifacts would replace inference with observations and enable p50/p95 analysis. <strong>Governance:</strong> the artifact schema and workflow mutation still require the applicable review, ratification, and change control.</p></article>
+      <article class="recommendation"><h3>4. Proposal: investigate duplicate example sweeping</h3><p><strong>Technical-risk assessment:</strong> reuse an aggregate <code>check-examples</code> result only if measurements confirm overlap and malformed/well-formed negative coverage proves every present property remains covered. <strong>Governance:</strong> removal or consolidation of a check requires ratification.</p></article>
+      <article class="recommendation ratify"><h3>5. Proposal: bound carried baseline failures</h3><p>Subject to design ratification, replace unconstrained failure-ID parity with an explicit dated allowlist keyed to test node and base SHA. Expiry or node/SHA changes must fail closed.</p></article>
+      <article class="recommendation ratify"><h3>6. Proposal: introduce path-aware local tiers</h3><p>Subject to design ratification, always run carrier, class, confidentiality, and permissions checks locally; keep the full suite before merge and define escalation for validator/runtime surfaces. Seeded mutations must demonstrate no lost safety property.</p></article>
+      <article class="recommendation ratify"><h3>7. Proposal: verify merge-group combined diffs</h3><p>Subject to design ratification, add merge-group checks for manifest, sizing, and coupling—or prove pull-request-only sufficiency. A fixture with conflicting individually-green changes should be rejected.</p></article>
+    </section>
+
+    <section aria-labelledby="questions-heading">
+      <h2 id="questions-heading">Risks and open questions</h2>
+      <ul>
+        <li>Live Actions logs and timing data were not available to this read-only audit; instrument before claiming latency savings.</li>
+        <li>Tiering and baseline changes can weaken safety unless negative tests and ratification accompany them.</li>
+        <li>Current-main conclusions were anchored to the audited <code>origin/main</code> evidence; re-check the gate manifest as workflows evolve.</li>
+      </ul>
+    </section>
+
+    <footer>
+      <h2>Repository sources</h2>
+      <ol>
+        <li><code>.github/workflows/validate.yml</code> — CI triggers and PR/merge-group gates.</li>
+        <li><code>validators/creator_engine_validator/pr_preflight.py</code> — local orchestration and baseline comparison.</li>
+        <li><code>validators/tests/conftest.py</code> — example sweep fixture context.</li>
+        <li><code>docs/operations/AUTHOR_A_CE_VALID_PR.md</code> and <code>docs/contracts/authoring-a-governed-pr.md</code> — documented validation expectations.</li>
+        <li><code>docs/design/seat-side-preflight.md</code> — contained-seat preflight context.</li>
+      </ol>
+    </footer>
+  </main>
+</body>
+</html>

@@ -144,6 +144,10 @@ field.
 
 ## f. Explicit Feature 003 deferral
 
+This section records the Sprint 0 Slice A historical snapshot. Feature 003 has
+since delivered `.github/workflows/validate.yml`; see the
+[CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html) for the current gate inventory.
+
 The following surfaces are deferred to Feature 003 (GitHub CI
 Governance):
 
@@ -165,3 +169,10 @@ This CI_CD_STRATEGY.md satisfies Feature 002 Canonical Document
 Specification #15: the verifies-not-ratifies invariant is explicit;
 the Feature 003 deferral is explicit; CI evidence linkage to T17 is
 stated; no `.github/` workflow content is authored.
+
+## CI efficiency audit
+
+The repository-native [CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html)
+maps shared local/CI gates, records known fidelity gaps, and separates observed
+evidence and technical-risk assessments from proposals that remain subject to
+the existing ratification and change-control contract.
