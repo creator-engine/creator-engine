@@ -816,7 +816,7 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 118
+    assert len(active) == 120
     assert {
         brain_probe.record_probe_name(record)
         for record in active
@@ -848,6 +848,21 @@ def test_authoritative_migrated_assertions_validate_and_probe():
         and record["evidence_ref"] == ".ce/brain/notes/deterministic-citations.md"
         for record in active
     )
+
+
+def test_implementer_reserved_acts_cannot_be_overridden_by_deployment_authority():
+    root = Path(__file__).resolve().parents[3]
+    policy_text = (root / ".claude" / "agents" / "implementer.md").read_text(encoding="utf-8")
+    policy = " ".join(policy_text.split())
+
+    assert (
+        "separate governed authority applies only to authorized deployment and IaC execution" in policy
+    )
+    assert (
+        "Ratifying a waiver and deciding closure remain controller-reserved acts" in policy
+    )
+    assert "regardless of separate deployment authority" in policy
+    assert "decide closure unless a separate governed authority" not in policy
 
 
 def test_missing_state_root_is_zero_active_assertions_for_cli_and_registered_check(tmp_path: Path):

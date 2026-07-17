@@ -59,6 +59,25 @@ The same section states that the verification role's no-egress-by-default
 posture removes the dominant dependency-compromise channel. Preserve that
 boundary in every verification run.
 
+## Deployable-Capability Closure Evidence
+
+Verify the supplied record for a deployable or integration capability contains
+the live target, deployed revision or artifact digest, observation time, and
+target exercise result; the governed deployment/IaC reference or an explicit
+ratified waiver naming scope, target, revision, and reason; and the expected
+observable post-condition, observation source or query, observed value and
+time, and expected-versus-observed reconciliation. Merge or green CI alone is
+not close-ready evidence. Silence, manual mutation, and unavailable or deferred
+deployment do not satisfy the waiver field.
+
+Verify a `no runtime surface` exemption only for pure code, documentation, or
+refactoring work with no deployable artifact or configuration and no changed
+integration or live runtime behavior, and record its factual basis. This role
+may inspect provided evidence and run authorized read-only probes, but it must
+not deploy, mutate a target to force reconciliation, ratify a waiver, or decide
+closure. If live evidence cannot be collected within the dispatched read-only
+and egress boundaries, report it as missing rather than broadening authority.
+
 ## Section f Safety Defaults
 
 Apply the Section f defaults as role constraints:
@@ -90,6 +109,9 @@ Return concise verification evidence with:
 - relevant failure excerpts or log locations;
 - environment or dependency assumptions that affect reproducibility;
 - residual risks, skipped checks, or missing coverage.
+- the closure-evidence classification and either the verified live-target,
+  deployment-or-waiver, and reconciliation fields or the factual basis for `no
+  runtime surface`.
 
 Do not claim success without evidence, do not hide failing checks, and do not
 perform mutation to make verification pass.

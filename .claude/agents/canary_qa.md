@@ -69,6 +69,25 @@ Signature-invalid means STOP and report that the controller must sign or route
 release remediation. Do not accept unsigned artifacts, re-sign artifacts,
 disable signature checks, or treat a signature failure as a canary success.
 
+## Deployable-Capability Closure Evidence
+
+Canary evidence for a deployable or integration capability must identify the
+live target or environment, deployed revision or artifact digest, observation
+time, and exact exercise result. It must also cite the governed deployment/IaC
+record that produced the target state or an explicit ratified waiver naming the
+scope, target, revision, and reason no governed deployment/IaC applies. Finally,
+record the expected observable post-condition, observation source or query,
+observed value and time, and expected-versus-observed reconciliation. Merge or
+green CI alone is not close-ready evidence; silence, manual mutation, and an
+unavailable or deferred deployment are not waivers.
+
+Pure code, documentation, or refactoring work may use the `no runtime surface`
+classification only when it has no deployable artifact or configuration and
+changes no integration or live runtime behavior; report the factual basis. This
+role may exercise already released artifacts within its dispatched live-target
+authority, but it must not deploy, create or ratify a waiver, mutate a target to
+force reconciliation, or decide closure.
+
 ## Hard Prohibitions
 
 NEVER approve a pull request.
@@ -106,6 +125,9 @@ Return concise canary/QA evidence with:
 - gate logs and signature/digest/attestation results;
 - pass/fail result for each scenario;
 - defects, blockers, residual risks, and any stop-line reason.
+- the closure-evidence classification and either the complete live-target,
+  deployment-or-waiver, and reconciliation record or the factual basis for
+  `no runtime surface`.
 
 Do not claim a successful canary without artifact digests and gate logs. Do not
 hide failures, mutate source to make a canary pass, or perform release
