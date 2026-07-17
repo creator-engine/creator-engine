@@ -63,11 +63,40 @@ def test_main_assembles_armed_daemon_from_env(monkeypatch: pytest.MonkeyPatch, t
     assert daemon_kwargs["gh_runner"] is not None
     assert daemon_kwargs["now"] is not None
     assert daemon_kwargs["ledger_writer"] is not None
+    assert daemon_kwargs["receipt_state_path"] == Path(env["CE_CONVEYOR_DAEMON_DISCOVERY_STATE"])
     assert daemon_kwargs["path_allocator"] is not None
     assert daemon_kwargs["daemon_lease"] is lease
     assert daemon_kwargs["receipt_issuer"] is not None
     assert lease.released is True
     assert constructed[-1] == ("run_once",)
+
+
+def test_build_daemon_pins_production_receipt_identity_to_controller_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    env = _base_env(tmp_path)
+    config = runner.load_config(env)
+    captured = {}
+
+    class FakeDaemon:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(runner, "ConveyorDaemon", FakeDaemon)
+
+    runner._build_daemon(
+        config,
+        FakeLease(),
+        probe_runner=lambda _argv: (
+            "READY-FOR-HARVEST ce-497-signal-receipt-ledger "
+            "0123456789abcdef0123456789abcdef01234567"
+        ),
+    )
+
+    payload = next(iter(captured["discovery_runner"]()))
+    assert payload.receipt_identity is not None
+    assert captured["receipt_state_path"] == config.discovery_state
 
 
 @pytest.mark.parametrize(

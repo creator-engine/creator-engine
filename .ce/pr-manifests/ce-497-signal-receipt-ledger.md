@@ -6,15 +6,17 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** story
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=8
 
-AUTHORIZED_PATHS_SHA256=28a13784bbb5af67635f55ba6a9c2688785e4a237d346306131fbf40b7f19d5c
+AUTHORIZED_PATHS_SHA256=fdf09cbdbe58f6744dc15f261f1376ffe07a824b0761c19e4be4cc699843a10e
 
 ```text
 .ce/changelog/ce-497-signal-receipt-ledger.md
 .ce/pr-manifests/ce-497-signal-receipt-ledger.md
 validators/creator_engine_validator/conveyor_daemon.py
+validators/creator_engine_validator/conveyor_daemon_runner.py
 validators/creator_engine_validator/conveyor_discovery.py
 validators/tests/unit/test_conveyor_daemon.py
+validators/tests/unit/test_conveyor_daemon_runner.py
 validators/tests/unit/test_conveyor_discovery.py
 ```
