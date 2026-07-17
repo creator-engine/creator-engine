@@ -496,9 +496,7 @@ class ConveyorDaemon:
                         continue
                 result = self._process_armed(item)
                 if item.receipt is not None:
-                    terminal_state = "pr_opened" if result.status == "pr-opened" else (
-                        "uncertain" if any(reason.startswith("exception:") for reason in result.reasons) else "failed"
-                    )
+                    terminal_state = _receipt_terminal_state(result)
                     try:
                         completed = item.receipt.complete(terminal_state)
                     except ValueError as exc:
@@ -1351,6 +1349,19 @@ def _coerce_result(result: ConveyorCommandResult | tuple[int, str, str]) -> Conv
     if isinstance(result, ConveyorCommandResult):
         return result
     return ConveyorCommandResult(result[0], result[1], result[2])
+
+
+def _receipt_terminal_state(result: ConveyorDaemonItemResult) -> str:
+    """Preserve indeterminate transport outcomes for later reconciliation."""
+
+    if result.status == "pr-opened":
+        return "pr_opened"
+    if any(
+        reason.startswith(("exception:", "push failed:", "pr-open failed:"))
+        for reason in result.reasons
+    ):
+        return "uncertain"
+    return "failed"
 
 
 def _jsonl_ledger_writer(path: Path) -> LedgerWriter:

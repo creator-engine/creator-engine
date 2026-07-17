@@ -326,22 +326,25 @@ def _receipt_ledger(state_path: Path, audit_sink: AuditSink | None = None) -> _S
 
 @contextmanager
 def _locked_receipt_state(state_path: Path) -> Iterable[Mapping[str, Any]]:
-    state_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = state_path.with_name(f".{state_path.name}.lock")
-    with lock_path.open("a+", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        try:
-            if not state_path.exists():
-                yield {"version": RECEIPT_VERSION, "receipts": []}
-                return
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
             try:
-                raw = state_path.read_text(encoding="utf-8")
-                data = json.loads(raw)
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise ValueError(f"receipt_state_unreadable:{type(exc).__name__}") from exc
-            yield data
-        finally:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
+                if not state_path.exists():
+                    yield {"version": RECEIPT_VERSION, "receipts": []}
+                    return
+                try:
+                    raw = state_path.read_text(encoding="utf-8")
+                    data = json.loads(raw)
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(f"receipt_state_unreadable:{type(exc).__name__}") from exc
+                yield data
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+    except OSError as exc:
+        raise ValueError(f"receipt_state_lock_unavailable:{type(exc).__name__}") from exc
 
 
 def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -405,7 +408,10 @@ def _write_receipt_state(state_path: Path, receipts: list[dict[str, str]]) -> No
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_name, state_path)
+        try:
+            os.replace(tmp_name, state_path)
+        except OSError as exc:
+            raise ValueError(f"receipt_state_write_failed:{type(exc).__name__}") from exc
     finally:
         try:
             os.unlink(tmp_name)

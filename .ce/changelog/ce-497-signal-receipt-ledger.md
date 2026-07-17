@@ -10,3 +10,4 @@ issue: ce-ops#497
 
 - Add a versioned, atomically persisted receipt ledger keyed by seat, branch, and SHA.
 - Bind receipt state transitions to the discovery/daemon handoff so duplicate and terminal signals cannot re-enter processing.
+- Preserve indeterminate push and PR-create outcomes as `uncertain` for reconciliation while known pre-side-effect failures remain terminal.

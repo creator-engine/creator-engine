@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from creator_engine_validator import conveyor_discovery
 from creator_engine_validator.conveyor_daemon import ConveyorDaemonItem
 from creator_engine_validator.conveyor_discovery import (
     ConveyorSeatDiscoveryRunner,
@@ -219,6 +220,77 @@ def test_receipt_transitions_are_monotonic_and_new_sha_is_separate(tmp_path):
         (SHA_ONE, "failed"),
         (SHA_TWO, "uncertain"),
     }
+
+
+def test_new_sha_is_processable_while_prior_receipt_is_unfinished(tmp_path):
+    state_path = tmp_path / "receipts.json"
+    first = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+        )()
+    )[0].receipt
+    assert first.claim() is True
+
+    second = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_TWO}",
+        )()
+    )[0].receipt
+
+    assert second.claim() is True
+    assert {(entry["sha"], entry["state"]) for entry in json.loads(state_path.read_text())["receipts"]} == {
+        (SHA_ONE, "processing"),
+        (SHA_TWO, "processing"),
+    }
+
+
+def test_receipt_lock_failure_fails_closed_and_preserves_state(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+    receipt = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+        )()
+    )[0].receipt
+    original = state_path.read_text(encoding="utf-8")
+
+    def fail_lock(*_args):
+        raise PermissionError("lock denied")
+
+    monkeypatch.setattr(conveyor_discovery.fcntl, "flock", fail_lock)
+
+    with pytest.raises(ValueError, match="receipt_state_lock_unavailable:PermissionError"):
+        receipt.claim()
+
+    assert state_path.read_text(encoding="utf-8") == original
+
+
+def test_receipt_replace_failure_fails_closed_and_preserves_state(tmp_path, monkeypatch):
+    state_path = tmp_path / "receipts.json"
+    receipt = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-1", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST ce-388-conveyor-discovery {SHA_ONE}",
+        )()
+    )[0].receipt
+    original = state_path.read_text(encoding="utf-8")
+
+    def fail_replace(*_args):
+        raise OSError("replace denied")
+
+    monkeypatch.setattr(conveyor_discovery.os, "replace", fail_replace)
+
+    with pytest.raises(ValueError, match="receipt_state_write_failed:OSError"):
+        receipt.claim()
+
+    assert state_path.read_text(encoding="utf-8") == original
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_concurrent_claims_have_one_winner_and_atomic_json(tmp_path):
