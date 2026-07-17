@@ -260,7 +260,19 @@ def _one_shot_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
     worktree = tmp_path / "worker"
     (worktree / "governance" / "policies").mkdir(parents=True)
     source_policy = Path(__file__).resolve().parents[3] / "governance" / "policies" / "codex-one-shot-launch-v1.yaml"
-    (worktree / "governance" / "policies" / source_policy.name).write_bytes(source_policy.read_bytes())
+    policy_path = worktree / "governance" / "policies" / source_policy.name
+    policy_path.write_bytes(source_policy.read_bytes())
+    test_binary = tmp_path / "codex" / "0.145.0-alpha.9" / "bin" / "codex"
+    test_binary.parent.mkdir(parents=True)
+    test_binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    test_binary.chmod(0o755)
+    policy_record = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    policy_record["venues"]["dev1-local"]["codex_binary_template"] = str(
+        test_binary
+    ).replace("0.145.0-alpha.9", "{version}")
+    policy_path.write_text(
+        yaml.safe_dump(policy_record, sort_keys=False), encoding="utf-8"
+    )
     (worktree / "governance").mkdir(exist_ok=True)
     (worktree / "validators").mkdir()
     (worktree / ".claude" / "agents").mkdir(parents=True)

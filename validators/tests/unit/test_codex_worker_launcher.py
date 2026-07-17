@@ -1872,6 +1872,17 @@ def test_binary_preflight_refuses_missing_nonexecutable_escape_or_version_mismat
 
 
 def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree: Path) -> None:
+    binary = worktree.parent / "codex" / "0.145.0-alpha.9" / "bin" / "codex"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["venues"]["dev1-local"].__setitem__(
+            "codex_binary_template",
+            str(binary).replace("0.145.0-alpha.9", "{version}"),
+        ),
+    )
     runner = RecordingRunner()
     worker_input = governed_input(worktree, role="architect_research")
     built = plan(worktree, governed_input=worker_input)
