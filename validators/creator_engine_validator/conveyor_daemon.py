@@ -31,8 +31,8 @@ from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_
 from .conveyor_discovery import (
     HandledSignalReceipt,
     ReceiptDiscoveryPayload,
-    ReceiptDurabilityUncertainError,
     ReceiptIdentity,
+    normalize_receipt_state_path,
 )
 from .daemon_lease import DaemonLease
 from .checks.path_manifest_fidelity import branch_slug, extract_manifest_paths_from_file
@@ -337,7 +337,7 @@ class ConveyorDaemon:
         self.now = now
         self.ledger_writer = ledger_writer or (_jsonl_ledger_writer(Path(ledger_path)) if ledger_path is not None else None)
         self.receipt_state_path = (
-            Path(receipt_state_path).resolve()
+            normalize_receipt_state_path(receipt_state_path)
             if receipt_state_path is not None
             else None
         )
@@ -530,19 +530,18 @@ class ConveyorDaemon:
                     terminal_state = _receipt_terminal_state(result)
                     try:
                         completed = receipt.complete(terminal_state)
-                    except ReceiptDurabilityUncertainError:
+                    except Exception:
                         completed = False
-                        completion_reason = "receipt terminal durability is uncertain"
-                    except ValueError as exc:
-                        completed = False
-                        completion_reason = f"receipt completion refused: {exc}"
-                    else:
-                        completion_reason = "receipt completion refused"
+                    completion_reason = (
+                        "receipt completion durability is uncertain"
+                        if result.side_effect_started
+                        else "receipt completion persistence failed"
+                    )
                     if not completed:
                         result_factory = self._uncertain if result.side_effect_started else self._failed
                         result = result_factory(
                             item,
-                            (*result.reasons, completion_reason),
+                            (completion_reason,),
                             prepare_result=result.prepare_result,
                             landing_result=result.landing_result,
                             ledger_records=result.ledger_records,
