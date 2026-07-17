@@ -1,5 +1,5 @@
 ---
-slug: ce-497-signal-receipt-ledger
+slug: ce-497-signal-receipt-ledger-main5d85
 date: 2026-07-16
 kind: added
 scope: conveyor discovery
