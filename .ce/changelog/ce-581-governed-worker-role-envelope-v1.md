@@ -16,8 +16,9 @@ issue: ce-ops#581
   fake-executable coverage through the production planner, launcher, and
   subprocess runner, including direct implementer and read-only behavior.
 - Reconstruct and exactly compare the complete executable argument tuple at
-  the final boundary from the reopened canonical launcher policy and governed
-  input rather than mutable plan fields. Reapply run-ID and output-node safety,
+  the final boundary from an immutable request bound outside the mutable plan,
+  the reopened canonical launcher policy, and governed input. Reapply run-ID
+  and output-node safety,
   bind the exact role-granted provider-credential tuple, and no-follow rebind
   the bounded canonical role-policy bytes, digest, descriptor identity, mode,
   and ownership immediately before runner invocation.

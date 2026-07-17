@@ -15,6 +15,7 @@ import string
 import subprocess
 import tempfile
 import tomllib
+import weakref
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -438,6 +439,16 @@ class GovernedWorkerInput:
 
 
 @dataclass(frozen=True)
+class CodexWorkerLaunchRequest:
+    """Immutable caller authority kept separate from the derived launch plan."""
+
+    role: str
+    venue: str
+    worktree: str
+    run_id: str
+
+
+@dataclass(frozen=True)
 class CodexWorkerLaunchPlan:
     policy_id: str
     policy_version: str
@@ -485,6 +496,14 @@ class CodexWorkerLaunchPlan:
             "developer_instructions": self.developer_instructions,
             "argv": list(self.argv),
         }
+
+
+# Keep caller authority outside the public, serializable launch plan.  This
+# preserves the existing CLI surface while ensuring a dataclass ``replace``
+# produces an unbound plan that cannot authorize itself.
+_BOUND_LAUNCH_REQUESTS: weakref.WeakKeyDictionary[
+    CodexWorkerLaunchPlan, CodexWorkerLaunchRequest
+] = weakref.WeakKeyDictionary()
 
 
 class CodexOneShotRunner(Protocol):
@@ -890,43 +909,6 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
     return policy
 
 
-def _provider_credentials_from_policy_bytes(
-    raw_bytes: bytes, *, role: str
-) -> tuple[str, ...]:
-    """Recover one role's exact credential tuple from the bound policy bytes."""
-    try:
-        raw = yaml.safe_load(raw_bytes)
-    except yaml.YAMLError as exc:
-        raise CodexWorkerLaunchError("cannot parse canonical launcher policy") from exc
-    if not isinstance(raw, dict):
-        raise CodexWorkerLaunchError("canonical launcher policy must be a mapping")
-    credentials_by_role = raw.get("role_provider_credentials")
-    if not isinstance(credentials_by_role, dict) or role not in credentials_by_role:
-        raise CodexWorkerLaunchError(
-            f"role {role} has no provider credential policy"
-        )
-    raw_credentials = credentials_by_role[role]
-    if not isinstance(raw_credentials, list) or any(
-        not isinstance(name, str) for name in raw_credentials
-    ):
-        raise CodexWorkerLaunchError(
-            f"policy role_provider_credentials.{role} must be a string list"
-        )
-    credentials = tuple(raw_credentials)
-    if len(set(credentials)) != len(credentials):
-        raise CodexWorkerLaunchError(
-            f"policy role_provider_credentials.{role} must not contain duplicates"
-        )
-    if any(
-        name not in ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES
-        for name in credentials
-    ):
-        raise CodexWorkerLaunchError(
-            f"policy role_provider_credentials.{role} contains a non-provider credential"
-        )
-    return credentials
-
-
 def load_canonical_policy(
     worktree: str | os.PathLike[str],
     *,
@@ -1146,13 +1128,57 @@ def _canonical_output(
     return output
 
 
-def build_launch_plan(
+def build_launch_request(
     *,
     policy: CodexOneShotPolicy,
     governed_input: GovernedWorkerInput,
     role: str,
     venue: str,
     worktree: str,
+    run_id: str | None = None,
+    filesystem: LauncherFilesystem | None = None,
+) -> CodexWorkerLaunchRequest:
+    """Validate and freeze the caller's authority independently of a plan."""
+    _require_trusted_v1_matrix(policy)
+    fs = filesystem or RealLauncherFilesystem()
+    root = _real_directory(worktree, field="worktree", filesystem=fs)
+    if root != policy.worktree:
+        raise CodexWorkerLaunchError("policy does not belong to the allocated worktree")
+    if role not in policy.supported_roles:
+        raise CodexWorkerLaunchError(f"unknown role: {role}")
+    if governed_input.role != role:
+        raise CodexWorkerLaunchError("governed role policy does not match requested role")
+    if not _inside(governed_input.role_policy_path, root) or not _inside(
+        governed_input.brief_path, root
+    ):
+        raise CodexWorkerLaunchError(
+            "governed input does not belong to the allocated worktree"
+        )
+    policy.venue(venue).sandbox_for(role)
+    chosen_run_id = run_id or _derive_run_id(
+        policy=policy,
+        role=role,
+        venue=venue,
+        worktree=root,
+        brief_sha256=governed_input.brief_sha256,
+    )
+    _canonical_output(root=root, run_id=chosen_run_id, filesystem=fs)
+    return CodexWorkerLaunchRequest(
+        role=role,
+        venue=venue,
+        worktree=root,
+        run_id=chosen_run_id,
+    )
+
+
+def build_launch_plan(
+    *,
+    policy: CodexOneShotPolicy,
+    governed_input: GovernedWorkerInput,
+    request: CodexWorkerLaunchRequest | None = None,
+    role: str | None = None,
+    venue: str | None = None,
+    worktree: str | None = None,
     run_id: str | None = None,
     filesystem: LauncherFilesystem | None = None,
     version_probe: CodexVersionProbe | None = None,
@@ -1166,6 +1192,25 @@ def build_launch_plan(
             venue=venue_policy.name,
         )
     _require_unique_canonical_add_dirs(policy.canonical_add_dirs)
+    if request is None:
+        if role is None or venue is None or worktree is None:
+            raise CodexWorkerLaunchError("an immutable launch request is required")
+        request = build_launch_request(
+            policy=policy,
+            governed_input=governed_input,
+            role=role,
+            venue=venue,
+            worktree=worktree,
+            run_id=run_id,
+            filesystem=filesystem,
+        )
+    elif any(value is not None for value in (role, venue, worktree, run_id)):
+        raise CodexWorkerLaunchError(
+            "launch request must not be combined with mutable request fields"
+        )
+    role = request.role
+    venue = request.venue
+    worktree = request.worktree
     fs = filesystem or RealLauncherFilesystem()
     probe = version_probe or SubprocessCodexVersionProbe()
     root = _real_directory(worktree, field="worktree", filesystem=fs)
@@ -1189,15 +1234,7 @@ def build_launch_plan(
     binary = _preflight_binary(
         policy=policy, venue=venue_policy, filesystem=fs, version_probe=probe
     )
-    chosen_run_id = run_id or _derive_run_id(
-        policy=policy,
-        role=role,
-        venue=venue,
-        worktree=root,
-        brief_sha256=governed_input.brief_sha256,
-    )
-    if not _RUN_ID_RE.fullmatch(chosen_run_id):
-        raise CodexWorkerLaunchError("run_id must be lowercase slug text")
+    chosen_run_id = request.run_id
     output = _canonical_output(root=root, run_id=chosen_run_id, filesystem=fs)
     argv = [
         binary,
@@ -1222,7 +1259,7 @@ def build_launch_plan(
     for directory in add_dirs:
         argv.extend(("--add-dir", directory))
     argv.extend(("-o", output, "-"))
-    return CodexWorkerLaunchPlan(
+    plan = CodexWorkerLaunchPlan(
         policy_id=policy.policy_id,
         policy_version=policy.version,
         policy_path=policy.source_path,
@@ -1245,16 +1282,21 @@ def build_launch_plan(
         developer_instructions=developer_instructions,
         argv=tuple(argv),
     )
+    _BOUND_LAUNCH_REQUESTS[plan] = request
+    return plan
 
 
 def _validate_launch_envelope(
     plan: CodexWorkerLaunchPlan,
+    request: CodexWorkerLaunchRequest,
     governed_input: GovernedWorkerInput,
     *,
     filesystem: LauncherFilesystem,
 ) -> None:
     try:
-        root = _real_directory(plan.worktree, field="worktree", filesystem=filesystem)
+        root = _real_directory(
+            request.worktree, field="worktree", filesystem=filesystem
+        )
         policy_root = _real_directory(
             os.path.join(root, "governance", "policies"),
             field="canonical launcher policy area",
@@ -1273,8 +1315,18 @@ def _validate_launch_envelope(
             worktree=root,
             source_path=current_policy_path,
         )
-        role = governed_input.role
-        venue = current_policy.venue(plan.venue)
+        role = request.role
+        if governed_input.role != role:
+            raise CodexWorkerLaunchError(
+                "governed role policy does not match requested role"
+            )
+        if not _inside(governed_input.role_policy_path, root) or not _inside(
+            governed_input.brief_path, root
+        ):
+            raise CodexWorkerLaunchError(
+                "governed input does not belong to the allocated worktree"
+            )
+        venue = current_policy.venue(request.venue)
         sandbox = venue.sandbox_for(role)
         role_root = _real_directory(
             os.path.join(root, CANONICAL_ROLE_AREA),
@@ -1306,7 +1358,7 @@ def _validate_launch_envelope(
         encoded = toml_encode_config_value(expected_instructions)
         expected_output = _canonical_output(
             root=root,
-            run_id=plan.run_id,
+            run_id=request.run_id,
             filesystem=filesystem,
         )
         expected_binary = _resolve_policy_binary(
@@ -1358,7 +1410,7 @@ def _validate_launch_envelope(
             effort=current_policy.effort,
             provider_credential_env_names=current_policy.provider_credentials_for(role),
             worktree=root,
-            run_id=plan.run_id,
+            run_id=request.run_id,
             output=expected_output,
             binary=expected_binary,
             add_dirs=expected_add_dirs,
@@ -1376,13 +1428,26 @@ def _validate_launch_envelope(
 def launch(
     plan: CodexWorkerLaunchPlan,
     *,
+    request: CodexWorkerLaunchRequest | None = None,
     governed_input: GovernedWorkerInput,
     runner: CodexOneShotRunner,
     filesystem: LauncherFilesystem | None = None,
 ) -> int:
     """Execute only if the verified input metadata is exactly plan-bound."""
+    bound_request = _BOUND_LAUNCH_REQUESTS.get(plan)
+    if request is None:
+        request = bound_request
+    elif bound_request is not None and request != bound_request:
+        raise CodexWorkerLaunchError(
+            "launch envelope mismatch: immutable launch request changed after planning"
+        )
+    if request is None:
+        raise CodexWorkerLaunchError(
+            "launch envelope mismatch: immutable launch request is not bound to plan"
+        )
     _validate_launch_envelope(
         plan,
+        request,
         governed_input,
         filesystem=filesystem or RealLauncherFilesystem(),
     )

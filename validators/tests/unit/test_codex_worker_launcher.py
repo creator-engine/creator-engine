@@ -429,7 +429,28 @@ def plan(worktree: Path, **overrides) -> launcher.CodexWorkerLaunchPlan:
         "version_probe": FixedVersionProbe(),
     }
     values.update(overrides)
-    return launcher.build_launch_plan(**values)
+    request = launcher.build_launch_request(
+        policy=values["policy"],
+        governed_input=values["governed_input"],
+        role=values.pop("role"),
+        venue=values.pop("venue"),
+        worktree=values.pop("worktree"),
+        run_id=values.pop("run_id"),
+        filesystem=values["filesystem"],
+    )
+    return launcher.build_launch_plan(request=request, **values)
+
+
+def launch_request_from_plan(
+    built: launcher.CodexWorkerLaunchPlan,
+) -> launcher.CodexWorkerLaunchRequest:
+    """Recover the separately held immutable request used by test callers."""
+    return launcher.CodexWorkerLaunchRequest(
+        role=built.role,
+        venue=built.venue,
+        worktree=built.worktree,
+        run_id=built.run_id,
+    )
 
 
 def test_canonical_policy_pins_deployment_version_and_actual_venues(worktree: Path) -> None:
@@ -929,7 +950,12 @@ def test_production_subprocess_path_enforces_hermetic_leaf_behavior_matrix(
         }
     )
 
-    assert launcher.launch(built, governed_input=worker_input, runner=runner) == 0
+    assert launcher.launch(
+        built,
+        request=launch_request_from_plan(built),
+        governed_input=worker_input,
+        runner=runner,
+    ) == 0
     observation = yaml.safe_load(Path(built.output).read_text(encoding="utf-8"))
     Path(built.output).unlink()
     after = subprocess.run(
@@ -1057,7 +1083,12 @@ def test_production_subprocess_path_refuses_nested_reserved_or_fallback_requests
         environ={"PATH": os.environ["PATH"], "LANG": "C.UTF-8"}
     )
 
-    assert launcher.launch(built, governed_input=worker_input, runner=runner) == 64
+    assert launcher.launch(
+        built,
+        request=launch_request_from_plan(built),
+        governed_input=worker_input,
+        runner=runner,
+    ) == 64
     observation = yaml.safe_load(Path(built.output).read_text(encoding="utf-8"))
     Path(built.output).unlink()
     after = subprocess.run(
@@ -1159,7 +1190,12 @@ def test_launch_refuses_omitted_mismatched_or_authority_widened_envelope_before_
     for mutation in mutations:
         runner = RecordingRunner()
         with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
-            launcher.launch(mutation, governed_input=worker_input, runner=runner)
+            launcher.launch(
+                mutation,
+                request=launch_request_from_plan(built),
+                governed_input=worker_input,
+                runner=runner,
+            )
         assert runner.calls == []
 
 
@@ -1223,6 +1259,7 @@ def test_launch_refuses_every_noncanonical_argv_mutation_before_runner(
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
         launcher.launch(
             replace(built, argv=tuple(mutate_argv(built.argv))),
+            request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
         )
@@ -1235,6 +1272,67 @@ def _replace_argv_value(
 ) -> tuple[str, ...]:
     assert argv.count(old) == 1
     return tuple(new if item == old else item for item in argv)
+
+
+def test_launch_refuses_coordinated_valid_venue_mutation_before_runner(
+    worktree: Path,
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    request = launcher.build_launch_request(
+        policy=policy(worktree),
+        governed_input=worker_input,
+        role="architect_research",
+        venue="dev1-local",
+        worktree=str(worktree),
+        run_id="test-run",
+        filesystem=HermeticFilesystem(),
+    )
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(built, venue="dgx-relay"),
+            request=request,
+            governed_input=worker_input,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
+def test_launch_refuses_coordinated_alternate_valid_run_request_before_runner(
+    worktree: Path,
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    request = launcher.build_launch_request(
+        policy=policy(worktree),
+        governed_input=worker_input,
+        role="architect_research",
+        venue="dev1-local",
+        worktree=str(worktree),
+        run_id="test-run",
+        filesystem=HermeticFilesystem(),
+    )
+    alternate_run_id = "alternate-valid-run"
+    alternate_output = str(worktree / ".ce" / "state" / f"{alternate_run_id}.json")
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(
+                built,
+                run_id=alternate_run_id,
+                output=alternate_output,
+                argv=_replace_argv_value(built.argv, built.output, alternate_output),
+            ),
+            request=request,
+            governed_input=worker_input,
+            runner=runner,
+        )
+
+    assert runner.calls == []
 
 
 @pytest.mark.parametrize(
@@ -1335,6 +1433,7 @@ def test_launch_refuses_coordinated_plan_and_argv_mutation_before_runner(
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
         launcher.launch(
             mutation(built, worktree),
+            request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
         )
@@ -1365,7 +1464,12 @@ def test_launch_refuses_coordinated_existing_output_node_before_runner(
     runner = RecordingRunner()
 
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
-        launcher.launch(mutated, governed_input=worker_input, runner=runner)
+        launcher.launch(
+            mutated,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+        )
 
     assert runner.calls == []
 
@@ -1389,6 +1493,7 @@ def test_launch_refuses_reviewer_credential_tuple_mutation_before_runner(
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
         launcher.launch(
             replace(built, provider_credential_env_names=credentials),
+            request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
             filesystem=HermeticFilesystem(),
@@ -1416,6 +1521,7 @@ def test_launch_refuses_provider_role_credential_tuple_mutation_before_runner(
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
         launcher.launch(
             replace(built, provider_credential_env_names=credentials),
+            request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
             filesystem=HermeticFilesystem(),
@@ -1449,6 +1555,7 @@ def test_launch_refuses_reordered_role_credential_tuple_before_runner(
                 built,
                 provider_credential_env_names=(second_name, "OPENAI_API_KEY"),
             ),
+            request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
             filesystem=HermeticFilesystem(),
@@ -1476,7 +1583,12 @@ def test_launch_reopens_and_rebinds_canonical_role_policy_before_runner(
     runner = RecordingRunner()
 
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
-        launcher.launch(built, governed_input=worker_input, runner=runner)
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+        )
 
     assert runner.calls == []
 
@@ -1500,6 +1612,7 @@ def test_launch_refuses_role_policy_identity_or_mode_drift_before_runner(
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
         launcher.launch(
             built,
+            request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
             filesystem=HermeticFilesystem(),
@@ -1523,6 +1636,7 @@ def test_launch_refuses_role_policy_ownership_drift_before_runner(worktree: Path
     with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
         launcher.launch(
             built,
+            request=launch_request_from_plan(built),
             governed_input=worker_input,
             runner=runner,
             filesystem=OwnershipDriftFilesystem(),
@@ -1762,7 +1876,12 @@ def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree
     worker_input = governed_input(worktree, role="architect_research")
     built = plan(worktree, governed_input=worker_input)
     assert runner.calls == []
-    assert launcher.launch(built, governed_input=worker_input, runner=runner) == 0
+    assert launcher.launch(
+        built,
+        request=launch_request_from_plan(built),
+        governed_input=worker_input,
+        runner=runner,
+    ) == 0
     assert runner.calls == [(built.argv, worker_input.stdin)]
 
 
