@@ -9,7 +9,7 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -66,22 +66,44 @@ def reconcile_stale_tickets(
     merged_prs: Sequence[Mapping[str, Any] | MergedPullRequest],
     *,
     ticket_repo: str = DEFAULT_TICKET_REPO,
+    reference_numbers: Callable[[str, str], Sequence[int]] | None = None,
 ) -> list[StaleTicketMatch]:
     """Return deterministic report-only stale-ticket matches.
 
-    Matching is intentionally conservative:
+    Generic matching (the compatibility default) is intentionally conservative:
     - PR head branch contains ``ce-<ticket-number>-`` or a supplied branch hint.
     - PR title/body contains ``ce-ops#<ticket-number>`` or the fully qualified
       ``owner/ce-ops#<ticket-number>`` ticket reference.
+
+    When ``reference_numbers`` is supplied, reconciliation switches to the
+    fixed CE-ops advisory projection: a pair is retained only when the
+    normalized branch contains the literal ``ce-<ticket-number>-`` marker and
+    the canonical parser does *not* see that ticket in the PR title/body.  The
+    parser is evaluated once per PR so the projection is deterministic and a
+    caller can inject the shared production grammar without copying it here.
     """
 
     tickets = [_coerce_ticket(item) for item in open_tickets]
     prs = [_coerce_pr(item) for item in merged_prs]
     matches: dict[tuple[int, int], set[str]] = {}
 
+    parsed_refs: list[frozenset[int]] | None = None
+    if reference_numbers is not None:
+        parsed_refs = [
+            _coerce_reference_numbers(reference_numbers(pr.title, pr.body))
+            for pr in prs
+        ]
+
     for ticket in tickets:
-        for pr in prs:
-            evidence = _evidence_for(ticket, pr, ticket_repo=ticket_repo)
+        for pr_index, pr in enumerate(prs):
+            if parsed_refs is None:
+                evidence = _evidence_for(ticket, pr, ticket_repo=ticket_repo)
+            elif _literal_branch_matches(ticket.number, pr.head_branch) and (
+                ticket.number not in parsed_refs[pr_index]
+            ):
+                evidence = (EVIDENCE_BRANCH,)
+            else:
+                evidence = ()
             if not evidence:
                 continue
             matches.setdefault((ticket.number, pr.number), set()).update(evidence)
@@ -261,6 +283,17 @@ def _branch_matches(ticket: OpenTicket, head_branch: str) -> bool:
         return True
     # WARNING: hints are matched as substrings, not anchored patterns.
     return any(_normalise_branch(hint) in branch for hint in ticket.branch_slug_hints)
+
+
+def _literal_branch_matches(ticket_number: int, head_branch: str) -> bool:
+    branch = _normalise_branch(head_branch)
+    return bool(branch) and f"ce-{ticket_number}-" in branch
+
+
+def _coerce_reference_numbers(values: Sequence[int]) -> frozenset[int]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise TypeError("reference-number callback must return a sequence")
+    return frozenset(_coerce_number(value, "reference number") for value in values)
 
 
 def _ticket_ref_matches(ticket_number: int, text: str, *, ticket_repo: str) -> bool:

@@ -151,3 +151,94 @@ def test_cli_reads_json_files_and_emits_json(tmp_path, capsys):
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["matches"][0]["report_line"] == "STALE-OPEN example-ops#523 <- PR#79 (branch)"
+
+
+def _canonical_refs(title: str, body: str) -> list[int]:
+    refs: list[int] = []
+    if "ce-518" in title.lower():
+        refs.append(518)
+    if "closes example-ops#519" in body.lower():
+        refs.append(519)
+    return refs
+
+
+def test_fixed_projection_suppresses_branch_when_title_parser_sees_ce_number():
+    matches = tr.reconcile_stale_tickets(
+        [{"number": 518}],
+        [{"number": 90, "title": "feat: ce-518 landed", "head_branch": "ce-518-fix"}],
+        ticket_repo=_EXAMPLE_REPO,
+        reference_numbers=_canonical_refs,
+    )
+
+    assert matches == []
+
+
+def test_fixed_projection_suppresses_branch_when_closing_body_parser_sees_ticket():
+    matches = tr.reconcile_stale_tickets(
+        [{"number": 519}],
+        [
+            {
+                "number": 91,
+                "title": "land fix",
+                "head_branch": "users/dev/ce-519-fix",
+                "body": "Closes example-ops#519",
+            }
+        ],
+        ticket_repo=_EXAMPLE_REPO,
+        reference_numbers=_canonical_refs,
+    )
+
+    assert matches == []
+
+
+def test_fixed_projection_retains_branch_for_bare_body_mention():
+    matches = tr.reconcile_stale_tickets(
+        [{"number": 519}],
+        [
+            {
+                "number": 92,
+                "title": "land fix",
+                "head_branch": "refs/heads/ce-519-fix",
+                "body": "Context only: example-ops#519",
+            }
+        ],
+        ticket_repo=_EXAMPLE_REPO,
+        reference_numbers=_canonical_refs,
+    )
+
+    assert tr.render_report(matches) == "STALE-OPEN example-ops#519 <- PR#92 (branch)"
+
+
+def test_fixed_projection_requires_literal_branch_marker_and_sorts_pairs():
+    matches = tr.reconcile_stale_tickets(
+        [
+            {"number": 52, "branch_slug_hints": ["custom-hint"]},
+            {"number": 51},
+        ],
+        [
+            {"number": 102, "head_branch": "ce-52-fix"},
+            {"number": 101, "head_branch": "origin/ce-51-fix"},
+            {"number": 100, "head_branch": "ce-518-wrong-boundary"},
+            {"number": 99, "head_branch": "users/custom-hint"},
+        ],
+        ticket_repo=_EXAMPLE_REPO,
+        reference_numbers=lambda _title, _body: [],
+    )
+
+    assert [(match.ticket_number, match.pr_number) for match in matches] == [(51, 101), (52, 102)]
+
+
+def test_reference_callback_is_evaluated_once_per_pr():
+    calls: list[tuple[str, str]] = []
+
+    def parser(title: str, body: str) -> list[int]:
+        calls.append((title, body))
+        return []
+
+    tr.reconcile_stale_tickets(
+        [{"number": 51}, {"number": 52}],
+        [{"number": 100, "title": "one", "body": "body", "head_branch": "ce-51-fix"}],
+        reference_numbers=parser,
+    )
+
+    assert calls == [("one", "body")]
