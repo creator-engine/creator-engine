@@ -19,5 +19,8 @@ issue: ce-ops#566
 - Refuses duplicate direct-policy role cells before matrix normalization.
 - Runs Codex under cleanup-bound isolated home/config directories and a role-policy-bound
   environment, and reports execution errors or nonzero exits as fail-closed refusals.
+- Runs the pinned-version probe in the same cleanup-bound credential-free isolation,
+  rejects credential-shaped locale variables before allowlisting benign locale state,
+  and structurally permits only one plain `{version}` binary-template field.
 - Removes caller launch-surface overrides; plans retain canonical paths/digests.
 - Resolves the tracked VPS image source/digest while preserving exact-name removal, readiness, and diagnostics.

@@ -301,6 +301,16 @@ def _mutate_one_shot_policy(worktree: Path, mutation: str) -> None:
         )
     elif mutation == "revive-null-read-only-role":
         raw["venues"]["vps-tmux"]["role_sandboxes"]["reviewer"] = "read-only"
+    elif mutation.startswith("binary-"):
+        templates = {
+            "binary-positional": "/opt/{version}/{0}/codex",
+            "binary-attribute": "/opt/{version.real}/codex",
+            "binary-index": "/opt/{version[0]}/codex",
+            "binary-conversion": "/opt/{version!r}/codex",
+            "binary-format-spec": "/opt/{version:>20}/codex",
+            "binary-extra-field": "/opt/{version}/{other}/codex",
+        }
+        raw["venues"]["dev1-local"]["codex_binary_template"] = templates[mutation]
     else:  # pragma: no cover - closed test vocabulary
         raise AssertionError(mutation)
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
@@ -418,6 +428,12 @@ def test_worker_launch_refuses_implementer_native_venues_before_runner_construct
         "remove-role",
         "widen-read-only-role",
         "revive-null-read-only-role",
+        "binary-positional",
+        "binary-attribute",
+        "binary-index",
+        "binary-conversion",
+        "binary-format-spec",
+        "binary-extra-field",
     ],
 )
 def test_worker_launch_refuses_mutated_v1_policy_before_probe_or_runner_construction(
@@ -438,8 +454,9 @@ def test_worker_launch_refuses_mutated_v1_policy_before_probe_or_runner_construc
     monkeypatch.setattr(
         ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner constructed")
     )
+    role = "architect_research" if mutation.startswith("binary-") else "implementer"
     assert ce_cli.main([
-        "worker", "launch", "--role", "implementer", "--venue", "dev1-local",
+        "worker", "launch", "--role", role, "--venue", "dev1-local",
         "--worktree", str(worktree), "--brief", str(brief),
         "--brief-sha256", digest, "--run-id", "cli-mutated-policy-test",
     ]) == 1

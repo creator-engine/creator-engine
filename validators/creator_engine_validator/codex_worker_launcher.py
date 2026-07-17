@@ -10,9 +10,11 @@ import hashlib
 import json
 import os
 import re
+import string
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Protocol, Sequence
@@ -79,6 +81,45 @@ V1_ROLE_SANDBOX_MATRIX = (
 ALLOWED_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
 ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES = frozenset({"OPENAI_API_KEY"})
 SAFE_RUNTIME_ENV_NAMES = frozenset({"LANG", "PATH", "TERM"})
+_EXACT_CREDENTIAL_ENV_NAMES = frozenset(
+    {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "BAO_TOKEN",
+        "OPENBAO_TOKEN",
+        "VAULT_TOKEN",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GITHUB_API_URL",
+        "GH_HOST",
+        "GH_CONFIG_DIR",
+        "GH_DEBUG",
+        "GITHUB_PAT",
+        "GITHUB_APP_PRIVATE_KEY",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+        "SSH_AUTH_SOCK",
+        "CE_PICKUP_TOKEN",
+        "CE_FORGE_MINT_BROKER_USER_TOKEN",
+    }
+)
+_SECRET_ENV_TOKENS = (
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "PRIVATE_KEY",
+    "API_KEY",
+    "CREDENTIAL",
+    "AUTH",
+)
 _RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 _ROLE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -87,6 +128,57 @@ _VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 
 class CodexWorkerLaunchError(ValueError):
     """A policy, filesystem, deployment, or caller input was refused."""
+
+
+def _is_credential_env_name(name: str) -> bool:
+    upper = name.upper()
+    return upper in _EXACT_CREDENTIAL_ENV_NAMES or any(
+        token in upper for token in _SECRET_ENV_TOKENS
+    )
+
+
+@contextmanager
+def _isolated_child_environment(
+    source: Mapping[str, str],
+    *,
+    provider_credential_env_names: Sequence[str] = (),
+) -> Iterator[dict[str, str]]:
+    """Yield a cleanup-bound environment with invocation-owned state roots."""
+    with tempfile.TemporaryDirectory(prefix="ce-codex-one-shot-") as invocation_root:
+        home = os.path.join(invocation_root, "home")
+        codex_home = os.path.join(invocation_root, "codex")
+        tmpdir = os.path.join(invocation_root, "tmp")
+        xdg_config = os.path.join(invocation_root, "xdg-config")
+        xdg_cache = os.path.join(invocation_root, "xdg-cache")
+        xdg_data = os.path.join(invocation_root, "xdg-data")
+        for directory in (home, codex_home, tmpdir, xdg_config, xdg_cache, xdg_data):
+            os.mkdir(directory, mode=0o700)
+        child_env = {
+            name: value
+            for name, value in source.items()
+            if name in SAFE_RUNTIME_ENV_NAMES
+            or (name.startswith("LC_") and not _is_credential_env_name(name))
+        }
+        child_env.update(
+            {
+                name: source[name]
+                for name in provider_credential_env_names
+                if name in source
+            }
+        )
+        child_env.update(
+            {
+                "HOME": home,
+                "CODEX_HOME": codex_home,
+                "TMPDIR": tmpdir,
+                "XDG_CONFIG_HOME": xdg_config,
+                "XDG_CACHE_HOME": xdg_cache,
+                "XDG_DATA_HOME": xdg_data,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+            }
+        )
+        yield child_env
 
 
 class LauncherFilesystem(Protocol):
@@ -132,15 +224,21 @@ class CodexVersionProbe(Protocol):
 class SubprocessCodexVersionProbe:
     """Probe the already-preflighted absolute executable, never ambient PATH."""
 
+    def __init__(self, *, environ: Mapping[str, str] | None = None) -> None:
+        self._environ = environ
+
     def probe(self, binary: str) -> str:
+        source = dict(os.environ if self._environ is None else self._environ)
         try:
-            completed = subprocess.run(
-                [binary, "--version"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        except OSError as exc:
+            with _isolated_child_environment(source) as child_env:
+                completed = subprocess.run(
+                    [binary, "--version"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=child_env,
+                )
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
             raise CodexWorkerLaunchError("Codex version probe could not execute pinned binary") from exc
         if completed.returncode != 0:
             raise CodexWorkerLaunchError("Codex version probe failed")
@@ -316,39 +414,9 @@ class SubprocessCodexOneShotRunner:
         ):
             raise CodexWorkerLaunchError("runner received a non-provider credential name")
         try:
-            with tempfile.TemporaryDirectory(prefix="ce-codex-one-shot-") as invocation_root:
-                home = os.path.join(invocation_root, "home")
-                codex_home = os.path.join(invocation_root, "codex")
-                tmpdir = os.path.join(invocation_root, "tmp")
-                xdg_config = os.path.join(invocation_root, "xdg-config")
-                xdg_cache = os.path.join(invocation_root, "xdg-cache")
-                xdg_data = os.path.join(invocation_root, "xdg-data")
-                for directory in (home, codex_home, tmpdir, xdg_config, xdg_cache, xdg_data):
-                    os.mkdir(directory, mode=0o700)
-                child_env = {
-                    name: value
-                    for name, value in source.items()
-                    if name in SAFE_RUNTIME_ENV_NAMES or name.startswith("LC_")
-                }
-                child_env.update(
-                    {
-                        name: source[name]
-                        for name in credential_names
-                        if name in source
-                    }
-                )
-                child_env.update(
-                    {
-                        "HOME": home,
-                        "CODEX_HOME": codex_home,
-                        "TMPDIR": tmpdir,
-                        "XDG_CONFIG_HOME": xdg_config,
-                        "XDG_CACHE_HOME": xdg_cache,
-                        "XDG_DATA_HOME": xdg_data,
-                        "GIT_CONFIG_NOSYSTEM": "1",
-                        "GIT_TERMINAL_PROMPT": "0",
-                    }
-                )
+            with _isolated_child_environment(
+                source, provider_credential_env_names=credential_names
+            ) as child_env:
                 completed = subprocess.run(
                     list(argv),
                     input=stdin,
@@ -378,6 +446,34 @@ def _require_string_list(value: Any, field: str) -> tuple[str, ...]:
     if len(set(values)) != len(values):
         raise CodexWorkerLaunchError(f"policy {field} must not contain duplicates")
     return values
+
+
+def _render_binary_template(*, template: str, version: str, venue: str) -> str:
+    """Render exactly one plain ``{version}`` field and no other format syntax."""
+    try:
+        parsed = tuple(string.Formatter().parse(template))
+    except ValueError as exc:
+        raise CodexWorkerLaunchError(
+            f"policy venue {venue} has an invalid binary template"
+        ) from exc
+    fields = tuple(
+        (field_name, format_spec, conversion)
+        for _literal, field_name, format_spec, conversion in parsed
+        if field_name is not None
+    )
+    if (
+        template.count("{version}") != 1
+        or fields != (("version", "", None),)
+    ):
+        raise CodexWorkerLaunchError(
+            f"policy venue {venue} binary template must contain exactly one plain version field"
+        )
+    try:
+        return template.format(version=version)
+    except (AttributeError, IndexError, KeyError, ValueError) as exc:
+        raise CodexWorkerLaunchError(
+            f"policy venue {venue} has an invalid binary template"
+        ) from exc
 
 
 def _inside(path: str, root: str) -> bool:
@@ -481,12 +577,7 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
         if not isinstance(raw_venue, dict) or set(raw_venue) != VENUE_REQUIRED_KEYS:
             raise CodexWorkerLaunchError(f"policy venue {name} keys must exactly match the v1 schema")
         template = _require_string(raw_venue["codex_binary_template"], f"venues.{name}.codex_binary_template")
-        if template.count("{version}") != 1:
-            raise CodexWorkerLaunchError(f"policy venue {name} binary template must contain one version placeholder")
-        try:
-            rendered = template.format(version=version)
-        except (KeyError, ValueError) as exc:
-            raise CodexWorkerLaunchError(f"policy venue {name} has an invalid binary template") from exc
+        rendered = _render_binary_template(template=template, version=version, venue=name)
         if not PurePath(rendered).is_absolute() or ".." in PurePath(rendered).parts:
             raise CodexWorkerLaunchError(f"policy venue {name} Codex binary must be absolute and nonescaping")
         attestation = raw_venue["outer_isolation_attestation"]
@@ -667,7 +758,11 @@ def _preflight_binary(
     version_probe: CodexVersionProbe,
 ) -> str:
     declared = _lexical_absolute(
-        venue.codex_binary_template.format(version=policy.version),
+        _render_binary_template(
+            template=venue.codex_binary_template,
+            version=policy.version,
+            venue=venue.name,
+        ),
         field=f"policy Codex binary for {venue.name}",
     )
     parts = PurePath(declared).parts
@@ -709,6 +804,12 @@ def build_launch_plan(
 ) -> CodexWorkerLaunchPlan:
     """Build a deterministic digest/path-only plan after all preflights pass."""
     _require_trusted_v1_matrix(policy)
+    for venue_policy in policy.venues:
+        _render_binary_template(
+            template=venue_policy.codex_binary_template,
+            version=policy.version,
+            venue=venue_policy.name,
+        )
     fs = filesystem or RealLauncherFilesystem()
     probe = version_probe or SubprocessCodexVersionProbe()
     root = _real_directory(worktree, field="worktree", filesystem=fs)

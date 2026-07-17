@@ -35,6 +35,14 @@ NON_IMPLEMENTER_MATRIX_MUTATIONS = [
     }.items()
     for role, sandbox in values.items()
 ]
+MALFORMED_BINARY_TEMPLATES = [
+    "/opt/creator-engine/codex/{version}/{0}/codex",
+    "/opt/creator-engine/codex/{version.real}/bin/codex",
+    "/opt/creator-engine/codex/{version[0]}/bin/codex",
+    "/opt/creator-engine/codex/{version!r}/bin/codex",
+    "/opt/creator-engine/codex/{version:>20}/bin/codex",
+    "/opt/creator-engine/codex/{version}/{other}/codex",
+]
 
 
 class HermeticFilesystem(launcher.RealLauncherFilesystem):
@@ -73,6 +81,11 @@ class FixedVersionProbe:
     def probe(self, binary: str) -> str:
         self.calls.append(binary)
         return self.version
+
+
+class UnusedFilesystem:
+    def __getattr__(self, name: str):
+        pytest.fail(f"filesystem method used before binary-template refusal: {name}")
 
 
 class RecordingRunner:
@@ -261,6 +274,20 @@ def test_policy_parser_refuses_mutated_v1_supported_role_set(
         policy(worktree)
 
 
+@pytest.mark.parametrize("template", MALFORMED_BINARY_TEMPLATES)
+def test_policy_parser_refuses_structurally_malformed_binary_template(
+    worktree: Path, template: str
+) -> None:
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["venues"]["dev1-local"].__setitem__(
+            "codex_binary_template", template
+        ),
+    )
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="binary template"):
+        policy(worktree)
+
+
 @pytest.mark.parametrize("sandbox", ["workspace-write", "danger-full-access"])
 def test_planner_revalidates_trusted_v1_implementer_refusal_before_version_probe(
     worktree: Path, sandbox: str
@@ -354,6 +381,31 @@ def test_planner_refuses_unsafe_first_duplicate_role_cell_before_version_probe(
             venue=venue_name,
             worktree=str(worktree),
             filesystem=HermeticFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
+
+
+@pytest.mark.parametrize("template", MALFORMED_BINARY_TEMPLATES)
+def test_planner_refuses_structurally_malformed_binary_template_before_version_probe(
+    worktree: Path, template: str
+) -> None:
+    loaded = policy(worktree)
+    venue = loaded.venue("dev1-local")
+    unsafe_venue = replace(venue, codex_binary_template=template)
+    unsafe_policy = replace(
+        loaded,
+        venues=tuple(unsafe_venue if item.name == venue.name else item for item in loaded.venues),
+    )
+    probe = FixedVersionProbe()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="binary template"):
+        launcher.build_launch_plan(
+            policy=unsafe_policy,
+            governed_input=governed_input(worktree, role="architect_research"),
+            role="architect_research",
+            venue="dev1-local",
+            worktree=str(worktree),
+            filesystem=UnusedFilesystem(),
             version_probe=probe,
         )
     assert probe.calls == []
@@ -530,6 +582,63 @@ def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree
     assert runner.calls == [(built.argv, worker_input.stdin)]
 
 
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_production_version_probe_uses_cleanup_bound_credential_free_environment(
+    tmp_path: Path, monkeypatch, returncode: int
+) -> None:
+    captured: dict[str, object] = {}
+    hostile = {
+        "PATH": "/runtime/bin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "TERM": "xterm-256color",
+        "HOME": str(tmp_path / "host-home"),
+        "CODEX_HOME": str(tmp_path / "host-codex"),
+        "XDG_CONFIG_HOME": str(tmp_path / "host-config"),
+        "GH_TOKEN": "host-gh-secret",
+        "AWS_ACCESS_KEY_ID": "host-aws-secret",
+        "SSH_AUTH_SOCK": str(tmp_path / "ssh-agent.sock"),
+        "GPG_AGENT_INFO": str(tmp_path / "gpg-agent.sock"),
+        "CE_CONTROLLER_SOCKET": str(tmp_path / "controller.sock"),
+        "OPENAI_API_KEY": "provider-secret-must-not-reach-probe",
+    }
+
+    def fake_run(argv, **kwargs):
+        env = dict(kwargs["env"])
+        captured.update({"argv": argv, "env": env, "root": Path(env["HOME"]).parent})
+        for name in (
+            "HOME",
+            "CODEX_HOME",
+            "TMPDIR",
+            "XDG_CONFIG_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_DATA_HOME",
+        ):
+            assert Path(env[name]).is_dir()
+        return subprocess.CompletedProcess(argv, returncode, "codex-cli 0.145.0-alpha.9\n", "")
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    probe = launcher.SubprocessCodexVersionProbe(environ=hostile)
+    if returncode:
+        with pytest.raises(launcher.CodexWorkerLaunchError, match="version probe failed"):
+            probe.probe(PINNED_BINARY)
+    else:
+        assert probe.probe(PINNED_BINARY) == "0.145.0-alpha.9"
+
+    child_env = captured["env"]
+    assert isinstance(child_env, dict)
+    for name in hostile:
+        if name in {"PATH", "LANG", "LC_ALL", "TERM"}:
+            continue
+        if name in {"HOME", "CODEX_HOME", "XDG_CONFIG_HOME"}:
+            assert child_env[name] != hostile[name]
+        else:
+            assert name not in child_env
+    assert child_env["LC_ALL"] == "C.UTF-8"
+    assert captured["root"] is not None
+    assert not Path(captured["root"]).exists()
+
+
 @pytest.mark.parametrize("venue", ["dgx-relay", "dev1-local"])
 def test_implementer_is_refused_at_former_native_venues_before_runner_execution(
     worktree: Path, venue: str
@@ -632,3 +741,36 @@ def test_production_runner_refuses_untracked_provider_credential_name() -> None:
             stdin=b"verified",
             provider_credential_env_names=("GITHUB_TOKEN",),
         )
+
+
+@pytest.mark.parametrize(
+    "credential_name",
+    [
+        "LC_GITHUB_TOKEN",
+        "LC_AWS_SECRET_ACCESS_KEY",
+        "LC_PRIVATE_KEY",
+        "LC_AUTH_SOCK",
+        "LC_CREDENTIALS",
+        "LC_PASSWORD",
+    ],
+)
+def test_production_runner_scrubs_credential_shaped_locale_names(
+    monkeypatch, credential_name: str
+) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_run(argv, **kwargs):
+        captured.update(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    runner = launcher.SubprocessCodexOneShotRunner(
+        environ={credential_name: "secret", "LC_ALL": "C.UTF-8"}
+    )
+    assert runner.run(
+        ["/pinned/codex", "exec"],
+        stdin=b"verified",
+        provider_credential_env_names=(),
+    ) == 0
+    assert credential_name not in captured
+    assert captured["LC_ALL"] == "C.UTF-8"
