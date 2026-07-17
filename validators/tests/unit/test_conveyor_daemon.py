@@ -1445,7 +1445,7 @@ def test_data_only_discovery_mapping_plans_without_payload_paths():
     assert not any("payload audit" in message for message in logs)
 
 
-def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
+def test_armed_data_only_discovery_mapping_without_receipt_identity_fails_closed():
     prepare = FakePrepare(record_validation=True)
     git = FakeGit()
     gh = FakeGh()
@@ -1468,13 +1468,13 @@ def test_data_only_discovery_mapping_allocates_once_and_flows_downstream():
         validation_ledger_binding=_validation_ledger_binding(),
     ).run_once()
 
-    assert result.results[0].status == "pr-opened"
-    assert allocator.allocate_calls == [{"repo": "feature-one", "branch_name": "feature-one"}]
-    assert len(allocator.allocations) == 1
-    allocation = allocator.allocations[0]
-    assert prepare.calls[0].worktree_path == allocation.worktree_path
-    assert (("push", "--", "origin", "feature-one:feature-one"), allocation.repo_path) in git.calls
-    assert len(gh.calls) == 1
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("receipt identity is required for armed processing",)
+    assert allocator.allocate_calls == []
+    assert allocator.allocations == []
+    assert prepare.calls == []
+    assert git.calls == []
+    assert gh.calls == []
 
 
 def test_direct_item_with_paths_and_no_receipt_fails_before_prepare_land_git_or_gh():

@@ -153,6 +153,7 @@ class ConveyorDaemonItem:
     identity: str | None = None
     allocation_receipt: DaemonPathReceipt | None = None
     receipt_identity: ReceiptIdentity | None = None
+    requires_receipt_identity: bool = False
 
     @classmethod
     def from_mapping(
@@ -180,6 +181,7 @@ class ConveyorDaemonItem:
             pr_title=parsed.pr_title,
             pr_body=parsed.pr_body,
             receipt_identity=receipt_identity,
+            requires_receipt_identity=True,
         )
 
     @property
@@ -486,6 +488,11 @@ class ConveyorDaemon:
                 self._log(f"conveyor dry-run plan {item.branch}: {', '.join(PLAN_ACTIONS)}")
             else:
                 receipt: HandledSignalReceipt | None = None
+                if item.receipt_identity is None and item.requires_receipt_identity:
+                    results.append(
+                        self._failed(item, ("receipt identity is required for armed processing",))
+                    )
+                    continue
                 if item.receipt_identity is not None:
                     if self.receipt_state_path is None:
                         results.append(

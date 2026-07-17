@@ -381,6 +381,7 @@ def _build_daemon(
         gh_runner=_gh_runner_factory(config.gh_token),
         now=_utc_now,
         ledger_writer=_jsonl_ledger_writer(ledger_path),
+        receipt_state_path=config.discovery_state,
         log_runner=_log,
         repo_root=roots.repo_root,
         bundle_root=roots.bundle_root,
