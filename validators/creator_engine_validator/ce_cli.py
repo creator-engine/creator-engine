@@ -110,6 +110,7 @@ from . import (
     brain_recall,
     brain_recall_surface,
     bootstrap_runtime,
+    codex_worker_launcher,
     check_profiles,
     ce_ops_triage_queue,
     ce_event_runtime,
@@ -197,6 +198,21 @@ def _make_worker_run_seeder():
 def _make_worker_run_collector(timeout_seconds: float):
     """Factory for worker-run findings collection (monkeypatchable in tests)."""
     return worker_run.FileFindingsCollector(timeout_seconds=timeout_seconds)
+
+
+def _make_codex_one_shot_runner():
+    """Factory for the explicit Codex one-shot execution seam."""
+    return codex_worker_launcher.SubprocessCodexOneShotRunner()
+
+
+def _make_codex_launcher_filesystem():
+    """Factory for one-shot canonical-path preflight (monkeypatchable in tests)."""
+    return codex_worker_launcher.RealLauncherFilesystem()
+
+
+def _make_codex_version_probe():
+    """Factory for the pinned Codex deployment probe (monkeypatchable in tests)."""
+    return codex_worker_launcher.SubprocessCodexVersionProbe()
 
 
 def _make_herdr_attach_runner():
@@ -823,6 +839,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="seconds to wait for the worker findings artifact (default: 300)",
     )
     wrun.add_argument("--json", action="store_true", dest="json_output")
+
+    wlaunch = worker_sub.add_parser(
+        "launch",
+        help="plan or execute a policy-bound external Codex one-shot worker",
+    )
+    wlaunch.add_argument("--role", required=True, help="policy-supported worker role")
+    wlaunch.add_argument("--venue", required=True, help="policy-supported execution venue")
+    wlaunch.add_argument("--worktree", required=True, help="absolute allocated worktree path")
+    wlaunch.add_argument("--brief", required=True, help="regular brief file inside <worktree>/.ce/briefs")
+    wlaunch.add_argument(
+        "--brief-sha256",
+        required=True,
+        help="expected SHA-256 of the exact governed brief bytes (64 lowercase hex)",
+    )
+    wlaunch.add_argument("--run-id", default=None, help="optional deterministic lowercase run identifier")
+    wlaunch.add_argument("--dry-run", action="store_true", help="emit deterministic plan JSON without runner invocation")
+    wlaunch.add_argument("--json", action="store_true", dest="json_output")
 
     wse = worker_sub.add_parser(
         "scrub-env",
@@ -2700,6 +2733,64 @@ def _worker_run(args) -> int:
         print(f"ce worker run: completed {result.run_id} ({result.role.name}/{args.harness})")
         print(f"findings: {result.findings_path}")
     return 0
+
+
+def _worker_launch(args) -> int:
+    filesystem = _make_codex_launcher_filesystem()
+    try:
+        policy = codex_worker_launcher.load_canonical_policy(
+            args.worktree,
+            filesystem=filesystem,
+        )
+        governed_input = codex_worker_launcher.load_governed_worker_input(
+            worktree=args.worktree,
+            role=args.role,
+            brief_path=args.brief,
+            brief_sha256=args.brief_sha256,
+            filesystem=filesystem,
+        )
+        plan = codex_worker_launcher.build_launch_plan(
+            policy=policy,
+            governed_input=governed_input,
+            role=args.role,
+            venue=args.venue,
+            worktree=args.worktree,
+            run_id=args.run_id,
+            filesystem=filesystem,
+            version_probe=_make_codex_version_probe(),
+        )
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        print(f"ERROR: ce worker launch refused: {exc}", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print(json.dumps(plan.to_dict(), indent=2, sort_keys=True))
+        return 0
+    try:
+        result = codex_worker_launcher.launch(
+            plan,
+            runner=_make_codex_one_shot_runner(),
+            governed_input=governed_input,
+        )
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        print(f"ERROR: ce worker launch refused: {exc}", file=sys.stderr)
+        return 1
+    status = "completed" if result == 0 else "failed/refused"
+    if args.json_output:
+        print(
+            json.dumps(
+                {"plan": plan.to_dict(), "returncode": result, "status": status},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    elif result == 0:
+        print(f"ce worker launch: completed {plan.run_id} ({plan.role}/{plan.venue})")
+    else:
+        print(
+            f"ERROR: ce worker launch failed/refused: Codex exited with status {result}",
+            file=sys.stderr,
+        )
+    return result
 
 
 def _worker_scrub_env(args) -> int:
@@ -5618,6 +5709,7 @@ _LEDGER_DISPATCH = {
 }
 
 _WORKER_DISPATCH = {
+    "launch": _worker_launch,
     "run": _worker_run,
     "spawn": _worker_spawn,
     "scrub-env": _worker_scrub_env,

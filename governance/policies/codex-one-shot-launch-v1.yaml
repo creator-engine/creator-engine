@@ -1,0 +1,55 @@
+kind: codex-one-shot-launch-policy
+schema_version: "1"
+policy_id: codex-one-shot-launch-v1
+version: 0.145.0-alpha.9
+supported_roles:
+  - architect_research
+  - implementer
+  - reviewer
+  - verification
+role_provider_credentials:
+  architect_research:
+    - OPENAI_API_KEY
+  implementer:
+    - OPENAI_API_KEY
+  reviewer: []
+  verification: []
+venues:
+  dgx-relay:
+    codex_binary_template: /opt/creator-engine/codex/{version}/bin/codex
+    outer_isolation_attestation: null
+    role_sandboxes:
+      architect_research: read-only
+      implementer: null
+      reviewer: read-only
+      verification: read-only
+  vps-tmux:
+    codex_binary_template: /opt/creator-engine/codex/{version}/bin/codex
+    outer_isolation_attestation: null
+    role_sandboxes:
+      architect_research: null
+      implementer: null
+      reviewer: null
+      verification: null
+  dev1-local:
+    codex_binary_template: /opt/creator-engine/codex/{version}/bin/codex
+    outer_isolation_attestation: null
+    role_sandboxes:
+      architect_research: read-only
+      implementer: null
+      reviewer: read-only
+      verification: read-only
+  in-seat:
+    codex_binary_template: /opt/creator-engine/codex/{version}/bin/codex
+    outer_isolation_attestation: null
+    role_sandboxes:
+      architect_research: null
+      implementer: null
+      reviewer: null
+      verification: null
+model_defaults:
+  model: gpt-5.6-terra
+  effort: high
+canonical_add_dirs:
+  - governance
+  - validators

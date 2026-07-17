@@ -1487,6 +1487,21 @@ Options:
 | `--claim-id` | no |  | optional: scope the sweep to one claim |
 | `--json` | no |  |  |
 
+### `worker launch`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--role` | yes |  | policy-supported worker role |
+| `--venue` | yes |  | policy-supported execution venue |
+| `--worktree` | yes |  | absolute allocated worktree path |
+| `--brief` | yes |  | regular brief file inside <worktree>/.ce/briefs |
+| `--brief-sha256` | yes |  | expected SHA-256 of the exact governed brief bytes (64 lowercase hex) |
+| `--run-id` | no |  | optional deterministic lowercase run identifier |
+| `--dry-run` | no |  | emit deterministic plan JSON without runner invocation |
+| `--json` | no |  |  |
+
 ### `worker run`
 
 Options:

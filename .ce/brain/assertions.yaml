@@ -4752,4 +4752,254 @@ records:
   verification_method:
     evidence_ref: validators/pyproject.toml
     type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 051217ab82841da95dc808b1361f3f8c576642133b0b132dbb4043ab1753be9d
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 9825f42186d419c6cde8c281fb9bccf046f961ea795aed6a99af0154b8c065e8
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-d1b-30-contained-not-airgapped-v2
+  kind: brain-assertion
+  prev_hash: 92ba094ddc16bf7d0f305002028445e7096d26f2d5033894e0cd626488330fae
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 182
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: superseded
+  superseded_by: brain-assertion-96ba0f54de6a482c3cd9c289
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 8efca15ca64256ece2833e7c801f12a0054ac2f2cfbeac1d58449a80d8b11af6
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 40d73e01a48b89367cbf381c44fadef249fcd094e589e42233e516d1d60580c0
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-96ba0f54de6a482c3cd9c289
+  kind: brain-assertion
+  prev_hash: 9825f42186d419c6cde8c281fb9bccf046f961ea795aed6a99af0154b8c065e8
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 183
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 8efca15ca64256ece2833e7c801f12a0054ac2f2cfbeac1d58449a80d8b11af6
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: c84e15cec713e2c76d9ab283f126364a443f410c0ea33c5d70b81e6e69b567ff
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-96ba0f54de6a482c3cd9c289
+  kind: brain-assertion
+  prev_hash: 40d73e01a48b89367cbf381c44fadef249fcd094e589e42233e516d1d60580c0
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 184
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: superseded
+  superseded_by: brain-assertion-0a6fb3e3b65966cff353956f
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: c90789d582f35aa38aa5231b22dbdc492961fddc1a8a52d9b2638799da3785b3
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 00460fdb37b9c0b92b617e79aeec980340b769d92436eff04e9ef5de253391c9
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-0a6fb3e3b65966cff353956f
+  kind: brain-assertion
+  prev_hash: c84e15cec713e2c76d9ab283f126364a443f410c0ea33c5d70b81e6e69b567ff
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 185
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: c90789d582f35aa38aa5231b22dbdc492961fddc1a8a52d9b2638799da3785b3
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: f4593ed4b6e765732ddc120d8471f1588a44018f2fb87e282323dd78885424c9
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-0a6fb3e3b65966cff353956f
+  kind: brain-assertion
+  prev_hash: 00460fdb37b9c0b92b617e79aeec980340b769d92436eff04e9ef5de253391c9
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 186
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: superseded
+  superseded_by: brain-assertion-478c91282dd7827da17a0f4f
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 3f7a0ab9cefa284d0b70dc5ca391dd409d6ed1fe2cab87143c15b088d111f185
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 2d0637c6f9addb181dd4d5153c6fbe06d7bf8e4163222ad1be6a60f475457d7a
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-478c91282dd7827da17a0f4f
+  kind: brain-assertion
+  prev_hash: f4593ed4b6e765732ddc120d8471f1588a44018f2fb87e282323dd78885424c9
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 187
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 3f7a0ab9cefa284d0b70dc5ca391dd409d6ed1fe2cab87143c15b088d111f185
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: d2a45e0fd5c09a9d615918df7ddc4bb94a55bfb99943e4f37ff8c6865edda96f
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-478c91282dd7827da17a0f4f
+  kind: brain-assertion
+  prev_hash: 2d0637c6f9addb181dd4d5153c6fbe06d7bf8e4163222ad1be6a60f475457d7a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 188
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: superseded
+  superseded_by: brain-assertion-0b347c13ae9190fac04413ab
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 1aba43592d1b2def857d17633d5fea9a5b4148b6938d4a045c536efc0dff1901
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 1ee4c9f3a2d6a4da76ac594e22c420b38133035f3c769559f735b23287658358
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-0b347c13ae9190fac04413ab
+  kind: brain-assertion
+  prev_hash: d2a45e0fd5c09a9d615918df7ddc4bb94a55bfb99943e4f37ff8c6865edda96f
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 189
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 1aba43592d1b2def857d17633d5fea9a5b4148b6938d4a045c536efc0dff1901
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 9dec0d6676b988f8b33764003f2b04610976cd88b59762d867e1b6d4c02ac2b3
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-0b347c13ae9190fac04413ab
+  kind: brain-assertion
+  prev_hash: 1ee4c9f3a2d6a4da76ac594e22c420b38133035f3c769559f735b23287658358
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 190
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: superseded
+  superseded_by: brain-assertion-ab959ff1a607fca27f178eae
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
+- claim:
+    details: Containment does not imply air-gap; allowed egress is role-scoped and
+      must be checked from the seat policy before diagnosing broken access.
+    evidence_sha256: 32d3c30ed05445fe1465b1dc1e99af5289b7692a25536e5fab58ee8d3c1162db
+    item: 30
+    object: contained-not-airgapped
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 5671bcb4652486126fa576e2c37c5810f58ce643b6f0352615fd9239ddd2016e
+  evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+  id: brain-assertion-ab959ff1a607fca27f178eae
+  kind: brain-assertion
+  prev_hash: 9dec0d6676b988f8b33764003f2b04610976cd88b59762d867e1b6d4c02ac2b3
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 191
+  statement: Containment does not imply air-gap; allowed egress is role-scoped and
+    must be checked from the seat policy before diagnosing broken access.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/operations/WORKER_CONTAINER_PROTOCOL.md
+    type: static
 schema_version: '1'

@@ -300,6 +300,7 @@ above into a local runtime:
 | `ce worker status` | local read | read a single container-instance record (read-only) |
 | `ce worker spawn` | `worker_spawn.spawn_worker` | spawn a harness-agnostic governed worker seat under a scrubbed environment, recording only prompt refs/hashes and value-free launch metadata |
 | `ce worker run --role <role> --brief <file>` | `worker_run.run_worker_role` | sanctioned one-call role-brief path: resolve `.claude/agents/<role>.md`, compose `worker_spawn`, wait for the declared findings artifact, and return structured findings |
+| `ce worker launch` | `codex_worker_launcher.build_launch_plan` | load the strict checked-in one-shot policy and construct a deterministic external Codex argv; `--dry-run` emits JSON and never invokes a runner |
 
 Runtime invariants: the container engine and credential broker are reached
 **only** through injectable seams (`PodmanCommandRunner`, `NullCredentialBroker`);
@@ -310,7 +311,62 @@ secret values never enter argv, records, side-effect details, or broker metadata
 enforcement primitive is refused before container start (`G5-EGRESS-UNENFORCEABLE`);
 and every refusal raises before any side effect.
 
-### 7.1 `ce worker run` design note and deferrals
+### 7.1 Policy-bound external Codex one-shots
+
+`ce worker launch` is a narrow, pure-plan-first external Codex seam. Callers provide
+`--brief <path> --brief-sha256 <64-lowerhex>` but cannot override policy, binary,
+stdin, output, flags, or add-dirs. It loads only `governance/policies/codex-one-shot-launch-v1.yaml`
+from the allocated worktree and fails closed on unknown keys, symlinks, escapes, or unreadable non-files.
+
+The same containment rule resolves `.claude/agents/<role>.md` and a regular brief
+beneath `.ce/briefs`, whose exact bytes must match the supplied SHA-256. The runner
+receives a length-delimited frame of canonical role-policy then exact brief bytes. Plan JSON stores
+only canonical paths and digests, never either prompt body.
+
+Production execution never inherits the controller environment wholesale. Each invocation
+uses fresh, cleanup-bound `HOME`, `CODEX_HOME`, XDG, and temporary directories; preserves
+only the small non-secret runtime allowlist; and admits only provider credential names
+explicitly listed for the role by the canonical policy. GitHub, cloud, SSH/GPG agent,
+controller/seat socket, and host configuration variables are absent. An execution exception
+or nonzero Codex exit is reported as failed/refused; completion is emitted only for zero.
+
+The policy pins Codex `0.145.0-alpha.9`, model, reasoning effort, canonical add-dirs, and this complete matrix:
+
+| Venue | `architect_research` | `implementer` | `reviewer` | `verification` |
+|---|---|---|---|---|
+| `dgx-relay` | `read-only` | refused | `read-only` | `read-only` |
+| `dev1-local` | `read-only` | refused | `read-only` | `read-only` |
+| `vps-tmux` | refused | refused | refused | refused |
+| `in-seat` | refused | refused | refused | refused |
+
+Every implementer venue is refused until it has a separately reviewed, mechanically
+enforced boundary that keeps `governance/`, `schemas/`, `validators/`, and the validator
+binary read-only while the allocated worktree remains writable. `workspace-write` alone
+does not supply that boundary, and neither currently executable native venue has an
+outer-isolation attestation or launcher primitive that does. Contained `vps-tmux` and
+`in-seat` also cannot prove the required mount/scratch contract, so every role there
+fails closed pending separately reviewed, machine-verifiable outer-isolation attestation.
+Neither `danger-full-access` for read-only roles nor unusable nested `read-only` for
+implementers is allowed; this is enforced rather than trusted to prose.
+
+Every plan has this fixed argv order:
+
+```text
+<pinned-binary> exec --ephemeral -m <pinned-model> -c model_reasoning_effort=<pinned-effort> \
+  -c features.multi_agent=false -c features.multi_agent_v2=false -s <venue-sandbox> -C <worktree> \
+  [canonical --add-dir values] -o <deterministic-output> -
+```
+
+Before runner construction, the worktree, canonical add-dirs, and `.ce/state` must
+be existing real directories without symlink or `..` traversal. The venue-owned
+absolute binary must be a regular executable whose final symlink target remains
+under its `0.145.0-alpha.9` root; an injectable probe verifies that version, and
+deterministic output remains inside the real worktree state root.
+
+This source slice neither starts a container nor performs a live relaunch. Source
+validation and merge must precede a separately authorized real-evidence post-land relaunch, which may not be simulated.
+
+### 7.2 `ce worker run` design note and deferrals
 
 `ce worker run --role <role> --brief <file>` is the sanctioned replacement for
 ad hoc harness fallback when a controller needs a governed role to answer a
