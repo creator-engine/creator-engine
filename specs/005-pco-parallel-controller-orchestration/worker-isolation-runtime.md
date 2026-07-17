@@ -282,6 +282,44 @@ The role enum is normative for Slice 2I-S. Additional roles (e.g.,
 connector-only workers per Feature 008) MUST be ratified as additive
 schema changes; this amendment fixes only the three above.
 
+#### d.2.1 Governed Codex one-shot role envelope
+
+The policy-bound Codex one-shot launcher applies
+`CE-GOVERNED-ROLE-ENVELOPE-V1` to the closed leaf set
+`architect_research | implementer | reviewer | verification`. `reviewer`
+is the read-only review specialization of the read-only worker posture;
+this launcher contract does not widen the worker-container role enum,
+mounts, egress, credentials, or runtime authority described above.
+
+The launcher MUST read and SHA-256-bind the canonical tracked role policy
+and the canonical governed brief before planning. It MUST pass only the
+exact verified brief bytes on ordinary stdin. Role-policy bytes, ambient
+bootstrap prose, ticket content, credential values, and secret values MUST
+NOT enter stdin or the role envelope.
+
+The deterministic developer-role envelope contains only:
+
+* its schema/version and one closed leaf role;
+* `seat_class: worker` and disabled nested delegation;
+* canonical worktree-relative role-policy and brief paths with their
+  SHA-256 digests;
+* the closed role capability and sandbox posture;
+* prohibitions on controller or foreman authority, nested spawn, role
+  switching, credential expansion, approval, enqueue, merge, signing, and
+  every reserved act; and
+* parent lineage as provenance only, with no inherited authority.
+
+The launcher MUST supply that instruction through a bounded, deterministic,
+round-trip-verified TOML string in
+`codex exec --strict-config -c developer_instructions=<TOML-string>`.
+`features.multi_agent=false` remains mandatory. The launcher MUST refuse,
+before runner invocation, an unknown or malformed role, digest or envelope
+mismatch, noncanonical or control-bearing path, unsafe TOML encoding,
+oversized envelope, missing or reordered strict configuration, authority
+or sandbox escalation, nested delegation, or any prompt-only, foreman, or
+unguarded fallback. `model_instructions_file`, mutable ambient role prose,
+and role-policy framing on stdin are not permitted substitutes.
+
 ### d.3 Runtime engine selection is an OSD, not hardcoded
 
 Rootless **Podman** and rootless **Docker** are both acceptable v1

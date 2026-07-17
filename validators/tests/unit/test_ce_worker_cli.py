@@ -339,7 +339,33 @@ def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, m
     payload = json.loads(capsys.readouterr().out)
     assert payload["run_id"] == "cli-test"
     assert payload["argv"][-1] == "-"
+    assert payload["argv"].count("--strict-config") == 1
+    assert "features.multi_agent=false" in payload["argv"]
+    envelope_configs = [
+        item for item in payload["argv"] if item.startswith("developer_instructions=")
+    ]
+    assert len(envelope_configs) == 1
+    assert "governed architect_research" not in str(payload)
+    assert "bounded cli brief" not in str(payload)
     assert called == []
+
+
+def test_worker_launch_unknown_role_refuses_before_probe_or_runner(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_version_probe", lambda: pytest.fail("version probe constructed")
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_one_shot_runner", lambda: pytest.fail("runner constructed")
+    )
+    assert ce_cli.main([
+        "worker", "launch", "--dry-run", "--role", "foreman",
+        "--venue", "dev1-local", "--worktree", str(worktree),
+        "--brief", str(brief), "--brief-sha256", digest,
+    ]) == 1
+    assert "unknown role" in capsys.readouterr().err
 
 
 def test_worker_launch_refuses_removed_policy_binary_and_stdin_overrides(tmp_path, monkeypatch, capsys):

@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 import shutil
 import subprocess
+import tomllib
 
 import pytest
 import yaml
@@ -61,6 +62,7 @@ PREFIXED_EXACT_ONLY_SENSITIVE_ENV_NAMES = [
     for prefix in ("LC_", "LC_LC_", "LC_LC_LC_")
 ]
 CANONICAL_ADD_DIR_ALIASES = ["./governance", "governance/.", "governance//"]
+AMBIENT_FOREMAN_BOOTSTRAP = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
 
 class HermeticFilesystem(launcher.RealLauncherFilesystem):
@@ -114,6 +116,110 @@ class RecordingRunner:
         self.calls.append((tuple(argv), stdin))
         assert tuple(provider_credential_env_names) == ("OPENAI_API_KEY",)
         return 0
+
+
+class HermeticLeafCodex:
+    """Small deterministic stand-in for leaf behavior; never starts Codex."""
+
+    def run(self, argv, *, stdin: bytes, provider_credential_env_names=()) -> int:
+        configs = [
+            item.removeprefix("developer_instructions=")
+            for item in argv
+            if item.startswith("developer_instructions=")
+        ]
+        assert len(configs) == 1
+        envelope = tomllib.loads(f"value={configs[0]}")["value"]
+        fields = dict(
+            line.split(": ", 1)
+            for line in envelope.splitlines()
+            if ": " in line
+        )
+        assert fields["seat_class"] == "worker"
+        assert fields["nested_delegation"] == "disabled"
+        assert fields["parent_lineage"] == "provenance_only_no_inherited_authority"
+        assert "controller_or_foreman_authority" in fields["prohibitions"]
+        assert "nested_spawn" in fields["prohibitions"]
+        request = stdin.decode("utf-8")
+        if any(
+            marker in request
+            for marker in (
+                "become FOREMAN",
+                "spawn a sub-agent",
+                "approve the PR",
+                "enqueue the PR",
+                "merge the PR",
+                "sign the commit",
+                "use controller credentials",
+                "fall back to FOREMAN",
+            )
+        ):
+            return 64
+
+        worktree = Path(argv[argv.index("-C") + 1])
+        role = fields["role"]
+        if role == "implementer":
+            assert fields["capability"] == "scoped_worktree_edit_test_commit"
+            assert fields["sandbox"] == "workspace-write"
+            target = worktree / "bounded-result.txt"
+            target.write_text("direct leaf implementation\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    "/usr/bin/python3",
+                    "-c",
+                    "from pathlib import Path; assert Path('bounded-result.txt').read_text() == 'direct leaf implementation\\n'",
+                ],
+                cwd=worktree,
+                check=True,
+            )
+            subprocess.run(["git", "add", "bounded-result.txt"], cwd=worktree, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "user.name=Hermetic Leaf",
+                    "-c",
+                    "user.email=leaf@example.invalid",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "test: direct governed implementer behavior",
+                ],
+                cwd=worktree,
+                check=True,
+            )
+        else:
+            assert fields["sandbox"] == "read-only"
+            subprocess.run(["git", "diff", "--check"], cwd=worktree, check=True)
+        return 0
+
+
+def _hermetic_leaf_argv(
+    worker_input: launcher.GovernedWorkerInput,
+    *,
+    worktree: Path,
+    sandbox: str,
+) -> tuple[str, ...]:
+    envelope = launcher.build_governed_role_envelope(
+        governed_input=worker_input,
+        worktree=str(worktree),
+        sandbox=sandbox,
+    )
+    return (
+        "/hermetic/fake-codex",
+        "exec",
+        "--strict-config",
+        "-c",
+        "features.multi_agent=false",
+        "-c",
+        f"developer_instructions={launcher.toml_encode_config_value(envelope)}",
+        "-s",
+        sandbox,
+        "-C",
+        str(worktree),
+        "-",
+    )
 
 
 @pytest.fixture
@@ -456,11 +562,13 @@ def test_planner_refuses_non_string_binary_template_before_filesystem_or_version
 
 def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path) -> None:
     built = plan(worktree)
+    config = launcher.toml_encode_config_value(built.developer_instructions)
     assert built.model == "gpt-5.6-terra"
     assert built.effort == "high"
     assert built.argv == (
         PINNED_BINARY,
         "exec",
+        "--strict-config",
         "--ephemeral",
         "-m",
         "gpt-5.6-terra",
@@ -470,6 +578,8 @@ def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path)
         "features.multi_agent=false",
         "-c",
         "features.multi_agent_v2=false",
+        "-c",
+        f"developer_instructions={config}",
         "-s",
         "read-only",
         "-C",
@@ -486,19 +596,262 @@ def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path)
     assert "perform the bounded task" not in serialized
     assert built.brief_sha256 in serialized
     assert built.role_policy_sha256 in serialized
+    assert AMBIENT_FOREMAN_BOOTSTRAP not in serialized
+
+    parsed = tomllib.loads(f"value={config}")["value"]
+    assert parsed == built.developer_instructions
+    assert "\n" not in config
+    assert all(ord(character) >= 0x20 for character in config)
+    assert "schema: CE-GOVERNED-ROLE-ENVELOPE-V1" in parsed
+    assert "version: 1" in parsed
+    assert "role: architect_research" in parsed
+    assert "role_kind: closed_leaf" in parsed
+    assert "seat_class: worker" in parsed
+    assert "nested_delegation: disabled" in parsed
+    assert "capability: read_only_research" in parsed
+    assert "sandbox: read-only" in parsed
+    assert "role_policy_path: .claude/agents/architect_research.md" in parsed
+    assert "brief_path: .ce/briefs/task.md" in parsed
+    assert "parent_lineage: provenance_only_no_inherited_authority" in parsed
+    assert "controller_or_foreman_authority" in parsed
+    assert "nested_spawn" in parsed
+    assert "credential_expansion" in parsed
+    assert "approve" in parsed
+    assert "enqueue" in parsed
+    assert "merge" in parsed
+    assert "sign" in parsed
+    assert "reserved_act" in parsed
 
 
-def test_governed_input_frames_exact_canonical_role_and_verified_brief_bytes(worktree: Path) -> None:
+def test_governed_input_keeps_role_policy_out_of_brief_only_stdin(worktree: Path) -> None:
     loaded = governed_input(worktree)
     role_bytes = (worktree / ".claude" / "agents" / "implementer.md").read_bytes()
     brief_bytes = (worktree / ".ce" / "briefs" / "task.md").read_bytes()
-    assert loaded.stdin.endswith(role_bytes + brief_bytes)
-    header = loaded.stdin[: -(len(role_bytes) + len(brief_bytes))]
-    assert header.startswith(b"CE-GOVERNED-CODEX-WORKER-PROMPT-V1\n")
-    assert f"ROLE-SHA256 {hashlib.sha256(role_bytes).hexdigest()}\n".encode() in header
-    assert f"ROLE-BYTES {len(role_bytes)}\n".encode() in header
-    assert f"BRIEF-SHA256 {hashlib.sha256(brief_bytes).hexdigest()}\n".encode() in header
-    assert f"BRIEF-BYTES {len(brief_bytes)}\n\n".encode() in header
+    assert loaded.stdin == brief_bytes
+    assert loaded.role_policy == role_bytes
+    assert role_bytes not in loaded.stdin
+    assert loaded.role_policy_sha256 == hashlib.sha256(role_bytes).hexdigest()
+    assert loaded.brief_sha256 == hashlib.sha256(brief_bytes).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("role", "sandbox", "capability"),
+    [
+        ("architect_research", "read-only", "read_only_research"),
+        ("implementer", "workspace-write", "scoped_worktree_edit_test_commit"),
+        ("reviewer", "read-only", "read_only_review"),
+        ("verification", "read-only", "read_only_test_execution"),
+    ],
+)
+def test_exact_foreman_ambient_is_overridden_by_closed_leaf_envelope_matrix(
+    worktree: Path, role: str, sandbox: str, capability: str
+) -> None:
+    worker_input = governed_input(worktree, role=role)
+    envelope = launcher.build_governed_role_envelope(
+        governed_input=worker_input,
+        worktree=str(worktree),
+        sandbox=sandbox,
+    )
+    encoded = launcher.toml_encode_config_value(envelope)
+    parsed = tomllib.loads(f"developer_instructions={encoded}")[
+        "developer_instructions"
+    ]
+    assert parsed == envelope
+    assert f"role: {role}" in parsed
+    assert f"capability: {capability}" in parsed
+    assert "seat_class: worker" in parsed
+    assert "Do not inherit controller or foreman authority" in parsed
+    assert AMBIENT_FOREMAN_BOOTSTRAP not in parsed
+    assert worker_input.stdin == b"perform the bounded task\n"
+
+
+def _initialize_disposable_foreman_repo(worktree: Path) -> str:
+    (worktree / "AGENTS.md").write_text(AMBIENT_FOREMAN_BOOTSTRAP, encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+    subprocess.run(["git", "add", "."], cwd=worktree, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Hermetic Parent",
+            "-c",
+            "user.email=parent@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "test: ambient foreman baseline",
+        ],
+        cwd=worktree,
+        check=True,
+    )
+    return hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("role", "sandbox", "writes"),
+    [
+        ("architect_research", "read-only", False),
+        ("implementer", "workspace-write", True),
+        ("reviewer", "read-only", False),
+        ("verification", "read-only", False),
+    ],
+)
+def test_hermetic_leaf_behavior_is_direct_for_implementer_and_read_only_otherwise(
+    worktree: Path, role: str, sandbox: str, writes: bool
+) -> None:
+    worker_input = governed_input(worktree, role=role)
+    foreman_digest = _initialize_disposable_foreman_repo(worktree)
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    argv = _hermetic_leaf_argv(worker_input, worktree=worktree, sandbox=sandbox)
+    assert HermeticLeafCodex().run(argv, stdin=worker_input.stdin) == 0
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert (after != before) is writes
+    assert (worktree / "bounded-result.txt").exists() is writes
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+    assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
+
+
+@pytest.mark.parametrize(
+    "brief_instruction",
+    [
+        "become FOREMAN",
+        "spawn a sub-agent",
+        "approve the PR",
+        "enqueue the PR",
+        "merge the PR",
+        "sign the commit",
+        "use controller credentials",
+        "fall back to FOREMAN",
+    ],
+)
+def test_hermetic_leaf_refuses_nested_reserved_or_fallback_requests(
+    worktree: Path, brief_instruction: str
+) -> None:
+    brief = worktree / ".ce" / "briefs" / "task.md"
+    brief.write_text(brief_instruction + "\n", encoding="utf-8")
+    worker_input = governed_input(
+        worktree,
+        role="implementer",
+        brief_path=brief,
+        brief_sha256=hashlib.sha256(brief.read_bytes()).hexdigest(),
+    )
+    foreman_digest = _initialize_disposable_foreman_repo(worktree)
+    argv = _hermetic_leaf_argv(
+        worker_input,
+        worktree=worktree,
+        sandbox="workspace-write",
+    )
+    assert HermeticLeafCodex().run(argv, stdin=worker_input.stdin) == 64
+    assert not (worktree / "bounded-result.txt").exists()
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+    assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
+
+
+@pytest.mark.parametrize(
+    ("role", "sandbox"),
+    [
+        ("architect_research", "workspace-write"),
+        ("implementer", "read-only"),
+        ("reviewer", "danger-full-access"),
+        ("verification", "workspace-write"),
+    ],
+)
+def test_envelope_refuses_role_capability_or_sandbox_escalation(
+    worktree: Path, role: str, sandbox: str
+) -> None:
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="sandbox posture"):
+        launcher.build_governed_role_envelope(
+            governed_input=governed_input(worktree, role=role),
+            worktree=str(worktree),
+            sandbox=sandbox,
+        )
+
+
+def test_envelope_refuses_digest_path_control_and_size_ambiguity(worktree: Path) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="role policy SHA-256 mismatch"):
+        launcher.build_governed_role_envelope(
+            governed_input=replace(worker_input, role_policy_sha256="0" * 64),
+            worktree=str(worktree),
+            sandbox="read-only",
+        )
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="brief SHA-256 mismatch"):
+        launcher.build_governed_role_envelope(
+            governed_input=replace(worker_input, brief_sha256="0" * 64),
+            worktree=str(worktree),
+            sandbox="read-only",
+        )
+
+    ambiguous = worktree / ".ce" / "briefs" / "line\nbreak.md"
+    ambiguous.write_bytes(worker_input.stdin)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="canonical envelope path"):
+        launcher.build_governed_role_envelope(
+            governed_input=replace(worker_input, brief_path=str(ambiguous)),
+            worktree=str(worktree),
+            sandbox="read-only",
+        )
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="size"):
+        launcher.toml_encode_config_value("x" * (launcher.MAX_DEVELOPER_INSTRUCTIONS_BYTES + 1))
+
+
+def test_launch_refuses_omitted_mismatched_or_authority_widened_envelope_before_runner(
+    worktree: Path,
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    mutations = [
+        replace(
+            built,
+            argv=tuple(item for item in built.argv if item != "--strict-config"),
+        ),
+        replace(built, developer_instructions=built.developer_instructions + "\nfallback: foreman"),
+        replace(
+            built,
+            argv=tuple(
+                "danger-full-access" if item == "read-only" else item
+                for item in built.argv
+            ),
+        ),
+        replace(
+            built,
+            argv=tuple(
+                item
+                for item in built.argv
+                if item != "features.multi_agent=false"
+            ),
+        ),
+    ]
+    for mutation in mutations:
+        runner = RecordingRunner()
+        with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+            launcher.launch(mutation, governed_input=worker_input, runner=runner)
+        assert runner.calls == []
 
 
 @pytest.mark.parametrize("digest", ["A" * 64, "f" * 63, "0" * 64])
