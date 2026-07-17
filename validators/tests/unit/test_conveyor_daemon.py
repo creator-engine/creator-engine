@@ -3,7 +3,9 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -2008,35 +2010,17 @@ def test_completion_parent_fsync_error_returns_uncertain_and_leaves_terminal_sea
             probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
         )()
     )[0]
-    real_open = conveyor_discovery.os.open
-    real_close = conveyor_discovery.os.close
     real_fsync = conveyor_discovery.os.fsync
-    parent_fd: int | None = None
     parent_fsync_calls = 0
-
-    def record_open(path, flags, *args, **kwargs):
-        nonlocal parent_fd
-        fd = real_open(path, flags, *args, **kwargs)
-        if Path(path) == state_path.parent:
-            parent_fd = fd
-        return fd
-
-    def record_close(fd):
-        nonlocal parent_fd
-        if fd == parent_fd:
-            parent_fd = None
-        return real_close(fd)
 
     def fail_terminal_parent_fsync(fd):
         nonlocal parent_fsync_calls
-        if fd == parent_fd:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
             parent_fsync_calls += 1
-            if parent_fsync_calls == 2:
+            if parent_fsync_calls == 6:
                 raise OSError("terminal directory fsync denied")
         return real_fsync(fd)
 
-    monkeypatch.setattr(conveyor_discovery.os, "open", record_open)
-    monkeypatch.setattr(conveyor_discovery.os, "close", record_close)
     monkeypatch.setattr(conveyor_discovery.os, "fsync", fail_terminal_parent_fsync)
 
     result = ConveyorDaemon(
@@ -2055,7 +2039,7 @@ def test_completion_parent_fsync_error_returns_uncertain_and_leaves_terminal_sea
 
     entry = json.loads(state_path.read_text(encoding="utf-8"))["receipts"][0]
     assert result.results[0].status == "uncertain"
-    assert result.results[0].reasons == ("receipt terminal durability is uncertain",)
+    assert result.results[0].reasons == ("receipt completion durability is uncertain",)
     assert result.results[0].side_effect_started is True
     assert entry["state"] == "pr_opened"
     assert entry["completion_sealed"] is True
@@ -2078,24 +2062,18 @@ def test_sealed_visible_terminal_is_audited_blocked_after_restart_and_never_reex
         state_path, identity.seat_id, identity.branch, identity.sha
     )
     assert receipt.claim() is True
-    real_open = conveyor_discovery.os.open
     real_fsync = conveyor_discovery.os.fsync
-    parent_fd: int | None = None
-
-    def record_open(path, flags, *args, **kwargs):
-        nonlocal parent_fd
-        fd = real_open(path, flags, *args, **kwargs)
-        if Path(path) == state_path.parent:
-            parent_fd = fd
-        return fd
+    directory_fsyncs = 0
 
     def fail_sealed_terminal_parent_fsync(fd):
-        if fd == parent_fd:
+        nonlocal directory_fsyncs
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            directory_fsyncs += 1
+        if directory_fsyncs == 3:
             raise OSError("terminal directory fsync denied")
         return real_fsync(fd)
 
     with monkeypatch.context() as patch_context:
-        patch_context.setattr(conveyor_discovery.os, "open", record_open)
         patch_context.setattr(conveyor_discovery.os, "fsync", fail_sealed_terminal_parent_fsync)
         with pytest.raises(conveyor_discovery.ReceiptDurabilityUncertainError):
             receipt.complete("pr_opened")
@@ -2144,12 +2122,12 @@ def test_processing_receipt_recovery_blocks_restart_without_rerunning_side_effec
     )
     assert receipt.claim() is True
 
-    def fail_terminal_replace(*_args):
+    def fail_terminal_replace(*_args, **_kwargs):
         raise OSError("terminal replace denied")
 
     with monkeypatch.context() as patch_context:
         patch_context.setattr(conveyor_discovery.os, "replace", fail_terminal_replace)
-        with pytest.raises(ValueError, match="receipt_state_write_failed:OSError"):
+        with pytest.raises(conveyor_discovery.ReceiptPersistenceError, match="receipt_state_write_failed"):
             receipt.complete("pr_opened")
 
     prepare = FakePrepare()
@@ -2275,6 +2253,119 @@ def test_receipt_exception_during_push_is_uncertain(tmp_path):
     assert result.results[0].status == "uncertain"
     assert result.results[0].side_effect_started is True
     assert json.loads(state_path.read_text())["receipts"][0]["state"] == "uncertain"
+
+
+@pytest.mark.parametrize("completion_outcome", ["false", "exception"])
+def test_post_side_effect_completion_ambiguity_is_value_free_uncertain_once_and_restart_safe(
+    tmp_path, monkeypatch, completion_outcome
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-secret", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    completion_calls = 0
+
+    def ambiguous_complete(_receipt, _state):
+        nonlocal completion_calls
+        completion_calls += 1
+        if completion_outcome == "exception":
+            raise RuntimeError("secret rejected value")
+        return False
+
+    prepare = FakePrepare(record_validation=True)
+    gh = FakeGh()
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(
+            conveyor_discovery.HandledSignalReceipt,
+            "complete",
+            ambiguous_complete,
+        )
+        result = ConveyorDaemon(
+            discovery_runner=lambda: [payload],
+            armed=True,
+            **_receipt_armed_roots(tmp_path),
+            git_runner=FakeGit(),
+            validate_runner=FakeValidate(),
+            gh_runner=gh,
+            now=FakeClock(),
+            ledger_writer=lambda record: None,
+            prepare_runner=prepare,
+            land_runner=FakeLand(),
+            validation_sandbox_runner=FakeValidationSandboxRunner(),
+        ).run_once()
+
+    assert completion_calls == 1
+    assert result.results[0].status == "uncertain"
+    assert result.results[0].reasons == ("receipt completion durability is uncertain",)
+    assert str(state_path) not in str(result.results[0].reasons)
+    assert "secret" not in str(result.results[0].reasons)
+    assert json.loads(state_path.read_text())["receipts"][0]["state"] == "processing"
+
+    prepare_calls = len(prepare.calls)
+    gh_calls = len(gh.calls)
+    restarted = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+    assert restarted.results[0].status == "skipped"
+    assert len(prepare.calls) == prepare_calls
+    assert len(gh.calls) == gh_calls
+
+
+def test_pre_side_effect_completion_exception_is_stable_failed_once_and_does_not_crash(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "receipts.json"
+    payload = list(
+        ConveyorSeatDiscoveryRunner(
+            [SeatProbeSpec("seat-secret", ("probe",))],
+            state_path,
+            probe_runner=lambda argv: f"READY-FOR-HARVEST feature-one {HEAD_SHA}",
+        )()
+    )[0]
+    completion_calls = 0
+
+    def fail_complete(_receipt, _state):
+        nonlocal completion_calls
+        completion_calls += 1
+        raise OSError("secret completion path")
+
+    def fail_prepare(*_args, **_kwargs):
+        raise RuntimeError("prepare failed")
+
+    monkeypatch.setattr(conveyor_discovery.HandledSignalReceipt, "complete", fail_complete)
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        **_receipt_armed_roots(tmp_path),
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=fail_prepare,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert completion_calls == 1
+    assert result.results[0].status == "failed"
+    assert result.results[0].reasons == ("receipt completion persistence failed",)
+    assert str(state_path) not in str(result.results[0].reasons)
+    assert "secret" not in str(result.results[0].reasons)
 
 
 def test_hostile_item_bundle_path_transport_gadget_is_rejected_never_reaches_git():

@@ -96,7 +96,26 @@ def test_build_daemon_pins_production_receipt_identity_to_controller_state(
 
     payload = next(iter(captured["discovery_runner"]()))
     assert payload.receipt_identity is not None
-    assert captured["receipt_state_path"] == config.discovery_state
+    assert captured["receipt_state_path"] is config.discovery_state
+    assert captured["discovery_runner"].state_path is config.discovery_state
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    ["relative/state.json", "/", "/tmp/../state.json", "/tmp/./state.json", "/tmp/x\x00y"],
+)
+def test_load_config_rejects_nonlexical_receipt_state_paths(tmp_path: Path, unsafe: str):
+    env = _base_env(tmp_path)
+    env["CE_CONVEYOR_DAEMON_DISCOVERY_STATE"] = unsafe
+    with pytest.raises(runner.ConfigError, match="safe absolute path"):
+        runner.load_config(env)
+
+
+def test_load_config_normalizes_receipt_state_once_without_following_links(tmp_path: Path):
+    env = _base_env(tmp_path)
+    env["CE_CONVEYOR_DAEMON_DISCOVERY_STATE"] = f"{tmp_path}//private///receipts.json"
+    config = runner.load_config(env)
+    assert config.discovery_state == tmp_path / "private" / "receipts.json"
 
 
 @pytest.mark.parametrize(
