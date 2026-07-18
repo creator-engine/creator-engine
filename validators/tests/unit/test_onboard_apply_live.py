@@ -1181,6 +1181,52 @@ def test_direct_live_runtime_invalid_repository_root_refuses_before_any_side_eff
     assert policy_pair_writes == []
 
 
+@pytest.mark.parametrize("backend", ["os-native", "openshell"])
+def test_direct_live_held_runtime_outside_source_skips_canonical_policy_and_tools(
+    tmp_path, monkeypatch, backend
+):
+    driver = onboard_apply_live.LiveForgeApplyDriver.__new__(
+        onboard_apply_live.LiveForgeApplyDriver
+    )
+    outside_source = (tmp_path / "outside-source").resolve()
+    outside_source.mkdir()
+    canonical_admissions = []
+    pinned_tool_ensure_calls = []
+
+    def refuse_canonical_admission(**kwargs):
+        canonical_admissions.append(kwargs)
+        raise AssertionError("held backend attempted canonical runtime-policy admission")
+
+    monkeypatch.setattr(
+        onboard_apply,
+        "_admit_canonical_runtime_policy",
+        refuse_canonical_admission,
+    )
+    monkeypatch.setattr(
+        driver,
+        "_ensure_pinned_system_tools",
+        lambda tools: pinned_tool_ensure_calls.append(tuple(tools)),
+    )
+
+    result = driver.provision_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        repository_root=outside_source,
+        backend=backend,
+    )
+
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    posture = json.loads((runtime_dir / "posture.json").read_text(encoding="utf-8"))
+    assert result["ok"] is True
+    assert posture["isolation_backend"] == backend
+    assert "runtime_policy" not in posture
+    assert canonical_admissions == []
+    assert pinned_tool_ensure_calls == []
+    assert not (runtime_dir / "runtime-policy.yaml").exists()
+    assert not (runtime_dir / "runtime-policy.receipt.json").exists()
+
+
 def test_install_dependencies_fails_closed_on_pip_failure():
     driver, calls = _deps_driver(pip_rc=1)
     result = driver.install_dependencies(["uv"], sudo_tools=[], userspace_tools=["uv"])

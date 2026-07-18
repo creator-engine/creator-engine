@@ -1258,10 +1258,13 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         runtime_policy_binding: onboard_apply.CanonicalRuntimePolicyBinding | None = None,
     ) -> dict[str, Any]:
         """Provision the runtime posture and, for gVisor, the concrete pinned host binaries."""
-        admitted_runtime_policy = onboard_apply._admit_canonical_runtime_policy(
-            repository_root=repository_root,
-            binding=runtime_policy_binding,
-        )
+        if backend == "gvisor-proxy":
+            admitted_runtime_policy = onboard_apply._admit_canonical_runtime_policy(
+                repository_root=repository_root,
+                binding=runtime_policy_binding,
+            )
+        else:
+            admitted_runtime_policy = None
         runtime_tools: dict[str, str] = {}
         if backend == "gvisor-proxy":
             ensured = self._ensure_pinned_system_tools(GVISOR_RUNTIME_TOOLS)

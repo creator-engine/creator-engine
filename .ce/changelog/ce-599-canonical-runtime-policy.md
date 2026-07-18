@@ -28,7 +28,11 @@ identity are now preflighted and captured before the apply lock or live-driver
 selection. Runtime provisioning reuses that immutable binding, so a missing,
 malformed, stale, or mismatched explicit checkout refuses without state writes
 or host-tool mutation and is never retrusted from a later checkout read.
-Direct base and live production-driver calls enforce the same admission at
-their first instruction, before runtime-directory creation or pinned-tool
-ensure. Focused coverage includes the complete live-driver module and proves
-invalid direct checkout roots leave both runtime state and host tools untouched.
+Direct base and live production-driver calls enforce the same admission for
+gVisor at their first instruction, before runtime-directory creation or
+pinned-tool ensure. Held os-native and OpenShell provisioning never reads or
+emits canonical policy material, including from an installed console outside a
+source checkout, while still refusing stale gVisor evidence before posture
+mutation. Focused coverage includes the complete live-driver module and proves
+invalid direct gVisor checkout roots leave both runtime state and host tools
+untouched.

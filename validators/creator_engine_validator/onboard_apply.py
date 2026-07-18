@@ -991,14 +991,25 @@ class ApplyDriver:
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
         runtime_policy_binding: CanonicalRuntimePolicyBinding | None = None,
     ) -> dict[str, Any]:
-        admitted_runtime_policy = _admit_canonical_runtime_policy(
-            repository_root=repository_root,
-            binding=runtime_policy_binding,
-        )
+        if backend == "gvisor-proxy":
+            admitted_runtime_policy = _admit_canonical_runtime_policy(
+                repository_root=repository_root,
+                binding=runtime_policy_binding,
+            )
+        else:
+            admitted_runtime_policy = None
         # ce-ops#71 Edit A: the backend is no longer hardwired to ``gvisor-proxy`` —
         # it is the one RESOLVED from the profile/answers (``solo-pilot`` →
         # ``os-native``, no privileged runtime). The posture records the selection.
         runtime_dir = state_root / ONBOARD_SUBDIR / "runtime"
+        if backend in {"os-native", "openshell"}:
+            policy_path = runtime_dir / RUNTIME_POLICY_BASENAME
+            receipt_path = runtime_dir / RUNTIME_POLICY_RECEIPT_BASENAME
+            if os.path.lexists(policy_path) or os.path.lexists(receipt_path):
+                raise ApplyRefused(
+                    "runtime_policy_held_transition_refused",
+                    "held backend transition refused while canonical runtime-policy evidence exists",
+                )
         runtime_dir.mkdir(parents=True, exist_ok=True)
         config = {
             "isolation_backend": backend,
@@ -1021,14 +1032,6 @@ class ApplyDriver:
                     str(runtime_policy_result["receipt_path"]),
                 ]
             )
-        elif backend in {"os-native", "openshell"}:
-            policy_path = runtime_dir / RUNTIME_POLICY_BASENAME
-            receipt_path = runtime_dir / RUNTIME_POLICY_RECEIPT_BASENAME
-            if os.path.lexists(policy_path) or os.path.lexists(receipt_path):
-                raise ApplyRefused(
-                    "runtime_policy_held_transition_refused",
-                    "held backend transition refused while canonical runtime-policy evidence exists",
-                )
         (runtime_dir / "posture.json").write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",

@@ -695,14 +695,29 @@ def test_direct_base_runtime_invalid_repository_root_refuses_before_state_write(
 
 
 @pytest.mark.parametrize("backend", ["os-native", "openshell"])
-def test_held_backend_posture_does_not_emit_or_claim_gvisor_policy(tmp_path, backend):
+def test_held_backend_posture_does_not_read_emit_or_claim_gvisor_policy(
+    tmp_path, monkeypatch, backend
+):
     driver = onboard_apply.ApplyDriver()
+    outside_source = (tmp_path / "outside-source").resolve()
+    outside_source.mkdir()
+    canonical_admissions = []
+
+    def refuse_canonical_admission(**kwargs):
+        canonical_admissions.append(kwargs)
+        raise AssertionError("held backend attempted canonical runtime-policy admission")
+
+    monkeypatch.setattr(
+        onboard_apply,
+        "_admit_canonical_runtime_policy",
+        refuse_canonical_admission,
+    )
     result = driver.provision_runtime(
         state_root=tmp_path / "state",
         workspace_root=tmp_path / "workspace",
         provider="codex",
         backend=backend,
-        repository_root=Path.cwd(),
+        repository_root=outside_source,
     )
     runtime_dir = tmp_path / "state" / "onboard" / "runtime"
     posture = json.loads((runtime_dir / "posture.json").read_text(encoding="utf-8"))
@@ -712,6 +727,7 @@ def test_held_backend_posture_does_not_emit_or_claim_gvisor_policy(tmp_path, bac
     assert "runtime_policy" not in posture
     assert not (runtime_dir / "runtime-policy.yaml").exists()
     assert not (runtime_dir / "runtime-policy.receipt.json").exists()
+    assert canonical_admissions == []
     verification = driver.verify_runtime(
         state_root=tmp_path / "state",
         workspace_root=tmp_path / "workspace",
@@ -2278,6 +2294,100 @@ def test_noneditable_console_apply_binds_explicit_canonical_checkout_outside_sou
     ).read_bytes() == (
         checkout / "governance/policies/runtime/default-controller-v1.yaml"
     ).read_bytes()
+
+
+@pytest.mark.parametrize("backend", ["os-native", "openshell"])
+def test_noneditable_console_held_backend_succeeds_outside_source_without_policy_reads(
+    tmp_path, capsys, monkeypatch, backend
+):
+    source_root = Path.cwd().resolve()
+    spec = (tmp_path / "signed-install.md").resolve()
+    spec.write_bytes(_signed_spec())
+    answers = (tmp_path / "answers.yaml").resolve()
+    answers.write_text(
+        yaml.safe_dump(_answers(tmp_path), sort_keys=True),
+        encoding="utf-8",
+    )
+    schema = (source_root / "schemas/install-answers.schema.yaml").resolve()
+    outside = (tmp_path / "outside-source").resolve()
+    outside.mkdir()
+    wheel_module = (
+        tmp_path / "wheel-site" / "creator_engine_validator" / "v3_cli.py"
+    ).resolve()
+    wheel_module.parent.mkdir(parents=True)
+    wheel_module.write_text("# installed console module\n", encoding="utf-8")
+
+    selected = FakeDriver()
+    canonical_reads = []
+
+    def refuse_canonical_read(*args, **kwargs):
+        canonical_reads.append((args, kwargs))
+        raise AssertionError("held backend attempted a canonical runtime-policy read")
+
+    monkeypatch.setattr(
+        v3_installer,
+        "resolve_onboard_isolation_backend",
+        lambda **_kwargs: backend,
+    )
+    monkeypatch.setattr(
+        v3_cli,
+        "_select_onboard_apply_driver",
+        lambda *, merged, policy_sha, adoption: selected,
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: _brownfield_probe_without_origin(),
+    )
+    monkeypatch.setattr(v3_cli.shutil, "which", lambda _tool: "/usr/bin/tool")
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool != "claude")
+    monkeypatch.setattr(v3_cli, "__file__", str(wheel_module))
+    monkeypatch.setattr(
+        onboard_apply,
+        "__file__",
+        str(wheel_module.with_name("onboard_apply.py")),
+    )
+    monkeypatch.setattr(
+        onboard_apply,
+        "bind_canonical_runtime_policy",
+        refuse_canonical_read,
+    )
+    monkeypatch.setattr(
+        onboard_apply,
+        "_admit_canonical_runtime_policy",
+        refuse_canonical_read,
+    )
+    monkeypatch.chdir(outside)
+
+    code = v3_cli.main(
+        [
+            "install",
+            "--spec",
+            str(spec),
+            "--answers",
+            str(answers),
+            "--answers-schema",
+            str(schema),
+            "--apply",
+            "--non-interactive",
+            "--root",
+            str(tmp_path / "state"),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0, payload
+    assert selected.provisioned_backend == backend
+    assert selected.provisioned_repository_root == outside
+    assert canonical_reads == []
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    posture = json.loads((runtime_dir / "posture.json").read_text(encoding="utf-8"))
+    assert posture["isolation_backend"] == backend
+    assert "runtime_policy" not in posture
+    assert not (runtime_dir / "runtime-policy.yaml").exists()
+    assert not (runtime_dir / "runtime-policy.receipt.json").exists()
 
 
 @pytest.mark.parametrize(
