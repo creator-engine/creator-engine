@@ -667,6 +667,33 @@ def test_absent_profile_defaults_to_os_native_posture(tmp_path):
     assert "runtime_policy" not in posture_json
 
 
+def test_direct_base_runtime_invalid_repository_root_refuses_before_state_write(
+    tmp_path, monkeypatch
+):
+    state_root = tmp_path / "state"
+    policy_pair_writes = []
+    monkeypatch.setattr(
+        onboard_apply,
+        "_commit_runtime_policy_pair",
+        lambda **kwargs: policy_pair_writes.append(kwargs),
+    )
+
+    with pytest.raises(
+        onboard_apply.ApplyRefused,
+        match="repository root must be an existing real directory",
+    ):
+        onboard_apply.ApplyDriver().provision_runtime(
+            state_root=state_root,
+            workspace_root=tmp_path / "workspace",
+            provider="codex",
+            repository_root=tmp_path / "missing-checkout",
+            backend="gvisor-proxy",
+        )
+
+    assert not state_root.exists()
+    assert policy_pair_writes == []
+
+
 @pytest.mark.parametrize("backend", ["os-native", "openshell"])
 def test_held_backend_posture_does_not_emit_or_claim_gvisor_policy(tmp_path, backend):
     driver = onboard_apply.ApplyDriver()

@@ -6,16 +6,16 @@ declared_work_class: epic
 
 # PR path manifest — ce-ops#599 canonical runtime policy
 
-This carrier lists the closed 15-path DF-3 L2 implementation territory. It
+This carrier lists the closed 16-path DF-3 L2 implementation territory. It
 includes itself and declares the canonical work class `epic`.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** epic
 
-AUTHORIZED_PATHS_COUNT=15
+AUTHORIZED_PATHS_COUNT=16
 
-AUTHORIZED_PATHS_SHA256=fac2b9383366d48a1b13593fd6f22fdbfc88b8242a91f2204b99ab697dfb1484
+AUTHORIZED_PATHS_SHA256=f0839854a730b4a3186adaa66ef71f65d9f0b32ac3e8bdb1282239618a70ce17
 
 ```text
 .ce/changelog/ce-599-canonical-runtime-policy.md
@@ -33,4 +33,5 @@ validators/tests/unit/test_ce_runtime_policy.py
 validators/tests/unit/test_ce_worker_cli.py
 validators/tests/unit/test_codex_worker_launcher.py
 validators/tests/unit/test_onboard_apply.py
+validators/tests/unit/test_onboard_apply_live.py
 ```

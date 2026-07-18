@@ -778,13 +778,12 @@ def bind_canonical_runtime_policy(
     return admitted
 
 
-def provision_canonical_runtime_policy(
+def _admit_canonical_runtime_policy(
     *,
-    state_root: Path,
     repository_root: Path,
-    binding: CanonicalRuntimePolicyBinding | None = None,
-) -> dict[str, Any]:
-    """Copy pre-admitted exact bytes and emit a compact provenance receipt."""
+    binding: CanonicalRuntimePolicyBinding | None,
+) -> CanonicalRuntimePolicyBinding:
+    """Admit or revalidate immutable canonical bytes before any runtime side effect."""
     repository_root = _validated_repository_root(repository_root)
     admitted = binding or bind_canonical_runtime_policy(repository_root)
     if admitted.repository_root != repository_root:
@@ -793,6 +792,20 @@ def provision_canonical_runtime_policy(
             "bound canonical runtime-policy belongs to a different repository root",
         )
     _validate_bound_runtime_policy(admitted)
+    return admitted
+
+
+def provision_canonical_runtime_policy(
+    *,
+    state_root: Path,
+    repository_root: Path,
+    binding: CanonicalRuntimePolicyBinding | None = None,
+) -> dict[str, Any]:
+    """Copy pre-admitted exact bytes and emit a compact provenance receipt."""
+    admitted = _admit_canonical_runtime_policy(
+        repository_root=repository_root,
+        binding=binding,
+    )
     policy_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_BASENAME
     receipt_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_RECEIPT_BASENAME
     receipt = {
@@ -978,6 +991,10 @@ class ApplyDriver:
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
         runtime_policy_binding: CanonicalRuntimePolicyBinding | None = None,
     ) -> dict[str, Any]:
+        admitted_runtime_policy = _admit_canonical_runtime_policy(
+            repository_root=repository_root,
+            binding=runtime_policy_binding,
+        )
         # ce-ops#71 Edit A: the backend is no longer hardwired to ``gvisor-proxy`` —
         # it is the one RESOLVED from the profile/answers (``solo-pilot`` →
         # ``os-native``, no privileged runtime). The posture records the selection.
@@ -994,7 +1011,7 @@ class ApplyDriver:
             runtime_policy_result = provision_canonical_runtime_policy(
                 state_root=state_root,
                 repository_root=repository_root,
-                binding=runtime_policy_binding,
+                binding=admitted_runtime_policy,
             )
             runtime_policy_path = Path(runtime_policy_result["policy_path"])
             config["runtime_policy"] = str(runtime_policy_path)

@@ -28,3 +28,7 @@ identity are now preflighted and captured before the apply lock or live-driver
 selection. Runtime provisioning reuses that immutable binding, so a missing,
 malformed, stale, or mismatched explicit checkout refuses without state writes
 or host-tool mutation and is never retrusted from a later checkout read.
+Direct base and live production-driver calls enforce the same admission at
+their first instruction, before runtime-directory creation or pinned-tool
+ensure. Focused coverage includes the complete live-driver module and proves
+invalid direct checkout roots leave both runtime state and host tools untouched.
