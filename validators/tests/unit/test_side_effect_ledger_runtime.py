@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import pickle
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -253,6 +254,8 @@ def test_verified_binding_is_opaque_issued_and_rejects_raw_copy_and_substitution
         copy.deepcopy(binding)
     with pytest.raises(TypeError):
         replace(binding)
+    with pytest.raises(TypeError):
+        pickle.dumps(binding)
     with pytest.raises(AttributeError):
         binding.run_id = "substituted"
     with pytest.raises(AttributeError):
@@ -266,6 +269,67 @@ def test_verified_binding_is_opaque_issued_and_rejects_raw_copy_and_substitution
         controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
         reservation_id="reservation", policy_sha256="a" * 64,
     )["valid"]
+
+
+def test_verified_binding_has_no_module_global_issuance_registry_or_forgeable_copy(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    decision = runtime.reserve_work_unit_reservation(
+        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
+        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+    )
+    binding = decision.binding
+    assert binding is not None
+    assert "_ISSUED_WORK_UNIT_BINDINGS" not in vars(runtime)
+    assert "_IssuedWorkUnitBinding" not in vars(runtime)
+
+    # A forged instance can borrow the issued type/closure but not the exact object identity.
+    forged = object.__new__(type(binding))
+    assert not runtime.work_unit_reservation_evidence(
+        forged,
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
+        reservation_id="reservation", policy_sha256="a" * 64,
+    )["valid"]
+    with pytest.raises(TypeError):
+        type(binding)()
+    with pytest.raises(AttributeError):
+        object.__setattr__(forged, "run_id", "substituted")
+    with pytest.raises(AttributeError):
+        object.__setattr__(forged, "_ce603_issued_context", type(binding)._ce603_issued_context)
+    with pytest.raises(AttributeError):
+        setattr(type(binding), "_ce603_issued_context", lambda candidate: binding._issued_context())
+
+
+@pytest.mark.parametrize("fragment", ("zz", "7b", "7b7d"))
+def test_corrupt_persisted_ce603_receipt_history_refuses_before_mutation(tmp_path: Path, fragment: str):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    decision = runtime.reserve_work_unit_reservation(
+        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
+        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+    )
+    record_path = next((tmp_path / "side-effect-ledger").rglob("*-work-unit-reservation-*.json"))
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["details"] = {"work_unit_receipt_part_000": fragment}
+    record_path.write_text(runtime._canonical_bytes(record), encoding="utf-8")
+    head_path = tmp_path / "side-effect-ledger" / CONTROLLER / LANE / runtime.HEAD_FILENAME
+    head = json.loads(head_path.read_text(encoding="utf-8"))
+    head["head_sha256"] = hashlib.sha256(record_path.read_bytes()).hexdigest()
+    head_path.write_text(json.dumps(head, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    assert runtime.verify(
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+    ).ok
+    before = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
+
+    with pytest.raises(runtime.WorkUnitReceiptHistoryError):
+        runtime.reserve_work_unit_reservation(
+            cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
+            policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+        )
+
+    after = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
+    assert after == before
 
 
 def test_record_is_valid_under_existing_side_effect_ledger_substrate(tmp_path: Path):
