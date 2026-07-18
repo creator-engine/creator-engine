@@ -826,36 +826,177 @@ def _artifact_yaml_paths(repo_root: Path) -> list[Path]:
     return sorted(paths)
 
 
-def _workflow_permissions_audit(repo_root: Path) -> None:
-    import yaml
+# Governed workflow permission profiles.
+#
+# Each entry pins the EXACT permission profile the audit accepts for one
+# workflow under ``.github/workflows``. The value maps the YAML path of a
+# ``permissions`` block to the exact scope map at that node:
+#   * ``""``            -> the top-level ``permissions:`` block;
+#   * ``"jobs.<id>"``   -> a job-level ``permissions:`` block.
+#
+# This registry is the ratification surface. The audit fails closed: every
+# discovered workflow must appear here, and its committed permissions must
+# match the registered profile exactly. Adding a workflow, broadening a scope
+# (for example ``read`` -> ``write``), or introducing an undeclared scope all
+# require an explicit, reviewable diff to this table. Read-only workflows are
+# registered too so that a brand-new workflow cannot silently fall outside the
+# gate.
+GOVERNED_WORKFLOW_PERMISSIONS: dict[str, dict[str, dict[str, str]]] = {
+    "automerge-actuate.yml": {
+        "": {"contents": "read"},
+        "jobs.actuate": {
+            "actions": "read",
+            "contents": "write",
+            "pull-requests": "write",
+        },
+    },
+    "automerge-decide.yml": {
+        "": {"contents": "read", "pull-requests": "read", "checks": "read"},
+    },
+    "ce-claim-closeout.yml": {
+        "": {"contents": "read", "pull-requests": "read"},
+        "jobs.claim-closeout": {"contents": "write", "pull-requests": "read"},
+    },
+    "ce-dependency-unlock.yml": {"": {"contents": "read"}},
+    "ce-ops-autoclose.yml": {"": {"contents": "read"}},
+    "ce-ops-stale-ticket-reconcile.yml": {
+        "": {"contents": "read", "pull-requests": "read"},
+    },
+    "ce-ops-triage-queue.yml": {"": {"contents": "read"}},
+    "identity-denylist-freshness.yml": {"": {"contents": "read"}},
+    "publish-runtime-image.yml": {
+        "": {"contents": "read"},
+        "jobs.publish": {"contents": "read", "packages": "write"},
+    },
+    "publish-seat-image.yml": {
+        "": {"contents": "read"},
+        "jobs.publish": {"contents": "read", "packages": "write"},
+    },
+    "release-auto-tag.yml": {"": {"contents": "write", "actions": "write"}},
+    "release-finalize.yml": {"": {"contents": "write", "pull-requests": "write"}},
+    "release-parity.yml": {"": {"contents": "write", "issues": "write"}},
+    "release.yml": {"": {"contents": "write", "issues": "write"}},
+    "validate.yml": {"": {"contents": "read", "pull-requests": "read"}},
+}
 
-    workflow = repo_root / ".github" / "workflows" / "validate.yml"
-    doc = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    write_found: list[str] = []
 
-    def collect(obj: object, path: str = "") -> None:
+def _workflow_permission_pointer(node: str) -> str:
+    """Render a YAML-path pointer to a ``permissions`` block for evidence."""
+
+    if node == "":
+        return ".permissions (top-level)"
+    return f".{node}.permissions"
+
+
+def _normalize_permission_block(value: object) -> dict[str, str]:
+    """Canonicalize a ``permissions`` value into a comparable scope map.
+
+    A shorthand string form (for example ``read-all``/``write-all``) is
+    represented with the sentinel scope ``__all__`` so it can never
+    accidentally match an explicit per-scope governed profile.
+    """
+
+    if isinstance(value, dict):
+        return {str(key): str(perm) for key, perm in value.items()}
+    return {"__all__": str(value)}
+
+
+def _collect_workflow_permissions(doc: object) -> dict[str, dict[str, str]]:
+    """Recursively collect every ``permissions`` block keyed by YAML path."""
+
+    found: dict[str, dict[str, str]] = {}
+
+    def walk(obj: object, path: str) -> None:
         if isinstance(obj, dict):
             for key, value in obj.items():
                 if key == "permissions":
-                    if isinstance(value, dict):
-                        for perm_key, perm_val in value.items():
-                            if str(perm_val).lower() == "write":
-                                write_found.append(f"{path}.{perm_key}: write")
-                    elif isinstance(value, str) and value.lower() == "write":
-                        write_found.append(f"{path}: write (all)")
-                else:
-                    collect(value, f"{path}.{key}")
+                    found[path] = _normalize_permission_block(value)
+                    continue
+                child = f"{path}.{key}" if path else str(key)
+                walk(value, child)
         elif isinstance(obj, list):
             for idx, item in enumerate(obj):
-                collect(item, f"{path}[{idx}]")
+                walk(item, f"{path}[{idx}]")
 
-    collect(doc)
-    if write_found:
-        for finding in write_found:
-            print(f"FAIL: write permission in YAML structure: {finding}")
+    walk(doc, "")
+    return found
+
+
+def _workflow_yaml_permission_paths(repo_root: Path) -> list[Path]:
+    """Discover both ``*.yml`` and ``*.yaml`` workflows, de-duplicated."""
+
+    workflow_dir = repo_root / ".github" / "workflows"
+    paths: list[Path] = []
+    for pattern in ("*.yml", "*.yaml"):
+        paths.extend(workflow_dir.glob(pattern))
+    return sorted(set(paths))
+
+
+def _audit_workflow_permissions(
+    name: str, collected: dict[str, dict[str, str]]
+) -> list[str]:
+    """Return fail-closed evidence lines for one workflow's permissions."""
+
+    expected = GOVERNED_WORKFLOW_PERMISSIONS.get(name)
+    if expected is None:
+        if collected:
+            return [
+                f"FAIL {name}: unregistered workflow declares permissions at "
+                f"{_workflow_permission_pointer(node)} ({collected[node]}); register "
+                f"its exact profile in GOVERNED_WORKFLOW_PERMISSIONS"
+                for node in sorted(collected)
+            ]
+        return [
+            f"FAIL {name}: unregistered workflow; add an explicit permission "
+            f"profile to GOVERNED_WORKFLOW_PERMISSIONS"
+        ]
+
+    errors: list[str] = []
+    for node in sorted(set(expected) | set(collected)):
+        exp = expected.get(node)
+        got = collected.get(node)
+        if exp is None:
+            errors.append(
+                f"FAIL {name}: undeclared permissions block at "
+                f"{_workflow_permission_pointer(node)} ({got}); not present in the "
+                f"governed profile"
+            )
+        elif got is None:
+            errors.append(
+                f"FAIL {name}: governed permissions block at "
+                f"{_workflow_permission_pointer(node)} ({exp}) is missing from the "
+                f"workflow"
+            )
+        elif got != exp:
+            errors.append(
+                f"FAIL {name}: permission profile drift at "
+                f"{_workflow_permission_pointer(node)}: expected {exp}, found {got}"
+            )
+    return errors
+
+
+def _workflow_permissions_audit(repo_root: Path) -> None:
+    import yaml
+
+    workflow_paths = _workflow_yaml_permission_paths(repo_root)
+    errors: list[str] = []
+    for path in workflow_paths:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        collected = _collect_workflow_permissions(doc)
+        found = _audit_workflow_permissions(path.name, collected)
+        if found:
+            errors.extend(found)
+        else:
+            print(f"OK  {path.name}: permissions match governed profile")
+
+    if errors:
+        for message in errors:
+            print(message)
         raise RuntimeError("workflow permissions audit failed")
-    print(f"OK: declared permissions = {doc.get('permissions', {})}")
-    print("OK: no write permissions found in YAML structure")
+    print(
+        f"OK: audited {len(workflow_paths)} workflow(s) against "
+        f"{len(GOVERNED_WORKFLOW_PERMISSIONS)} governed profiles"
+    )
 
 
 def _install_spec_signature_required(
@@ -1798,7 +1939,10 @@ def _run_preflight(
     checks.append(
         _run_check(
             "Workflow permissions audit",
-            lambda: (_workflow_permissions_audit(config.repo_root), "no write permissions")[1],
+            lambda: (
+                _workflow_permissions_audit(config.repo_root),
+                "governed permission profiles honored",
+            )[1],
             out,
             err,
         )
