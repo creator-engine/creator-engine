@@ -260,6 +260,9 @@ def test_verified_binding_is_opaque_issued_and_rejects_raw_copy_and_substitution
         binding.run_id = "substituted"
     with pytest.raises(AttributeError):
         _ = binding.__dict__
+    with pytest.raises(TypeError):
+        class ForgedBinding(runtime.VerifiedCurrentWorkUnitBinding):
+            pass
 
     raw = runtime.record_work_unit_reservation(receipt=decision.receipt, **_kwargs(tmp_path, effect_id="raw"))
     assert raw.record_sha256
@@ -283,22 +286,57 @@ def test_verified_binding_has_no_module_global_issuance_registry_or_forgeable_co
     assert "_ISSUED_WORK_UNIT_BINDINGS" not in vars(runtime)
     assert "_IssuedWorkUnitBinding" not in vars(runtime)
 
-    # A forged instance can borrow the issued type/closure but not the exact object identity.
-    forged = object.__new__(type(binding))
+    assert type(binding) is runtime.VerifiedCurrentWorkUnitBinding
+    # A forged base object can receive the private issuance closure but cannot
+    # satisfy the closure's captured exact-object identity check.
+    forged = object.__new__(runtime.VerifiedCurrentWorkUnitBinding)
+    issuance = object.__getattribute__(binding, "_VerifiedCurrentWorkUnitBinding__ce603_issuance")
+    object.__setattr__(forged, "_VerifiedCurrentWorkUnitBinding__ce603_issuance", issuance)
     assert not runtime.work_unit_reservation_evidence(
         forged,
         side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
         controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
         reservation_id="reservation", policy_sha256="a" * 64,
     )["valid"]
-    with pytest.raises(TypeError):
-        type(binding)()
     with pytest.raises(AttributeError):
         object.__setattr__(forged, "run_id", "substituted")
-    with pytest.raises(AttributeError):
-        object.__setattr__(forged, "_ce603_issued_context", type(binding)._ce603_issued_context)
-    with pytest.raises(AttributeError):
-        setattr(type(binding), "_ce603_issued_context", lambda candidate: binding._issued_context())
+    type.__setattr__(type(binding), "_ce603_issued_context", lambda candidate: ())
+    try:
+        assert not runtime.work_unit_reservation_evidence(
+            forged,
+            side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+            controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
+            reservation_id="reservation", policy_sha256="a" * 64,
+        )["valid"]
+    finally:
+        delattr(type(binding), "_ce603_issued_context")
+
+
+def test_ce603_shaped_record_without_fragments_refuses_before_reservation_mutation(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    decision = runtime.reserve_work_unit_reservation(
+        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
+        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+    )
+    record_path = next((tmp_path / "side-effect-ledger").rglob("*-work-unit-reservation-*.json"))
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    del record["details"]
+    record_path.write_text(runtime._canonical_bytes(record), encoding="utf-8")
+    head_path = tmp_path / "side-effect-ledger" / CONTROLLER / LANE / runtime.HEAD_FILENAME
+    head = json.loads(head_path.read_text(encoding="utf-8"))
+    head["head_sha256"] = hashlib.sha256(record_path.read_bytes()).hexdigest()
+    head_path.write_text(json.dumps(head, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    before = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
+
+    with pytest.raises(runtime.WorkUnitReceiptHistoryError):
+        runtime.reserve_work_unit_reservation(
+            cap=100, run_id="run", attempt_id="retry", reservation_id="retry", requested=10,
+            policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+        )
+
+    after = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
+    assert after == before
 
 
 @pytest.mark.parametrize("fragment", ("zz", "7b", "7b7d"))
