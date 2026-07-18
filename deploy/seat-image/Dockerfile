@@ -57,8 +57,12 @@ WORKDIR /workspace/creator-engine
 RUN set -eux; \
     test "$(id -u)" = "${CE_UID}"; \
     test "$(id -g)" = "${CE_GID}"; \
+    command -v ce; \
+    command -v ssh-keygen; \
     command -v codex; \
     command -v claude; \
+    python -c "import pytest, xdist"; \
+    python -c "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'"; \
     codex --version; \
     claude --version
 
