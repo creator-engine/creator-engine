@@ -326,11 +326,18 @@ def record_work_unit_reservation(*, receipt: dict[str, Any], **record_kwargs: An
     root = Path(record_kwargs["side_effect_ledger_root"])
     controller_id = str(record_kwargs["controller_id"])
     lane_id = str(record_kwargs["lane_id"])
+    with _work_unit_lane_lock(root, controller_id, lane_id):
+        return _record_work_unit_reservation(receipt=receipt, record_kwargs=record_kwargs)
+
+
+def _record_work_unit_reservation(*, receipt: dict[str, Any], record_kwargs: dict[str, Any]) -> RecordResult:
+    """Build and append the ledger record; caller owns the lane lock."""
     details = dict(record_kwargs.pop("details", {}) or {})
-    # The landed ledger schema permits scalar detail values only. Preserve the
-    # complete closed receipt as canonical JSON plus its independently checked digest.
-    details["work_unit_receipt_json"] = _canonical_bytes(receipt).rstrip("\n")
-    details["work_unit_receipt_sha256"] = str(receipt.get("receipt_sha256") or "")
+    # Ledger details allow scalar values and reject token-shaped strings. Store
+    # canonical receipt bytes as bounded hex fragments; recovery reassembles it.
+    encoded = _canonical_bytes(receipt).rstrip("\n").encode("utf-8").hex()
+    for index in range(0, len(encoded), 30):
+        details[f"work_unit_receipt_part_{index // 30:03d}"] = encoded[index:index + 30]
     receipt_id = str(receipt.get("receipt_id") or "unknown")
     record_kwargs.update(
         effect_id=f"work-unit-reservation-{receipt_id[:32]}",
@@ -339,8 +346,49 @@ def record_work_unit_reservation(*, receipt: dict[str, Any], **record_kwargs: An
         summary="Recorded CE603 work-unit reservation.",
         details=details,
     )
+    return record(**record_kwargs)
+
+
+def _durable_work_unit_receipts(root: Path, controller_id: str, lane_id: str) -> tuple[dict[str, Any], ...]:
+    """Read CE603 receipts already committed to this lane's append-only ledger."""
+    lane_root = _lane_root(root, controller_id, lane_id)
+    receipts: list[dict[str, Any]] = []
+    for path in sorted(lane_root.rglob("*.json")) if lane_root.exists() else ():
+        if path.name == HEAD_FILENAME:
+            continue
+        try:
+            record_data = json.loads(path.read_text(encoding="utf-8"))
+            details = record_data.get("details", {})
+            fragments = [details[key] for key in sorted(details) if key.startswith("work_unit_receipt_part_")]
+            serialized = bytes.fromhex("".join(fragments)).decode("utf-8") if fragments and all(isinstance(value, str) for value in fragments) else ""
+            receipt = json.loads(serialized) if serialized else None
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(receipt, dict):
+            receipts.append(receipt)
+    return tuple(receipts)
+
+
+def reserve_work_unit_reservation(
+    *, cap: int, run_id: str, attempt_id: str, reservation_id: str, requested: int,
+    policy_sha256: str, recorded_at: str, **record_kwargs: Any,
+):
+    """Reserve and durably append under one lane lock, never exposing a race window."""
+    from .runner import work_unit_cap
+
+    root = Path(record_kwargs["side_effect_ledger_root"])
+    controller_id = str(record_kwargs["controller_id"])
+    lane_id = str(record_kwargs["lane_id"])
     with _work_unit_lane_lock(root, controller_id, lane_id):
-        return record(**record_kwargs)
+        decision = work_unit_cap.reserve(
+            _durable_work_unit_receipts(root, controller_id, lane_id), cap=cap, run_id=run_id,
+            attempt_id=attempt_id, reservation_id=reservation_id, requested=requested,
+            policy_sha256=policy_sha256, recorded_at=recorded_at,
+        )
+        if not decision.allowed or not decision.persist:
+            return decision
+        _record_work_unit_reservation(receipt=decision.receipt, record_kwargs=record_kwargs)
+        return decision
 
 
 def _require_live_claim(
