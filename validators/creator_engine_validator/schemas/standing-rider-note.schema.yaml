@@ -1,0 +1,63 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/standing-rider-note.schema.yaml"
+title: "CE605 standing-rider note"
+type: object
+required:
+  - kind
+  - schema_version
+  - rider_id
+  - sequence
+  - observed_at
+  - cadence_due_at
+  - source_state
+  - source_refs
+  - assessment
+  - tripwire
+  - previous_note_sha256
+  - note_sha256
+unevaluatedProperties: false
+properties:
+  kind:
+    const: standing-rider-note
+  schema_version:
+    const: "1"
+  rider_id:
+    const: CE605
+  sequence:
+    type: integer
+    minimum: 1
+  observed_at:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  cadence_due_at:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+  source_state:
+    enum: [authenticated, unavailable, stale, contradictory]
+  source_refs:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [class, path_or_digest, sha256]
+      unevaluatedProperties: false
+      properties:
+        class:
+          type: string
+          enum: [advisory-finding, decision-record, validation-evidence]
+        path_or_digest:
+          type: string
+          minLength: 1
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+  assessment:
+    enum: [no_change, change_detected, deferred]
+  tripwire:
+    enum: [clear, immediate_review_required, source_unavailable]
+  previous_note_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  note_sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
