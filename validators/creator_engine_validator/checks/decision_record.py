@@ -359,3 +359,8 @@ def run(paths: Iterable[Path]) -> CheckResult:
     for record_path, record in records:
         errors.extend(validate_decision_record(record, record_path, known_ids))
     return CheckResult(name=CHECK_NAME, errors=tuple(errors))
+
+
+# CE605 is loaded through this existing registry-facing check module so the
+# standing-rider registration remains in its allocated carrier.
+from . import standing_rider as standing_rider  # noqa: E402,F401
