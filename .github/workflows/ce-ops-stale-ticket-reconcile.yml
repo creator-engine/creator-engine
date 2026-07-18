@@ -1,0 +1,59 @@
+name: CE Ops Stale Ticket Reconcile
+
+# Daily/manual report-only reconciliation. This workflow deliberately has no
+# apply mode: it publishes normalized advisory evidence only after both source
+# repositories have been traversed completely.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ce-ops-stale-ticket-reconcile
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  stale-ticket-reconcile:
+    name: Build stale-ticket advisory
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+
+      - name: Install validator
+        run: python -m pip install -e validators
+
+      - name: Build complete advisory
+        env:
+          CE_OPS_READ_TOKEN: ${{ secrets.CE_OPS_READ_TOKEN }}
+          CE_PR_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/ce-ops-stale-ticket-reconcile.json"
+          python -m creator_engine_validator.ticket_reconcile_feed \
+            --ticket-repo creator-engine/ce-ops \
+            --pr-repo creator-engine/creator-engine \
+            --since-days 365 \
+            --ticket-token-env CE_OPS_READ_TOKEN \
+            --pr-token-env CE_PR_READ_TOKEN \
+            --json > "${report}"
+          python -m json.tool "${report}" >/dev/null
+
+      - name: Upload advisory
+        if: ${{ success() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ce-ops-stale-ticket-reconcile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ce-ops-stale-ticket-reconcile.json
+          if-no-files-found: error
