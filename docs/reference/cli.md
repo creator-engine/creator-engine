@@ -66,6 +66,7 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce containment-probe` | Probe live-runtime containment of a process from the operating system view. |
 | `ce containment-status` | Probe fleet-seat containment from live process and runtime evidence. |
 | `ce posture` | Print the read-only Controller posture banner. |
+| `ce scan-runtime-policy` | Run only the canonical runtime-policy check against a path. |
 | `ce takeover` | Produce a read-only controller-continuity takeover plan and evidence packet. |
 | `ce continuity-drill` | Run the scheduled benign controller-continuity drill proof. |
 | `ce checkpoint` | Save a validated resume point at a clean handoff, so the next session can continue with clear, trustworthy context. |
