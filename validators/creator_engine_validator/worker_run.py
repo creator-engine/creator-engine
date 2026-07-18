@@ -326,7 +326,7 @@ def run_worker_role(
     seeder: Any | None = None,
     collector: Any | None = None,
 ) -> WorkerRunResult:
-    root = Path(repo_root)
+    root = Path(repo_root).resolve()
     role_def = resolve_role_definition(role, repo_root=root)
     brief_path = resolve_brief_path(brief)
     brief_data = brief_path.read_bytes()
