@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import uuid
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -110,13 +111,34 @@ class VerifyResult:
     errors: tuple[str, ...]
 
 
-_WORK_UNIT_BINDING_PROOF = object()
+class VerifiedCurrentWorkUnitBinding:
+    """Opaque handle issued only after a serialized reservation append."""
+
+    __slots__ = ("__weakref__",)
+
+    def __new__(cls, *args: object, **kwargs: object):
+        if cls is VerifiedCurrentWorkUnitBinding:
+            raise TypeError("work-unit bindings are issued by a serialized reservation only")
+        return super().__new__(cls)
+
+    def __init_subclass__(cls, **kwargs: object):
+        raise TypeError("work-unit bindings cannot be subclassed")
+
+    def __copy__(self):
+        raise TypeError("work-unit bindings cannot be copied")
+
+    def __deepcopy__(self, memo: dict[int, object]):
+        raise TypeError("work-unit bindings cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("work-unit bindings cannot be serialized")
+
+    def __reduce_ex__(self, protocol: int):
+        raise TypeError("work-unit bindings cannot be serialized")
 
 
 @dataclass(frozen=True)
-class VerifiedCurrentWorkUnitBinding:
-    """Opaque, immutable result of a serialized CE603 reservation."""
-
+class _IssuedWorkUnitBinding:
     controller_id: str
     lane_id: str
     run_id: str
@@ -126,8 +148,10 @@ class VerifiedCurrentWorkUnitBinding:
     receipt_sha256: str
     policy_sha256: str
     ledger_head_sha256: str
-    _receipt_items: tuple[tuple[str, str | int], ...]
-    _proof: object
+    receipt_items: tuple[tuple[str, str | int], ...]
+
+
+_ISSUED_WORK_UNIT_BINDINGS: weakref.WeakKeyDictionary[VerifiedCurrentWorkUnitBinding, _IssuedWorkUnitBinding] = weakref.WeakKeyDictionary()
 
 
 # ---------------------------------------------------------------------------
@@ -453,14 +477,15 @@ def _verified_binding_from_serialized_reservation(
     required = ("run_id", "attempt_id", "reservation_id", "receipt_id", "receipt_sha256", "policy_sha256")
     if not all(isinstance(receipt.get(name), str) for name in required):
         return None
-    return VerifiedCurrentWorkUnitBinding(
+    binding = object.__new__(VerifiedCurrentWorkUnitBinding)
+    _ISSUED_WORK_UNIT_BINDINGS[binding] = _IssuedWorkUnitBinding(
         controller_id=controller_id, lane_id=lane_id,
         run_id=receipt["run_id"], attempt_id=receipt["attempt_id"],
         reservation_id=receipt["reservation_id"], receipt_id=receipt["receipt_id"],
         receipt_sha256=receipt["receipt_sha256"], policy_sha256=receipt["policy_sha256"],
-        ledger_head_sha256=record_result.record_sha256, _receipt_items=items,
-        _proof=_WORK_UNIT_BINDING_PROOF,
+        ledger_head_sha256=record_result.record_sha256, receipt_items=items,
     )
+    return binding
 
 
 def work_unit_reservation_evidence(
@@ -474,14 +499,17 @@ def work_unit_reservation_evidence(
     This contract is intentionally not called from ``decide_automerge``.  It
     rechecks the durable lane while holding the shared serialization lock.
     """
-    if not isinstance(binding, VerifiedCurrentWorkUnitBinding) or binding._proof is not _WORK_UNIT_BINDING_PROOF:
+    issued = _ISSUED_WORK_UNIT_BINDINGS.get(binding) if isinstance(binding, VerifiedCurrentWorkUnitBinding) else None
+    if issued is None:
         return {"valid": False, "reason": "missing_or_unverified", "receipt_id": None}
     expected = (controller_id, lane_id, run_id, attempt_id, reservation_id, policy_sha256)
-    actual = (binding.controller_id, binding.lane_id, binding.run_id, binding.attempt_id, binding.reservation_id, binding.policy_sha256)
+    actual = (issued.controller_id, issued.lane_id, issued.run_id, issued.attempt_id, issued.reservation_id, issued.policy_sha256)
     if actual != expected:
         return {"valid": False, "reason": "binding_identity_mismatch", "receipt_id": None}
     root = Path(side_effect_ledger_root)
     awl_root = Path(active_work_ledger_root)
+    from .runner import work_unit_cap
+
     with _lane_lock(root, controller_id, lane_id):
         verification = verify(
             side_effect_ledger_root=root, active_work_ledger_root=awl_root,
@@ -491,13 +519,13 @@ def work_unit_reservation_evidence(
             return {"valid": False, "reason": "ledger_invalid", "receipt_id": None}
         try:
             head = _read_head(_head_path(root, controller_id, lane_id))
-            if not isinstance(head, dict) or head.get("head_sha256") != binding.ledger_head_sha256:
+            if not isinstance(head, dict) or head.get("head_sha256") != issued.ledger_head_sha256:
                 return {"valid": False, "reason": "ledger_head_not_current", "receipt_id": None}
             last_ref = head.get("last_record_ref")
             if not isinstance(last_ref, str):
                 return {"valid": False, "reason": "ledger_head_invalid", "receipt_id": None}
             record_path = root / Path(last_ref)
-            if Path(last_ref).is_absolute() or ".." in Path(last_ref).parts or _sha256_file(record_path) != binding.ledger_head_sha256:
+            if Path(last_ref).is_absolute() or ".." in Path(last_ref).parts or _sha256_file(record_path) != issued.ledger_head_sha256:
                 return {"valid": False, "reason": "ledger_head_invalid", "receipt_id": None}
             record = json.loads(record_path.read_text(encoding="utf-8"))
             if not isinstance(record, dict):
@@ -507,17 +535,19 @@ def work_unit_reservation_evidence(
             fragments = [details[key] for key in sorted(details) if key.startswith("work_unit_receipt_part_")]
             encoded = "".join(fragments) if fragments and all(isinstance(value, str) for value in fragments) else ""
             receipt = json.loads(bytes.fromhex(encoded).decode("utf-8")) if encoded else None
+            durable_receipts = _durable_work_unit_receipts(root, controller_id, lane_id)
+            if work_unit_cap.validate_receipts(durable_receipts):
+                return {"valid": False, "reason": "receipt_invalid", "receipt_id": None}
         except (LedgerRuntimeError, OSError, ValueError, TypeError, AttributeError):
             return {"valid": False, "reason": "ledger_record_invalid", "receipt_id": None}
-    from .runner import work_unit_cap
 
-    if not isinstance(receipt, dict) or _receipt_items(receipt) != binding._receipt_items:
+    if not isinstance(receipt, dict) or _receipt_items(receipt) != issued.receipt_items:
         return {"valid": False, "reason": "receipt_mismatch", "receipt_id": None}
-    if work_unit_cap.validate_receipts((receipt,)) or receipt.get("phase") != "pre_dispatch" or receipt.get("source_state") != "measured":
+    if receipt.get("phase") != "pre_dispatch" or receipt.get("source_state") != "measured":
         return {"valid": False, "reason": "receipt_invalid", "receipt_id": None}
     if receipt.get("reserved", 0) <= 0 or receipt.get("remaining", -1) < 0:
         return {"valid": False, "reason": "receipt_invalid", "receipt_id": None}
-    return {"valid": True, "reason": "allowed", "receipt_id": binding.receipt_id}
+    return {"valid": True, "reason": "allowed", "receipt_id": issued.receipt_id}
 
 
 def _require_live_claim(
