@@ -6,14 +6,13 @@ Canonicalization: `sha256("\\n".join(sorted(unique_paths)) + "\\n")`.
 
 Declared work class: feature
 
-AUTHORIZED_PATHS_COUNT=17
+AUTHORIZED_PATHS_COUNT=16
 
-AUTHORIZED_PATHS_SHA256=f4d259bd242429383cebc961c1251134cf5d5581906f3763c22ad67a346bbe4f
+AUTHORIZED_PATHS_SHA256=d6f09c1e9fd251370fab1278725f0ca83c2a5121adac434d0736d2babaa9636b
 
 ```text
 .ce/changelog/ce603-work-unit-token-cap-dev3.md
 .ce/pr-manifests/ce-603-work-unit-token-cap-dev3-r2.md
-.ce/pr-manifests/ce603-work-unit-token-cap-dev3.md
 validators/creator_engine_validator/forge/automerge_policy.py
 validators/creator_engine_validator/runner/cockpit_readmodel.py
 validators/creator_engine_validator/runner/spend_gate.py
