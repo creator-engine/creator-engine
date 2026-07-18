@@ -3024,7 +3024,8 @@ def test_onboard_apply_team_gvisor_still_refuses_when_runsc_proxy_missing(tmp_pa
         "sudo_grant: [git, python, runsc, proxy]", "sudo_grant: []"))
     code = v3_cli.main([
         "install", "--spec", str(_signed_spec(tmp_path)),
-        "--answers", str(answers), "--apply", "--root", str(tmp_path / "state"), "--json",
+        "--answers", str(answers), "--apply", "--root", str(tmp_path / "state"),
+        "--repository-root", str(_REPO_ROOT), "--json",
     ])
     assert code == 1
     payload = json.loads(capsys.readouterr().out)

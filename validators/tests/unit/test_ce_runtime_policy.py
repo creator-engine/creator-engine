@@ -6,8 +6,11 @@ runtime-policy safety predicates (digest pin, forbidden mount, names-only
 secrets, deny-by-default egress). Record-shape only — no live runtime.
 """
 
+import copy
+import hashlib
 from pathlib import Path
 
+import pytest
 import yaml
 
 from creator_engine_validator.checks import registered_checks
@@ -20,10 +23,13 @@ from creator_engine_validator.checks.ce_runtime_policy import (
     CODE_RW_WITHOUT_JUSTIFICATION,
     CODE_SCHEMA,
     CODE_SECRET_NAMES_ONLY,
+    CODE_SEMANTIC_DIGEST_MISMATCH,
     RuntimePolicyResolutionError,
     resolve_isolation_backend,
     run,
     runtime_policy_launch_stamp,
+    runtime_policy_semantic_sha256,
+    runtime_policy_source_sha256,
     validate_runtime_policy,
 )
 
@@ -32,7 +38,7 @@ _IMAGE_SHA = "sha256:" + "b" * 64
 
 
 def valid_policy(role: str = "implementer") -> dict:
-    return {
+    record = {
         "kind": "runtime-policy-record",
         "record_type": "runtime_policy",
         "schema_version": "1",
@@ -65,6 +71,8 @@ def valid_policy(role: str = "implementer") -> dict:
         "grant_extensible": False,
         "grant_authority": "controller",
     }
+    record["policy_sha"] = runtime_policy_semantic_sha256(record)
+    return record
 
 
 def _codes(errors) -> set[str]:
@@ -83,6 +91,94 @@ def test_check_registered():
     assert CODE_FORBIDDEN_MOUNT in frs
     assert CODE_SECRET_NAMES_ONLY in frs
     assert CODE_EGRESS_NOT_DENY_BY_DEFAULT in frs
+    assert CODE_SEMANTIC_DIGEST_MISMATCH in frs
+
+
+def test_canonical_runtime_policy_has_exact_semantic_and_source_digests():
+    path = Path("governance/policies/runtime/default-controller-v1.yaml")
+    source = path.read_bytes()
+    record = yaml.safe_load(source)
+    assert runtime_policy_semantic_sha256(record) == "b26588442318a163d687e0e4fa10265ec2b1f41dccec5a9963df93b872281f55"
+    assert runtime_policy_source_sha256(source) == "2cf79aefe9239a23cd21997f7bde13e030231a3aa30f0887be9797e24bccc31f"
+    assert validate_runtime_policy(record, path) == []
+
+
+def test_every_non_assertion_mutation_breaks_semantic_digest(tmp_path):
+    record = valid_policy()
+    for field, replacement in (
+        ("policy_id", "other-policy-v1"),
+        ("role", "verification"),
+        ("grant_extensible", True),
+    ):
+        mutated = copy.deepcopy(record)
+        mutated[field] = replacement
+        assert CODE_SEMANTIC_DIGEST_MISMATCH in _codes(
+            validate_runtime_policy(mutated, tmp_path / "default-controller-v1.yaml")
+        )
+
+
+def test_self_asserted_digest_replacement_cannot_forge_semantic_material(tmp_path):
+    record = valid_policy()
+    record["policy_id"] = "other-policy-v1"
+    record["policy_sha"] = hashlib.sha256(record["policy_sha"].encode()).hexdigest()
+    assert CODE_SEMANTIC_DIGEST_MISMATCH in _codes(
+        validate_runtime_policy(record, tmp_path / "default-controller-v1.yaml")
+    )
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "mixed-key",
+        "recursive-anchor",
+        "non-finite",
+    ],
+)
+def test_bound_canonical_policy_malformed_semantic_material_fails_closed(
+    tmp_path, malformed
+):
+    if malformed == "mixed-key":
+        record = valid_policy()
+        record[1] = "non-json-key"
+    elif malformed == "recursive-anchor":
+        record = yaml.safe_load("policy_id: default-controller-v1\ncycle: &cycle [*cycle]\n")
+        record["policy_sha"] = "a" * 64
+    else:
+        record = valid_policy()
+        record["policy_id"] = "default-controller-v1"
+        record["timeout"] = float("nan")
+
+    errors = validate_runtime_policy(
+        record, tmp_path / "default-controller-v1.yaml"
+    )
+
+    assert CODE_SEMANTIC_DIGEST_MISMATCH in _codes(errors)
+
+
+def test_unbound_malformed_semantic_material_is_not_canonicalized(tmp_path):
+    record = valid_policy()
+    record[1] = "non-json-key"
+
+    errors = validate_runtime_policy(record, tmp_path / "unbound-policy.yaml")
+
+    assert CODE_SEMANTIC_DIGEST_MISMATCH not in _codes(errors)
+
+
+def test_reformat_is_byte_distinct_but_semantically_stable():
+    path = Path("governance/policies/runtime/default-controller-v1.yaml")
+    source = path.read_bytes()
+    record = yaml.safe_load(source)
+    reformatted = yaml.safe_dump(record, sort_keys=True).encode()
+    assert runtime_policy_source_sha256(reformatted) != runtime_policy_source_sha256(source)
+    assert runtime_policy_semantic_sha256(yaml.safe_load(reformatted)) == record["policy_sha"]
+
+
+def test_canonical_policy_contains_names_only_subscription_cell_and_no_forbidden_material():
+    text = Path("governance/policies/runtime/default-controller-v1.yaml").read_text()
+    record = yaml.safe_load(text)
+    assert record["secret_allowlist"] == ["codex-subscription-auth"]
+    for forbidden in ("OPENAI_API_KEY", "auth.json", "docker.sock", "controller-key", "api.openai.com"):
+        assert forbidden not in text
 
 
 # ---------------------------------------------------------------------------

@@ -847,6 +847,11 @@ def _build_parser() -> argparse.ArgumentParser:
     wlaunch.add_argument("--role", required=True, help="policy-supported worker role")
     wlaunch.add_argument("--venue", required=True, help="policy-supported execution venue")
     wlaunch.add_argument("--worktree", required=True, help="absolute allocated worktree path")
+    wlaunch.add_argument(
+        "--seat-repo-root",
+        default=None,
+        help="real seat repository root containing onboarded runtime policy state (default: worktree)",
+    )
     wlaunch.add_argument("--brief", required=True, help="regular brief file inside <worktree>/.ce/briefs")
     wlaunch.add_argument(
         "--brief-sha256",
@@ -1495,6 +1500,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=argparse.SUPPRESS,
     )
+    scan_runtime_policy = groups.add_parser(
+        "scan-runtime-policy",
+        help="run only the canonical runtime-policy check against a path",
+    )
+    scan_runtime_policy.add_argument("path", nargs="?", default=".", help="path to scan")
 
     # ce doctor — governed-environment guard preflight (DP-3 = B, RV1-061).
     doctor = groups.add_parser(
@@ -2755,6 +2765,7 @@ def _worker_launch(args) -> int:
             role=args.role,
             venue=args.venue,
             worktree=args.worktree,
+            seat_repo_root=args.seat_repo_root,
             run_id=args.run_id,
             filesystem=filesystem,
             version_probe=_make_codex_version_probe(),
@@ -4388,6 +4399,13 @@ def _check(args) -> int:
     if getattr(args, "profile", None):
         profile.extend(["--profile", args.profile])
     return validator_cli.main([*prefix, "check", *profile, *paths])
+
+
+def _scan_runtime_policy(args) -> int:
+    """Expose the retained validator's discrete runtime-policy scan through ``ce``."""
+    from . import cli as validator_cli
+
+    return validator_cli.main(["scan-runtime-policy", args.path])
 
 
 def _init(args) -> int:
@@ -6170,6 +6188,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _checkpoint(args)
     if args.group == "check":
         return _check(args)
+    if args.group == "scan-runtime-policy":
+        return _scan_runtime_policy(args)
     if args.group == "doctor":
         return _doctor(args)
     if args.group == "containment-probe":

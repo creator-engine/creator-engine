@@ -53,3 +53,14 @@ model_defaults:
 canonical_add_dirs:
   - governance
   - validators
+runtime_policy_binding:
+  source_path: governance/policies/runtime/default-controller-v1.yaml
+  source_sha256: 2cf79aefe9239a23cd21997f7bde13e030231a3aa30f0887be9797e24bccc31f
+  policy_id: default-controller-v1
+  policy_sha: b26588442318a163d687e0e4fa10265ec2b1f41dccec5a9963df93b872281f55
+  local_policy_relative_path: .ce/state/onboard/runtime/runtime-policy.yaml
+  local_receipt_relative_path: .ce/state/onboard/runtime/runtime-policy.receipt.json
+  dispatch_policy_relative_template: .ce/state/dispatches/{run_id}/runtime-policy.yaml
+  allowed_venues:
+    - vps-tmux
+    - in-seat

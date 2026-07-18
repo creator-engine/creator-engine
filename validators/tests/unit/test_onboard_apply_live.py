@@ -34,6 +34,7 @@ from creator_engine_validator.version import SEMVER as CE_SEMVER
 _FX = Path(__file__).parent / "fixtures" / "ce88_live_forge"
 _REPO = "creator-engine/creator-engine"
 _CE_DOWNLOADS_ROOT = Path(__file__).resolve().parents[3] / "docs" / "downloads"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _CE_DOWNLOADS_DIR = _CE_DOWNLOADS_ROOT / CE_SEMVER
 _CE_DOWNLOADS_URL_PREFIX = f"creator-engine.dev/downloads/{CE_SEMVER}/"
 _MINTED = "ghs_fake_minted_value"  # the value the fake mint transport returns
@@ -1051,12 +1052,15 @@ def test_provision_runtime_auto_installs_pinned_runsc_and_gvproxy_versions(tmp_p
         signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="runtime-provision",
     )
     driver = _RuntimeProvisionDriver(cfg)
+    runtime_policy_binding = onboard_apply.bind_canonical_runtime_policy(_REPOSITORY_ROOT)
 
     result = driver.provision_runtime(
         state_root=tmp_path / "state",
         workspace_root=tmp_path / "workspace",
         provider="codex",
+        repository_root=_REPOSITORY_ROOT,
         backend="gvisor-proxy",
+        runtime_policy_binding=runtime_policy_binding,
     )
 
     assert result["ok"] is True
@@ -1123,17 +1127,104 @@ def test_provision_runtime_fails_closed_when_pinned_version_verify_fails(tmp_pat
         repo=_REPO, installation_id=140271364, app_client_id="Iv1.testclient",
         signer=lambda b: b"fake-rs256-signature", policy_sha="a" * 64, run_id="runtime-bad-version",
     )
+    runtime_policy_binding = onboard_apply.bind_canonical_runtime_policy(_REPOSITORY_ROOT)
     result = _BadVersionDriver(cfg).provision_runtime(
         state_root=tmp_path / "state",
         workspace_root=tmp_path / "workspace",
         provider="codex",
+        repository_root=_REPOSITORY_ROOT,
         backend="gvisor-proxy",
+        runtime_policy_binding=runtime_policy_binding,
     )
 
     assert result["ok"] is False
     assert result["reason"] == "system_tool_verify_failed"
     assert result["tool"] == "runsc"
     assert result["expected_version"] == "20260608.0"
+
+
+def test_direct_live_runtime_invalid_repository_root_refuses_before_any_side_effect(
+    tmp_path, monkeypatch
+):
+    driver = onboard_apply_live.LiveForgeApplyDriver.__new__(
+        onboard_apply_live.LiveForgeApplyDriver
+    )
+    state_root = tmp_path / "state"
+    pinned_tool_ensure_calls = []
+    policy_pair_writes = []
+    monkeypatch.setattr(
+        driver,
+        "_ensure_pinned_system_tools",
+        lambda tools: pinned_tool_ensure_calls.append(tuple(tools))
+        or {"ok": True, "runtime_tools": {}},
+    )
+    monkeypatch.setattr(
+        onboard_apply,
+        "_commit_runtime_policy_pair",
+        lambda **kwargs: policy_pair_writes.append(kwargs),
+    )
+
+    with pytest.raises(
+        onboard_apply.ApplyRefused,
+        match="repository root must be an existing real directory",
+    ):
+        driver.provision_runtime(
+            state_root=state_root,
+            workspace_root=tmp_path / "workspace",
+            provider="codex",
+            repository_root=tmp_path / "missing-checkout",
+            backend="gvisor-proxy",
+        )
+
+    assert not state_root.exists()
+    assert pinned_tool_ensure_calls == []
+    assert policy_pair_writes == []
+
+
+@pytest.mark.parametrize("backend", ["os-native", "openshell"])
+def test_direct_live_held_runtime_outside_source_skips_canonical_policy_and_tools(
+    tmp_path, monkeypatch, backend
+):
+    driver = onboard_apply_live.LiveForgeApplyDriver.__new__(
+        onboard_apply_live.LiveForgeApplyDriver
+    )
+    outside_source = (tmp_path / "outside-source").resolve()
+    outside_source.mkdir()
+    canonical_admissions = []
+    pinned_tool_ensure_calls = []
+
+    def refuse_canonical_admission(**kwargs):
+        canonical_admissions.append(kwargs)
+        raise AssertionError("held backend attempted canonical runtime-policy admission")
+
+    monkeypatch.setattr(
+        onboard_apply,
+        "_admit_canonical_runtime_policy",
+        refuse_canonical_admission,
+    )
+    monkeypatch.setattr(
+        driver,
+        "_ensure_pinned_system_tools",
+        lambda tools: pinned_tool_ensure_calls.append(tuple(tools)),
+    )
+
+    result = driver.provision_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        repository_root=outside_source,
+        backend=backend,
+    )
+
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    posture = json.loads((runtime_dir / "posture.json").read_text(encoding="utf-8"))
+    assert result["ok"] is True
+    assert posture["isolation_backend"] == backend
+    assert "runtime_policy" not in posture
+    assert canonical_admissions == []
+    assert pinned_tool_ensure_calls == []
+    assert not (runtime_dir / "runtime-policy.yaml").exists()
+    assert not (runtime_dir / "runtime-policy.receipt.json").exists()
 
 
 def test_install_dependencies_fails_closed_on_pip_failure():

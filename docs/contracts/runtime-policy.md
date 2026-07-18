@@ -113,6 +113,7 @@ v3 plane-C contract:
 | `runtime_policy_rw_mount_without_justification` | a `mode: rw` mount without a `write_justification`. |
 | `runtime_policy_secret_names_only_violation` | a `secret_allowlist` entry that is a path or value, or that names the controller-key private key or any private-key-shaped secret. *(translates PCO-045)* |
 | `runtime_policy_egress_not_deny_by_default` | an egress rule missing `host`, or an `l7`-assured rule that does not set `tls_terminated: true`. |
+| `runtime_policy_semantic_digest_mismatch` | the canonical `default-controller-v1` record's lowercase `policy_sha` differs from the SHA-256 of canonical compact sorted-key JSON after removing `policy_sha`. |
 
 Every failure cites the offending error class, the field/path that
 violated it, and this contract document.
@@ -170,40 +171,55 @@ and applies the safety predicates above. Records carrying any other
 `scan-runtime-policy` CLI subcommand and runs as part of the full
 `check` sweep.
 
-## Onboarded controller launch default
+## Canonical controller-seat policy, render, and receipt
 
-`ce onboard --apply` materializes the controller launch default at the
-well-known tenant-local path:
+The ratified tracked source is
+`governance/policies/runtime/default-controller-v1.yaml`. Its two independent
+bindings are:
+
+- semantic SHA-256 `b26588442318a163d687e0e4fa10265ec2b1f41dccec5a9963df93b872281f55`,
+  computed from UTF-8 compact sorted-key JSON after removing top-level
+  `policy_sha`; and
+- exact YAML-byte SHA-256
+  `2cf79aefe9239a23cd21997f7bde13e030231a3aa30f0887be9797e24bccc31f`.
+
+`ce onboard --apply` validates the tracked source and its strict
+`codex-one-shot-launch-v1` registry binding before any state write. It then
+atomically copies the exact source bytes at mode `0600` to:
 
 `<repo>/.ce/state/onboard/runtime/runtime-policy.yaml`
 
-The file is a full `kind: runtime-policy-record`, not a posture note. The
-onboarded default declares `isolation_backend: docker`, `role:
-controller`, the canonical CE seat image by digest-pinned `image_ref`, a
-default-deny `egress_allowlist`, no injected secrets, and a sealed
-`mount_manifest` containing only:
+It also atomically emits a compact, closed-key provenance receipt at
+`runtime-policy.receipt.json`, binding the canonical source path and bytes,
+semantic identity, exact registry bytes, and local render. Reruns are
+byte-identical. Symlinks, nonregular nodes, malformed source or receipt,
+stale pins, insecure mode/owner, and post-replace mismatches fail closed.
 
-- the tenant workspace as `rw` with a write justification;
-- explicitly enumerated Claude configuration/auth directories; and
-- explicitly enumerated Codex configuration/auth directories.
+The policy is a `gvisor-proxy` controller record for the current VPS x86_64
+substrate. It pins the `codex-runsc:x86_64` image digest, grants only the
+named `codex-subscription-auth` broker cell, permits only HTTPS/443 to
+`auth.openai.com` and `chatgpt.com`, and never mounts an authentication
+directory or engine socket. It does not implement subscription credential
+custody or refresh.
 
 The legacy posture marker
 `<repo>/.ce/state/onboard/runtime/posture.json` remains for back-compat,
 but `ce launch` does not treat it as an executable runtime policy.
 
-For a live `ce launch` with no `--runtime-policy`, the launcher resolves
-the well-known runtime-policy record above before opening a tmux pane. If
-the record exists, it is loaded, validated by `ce_runtime_policy`, stamped
-into the launch plan, and sent through the existing runtime backend bridge.
-For the onboarded default this composes the plain-Docker backend. If the
-record is missing, the launcher fails closed with remediation to re-run
-onboarding and with the explicit host opt-out below. If the file exists but
-does not parse to a clean `kind: runtime-policy-record` mapping (missing or
-mismatched `kind`, or content that is not a mapping at all — e.g. a
-truncated write, hand-edit, or foreign schema), the launcher fails closed
-with a distinct remediation message rather than silently falling through to
-an ungoverned raw launch; the tenant can tell "never onboarded" apart from
-"onboarded but the file is invalid".
+`ce worker launch --seat-repo-root <seat>` verifies the tracked registry and
+source under the allocated worktree and the rendered policy/receipt under the
+explicit real seat root before the Codex binary version probe. The plan binds
+all paths and digests. A live launch atomically creates an immutable private
+copy at `.ce/state/dispatches/<run_id>/runtime-policy.yaml`, then reopens every
+node and rechecks byte digests, ownership, mode, and descriptor identity
+before invoking the runner. Dry-run performs the checks and reports the
+intended dispatch path without creating it.
+
+The binding never widens the one-shot role/venue/sandbox/model/credential
+policy. The deferred `dgx-relay` venue remains refused until an aarch64 image
+digest is separately ratified. Refusals are value-free and direct the operator
+to `ce onboard --apply`; there is no host, prompt-only, API-key, or ungoverned
+fallback.
 
 `ce launch --backend host` is the explicit raw-host opt-out. It preserves
 the historical host tmux behavior for operators that intentionally choose

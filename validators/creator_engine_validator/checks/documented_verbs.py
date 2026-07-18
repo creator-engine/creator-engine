@@ -58,7 +58,6 @@ BASELINE_OFFENSES: frozenset[tuple[str, int, str]] = frozenset(
         ("docs/operations/CONTROLLER_BOOTSTRAP.md", 50, "identity"),
         ("docs/operations/CONTROLLER_BOOTSTRAP.md", 230, "identity"),
         ("docs/reference/cli.md", 7, "dev"),
-        ("docs/reference/cli.md", 83, "conveyor"),
     }
 )
 
@@ -80,13 +79,14 @@ class TaughtInvocation:
 
 
 def shipped_verbs() -> frozenset[str]:
-    """Return top-level ``ce`` verbs registered on the argparse parser."""
+    """Return top-level ``ce`` verbs registered by every dispatch seam."""
     ce_cli = importlib.import_module("creator_engine_validator.ce_cli")
     parser = ce_cli._build_parser()
     verbs: set[str] = set()
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
             verbs.update(str(name) for name in action.choices)
+    verbs.update(str(name) for name in ce_cli.PRE_ARGPARSE_DISPATCH_GROUPS)
     return frozenset(verbs)
 
 

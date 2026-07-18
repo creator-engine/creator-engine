@@ -1327,6 +1327,14 @@ Positional arguments:
 | --- | --- | --- |
 | `v3_args` |  |  |
 
+### `scan-runtime-policy`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `path` |  | path to scan |
+
 ### `scope`
 
 Positional arguments:
@@ -1496,6 +1504,7 @@ Options:
 | `--role` | yes |  | policy-supported worker role |
 | `--venue` | yes |  | policy-supported execution venue |
 | `--worktree` | yes |  | absolute allocated worktree path |
+| `--seat-repo-root` | no |  | real seat repository root containing onboarded runtime policy state (default: worktree) |
 | `--brief` | yes |  | regular brief file inside <worktree>/.ce/briefs |
 | `--brief-sha256` | yes |  | expected SHA-256 of the exact governed brief bytes (64 lowercase hex) |
 | `--run-id` | no |  | optional deterministic lowercase run identifier |

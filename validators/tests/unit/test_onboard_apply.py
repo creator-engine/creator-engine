@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import ast
 from dataclasses import replace
@@ -17,7 +18,9 @@ from creator_engine_validator import (
     hook_pack_confirm,
     launch_runtime,
     onboard_apply,
+    onboard_apply_live,
     release_publish,
+    v3_cli,
     v3_installer,
     version as ce_version,
 )
@@ -121,6 +124,7 @@ def _request(
         answers=answer_doc,
         answers_sha256=v3_installer.content_digest(answer_bytes),
         state_root=tmp_path / "state",
+        repository_root=Path.cwd(),
         dependency_probe=probes or {tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES},
         non_interactive=True,
         spawn_smoke=spawn_smoke,
@@ -195,13 +199,28 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.calls.append(f"verify_tool:{name}")
         return self.tools.get(name, False)
 
-    def provision_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
+    def provision_runtime(
+        self,
+        *,
+        state_root,
+        workspace_root,
+        provider,
+        repository_root,
+        backend=v3_installer.DEFAULT_ISOLATION_BACKEND,
+        runtime_policy_binding=None,
+    ):
         self.calls.append("provision_runtime")
         self.provisioned_backend = backend
+        self.provisioned_repository_root = repository_root
         # Delegate to the real (pure file-write) provision so posture.json records
         # the resolved backend — exercises ce-ops#71 Edit A end-to-end.
         return super().provision_runtime(
-            state_root=state_root, workspace_root=workspace_root, provider=provider, backend=backend
+            state_root=state_root,
+            workspace_root=workspace_root,
+            provider=provider,
+            repository_root=repository_root,
+            backend=backend,
+            runtime_policy_binding=runtime_policy_binding,
         )
 
     def verify_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
@@ -626,6 +645,11 @@ def test_solo_pilot_materializes_os_native_with_no_runsc_or_proxy(tmp_path):
         (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
     )
     assert posture_json["isolation_backend"] == "os-native"
+    assert "runtime_policy" not in posture_json
+    assert not (tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml").exists()
+    assert not (
+        tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.receipt.json"
+    ).exists()
 
 
 def test_absent_profile_defaults_to_os_native_posture(tmp_path):
@@ -640,11 +664,214 @@ def test_absent_profile_defaults_to_os_native_posture(tmp_path):
         (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
     )
     assert posture_json["isolation_backend"] == "os-native"
+    assert "runtime_policy" not in posture_json
 
 
-def test_runtime_posture_emits_valid_default_docker_runtime_policy(tmp_path):
+def test_direct_base_runtime_invalid_repository_root_refuses_before_state_write(
+    tmp_path, monkeypatch
+):
+    state_root = tmp_path / "state"
+    policy_pair_writes = []
+    monkeypatch.setattr(
+        onboard_apply,
+        "_commit_runtime_policy_pair",
+        lambda **kwargs: policy_pair_writes.append(kwargs),
+    )
+
+    with pytest.raises(
+        onboard_apply.ApplyRefused,
+        match="repository root must be an existing real directory",
+    ):
+        onboard_apply.ApplyDriver().provision_runtime(
+            state_root=state_root,
+            workspace_root=tmp_path / "workspace",
+            provider="codex",
+            repository_root=tmp_path / "missing-checkout",
+            backend="gvisor-proxy",
+        )
+
+    assert not state_root.exists()
+    assert policy_pair_writes == []
+
+
+@pytest.mark.parametrize("backend", ["os-native", "openshell"])
+def test_held_backend_posture_does_not_read_emit_or_claim_gvisor_policy(
+    tmp_path, monkeypatch, backend
+):
+    driver = onboard_apply.ApplyDriver()
+    outside_source = (tmp_path / "outside-source").resolve()
+    outside_source.mkdir()
+    canonical_admissions = []
+
+    def refuse_canonical_admission(**kwargs):
+        canonical_admissions.append(kwargs)
+        raise AssertionError("held backend attempted canonical runtime-policy admission")
+
+    monkeypatch.setattr(
+        onboard_apply,
+        "_admit_canonical_runtime_policy",
+        refuse_canonical_admission,
+    )
+    result = driver.provision_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        backend=backend,
+        repository_root=outside_source,
+    )
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    posture = json.loads((runtime_dir / "posture.json").read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert posture["isolation_backend"] == backend
+    assert "runtime_policy" not in posture
+    assert not (runtime_dir / "runtime-policy.yaml").exists()
+    assert not (runtime_dir / "runtime-policy.receipt.json").exists()
+    assert canonical_admissions == []
+    verification = driver.verify_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        backend=backend,
+    )
+    assert verification["ok"] is False
+    assert verification["held"] is True
+    assert verification["backend"] == backend
+    assert verification["posture_applied"] is True
+
+
+@pytest.mark.parametrize("backend", ["gvisor-proxy", "os-native", "openshell"])
+def test_live_driver_forwards_repository_root_for_every_runtime_backend(
+    tmp_path, monkeypatch, backend
+):
+    driver = onboard_apply_live.LiveForgeApplyDriver.__new__(
+        onboard_apply_live.LiveForgeApplyDriver
+    )
+    ensure_calls: list[tuple[str, ...]] = []
+
+    def ensure_runtime_tools(tools):
+        ensure_calls.append(tuple(tools))
+        return {
+            "ok": True,
+            "runtime_tools": {tool: f"/pinned/{tool}" for tool in tools},
+        }
+
+    monkeypatch.setattr(driver, "_ensure_pinned_system_tools", ensure_runtime_tools)
+    result = driver.provision_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        repository_root=Path.cwd(),
+        backend=backend,
+    )
+
+    assert result["ok"] is True
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    if backend == "gvisor-proxy":
+        assert ensure_calls
+        assert (runtime_dir / "runtime-policy.yaml").is_file()
+        assert (runtime_dir / "runtime-policy.receipt.json").is_file()
+    else:
+        assert ensure_calls == []
+        assert not (runtime_dir / "runtime-policy.yaml").exists()
+        assert not (runtime_dir / "runtime-policy.receipt.json").exists()
+
+
+@pytest.mark.parametrize("backend", ["os-native", "openshell"])
+def test_gvisor_to_held_backend_rerun_refuses_and_preserves_coherent_pair(
+    tmp_path, backend
+):
+    driver = onboard_apply.ApplyDriver()
+    state_root = tmp_path / "state"
+    first = driver.provision_runtime(
+        state_root=state_root,
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        repository_root=Path.cwd(),
+        backend="gvisor-proxy",
+    )
+    policy_path = Path(first["created"][0])
+    receipt_path = Path(first["created"][1])
+    original_policy = policy_path.read_bytes()
+    original_receipt = receipt_path.read_bytes()
+    original_posture = policy_path.with_name("posture.json").read_bytes()
+
+    with pytest.raises(onboard_apply.ApplyRefused, match="held backend transition"):
+        driver.provision_runtime(
+            state_root=state_root,
+            workspace_root=tmp_path / "workspace",
+            provider="codex",
+            repository_root=Path.cwd(),
+            backend=backend,
+        )
+
+    assert policy_path.read_bytes() == original_policy
+    assert receipt_path.read_bytes() == original_receipt
+    assert policy_path.with_name("posture.json").read_bytes() == original_posture
+
+
+def test_installed_module_onboarding_uses_explicit_real_checkout_root(
+    tmp_path, monkeypatch
+):
+    checkout = (tmp_path / "explicit-checkout").resolve()
+    for relative in (
+        Path("governance/policies/codex-one-shot-launch-v1.yaml"),
+        Path("governance/policies/runtime/default-controller-v1.yaml"),
+    ):
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(relative.read_bytes())
+    installed_module = (
+        tmp_path
+        / "wheel-site"
+        / "creator_engine_validator"
+        / "onboard_apply.py"
+    )
+    installed_module.parent.mkdir(parents=True)
+    installed_module.write_text("# non-editable installed module location\n", encoding="utf-8")
+    monkeypatch.setattr(onboard_apply, "__file__", str(installed_module))
+    answers = _answers(tmp_path)
+    answers["profile"] = "team"
+    request = replace(
+        _request(tmp_path, answers=answers),
+        repository_root=checkout,
+    )
     driver = FakeDriver()
-    summary = _apply(tmp_path, driver)
+
+    summary = onboard_apply.apply_onboard(
+        request,
+        verifier=_verifier(),
+        driver=driver,
+        invocation_id="installed-wheel-explicit-checkout",
+    )
+
+    assert summary["failed"] == 0
+    assert summary["refused"] == 0
+    assert driver.provisioned_repository_root == checkout
+    assert (
+        tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
+    ).read_bytes() == (
+        checkout / "governance/policies/runtime/default-controller-v1.yaml"
+    ).read_bytes()
+
+
+def test_runtime_policy_repository_root_refuses_relative_or_symlink(tmp_path):
+    checkout_link = tmp_path / "checkout-link"
+    checkout_link.symlink_to(Path.cwd(), target_is_directory=True)
+
+    for repository_root in (Path("."), checkout_link):
+        with pytest.raises(onboard_apply.ApplyRefused, match="repository root"):
+            onboard_apply.provision_canonical_runtime_policy(
+                state_root=tmp_path / "state",
+                repository_root=repository_root,
+            )
+
+
+def test_runtime_posture_copies_canonical_runtime_policy_and_compact_receipt(tmp_path):
+    driver = FakeDriver()
+    answers = _answers(tmp_path)
+    answers["profile"] = "team"
+    summary = _apply(tmp_path, driver, answers=answers)
     assert summary["failed"] == 0
 
     policy_path = tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
@@ -653,26 +880,140 @@ def test_runtime_posture_emits_valid_default_docker_runtime_policy(tmp_path):
 
     assert errors == []
     assert record["kind"] == ce_runtime_policy.KIND_VALUE
-    assert record["isolation_backend"] == "docker"
+    assert policy_path.read_bytes() == Path(
+        "governance/policies/runtime/default-controller-v1.yaml"
+    ).read_bytes()
+    assert record["isolation_backend"] == "gvisor-proxy"
     assert record["role"] == "controller"
-    # Derive the expected image ref from the same function the production code
-    # uses (which in turn reads surfaces/manifest.yaml as SSOT).  This ensures
-    # that future digest bumps in the manifest automatically track here without
-    # requiring a separate test-literal update.
-    assert record["image_ref"] == onboard_apply._canonical_seat_image_ref()
-    mounts = record["mount_manifest"]
-    assert mounts[0]["path"] == str((tmp_path / "workspaces").resolve())
-    assert mounts[0]["mode"] == "rw"
-    mounted_paths = {entry["path"] for entry in mounts[1:]}
-    home = Path.home()
-    assert mounted_paths == {
-        str(home / ".claude"),
-        str(home / ".config" / "claude"),
-        str(home / ".codex"),
-        str(home / ".config" / "codex"),
-    }
-    assert record["egress_allowlist"] == []
-    assert record["secret_allowlist"] == []
+    assert record["policy_sha"] == "b26588442318a163d687e0e4fa10265ec2b1f41dccec5a9963df93b872281f55"
+    receipt_path = policy_path.with_name("runtime-policy.receipt.json")
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_bytes)
+    assert receipt_bytes == (
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    assert receipt["canonical_source_sha256"] == receipt["rendered_sha256"] == "2cf79aefe9239a23cd21997f7bde13e030231a3aa30f0887be9797e24bccc31f"
+    assert receipt["registry_sha256"] == hashlib.sha256(
+        Path("governance/policies/codex-one-shot-launch-v1.yaml").read_bytes()
+    ).hexdigest()
+    assert policy_path.stat().st_mode & 0o777 == 0o600
+    assert receipt_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_runtime_policy_provision_is_byte_idempotent(tmp_path):
+    first = onboard_apply.provision_canonical_runtime_policy(
+        state_root=tmp_path / "state", repository_root=Path.cwd()
+    )
+    first_policy = Path(first["policy_path"]).read_bytes()
+    first_receipt = Path(first["receipt_path"]).read_bytes()
+    second = onboard_apply.provision_canonical_runtime_policy(
+        state_root=tmp_path / "state", repository_root=Path.cwd()
+    )
+    assert Path(second["policy_path"]).read_bytes() == first_policy
+    assert Path(second["receipt_path"]).read_bytes() == first_receipt
+
+
+@pytest.mark.parametrize(
+    "failure_seam",
+    ["temp_collision", "write", "fsync", "replace", "post_verify"],
+)
+def test_runtime_policy_reprovision_failure_preserves_last_known_good_pair(
+    tmp_path, monkeypatch, failure_seam
+):
+    state_root = tmp_path / "state"
+    first = onboard_apply.provision_canonical_runtime_policy(
+        state_root=state_root, repository_root=Path.cwd()
+    )
+    policy_path = Path(first["policy_path"])
+    receipt_path = Path(first["receipt_path"])
+    original_policy = policy_path.read_bytes()
+    original_receipt = receipt_path.read_bytes()
+
+    if failure_seam == "temp_collision":
+        original_open = onboard_apply.os.open
+
+        def fail_stage_open(path, flags, *args, **kwargs):
+            if ".tmp." in str(path):
+                raise FileExistsError("injected temp collision")
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(onboard_apply.os, "open", fail_stage_open)
+    elif failure_seam == "write":
+        monkeypatch.setattr(
+            onboard_apply.os,
+            "write",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected write failure")),
+        )
+    elif failure_seam == "fsync":
+        monkeypatch.setattr(
+            onboard_apply.os,
+            "fsync",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected fsync failure")),
+        )
+    elif failure_seam == "replace":
+        original_replace = onboard_apply.os.replace
+        replace_calls = 0
+
+        def fail_second_replace(source, destination):
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 2:
+                raise OSError("injected second replace failure")
+            return original_replace(source, destination)
+
+        monkeypatch.setattr(onboard_apply.os, "replace", fail_second_replace)
+    else:
+        original_read = onboard_apply._read_regular_nofollow
+        destination_reads = 0
+
+        def fail_post_verify(path, *args, **kwargs):
+            nonlocal destination_reads
+            payload = original_read(path, *args, **kwargs)
+            if path in {policy_path, receipt_path}:
+                destination_reads += 1
+                # Two reads admit the valid existing pair; the third is the
+                # first post-replace verification read.
+                if destination_reads == 3:
+                    return payload + b"injected mismatch"
+            return payload
+
+        monkeypatch.setattr(onboard_apply, "_read_regular_nofollow", fail_post_verify)
+
+    with pytest.raises(onboard_apply.ApplyFailed):
+        onboard_apply.provision_canonical_runtime_policy(
+            state_root=state_root, repository_root=Path.cwd()
+        )
+
+    assert policy_path.read_bytes() == original_policy
+    assert receipt_path.read_bytes() == original_receipt
+    assert not list(policy_path.parent.glob(".*.tmp.*"))
+    assert not list(policy_path.parent.glob(".*.backup.*"))
+
+
+def test_runtime_policy_provision_refuses_symlink_destination(tmp_path):
+    runtime = tmp_path / "state" / "onboard" / "runtime"
+    runtime.mkdir(parents=True)
+    target = tmp_path / "outside"
+    target.write_text("outside\n")
+    (runtime / "runtime-policy.yaml").symlink_to(target)
+    with pytest.raises(onboard_apply.ApplyFailed, match="destination"):
+        onboard_apply.provision_canonical_runtime_policy(
+            state_root=tmp_path / "state", repository_root=Path.cwd()
+        )
+    assert target.read_text() == "outside\n"
+
+
+def test_runtime_policy_provision_refuses_symlink_destination_parent(tmp_path):
+    state = tmp_path / "state"
+    (state / "onboard").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (state / "onboard" / "runtime").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(onboard_apply.ApplyFailed, match="destination parent"):
+        onboard_apply.provision_canonical_runtime_policy(
+            state_root=state, repository_root=Path.cwd()
+        )
+    assert list(outside.iterdir()) == []
 
 
 def test_cli_exposure_records_owned_rollback(tmp_path):
@@ -1869,6 +2210,310 @@ def test_cli_apply_userspace_install_uses_selected_driver(tmp_path, capsys, monk
     assert selector_calls[0]["userspace_install"] is True
     assert selected.installed_userspace_tools == ("uv",)
     assert "install_dependencies" in selected.calls
+
+
+def test_noneditable_console_apply_binds_explicit_canonical_checkout_outside_source(
+    tmp_path, capsys, monkeypatch
+):
+    source_root = Path.cwd().resolve()
+    checkout = (tmp_path / "canonical-checkout").resolve()
+    for relative in (
+        Path("governance/policies/codex-one-shot-launch-v1.yaml"),
+        Path("governance/policies/runtime/default-controller-v1.yaml"),
+    ):
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((source_root / relative).read_bytes())
+
+    spec = (tmp_path / "signed-install.md").resolve()
+    spec.write_bytes(_signed_spec())
+    answer_doc = _answers(tmp_path)
+    answer_doc["profile"] = "team"
+    answers = (tmp_path / "answers.yaml").resolve()
+    answers.write_text(yaml.safe_dump(answer_doc, sort_keys=True), encoding="utf-8")
+    schema = (source_root / "schemas/install-answers.schema.yaml").resolve()
+    outside = (tmp_path / "outside-source").resolve()
+    outside.mkdir()
+    wheel_module = (
+        tmp_path
+        / "wheel-site"
+        / "creator_engine_validator"
+        / "v3_cli.py"
+    ).resolve()
+    wheel_module.parent.mkdir(parents=True)
+    wheel_module.write_text("# installed console module\n", encoding="utf-8")
+
+    selected = FakeDriver()
+    monkeypatch.setattr(
+        v3_cli,
+        "_select_onboard_apply_driver",
+        lambda *, merged, policy_sha, adoption: selected,
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: _brownfield_probe_without_origin(),
+    )
+    monkeypatch.setattr(v3_cli.shutil, "which", lambda _tool: "/usr/bin/tool")
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool != "claude")
+    monkeypatch.setattr(v3_cli, "__file__", str(wheel_module))
+    monkeypatch.setattr(onboard_apply, "__file__", str(wheel_module.with_name("onboard_apply.py")))
+    monkeypatch.chdir(outside)
+
+    console_args = [
+        "install",
+        "--spec",
+        str(spec),
+        "--answers",
+        str(answers),
+        "--answers-schema",
+        str(schema),
+        "--apply",
+        "--non-interactive",
+        "--root",
+        str(tmp_path / "state"),
+        "--json",
+    ]
+    missing_root_code = v3_cli.main(console_args)
+    missing_root_payload = json.loads(capsys.readouterr().out)
+    assert missing_root_code == 1
+    assert missing_root_payload["code"] == "runtime_policy_repository_root_required"
+
+    code = v3_cli.main(
+        console_args[:-3]
+        + ["--repository-root", str(checkout)]
+        + console_args[-3:]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0, payload
+    assert selected.provisioned_repository_root == checkout
+    assert (
+        tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
+    ).read_bytes() == (
+        checkout / "governance/policies/runtime/default-controller-v1.yaml"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("backend", ["os-native", "openshell"])
+def test_noneditable_console_held_backend_succeeds_outside_source_without_policy_reads(
+    tmp_path, capsys, monkeypatch, backend
+):
+    source_root = Path.cwd().resolve()
+    spec = (tmp_path / "signed-install.md").resolve()
+    spec.write_bytes(_signed_spec())
+    answers = (tmp_path / "answers.yaml").resolve()
+    answers.write_text(
+        yaml.safe_dump(_answers(tmp_path), sort_keys=True),
+        encoding="utf-8",
+    )
+    schema = (source_root / "schemas/install-answers.schema.yaml").resolve()
+    outside = (tmp_path / "outside-source").resolve()
+    outside.mkdir()
+    wheel_module = (
+        tmp_path / "wheel-site" / "creator_engine_validator" / "v3_cli.py"
+    ).resolve()
+    wheel_module.parent.mkdir(parents=True)
+    wheel_module.write_text("# installed console module\n", encoding="utf-8")
+
+    selected = FakeDriver()
+    canonical_reads = []
+
+    def refuse_canonical_read(*args, **kwargs):
+        canonical_reads.append((args, kwargs))
+        raise AssertionError("held backend attempted a canonical runtime-policy read")
+
+    monkeypatch.setattr(
+        v3_installer,
+        "resolve_onboard_isolation_backend",
+        lambda **_kwargs: backend,
+    )
+    monkeypatch.setattr(
+        v3_cli,
+        "_select_onboard_apply_driver",
+        lambda *, merged, policy_sha, adoption: selected,
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: _brownfield_probe_without_origin(),
+    )
+    monkeypatch.setattr(v3_cli.shutil, "which", lambda _tool: "/usr/bin/tool")
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool != "claude")
+    monkeypatch.setattr(v3_cli, "__file__", str(wheel_module))
+    monkeypatch.setattr(
+        onboard_apply,
+        "__file__",
+        str(wheel_module.with_name("onboard_apply.py")),
+    )
+    monkeypatch.setattr(
+        onboard_apply,
+        "bind_canonical_runtime_policy",
+        refuse_canonical_read,
+    )
+    monkeypatch.setattr(
+        onboard_apply,
+        "_admit_canonical_runtime_policy",
+        refuse_canonical_read,
+    )
+    monkeypatch.chdir(outside)
+
+    code = v3_cli.main(
+        [
+            "install",
+            "--spec",
+            str(spec),
+            "--answers",
+            str(answers),
+            "--answers-schema",
+            str(schema),
+            "--apply",
+            "--non-interactive",
+            "--root",
+            str(tmp_path / "state"),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0, payload
+    assert selected.provisioned_backend == backend
+    assert selected.provisioned_repository_root == outside
+    assert canonical_reads == []
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    posture = json.loads((runtime_dir / "posture.json").read_text(encoding="utf-8"))
+    assert posture["isolation_backend"] == backend
+    assert "runtime_policy" not in posture
+    assert not (runtime_dir / "runtime-policy.yaml").exists()
+    assert not (runtime_dir / "runtime-policy.receipt.json").exists()
+
+
+@pytest.mark.parametrize(
+    "invalid_material",
+    (
+        "missing_source",
+        "malformed_source",
+        "stale_source_bytes",
+        "mismatched_source_identity",
+        "malformed_registry",
+        "mismatched_registry_binding",
+    ),
+)
+def test_noneditable_console_invalid_canonical_checkout_refuses_before_any_side_effect(
+    tmp_path, capsys, monkeypatch, invalid_material
+):
+    source_root = Path.cwd().resolve()
+    checkout = (tmp_path / "canonical-checkout").resolve()
+    registry_relative = Path("governance/policies/codex-one-shot-launch-v1.yaml")
+    policy_relative = Path("governance/policies/runtime/default-controller-v1.yaml")
+    for relative in (registry_relative, policy_relative):
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((source_root / relative).read_bytes())
+
+    policy_path = checkout / policy_relative
+    registry_path = checkout / registry_relative
+    if invalid_material == "missing_source":
+        policy_path.unlink()
+    elif invalid_material == "malformed_source":
+        policy_path.write_bytes(b"[unterminated\n")
+    elif invalid_material == "stale_source_bytes":
+        policy_path.write_bytes(policy_path.read_bytes() + b"# stale checkout\n")
+    elif invalid_material == "mismatched_source_identity":
+        policy = yaml.safe_load(policy_path.read_bytes())
+        policy["policy_sha"] = "0" * 64
+        mutated_policy = yaml.safe_dump(policy, sort_keys=False).encode("utf-8")
+        policy_path.write_bytes(mutated_policy)
+        registry = yaml.safe_load(registry_path.read_bytes())
+        registry["runtime_policy_binding"]["source_sha256"] = hashlib.sha256(
+            mutated_policy
+        ).hexdigest()
+        registry_path.write_text(
+            yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+        )
+    elif invalid_material == "malformed_registry":
+        registry_path.write_bytes(b"[unterminated\n")
+    else:
+        registry = yaml.safe_load(registry_path.read_bytes())
+        registry["runtime_policy_binding"]["source_sha256"] = "0" * 64
+        registry_path.write_text(
+            yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+        )
+
+    spec = (tmp_path / "signed-install.md").resolve()
+    spec.write_bytes(_signed_spec())
+    answer_doc = _answers(tmp_path)
+    answer_doc["profile"] = "team"
+    answers = (tmp_path / "answers.yaml").resolve()
+    answers.write_text(yaml.safe_dump(answer_doc, sort_keys=True), encoding="utf-8")
+    schema = (source_root / "schemas/install-answers.schema.yaml").resolve()
+    outside = (tmp_path / "outside-source").resolve()
+    outside.mkdir()
+    wheel_module = (
+        tmp_path / "wheel-site" / "creator_engine_validator" / "v3_cli.py"
+    ).resolve()
+    wheel_module.parent.mkdir(parents=True)
+    wheel_module.write_text("# installed console module\n", encoding="utf-8")
+
+    selected = FakeDriver()
+    selector_calls = []
+    pinned_tool_ensure_calls = []
+
+    def select_driver(*, merged, policy_sha, adoption):
+        selector_calls.append(
+            {"merged": merged, "policy_sha": policy_sha, "adoption": adoption}
+        )
+        return selected
+
+    monkeypatch.setattr(v3_cli, "_select_onboard_apply_driver", select_driver)
+    monkeypatch.setattr(
+        onboard_apply_live.LiveForgeApplyDriver,
+        "_ensure_pinned_system_tools",
+        lambda *_args, **_kwargs: pinned_tool_ensure_calls.append(True),
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: _brownfield_probe_without_origin(),
+    )
+    monkeypatch.setattr(v3_cli.shutil, "which", lambda _tool: "/usr/bin/tool")
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool != "claude")
+    monkeypatch.setattr(v3_cli, "__file__", str(wheel_module))
+    monkeypatch.setattr(
+        onboard_apply, "__file__", str(wheel_module.with_name("onboard_apply.py"))
+    )
+    monkeypatch.chdir(outside)
+
+    state_root = tmp_path / "state"
+    code = v3_cli.main(
+        [
+            "install",
+            "--spec",
+            str(spec),
+            "--answers",
+            str(answers),
+            "--answers-schema",
+            str(schema),
+            "--apply",
+            "--non-interactive",
+            "--repository-root",
+            str(checkout),
+            "--root",
+            str(state_root),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert payload["code"].startswith("runtime_policy_")
+    assert not state_root.exists()
+    assert selector_calls == []
+    assert selected.calls == []
+    assert pinned_tool_ensure_calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -3607,6 +3607,51 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     # even though the fixed, backend-driven apply never needs them. Explicit
     # ``team``/``gvisor-proxy`` behavior is unchanged.
     isolation_backend = v3_installer.resolve_onboard_isolation_backend(profile=merged.value("profile"))
+    repository_root_arg = getattr(args, "repository_root", None)
+    canonical_runtime_policy = None
+    if apply_mode and isolation_backend == "gvisor-proxy" and not repository_root_arg:
+        return _emit(
+            args,
+            1,
+            [
+                f"{_BRAND} · onboard apply REFUSED: gVisor apply requires "
+                "--repository-root pointing to the canonical CE checkout"
+            ],
+            {
+                "error": "refused",
+                "code": "runtime_policy_repository_root_required",
+                "detail": "gVisor apply requires an explicit canonical CE checkout root",
+            },
+        )
+    if repository_root_arg:
+        try:
+            canonical_repository_root = onboard_apply._validated_repository_root(
+                Path(repository_root_arg)
+            )
+        except onboard_apply.ApplyRefused as exc:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard apply REFUSED: {exc.detail}"],
+                {"error": "refused", "code": exc.code, "detail": exc.detail},
+            )
+    else:
+        # Held backends never load runtime-policy material.  Keep a concrete
+        # request value for the common driver signature without treating cwd as
+        # a canonical policy source.
+        canonical_repository_root = Path.cwd().resolve()
+    if apply_mode and isolation_backend == "gvisor-proxy":
+        try:
+            canonical_runtime_policy = onboard_apply.bind_canonical_runtime_policy(
+                canonical_repository_root
+            )
+        except onboard_apply.ApplyRefused as exc:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard apply REFUSED: {exc.detail}"],
+                {"error": "refused", "code": exc.code, "detail": exc.detail},
+            )
     backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
     probe = {tool: _which(tool) for tool in backend_deps}
     dep_plan = v3_installer.plan_dependencies(isolation_backend, probe)
@@ -3816,6 +3861,8 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             answers=answers,
             answers_sha256=answers_sha,
             state_root=Path(args.root),
+            repository_root=canonical_repository_root,
+            canonical_runtime_policy=canonical_runtime_policy,
             mode=args.mode,
             detected=detected,
             dependency_probe=probe,
@@ -4894,6 +4941,12 @@ def _build_parser() -> argparse.ArgumentParser:
                            help="seconds to wait for another install apply lock before refusing")
     p_install.add_argument("--root", default=V3_LOCAL_STATE_ROOT,
                            help=f"v3 local-state root for apply ledger/lock (default: {V3_LOCAL_STATE_ROOT})")
+    p_install.add_argument(
+        "--repository-root",
+        default=None,
+        help="absolute, canonical CE source checkout containing the byte-pinned runtime policy "
+             "(required for gvisor-proxy --apply)",
+    )
     p_install.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
 
     p_carrier = sub.add_parser(

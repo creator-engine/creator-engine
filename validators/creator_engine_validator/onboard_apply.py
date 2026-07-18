@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import uuid
@@ -33,6 +34,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import brain_runtime, claude_hook_pack, v3_installer, version as ce_version
 from .checks import ce_runtime_policy
+from . import codex_worker_launcher
 from .forge.github_repo_config import DEFAULT_MAIN_PROTECTION, BranchProtectionPolicy
 from .forge.protection_diagnostics import (
     PROTECTION_FLOOR_REMEDIATION,
@@ -403,17 +405,7 @@ KNOWN_SHARED_OR_FOREIGN_APP_IDS: Mapping[str, str] = {
     "4085526": "known CE dev-4 App",
 }
 RUNTIME_POLICY_BASENAME = "runtime-policy.yaml"
-CANONICAL_SEAT_IMAGE_NAME = "ghcr.io/creator-engine/creator-engine/ce-seat"
-CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA = "sha256:" + ("0" * 64)
-DEFAULT_CONTROLLER_POLICY_ID = "default-controller-docker"
-_RUNTIME_POLICY_HASH_PLACEHOLDER = "0" * 64
-_SURFACES_MANIFEST = Path(__file__).resolve().parents[2] / "surfaces" / "manifest.yaml"
-_AGENT_CONFIG_DIRS: tuple[tuple[str, ...], ...] = (
-    (".claude",),
-    (".config", "claude"),
-    (".codex",),
-    (".config", "codex"),
-)
+RUNTIME_POLICY_RECEIPT_BASENAME = "runtime-policy.receipt.json"
 _BRAIN_GENESIS_ASSERTION_ID = "brain-assertion-genesis-0001"
 _BRAIN_GENESIS_SCOPE = "global"
 _BRAIN_GENESIS_CLAIM = {
@@ -424,78 +416,426 @@ _BRAIN_GENESIS_CLAIM = {
 _BRAIN_GENESIS_EVIDENCE_REF = "ce-ops#206:ce-brain-init"
 
 
-def _runtime_policy_sha(record: Mapping[str, Any]) -> str:
-    canonical = dict(record)
-    canonical["policy_sha"] = _RUNTIME_POLICY_HASH_PLACEHOLDER
-    payload = yaml.safe_dump(canonical, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _canonical_seat_image_ref() -> dict[str, str]:
-    image_ref = {
-        "name": CANONICAL_SEAT_IMAGE_NAME,
-        "sha": CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA,
-    }
+def _read_regular_nofollow(path: Path, *, max_bytes: int = 256 * 1024) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        manifest = yaml.safe_load(_SURFACES_MANIFEST.read_text(encoding="utf-8"))
-    except OSError:
-        return image_ref
-    surfaces = manifest.get("surfaces") if isinstance(manifest, Mapping) else None
-    if not isinstance(surfaces, list):
-        return image_ref
-    seat = next(
-        (
-            surface
-            for surface in surfaces
-            if isinstance(surface, Mapping) and surface.get("name") == "CE seat image"
-        ),
-        None,
-    )
-    if not isinstance(seat, Mapping):
-        return image_ref
-    source = seat.get("source")
-    digest = seat.get("commit_or_digest")
-    if isinstance(source, str) and source.strip():
-        image_ref["name"] = source.strip()
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input is unreadable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input is not regular")
+        payload = bytearray()
+        while len(payload) <= max_bytes:
+            chunk = os.read(descriptor, min(64 * 1024, max_bytes + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        if len(payload) > max_bytes:
+            raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input exceeds size bound")
+        return bytes(payload)
+    finally:
+        os.close(descriptor)
+
+
+def _ensure_nofollow_directory_path(path: Path) -> Path:
+    """Create a directory tree only when every existing component is a real directory."""
+    absolute = path.absolute()
+    chain = tuple(reversed((absolute, *absolute.parents)))
+    try:
+        for candidate in chain:
+            if os.path.lexists(candidate):
+                metadata = os.lstat(candidate)
+                if not stat.S_ISDIR(metadata.st_mode):
+                    raise ApplyFailed(
+                        "runtime_policy_destination_refused",
+                        "runtime-policy destination parent is not a real directory",
+                    )
+        absolute.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for candidate in chain:
+            metadata = os.lstat(candidate)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise ApplyFailed(
+                    "runtime_policy_destination_refused",
+                    "runtime-policy destination parent changed during creation",
+                )
+    except OSError as exc:
+        raise ApplyFailed(
+            "runtime_policy_destination_refused",
+            "runtime-policy destination parent cannot be created safely",
+        ) from exc
+    return absolute
+
+
+def _stage_private_write(path: Path, payload: bytes) -> Path:
+    """Write and verify one private replacement without changing its destination."""
+    path = _ensure_nofollow_directory_path(path.parent) / path.name
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ApplyFailed("runtime_policy_destination_refused", "runtime-policy destination is not a regular file")
+    temporary = path.parent / f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+    descriptor: int | None = None
+    staged = False
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        if (
+            _read_regular_nofollow(temporary, max_bytes=max(len(payload), 1)) != payload
+            or stat.S_IMODE(temporary.stat().st_mode) != 0o600
+        ):
+            raise ApplyFailed(
+                "runtime_policy_stage_mismatch",
+                "runtime-policy replacement failed staging verification",
+            )
+        staged = True
+        return temporary
+    except OSError as exc:
+        raise ApplyFailed("runtime_policy_atomic_write_failed", "runtime-policy atomic write failed") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if not staged:
+            with contextlib.suppress(FileNotFoundError):
+                temporary.unlink()
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _commit_runtime_policy_pair(
+    *,
+    policy_path: Path,
+    policy_bytes: bytes,
+    receipt_path: Path,
+    receipt_bytes: bytes,
+) -> None:
+    """Stage a pair, then replace it with recoverable last-known-good semantics.
+
+    A valid existing pair is hard-linked to private recovery names before either
+    destination changes.  Because a reprovision of one canonical binding has
+    identical policy and receipt bytes, replacing the two names cannot expose a
+    semantically mixed pair.  Any commit or post-commit verification failure
+    atomically renames both recovery links back over the destinations.
+    """
+    policy_path = _ensure_nofollow_directory_path(policy_path.parent) / policy_path.name
+    receipt_path = policy_path.parent / receipt_path.name
+    present = tuple(os.path.lexists(path) for path in (policy_path, receipt_path))
+    existing_valid = False
+    if any(present):
+        if not all(present):
+            raise ApplyFailed(
+                "runtime_policy_existing_pair_refused",
+                "runtime-policy destination contains an incomplete existing pair",
+            )
+        try:
+            existing_valid = (
+                _read_regular_nofollow(policy_path) == policy_bytes
+                and _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) == receipt_bytes
+                and stat.S_IMODE(policy_path.stat().st_mode) == 0o600
+                and stat.S_IMODE(receipt_path.stat().st_mode) == 0o600
+            )
+        except (ApplyFailed, OSError):
+            existing_valid = False
+        if not existing_valid:
+            raise ApplyFailed(
+                "runtime_policy_existing_pair_refused",
+                "runtime-policy destination does not contain a valid last-known-good pair",
+            )
+
+    staged_policy: Path | None = None
+    staged_receipt: Path | None = None
+    backup_policy: Path | None = None
+    backup_receipt: Path | None = None
+    commit_started = False
+    try:
+        staged_policy = _stage_private_write(policy_path, policy_bytes)
+        staged_receipt = _stage_private_write(receipt_path, receipt_bytes)
+        if existing_valid:
+            nonce = f"{os.getpid()}.{uuid.uuid4().hex}"
+            backup_policy = policy_path.parent / f".{policy_path.name}.backup.{nonce}"
+            backup_receipt = receipt_path.parent / f".{receipt_path.name}.backup.{nonce}"
+            os.link(policy_path, backup_policy, follow_symlinks=False)
+            os.link(receipt_path, backup_receipt, follow_symlinks=False)
+
+        commit_started = True
+        os.replace(staged_policy, policy_path)
+        staged_policy = None
+        os.replace(staged_receipt, receipt_path)
+        staged_receipt = None
+        _fsync_directory(policy_path.parent)
+        if (
+            _read_regular_nofollow(policy_path) != policy_bytes
+            or _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) != receipt_bytes
+            or stat.S_IMODE(policy_path.stat().st_mode) != 0o600
+            or stat.S_IMODE(receipt_path.stat().st_mode) != 0o600
+        ):
+            raise ApplyFailed(
+                "runtime_policy_post_replace_mismatch",
+                "runtime-policy pair failed post-replace verification",
+            )
+    except Exception as exc:
+        if commit_started:
+            if backup_policy is not None and backup_receipt is not None:
+                os.rename(backup_policy, policy_path)
+                with contextlib.suppress(FileNotFoundError):
+                    backup_policy.unlink()
+                backup_policy = None
+                os.rename(backup_receipt, receipt_path)
+                with contextlib.suppress(FileNotFoundError):
+                    backup_receipt.unlink()
+                backup_receipt = None
+                with contextlib.suppress(OSError):
+                    _fsync_directory(policy_path.parent)
+            else:
+                for candidate in (policy_path, receipt_path):
+                    with contextlib.suppress(FileNotFoundError):
+                        candidate.unlink()
+        if isinstance(exc, ApplyFailed):
+            raise
+        raise ApplyFailed(
+            "runtime_policy_atomic_write_failed", "runtime-policy atomic pair write failed"
+        ) from exc
+    finally:
+        for candidate in (staged_policy, staged_receipt, backup_policy, backup_receipt):
+            if candidate is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    candidate.unlink()
+
+
+def _validated_repository_root(repository_root: Path) -> Path:
+    """Bind one explicit, canonical source checkout without ambient searching."""
+    root = Path(repository_root)
+    if not root.is_absolute():
+        raise ApplyRefused(
+            "runtime_policy_repository_root_refused",
+            "runtime-policy repository root must be an explicit absolute path",
+        )
+    try:
+        metadata = root.lstat()
+        resolved = root.resolve(strict=True)
+    except OSError as exc:
+        raise ApplyRefused(
+            "runtime_policy_repository_root_refused",
+            "runtime-policy repository root must be an existing real directory",
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode) or resolved != root:
+        raise ApplyRefused(
+            "runtime_policy_repository_root_refused",
+            "runtime-policy repository root must be a canonical real directory",
+        )
+    return root
+
+
+@dataclass(frozen=True)
+class CanonicalRuntimePolicyBinding:
+    """Immutable canonical bytes admitted before any apply-side mutation."""
+
+    repository_root: Path
+    source_path: Path
+    source_relative_path: str
+    source_bytes: bytes
+    source_sha256: str
+    policy_id: str
+    policy_sha: str
+    local_policy_relative_path: str
+    registry_path: Path
+    registry_bytes: bytes
+    registry_sha256: str
+
+
+def _validate_bound_runtime_policy(binding: CanonicalRuntimePolicyBinding) -> None:
+    """Revalidate an immutable binding without reopening checkout material."""
+    if hashlib.sha256(binding.registry_bytes).hexdigest() != binding.registry_sha256:
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "bound launcher registry bytes do not match their admitted digest",
+        )
+    try:
+        launcher = codex_worker_launcher._parse_policy(
+            binding.registry_bytes,
+            worktree=str(binding.repository_root),
+            source_path=str(binding.registry_path),
+        )
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        raise ApplyRefused(
+            "runtime_policy_registry_invalid",
+            "bound launcher registry bytes are malformed or noncanonical",
+        ) from exc
+    registry_binding = launcher.runtime_policy_binding
     if (
-        isinstance(digest, str)
-        and digest.startswith("sha256:")
-        and len(digest) == len(CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA)
+        launcher.source_sha256 != binding.registry_sha256
+        or binding.registry_path
+        != binding.repository_root / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH
+        or binding.source_path != binding.repository_root / registry_binding.source_path
+        or binding.source_relative_path != registry_binding.source_path
+        or binding.source_sha256 != registry_binding.source_sha256
+        or binding.policy_id != registry_binding.policy_id
+        or binding.policy_sha != registry_binding.policy_sha
+        or binding.local_policy_relative_path
+        != registry_binding.local_policy_relative_path
     ):
-        image_ref["sha"] = digest
-    return image_ref
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "bound canonical runtime-policy identity does not match strict registry bytes",
+        )
+    if hashlib.sha256(binding.source_bytes).hexdigest() != binding.source_sha256:
+        raise ApplyRefused(
+            "runtime_policy_source_digest_mismatch",
+            "bound canonical runtime-policy bytes do not match their admitted digest",
+        )
+    try:
+        record = yaml.safe_load(binding.source_bytes)
+    except yaml.YAMLError as exc:
+        raise ApplyRefused(
+            "runtime_policy_source_invalid",
+            "canonical runtime-policy source is malformed",
+        ) from exc
+    if not isinstance(record, dict) or ce_runtime_policy.validate_runtime_policy(
+        record, binding.source_path
+    ):
+        raise ApplyRefused(
+            "runtime_policy_source_invalid",
+            "canonical runtime-policy source fails validation",
+        )
+    if (
+        record.get("policy_id") != binding.policy_id
+        or record.get("policy_sha") != binding.policy_sha
+        or ce_runtime_policy.runtime_policy_semantic_sha256(record) != binding.policy_sha
+    ):
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "canonical runtime-policy semantic identity does not match registry",
+        )
 
 
-def _default_controller_runtime_policy(*, workspace_root: Path) -> dict[str, Any]:
-    workspace = str(workspace_root.resolve())
-    home = Path.home()
-    mount_manifest: list[dict[str, Any]] = [
-        {
-            "path": workspace,
-            "mode": "rw",
-            "write_justification": "tenant workspace for the controller seat",
-        }
-    ]
-    for parts in _AGENT_CONFIG_DIRS:
-        mount_manifest.append({"path": str(home.joinpath(*parts)), "mode": "ro"})
+def bind_canonical_runtime_policy(
+    repository_root: Path,
+) -> CanonicalRuntimePolicyBinding:
+    """Preflight and capture exact canonical policy and strict registry bytes."""
+    repository_root = _validated_repository_root(repository_root)
+    try:
+        launcher = codex_worker_launcher.load_canonical_policy(str(repository_root))
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        raise ApplyRefused(
+            "runtime_policy_registry_invalid",
+            "canonical launcher registry is missing, malformed, or noncanonical",
+        ) from exc
 
-    record: dict[str, Any] = {
-        "kind": ce_runtime_policy.KIND_VALUE,
-        "record_type": "runtime_policy",
+    binding = launcher.runtime_policy_binding
+    registry_path = repository_root / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH
+    source_path = repository_root / binding.source_path
+    try:
+        registry_bytes = _read_regular_nofollow(
+            registry_path, max_bytes=codex_worker_launcher.MAX_RUNTIME_POLICY_BYTES
+        )
+    except (ApplyFailed, OSError) as exc:
+        raise ApplyRefused(
+            "runtime_policy_registry_invalid",
+            "canonical launcher registry cannot be read as a regular file",
+        ) from exc
+    registry_sha = hashlib.sha256(registry_bytes).hexdigest()
+    if registry_sha != launcher.source_sha256:
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "canonical launcher registry changed during admission",
+        )
+    try:
+        source_bytes = _read_regular_nofollow(
+            source_path, max_bytes=codex_worker_launcher.MAX_RUNTIME_POLICY_BYTES
+        )
+    except (ApplyFailed, OSError) as exc:
+        raise ApplyRefused(
+            "runtime_policy_source_invalid",
+            "canonical runtime-policy source is missing or unreadable",
+        ) from exc
+
+    admitted = CanonicalRuntimePolicyBinding(
+        repository_root=repository_root,
+        source_path=source_path,
+        source_relative_path=binding.source_path,
+        source_bytes=source_bytes,
+        source_sha256=binding.source_sha256,
+        policy_id=binding.policy_id,
+        policy_sha=binding.policy_sha,
+        local_policy_relative_path=binding.local_policy_relative_path,
+        registry_path=registry_path,
+        registry_bytes=registry_bytes,
+        registry_sha256=registry_sha,
+    )
+    _validate_bound_runtime_policy(admitted)
+    return admitted
+
+
+def _admit_canonical_runtime_policy(
+    *,
+    repository_root: Path,
+    binding: CanonicalRuntimePolicyBinding | None,
+) -> CanonicalRuntimePolicyBinding:
+    """Admit or revalidate immutable canonical bytes before any runtime side effect."""
+    repository_root = _validated_repository_root(repository_root)
+    admitted = binding or bind_canonical_runtime_policy(repository_root)
+    if admitted.repository_root != repository_root:
+        raise ApplyRefused(
+            "runtime_policy_repository_root_mismatch",
+            "bound canonical runtime-policy belongs to a different repository root",
+        )
+    _validate_bound_runtime_policy(admitted)
+    return admitted
+
+
+def provision_canonical_runtime_policy(
+    *,
+    state_root: Path,
+    repository_root: Path,
+    binding: CanonicalRuntimePolicyBinding | None = None,
+) -> dict[str, Any]:
+    """Copy pre-admitted exact bytes and emit a compact provenance receipt."""
+    admitted = _admit_canonical_runtime_policy(
+        repository_root=repository_root,
+        binding=binding,
+    )
+    policy_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_BASENAME
+    receipt_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_RECEIPT_BASENAME
+    receipt = {
+        "canonical_source_path": admitted.source_relative_path,
+        "canonical_source_sha256": admitted.source_sha256,
+        "kind": codex_worker_launcher.RUNTIME_RECEIPT_KIND,
+        "local_policy_relative_path": admitted.local_policy_relative_path,
+        "policy_id": admitted.policy_id,
+        "policy_sha": admitted.policy_sha,
+        "registry_path": codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH,
+        "registry_sha256": admitted.registry_sha256,
+        "rendered_sha256": admitted.source_sha256,
         "schema_version": "1",
-        "policy_id": DEFAULT_CONTROLLER_POLICY_ID,
-        "policy_sha": _RUNTIME_POLICY_HASH_PLACEHOLDER,
-        "role": "controller",
-        "isolation_backend": "docker",
-        "image_ref": _canonical_seat_image_ref(),
-        "mount_manifest": mount_manifest,
-        "egress_allowlist": [],
-        "secret_allowlist": [],
-        "grant_extensible": False,
-        "grant_authority": "controller",
     }
-    record["policy_sha"] = _runtime_policy_sha(record)
-    return record
+    receipt_bytes = (
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    _commit_runtime_policy_pair(
+        policy_path=policy_path,
+        policy_bytes=admitted.source_bytes,
+        receipt_path=receipt_path,
+        receipt_bytes=receipt_bytes,
+    )
+    return {
+        "policy_path": policy_path,
+        "receipt_path": receipt_path,
+        "source_sha256": admitted.source_sha256,
+        "policy_sha": admitted.policy_sha,
+        "registry_sha256": admitted.registry_sha256,
+    }
 
 
 class ApplyRefused(Exception):
@@ -530,6 +870,8 @@ class ApplyRequest:
     answers: dict[str, Any]
     answers_sha256: str | None
     state_root: Path
+    repository_root: Path = field(default_factory=Path.cwd)
+    canonical_runtime_policy: CanonicalRuntimePolicyBinding | None = None
     mode: str = "agent-native"
     detected: Mapping[str, Any] = field(default_factory=dict)
     dependency_probe: Mapping[str, bool] = field(default_factory=dict)
@@ -645,33 +987,59 @@ class ApplyDriver:
         state_root: Path,
         workspace_root: Path,
         provider: str | None,
+        repository_root: Path,
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
+        runtime_policy_binding: CanonicalRuntimePolicyBinding | None = None,
     ) -> dict[str, Any]:
+        if backend == "gvisor-proxy":
+            admitted_runtime_policy = _admit_canonical_runtime_policy(
+                repository_root=repository_root,
+                binding=runtime_policy_binding,
+            )
+        else:
+            admitted_runtime_policy = None
         # ce-ops#71 Edit A: the backend is no longer hardwired to ``gvisor-proxy`` —
         # it is the one RESOLVED from the profile/answers (``solo-pilot`` →
         # ``os-native``, no privileged runtime). The posture records the selection.
         runtime_dir = state_root / ONBOARD_SUBDIR / "runtime"
+        if backend in {"os-native", "openshell"}:
+            policy_path = runtime_dir / RUNTIME_POLICY_BASENAME
+            receipt_path = runtime_dir / RUNTIME_POLICY_RECEIPT_BASENAME
+            if os.path.lexists(policy_path) or os.path.lexists(receipt_path):
+                raise ApplyRefused(
+                    "runtime_policy_held_transition_refused",
+                    "held backend transition refused while canonical runtime-policy evidence exists",
+                )
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        runtime_policy_path = runtime_dir / RUNTIME_POLICY_BASENAME
-        runtime_policy = _default_controller_runtime_policy(workspace_root=workspace_root)
         config = {
             "isolation_backend": backend,
             "egress": "deny-by-default",
             "provider": provider,
             "workspace_root": str(workspace_root),
-            "runtime_policy": str(runtime_policy_path),
         }
-        runtime_policy_path.write_text(
-            yaml.safe_dump(runtime_policy, sort_keys=True),
-            encoding="utf-8",
-        )
+        created: list[str] = []
+        if backend == "gvisor-proxy":
+            runtime_policy_result = provision_canonical_runtime_policy(
+                state_root=state_root,
+                repository_root=repository_root,
+                binding=admitted_runtime_policy,
+            )
+            runtime_policy_path = Path(runtime_policy_result["policy_path"])
+            config["runtime_policy"] = str(runtime_policy_path)
+            created.extend(
+                [
+                    str(runtime_policy_path),
+                    str(runtime_policy_result["receipt_path"]),
+                ]
+            )
         (runtime_dir / "posture.json").write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        created.append(str(runtime_dir / "posture.json"))
         return {
             "ok": True,
-            "created": [str(runtime_policy_path), str(runtime_dir / "posture.json")],
+            "created": created,
         }
 
     def verify_runtime(
@@ -1224,13 +1592,26 @@ def apply_onboard(
     clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     """Run one bounded E2 apply pass and return the deterministic summary."""
+    repository_root = _validated_repository_root(request.repository_root)
+    signed = parse_signed_spec(request.spec_bytes, request.explicit_signature)
+    prepared = _prepare(request, signed=signed, verifier=verifier)
+    runtime_policy_binding = request.canonical_runtime_policy
+    if prepared.isolation_backend == "gvisor-proxy":
+        runtime_policy_binding = runtime_policy_binding or bind_canonical_runtime_policy(
+            repository_root
+        )
+        if runtime_policy_binding.repository_root != repository_root:
+            raise ApplyRefused(
+                "runtime_policy_repository_root_mismatch",
+                "bound canonical runtime-policy belongs to a different repository root",
+            )
+        _validate_bound_runtime_policy(runtime_policy_binding)
     driver = driver or ApplyDriver()
     invocation_id = invocation_id or str(uuid.uuid4())
     state_root = request.state_root
-    signed = parse_signed_spec(request.spec_bytes, request.explicit_signature)
     identity = {
-        "target_repo": _target_repo_from_answers(request.schema, request.answers, request.detected),
-        "workspace_root": _workspace_root_from_answers(request.schema, request.answers, request.detected),
+        "target_repo": prepared.target_repo,
+        "workspace_root": str(prepared.workspace_root),
         "install_spec_digest": signed.canonical_sha256,
     }
     with ApplyLock(
@@ -1238,7 +1619,6 @@ def apply_onboard(
         identity,
         request.lock_timeout_seconds,
     ):
-        prepared = _prepare(request, signed=signed, verifier=verifier)
         summary = prepared.summary
         ledger = Ledger(
             state_root / ONBOARD_SUBDIR / LEDGER_BASENAME,
@@ -1266,6 +1646,7 @@ def apply_onboard(
                         workspace_holder,
                         installation_holder,
                         adoption_holder,
+                        runtime_policy_binding,
                     )
                 except ApplyRefused as exc:
                     outcome = LegOutcome(
@@ -1681,6 +2062,7 @@ def _run_leg(
     workspace_holder: dict[str, Path],
     installation_holder: dict[str, int],
     adoption_holder: dict[str, Any],
+    runtime_policy_binding: CanonicalRuntimePolicyBinding | None,
 ) -> LegOutcome:
     # ce-ops#85 mode gate (E2 §6 seam 1; LegOutcome shape unchanged): in an authorized
     # adoption run the greenfield FORGE legs skip ("brownfield_adoption_mode"); in every
@@ -1757,7 +2139,9 @@ def _run_leg(
             state_root=request.state_root,
             workspace_root=prepared.workspace_root,
             provider=provider,
+            repository_root=request.repository_root,
             backend=backend,
+            runtime_policy_binding=runtime_policy_binding,
         )
         if not action.get("ok"):
             raise ApplyFailed("runtime_posture_apply_failed", str(action.get("reason", "runtime provisioning failed")))
