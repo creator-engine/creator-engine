@@ -313,6 +313,8 @@ def reconcile(
     if prior is None or prior.get("phase") not in {"pre_dispatch", "mid_run"}:
         receipt = _make_receipt(run_id=run_id, attempt_id=attempt_id, reservation_id=reservation_id, phase="reconcile", cap=cap, reserved=0, observed=observed, remaining=0, sample_sequence=sample_sequence, source_state="unknown", policy_sha256=policy_sha256, previous_receipt_sha256=GENESIS_RECEIPT_SHA256, recorded_at=recorded_at)
         return WorkUnitDecision(False, "work_unit_reservation_missing", receipt, persist=False)
+    if prior.get("attempt_id") != attempt_id or prior.get("policy_sha256") != policy_sha256:
+        return WorkUnitDecision(False, "work_unit_reservation_identity_mismatch", dict(prior), persist=False)
     prior_sequence = int(prior["sample_sequence"])
     prior_observed = int(prior["observed"])
     if sample_sequence == prior_sequence and observed == prior_observed:
@@ -321,11 +323,13 @@ def reconcile(
         return WorkUnitDecision(False, "work_unit_sample_replayed_conflict", dict(prior), persist=False)
     predecessor = str(projection.last_receipt["receipt_sha256"]) if projection.last_receipt else GENESIS_RECEIPT_SHA256
     reserved = int(prior["reserved"])
+    successor_attempt_id = str(prior["attempt_id"])
+    successor_policy_sha256 = str(prior["policy_sha256"])
     if observed < prior_observed:
-        receipt = _make_receipt(run_id=run_id, attempt_id=attempt_id, reservation_id=reservation_id, phase="mid_run", cap=cap, reserved=reserved, observed=observed, remaining=max(projection.remaining, 0), sample_sequence=sample_sequence, source_state="unknown", policy_sha256=policy_sha256, previous_receipt_sha256=predecessor, recorded_at=recorded_at)
+        receipt = _make_receipt(run_id=run_id, attempt_id=successor_attempt_id, reservation_id=reservation_id, phase="mid_run", cap=cap, reserved=reserved, observed=observed, remaining=max(projection.remaining, 0), sample_sequence=sample_sequence, source_state="unknown", policy_sha256=successor_policy_sha256, previous_receipt_sha256=predecessor, recorded_at=recorded_at)
         return WorkUnitDecision(False, "work_unit_observed_decreased", receipt, persist=False)
     source_state = "measured" if projection.safe and sample_sequence == prior_sequence + 1 and observed <= reserved else "unknown"
-    receipt = _make_receipt(run_id=run_id, attempt_id=attempt_id, reservation_id=reservation_id, phase="mid_run", cap=cap, reserved=reserved, observed=observed, remaining=max(cap - projection.committed - projection.live_reservations, 0), sample_sequence=sample_sequence, source_state=source_state, policy_sha256=policy_sha256, previous_receipt_sha256=predecessor, recorded_at=recorded_at)
+    receipt = _make_receipt(run_id=run_id, attempt_id=successor_attempt_id, reservation_id=reservation_id, phase="mid_run", cap=cap, reserved=reserved, observed=observed, remaining=max(cap - projection.committed - projection.live_reservations, 0), sample_sequence=sample_sequence, source_state=source_state, policy_sha256=successor_policy_sha256, previous_receipt_sha256=predecessor, recorded_at=recorded_at)
     if source_state != "measured":
         return WorkUnitDecision(False, "work_unit_sample_unknown", receipt)
     return WorkUnitDecision(True, "work_unit_reconciled", receipt)
@@ -342,7 +346,11 @@ def _terminal(
     if prior is None or prior.get("phase") not in {"pre_dispatch", "mid_run"}:
         receipt = _make_receipt(run_id=run_id, attempt_id=attempt_id, reservation_id=reservation_id, phase=phase, cap=cap, reserved=0, observed=0, remaining=max(projection.remaining, 0), sample_sequence=0, source_state="unknown", policy_sha256=policy_sha256, previous_receipt_sha256=GENESIS_RECEIPT_SHA256, recorded_at=recorded_at)
         return WorkUnitDecision(False, "work_unit_reservation_missing", receipt, persist=False)
+    if prior.get("attempt_id") != attempt_id or prior.get("policy_sha256") != policy_sha256:
+        return WorkUnitDecision(False, "work_unit_reservation_identity_mismatch", dict(prior), persist=False)
     reserved = int(prior["reserved"])
+    successor_attempt_id = str(prior["attempt_id"])
+    successor_policy_sha256 = str(prior["policy_sha256"])
     prior_observed = int(prior["observed"])
     final_observed = prior_observed if observed is None else observed
     if not _is_count(final_observed) or not prior_observed <= final_observed <= reserved:
@@ -350,7 +358,7 @@ def _terminal(
     sequence = int(prior["sample_sequence"]) + (1 if phase == "completion" else 0)
     successor_remaining = projection.remaining + reserved - (final_observed if phase == "completion" else 0)
     predecessor = str(projection.last_receipt["receipt_sha256"]) if projection.last_receipt else GENESIS_RECEIPT_SHA256
-    receipt = _make_receipt(run_id=run_id, attempt_id=attempt_id, reservation_id=reservation_id, phase=phase, cap=cap, reserved=reserved, observed=final_observed, remaining=successor_remaining, sample_sequence=sequence, source_state="measured" if projection.safe else "unknown", policy_sha256=policy_sha256, previous_receipt_sha256=predecessor, recorded_at=recorded_at)
+    receipt = _make_receipt(run_id=run_id, attempt_id=successor_attempt_id, reservation_id=reservation_id, phase=phase, cap=cap, reserved=reserved, observed=final_observed, remaining=successor_remaining, sample_sequence=sequence, source_state="measured" if projection.safe else "unknown", policy_sha256=successor_policy_sha256, previous_receipt_sha256=predecessor, recorded_at=recorded_at)
     return WorkUnitDecision(projection.safe, f"work_unit_{phase}", receipt)
 
 

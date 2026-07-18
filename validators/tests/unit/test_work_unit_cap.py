@@ -164,6 +164,32 @@ def test_reconcile_is_idempotent_and_a_gap_fails_closed():
     assert gap.receipt["source_state"] == "unknown"
 
 
+@pytest.mark.parametrize("operation", ["reconcile", "complete", "rollback"])
+@pytest.mark.parametrize("field", ["attempt_id", "policy_sha256"])
+def test_live_identity_is_required_and_preserved_for_successors(operation, field):
+    reservation = reserve()
+    kwargs = {
+        "cap": 100, "run_id": "run-1", "attempt_id": "attempt-1",
+        "reservation_id": "reservation-1", "policy_sha256": POLICY_SHA,
+        "recorded_at": NOW,
+    }
+    if operation == "reconcile":
+        kwargs.update(sample_sequence=1, observed=8)
+    elif operation == "complete":
+        kwargs.update(observed=8)
+    wrong = dict(kwargs, **{field: "attempt-2" if field == "attempt_id" else "b" * 64})
+    refused = getattr(cap, operation)((reservation.receipt,), **wrong)
+    assert not refused.allowed
+    assert refused.reason == "work_unit_reservation_identity_mismatch"
+    assert refused.persist is False
+    assert refused.receipt == reservation.receipt
+
+    successor = getattr(cap, operation)((reservation.receipt,), **kwargs)
+    assert successor.allowed
+    assert successor.receipt["attempt_id"] == reservation.receipt["attempt_id"]
+    assert successor.receipt["policy_sha256"] == reservation.receipt["policy_sha256"]
+
+
 def test_receipt_digests_are_canonical_and_tampering_is_rejected():
     reservation = reserve()
     sample = cap.reconcile(
