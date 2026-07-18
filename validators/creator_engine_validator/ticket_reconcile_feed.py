@@ -86,6 +86,8 @@ def collect_inputs(
     now: dt.datetime | None = None,
     ticket_token: str | None = None,
     pr_token: str | None = None,
+    ticket_token_env: str | None = None,
+    pr_token_env: str | None = None,
 ) -> tuple[list[OpenTicket], list[MergedPullRequest]]:
     """Collect complete open-ticket and merged-PR repository connections.
 
@@ -104,8 +106,19 @@ def collect_inputs(
     cutoff = instant.astimezone(dt.timezone.utc) - dt.timedelta(days=since_days)
 
     try:
-        tickets = _collect_tickets(ticket_repo, runner=runner, token=ticket_token)
-        prs_with_dates = _collect_prs(pr_repo, runner=runner, token=pr_token)
+        token_source_names = (ticket_token_env, pr_token_env)
+        tickets = _collect_tickets(
+            ticket_repo,
+            runner=runner,
+            token=ticket_token,
+            token_source_names=token_source_names,
+        )
+        prs_with_dates = _collect_prs(
+            pr_repo,
+            runner=runner,
+            token=pr_token,
+            token_source_names=token_source_names,
+        )
     except TicketReconcileFeedError as exc:
         raise TicketReconcileFeedError(
             _redact_tokens(str(exc), (ticket_token, pr_token))
@@ -148,6 +161,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.since_days,
             ticket_token=ticket_token,
             pr_token=pr_token,
+            ticket_token_env=args.ticket_token_env,
+            pr_token_env=args.pr_token_env,
         )
         matches = reconcile_stale_tickets(
             tickets,
@@ -165,19 +180,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _collect_tickets(repo: str, *, runner: Runner, token: str) -> list[OpenTicket]:
+def _collect_tickets(
+    repo: str,
+    *,
+    runner: Runner,
+    token: str,
+    token_source_names: Sequence[str | None],
+) -> list[OpenTicket]:
     nodes = _collect_connection(
         repo,
         connection_name="issues",
         query=_ISSUES_QUERY,
         runner=runner,
         token=token,
+        token_source_names=token_source_names,
     )
     return [_parse_ticket(node, index) for index, node in enumerate(nodes)]
 
 
 def _collect_prs(
-    repo: str, *, runner: Runner, token: str
+    repo: str,
+    *,
+    runner: Runner,
+    token: str,
+    token_source_names: Sequence[str | None],
 ) -> list[tuple[MergedPullRequest, dt.datetime]]:
     nodes = _collect_connection(
         repo,
@@ -185,6 +211,7 @@ def _collect_prs(
         query=_PRS_QUERY,
         runner=runner,
         token=token,
+        token_source_names=token_source_names,
     )
     return [_parse_pr(node, index) for index, node in enumerate(nodes)]
 
@@ -196,6 +223,7 @@ def _collect_connection(
     query: str,
     runner: Runner,
     token: str,
+    token_source_names: Sequence[str | None],
 ) -> list[Any]:
     owner, name = _split_repo(repo)
     cursor: str | None = None
@@ -216,7 +244,12 @@ def _collect_connection(
         ]
         if cursor is not None:
             command.extend(["-F", f"cursor={cursor}"])
-        payload, stderr = _run_gh_json(command, runner=runner, token=token)
+        payload, stderr = _run_gh_json(
+            command,
+            runner=runner,
+            token=token,
+            token_source_names=token_source_names,
+        )
         connection = _extract_connection(
             payload,
             connection_name=connection_name,
@@ -252,13 +285,17 @@ def _collect_connection(
 
 
 def _run_gh_json(
-    command: list[str], *, runner: Runner, token: str
+    command: list[str],
+    *,
+    runner: Runner,
+    token: str,
+    token_source_names: Sequence[str | None],
 ) -> tuple[Any, str]:
     kwargs: dict[str, Any] = {
         "capture_output": True,
         "text": True,
         "check": False,
-        "env": _scoped_gh_env(token),
+        "env": _scoped_gh_env(token, token_source_names=token_source_names),
     }
     try:
         completed = runner(command, **kwargs)
@@ -387,10 +424,9 @@ def _load_reference_parser(path: Path = _PARSER_PATH) -> ReferenceParser:
 
 
 def _parse_reference_numbers(title: str, body: str) -> Sequence[int]:
+    parser = _load_reference_parser()
     try:
-        values = _load_reference_parser()(title, body)
-    except TicketReconcileFeedError:
-        raise
+        values = parser(title, body)
     except Exception:
         raise TicketReconcileFeedError("canonical reference parser failed") from None
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
@@ -421,9 +457,21 @@ def _validate_token_pair(ticket_token: Any, pr_token: Any) -> tuple[str, str]:
     return ticket_token, pr_token
 
 
-def _scoped_gh_env(token: str) -> dict[str, str]:
+def _is_app_key_var(name: str) -> bool:
+    """Return whether *name* could carry a GitHub App private key."""
+
+    upper = name.upper()
+    return upper.endswith("_PEM") or "PRIVATE_KEY" in upper or "APP_KEY" in upper
+
+
+def _scoped_gh_env(
+    token: str, *, token_source_names: Sequence[str | None] = ()
+) -> dict[str, str]:
     child = dict(os.environ)
-    for name in _SCOPED_GH_ENV_EXCLUSIONS:
+    for name in (*_SCOPED_GH_ENV_EXCLUSIONS, *token_source_names):
+        if name is not None:
+            child.pop(name, None)
+    for name in [name for name in child if _is_app_key_var(name)]:
         child.pop(name, None)
     child["GH_TOKEN"] = token
     return child

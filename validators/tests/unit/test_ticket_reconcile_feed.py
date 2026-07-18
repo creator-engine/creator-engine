@@ -186,6 +186,9 @@ def test_ticket_and_pr_credentials_are_isolated_in_child_environments(monkeypatc
         "GH_HOST": "untrusted.example",
         "GH_CONFIG_DIR": "/tmp/untrusted-gh-config",
         "GITHUB_API_URL": "https://untrusted.example/api/v3",
+        "CE_GITHUB_APP_PEM": "app-pem",
+        "CE_GITHUB_PRIVATE_KEY": "app-private-key",
+        "CE_APP_KEY_MATERIAL": "app-key",
     }
     for name, value in excluded.items():
         monkeypatch.setenv(name, value)
@@ -209,6 +212,38 @@ def test_ticket_and_pr_credentials_are_isolated_in_child_environments(monkeypatc
         assert (excluded.keys() - {"GH_TOKEN"}).isdisjoint(child_env)
     assert all("ticket-only" not in " ".join(call[0]) for call in runner.calls)
     assert all("pr-only" not in " ".join(call[0]) for call in runner.calls)
+
+
+def test_custom_token_source_names_are_isolated_from_child_environments(monkeypatch):
+    ticket_source = "CUSTOM_TICKET_SOURCE"
+    pr_source = "CUSTOM_PR_SOURCE"
+    ticket_token = "custom-ticket-secret"
+    pr_token = "custom-pr-secret"
+    monkeypatch.setenv(ticket_source, ticket_token)
+    monkeypatch.setenv(pr_source, pr_token)
+    runner = FakeGraphqlRunner([_page([])], [_page([])])
+
+    feed.collect_inputs(
+        _TICKET_REPO,
+        _PR_REPO,
+        1,
+        runner=runner,
+        now=_NOW,
+        ticket_token=ticket_token,
+        pr_token=pr_token,
+        ticket_token_env=ticket_source,
+        pr_token_env=pr_source,
+    )
+
+    ticket_env = runner.calls[0][1]["env"]
+    pr_env = runner.calls[1][1]["env"]
+    assert ticket_env["GH_TOKEN"] == ticket_token
+    assert pr_env["GH_TOKEN"] == pr_token
+    for child_env in (ticket_env, pr_env):
+        assert ticket_source not in child_env
+        assert pr_source not in child_env
+    assert all(ticket_token not in " ".join(call[0]) for call in runner.calls)
+    assert all(pr_token not in " ".join(call[0]) for call in runner.calls)
 
 
 @pytest.mark.parametrize(
@@ -305,8 +340,8 @@ def test_production_parser_visibility_matches_title_closing_and_bare_body_contra
     feed._load_reference_parser.cache_clear()
 
     assert feed._parse_reference_numbers("feat: ce-518 canonical", "") == [518]
-    assert feed._parse_reference_numbers("unrelated", "Closes ce-ops#519") == [519]
-    assert feed._parse_reference_numbers("unrelated", "Context only: ce-ops#520") == []
+    assert feed._parse_reference_numbers("unrelated", "Closes ce-ops#1000001") == [1000001]
+    assert feed._parse_reference_numbers("unrelated", "Context only: ce-ops#1000002") == []
 
 
 @pytest.mark.parametrize(
@@ -441,7 +476,10 @@ def test_canonical_parser_rejects_malformed_number_elements(monkeypatch, values)
         feed._parse_reference_numbers("title", "body")
 
 
-def test_main_parser_failure_does_not_emit_raw_body_or_read_token(monkeypatch, capsys):
+@pytest.mark.parametrize("error_type", [RuntimeError, feed.TicketReconcileFeedError])
+def test_main_parser_failure_does_not_emit_raw_body_or_read_token(
+    monkeypatch, capsys, error_type
+):
     body = "RAW-SECRET-BODY"
     token = "injected-read-secret"
     monkeypatch.setenv("CE_OPS_READ_TOKEN", token)
@@ -462,7 +500,7 @@ def test_main_parser_failure_does_not_emit_raw_body_or_read_token(monkeypatch, c
     )
 
     def failing_parser(_title, parser_body):
-        raise RuntimeError(parser_body)
+        raise error_type(parser_body)
 
     monkeypatch.setattr(feed, "_load_reference_parser", lambda: failing_parser)
 
