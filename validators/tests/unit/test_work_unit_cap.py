@@ -88,6 +88,35 @@ def test_retry_reuse_requires_the_extant_reservation_invariants():
     assert not after_terminal.allowed and after_terminal.reason == "work_unit_retry_reservation_terminal"
 
 
+@pytest.mark.parametrize("corruption", ["tampered", "duplicate", "sequence_invalid", "malformed"])
+def test_retry_reuse_refuses_any_unsafe_durable_history(corruption):
+    first = reserve(requested=60)
+    if corruption == "tampered":
+        unsafe = dict(first.receipt, remaining=41)
+        unsafe["receipt_sha256"] = cap.receipt_sha256(unsafe)
+        stream = (first.receipt, unsafe)
+    elif corruption == "duplicate":
+        stream = (first.receipt, dict(first.receipt))
+    elif corruption == "sequence_invalid":
+        sample = cap.reconcile(
+            (first.receipt,), cap=100, run_id="run-1", attempt_id="attempt-1",
+            reservation_id="reservation-1", sample_sequence=1, observed=1,
+            policy_sha256=POLICY_SHA, recorded_at=NOW,
+        )
+        unsafe = dict(sample.receipt, sample_sequence=2)
+        unsafe["receipt_sha256"] = cap.receipt_sha256(unsafe)
+        stream = (first.receipt, unsafe)
+    else:
+        stream = (first.receipt, {"run_id": "run-1"})
+
+    retry = cap.reserve(
+        stream, cap=100, run_id="run-1", attempt_id="attempt-1",
+        reservation_id="reservation-1", requested=60, policy_sha256=POLICY_SHA, recorded_at=NOW,
+    )
+    assert not retry.allowed
+    assert retry.reason == "work_unit_receipts_invalid"
+
+
 @pytest.mark.parametrize("requested", [False, 0, -1, 1.5])
 def test_non_positive_or_non_integer_requests_are_refused_before_receipt_creation(requested):
     with pytest.raises(ValueError, match="positive integer"):

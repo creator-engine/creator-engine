@@ -8,10 +8,12 @@ split.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -227,6 +229,39 @@ def test_verified_current_work_unit_binding_requires_serialized_current_ledger_e
     _append(tmp_path, effect_id="effect-after-reservation")
     assert not runtime.work_unit_reservation_evidence(
         binding,
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
+        reservation_id="reservation", policy_sha256="a" * 64,
+    )["valid"]
+
+
+def test_verified_binding_is_opaque_issued_and_rejects_raw_copy_and_substitution(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    decision = runtime.reserve_work_unit_reservation(
+        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
+        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+    )
+    binding = decision.binding
+    assert binding is not None
+
+    with pytest.raises(TypeError):
+        runtime.VerifiedCurrentWorkUnitBinding()
+    with pytest.raises(TypeError):
+        copy.copy(binding)
+    with pytest.raises(TypeError):
+        copy.deepcopy(binding)
+    with pytest.raises(TypeError):
+        replace(binding)
+    with pytest.raises(AttributeError):
+        binding.run_id = "substituted"
+    with pytest.raises(AttributeError):
+        _ = binding.__dict__
+
+    raw = runtime.record_work_unit_reservation(receipt=decision.receipt, **_kwargs(tmp_path, effect_id="raw"))
+    assert raw.record_sha256
+    assert not runtime.work_unit_reservation_evidence(
+        object.__new__(runtime.VerifiedCurrentWorkUnitBinding),
         side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
         controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
         reservation_id="reservation", policy_sha256="a" * 64,

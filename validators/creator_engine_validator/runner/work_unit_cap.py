@@ -260,6 +260,8 @@ def reserve(
     ]
     if reservation_history:
         latest = reservation_history[-1]
+        if not projection.safe or validate_receipts(stream):
+            return WorkUnitDecision(False, "work_unit_receipts_invalid", dict(latest), persist=False)
         if latest.get("phase") in {"completion", "rollback"}:
             return WorkUnitDecision(False, "work_unit_retry_reservation_terminal", dict(latest), persist=False)
         invariant_fields = {
