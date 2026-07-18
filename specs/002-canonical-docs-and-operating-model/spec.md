@@ -1389,15 +1389,18 @@ them.
 - **Required sections**: (a) Spec Kit integration boundary
   (Feature 001 wrapper sidecars and Spec Kit-byte-identical
   invariant); (b) GitHub integration boundary (PR/merge mechanics;
-  `.github/` deferred to Feature 003); (c) CI integration boundary
+  the Sprint 0 `.github/` deferral to Feature 003, distinguished from
+  Feature 003's subsequently delivered live workflow wiring); (c) CI integration boundary
   (mechanical validation; verifies-not-ratifies); (d) tracker-
   agnostic work-item model; (e) per-integration deferrals citing
   Features 003–006; (f) trust boundaries summary.
 - **Source-of-truth relationship**: REFERENCE — defers to Feature 001
   wrapper sidecar contracts and to the operating model doc.
 - **Acceptance criteria**: every integration boundary row names
-  ownership (Creator Engine governs vs external owns) and deferral
-  status; `.github/` explicitly listed as Feature 003 deferral.
+  ownership (Creator Engine governs vs external owns) and historical
+  deferral or current delivery status; the Sprint 0 `.github/` Feature 003
+  deferral is explicit, and the delivered live workflow is not presented as
+  future work.
 
 ### 9. `docs/architecture/parallel-agent-development-model.md`
 
@@ -1509,36 +1512,42 @@ them.
 - **Required sections**: (a) when test writing is mandatory
   (Feature 001 FR-025 and operating-model transition T14);
   (b) test placement convention; (c) validator self-tests
-  (Feature 001 FR-025–FR-027); (d) CI verification expectations
-  (Feature 003 deferral); (e) evidence-capture format;
+  (Feature 001 FR-025–FR-027); (d) CI verification expectations,
+  including the historical Feature 003 deferral and the subsequently delivered
+  live workflow; (e) evidence-capture format;
   (f) "agent says it works" rejection invariant (Feature 001
   FR-014).
 - **Source-of-truth relationship**: REFERENCE — defers to
   Feature 001 Definition of Done (FR-014) and validator requirements
-  (FR-025–FR-027); CI execution deferred to Feature 003.
+  (FR-025–FR-027); preserves the Sprint 0 CI-execution deferral to Feature 003
+  while recognizing the subsequently delivered live workflow.
 - **Acceptance criteria**: every required section present;
-  self-claim rejection invariant cited; Feature 003 CI execution
-  deferral explicit; testing-level-to-mutation-class table aligned
-  with QA_STRATEGY.md.
+  self-claim rejection invariant cited; the historical Feature 003 CI-execution
+  deferral and current live-workflow state explicit; testing-level-to-mutation-class
+  table aligned with QA_STRATEGY.md.
 
 ### 15. `docs/devops/CI_CD_STRATEGY.md`
 
-- **Purpose**: Define what Creator Engine governs about CI/CD even
-  though `.github/` automation is deferred to Feature 003.
+- **Purpose**: Define what Creator Engine governs about CI/CD while preserving
+  the historical Sprint 0 deferral of `.github/` automation to Feature 003.
 - **Required sections**: (a) verifies-not-ratifies invariant
-  (Feature 002 FR-013); (b) required CI checks (tests, lint,
-  typecheck, build, Creator Engine validator) — specified, executed
-  by Feature 003; (c) protected-branch policy summary (deferred
-  Feature 003); (d) CI mutation-class ratification policy (CI
+  (Feature 002 FR-013); (b) historical v0.1/Sprint 0 required-check baseline
+  (tests, lint, typecheck, build, Creator Engine validator), with the current
+  observed required-check inventory maintained in the
+  [CI/CD efficiency audit](../../docs/devops/CI_CD_EFFICIENCY_AUDIT.html)
+  rather than duplicated into §b; (c) historical protected-branch policy
+  summary from the Feature 003 deferral epoch; (d) CI mutation-class
+  ratification policy (CI
   changes are themselves a privileged mutation requiring Source
   ratification per Feature 001 FR-008); (e) CI evidence linkage to
   SDLC transition T17; (f) explicit Feature 003 deferral.
-- **Source-of-truth relationship**: REFERENCE — Feature 003 ratifies
-  CI workflow content; Feature 002 specifies the policy CI must
-  obey.
+- **Source-of-truth relationship**: REFERENCE — Feature 003 ratifies CI
+  workflow content; Feature 002 specifies the policy CI must obey and preserves
+  the historical deferral record.
 - **Acceptance criteria**: verifies-not-ratifies invariant explicit;
-  Feature 003 deferral explicit; CI evidence linkage to T17 stated;
-  no `.github/` workflow content authored.
+  historical Feature 003 deferral explicit; CI evidence linkage to T17 stated;
+  an auditable current required-check inventory is linked; no `.github/`
+  workflow content authored by the Sprint 0 slice.
 
 ### 16. `docs/devops/RELEASE_AND_DEPLOYMENT_STRATEGY.md`
 

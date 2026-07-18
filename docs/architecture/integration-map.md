@@ -71,14 +71,14 @@ must accompany merge.
 - PR creation, comments, status checks, merges, release tags, and
   environments.
 - Branch protection settings, PR template files, environment gates —
-  all of which live under `.github/` and are deferred per below.
+  all of which live under `.github/`; their historical deferrals are recorded
+  below.
 
-**Deferral status**: `.github/` workflows, PR template files, branch
-protection (as live GitHub settings), and environment gates are
-deferred to Feature 003 (branch protection / PR templates) and
-Feature 006 (deploy environments). Feature 002 specifies the policy
-GitHub must obey when those features land but does not author any
-`.github/` content.
+**Deferral status**: At this map's Sprint 0 authoring epoch, `.github/`
+workflows, PR template files, and branch protection (as live GitHub settings)
+were deferred to Feature 003, while environment gates were deferred to Feature
+006. Feature 002 specifies the policy GitHub must obey but did not itself
+author `.github/` content.
 
 **Authority note**: branch protection, PR template, environment
 gate, and merge-policy changes are themselves privileged
@@ -92,10 +92,10 @@ NOT ratify.
 
 **What Creator Engine governs**:
 
-- The required CI checks (specified in
-  [`../devops/CI_CD_STRATEGY.md`](../devops/CI_CD_STRATEGY.md) §b):
-  tests, lint, typecheck, build, Creator Engine validator, schema
-  validation.
+- The historical v0.1/Sprint 0 required-check baseline recorded in
+  [`../devops/CI_CD_STRATEGY.md`](../devops/CI_CD_STRATEGY.md) §b. The
+  [CI/CD efficiency audit](../devops/CI_CD_EFFICIENCY_AUDIT.html) is the sole
+  current observed local/CI gate inventory.
 - The verifies-not-ratifies invariant (FR-013).
 - The CI evidence linkage to SDLC transition T17.
 - The rule that CI policy or workflow changes are themselves
@@ -106,9 +106,10 @@ NOT ratify.
 - Test execution, lint/typecheck execution, validator execution,
   status check reporting, run logs, and build artifacts.
 
-**Deferral status**: CI workflow content (`.github/workflows/`), CI
-check definitions, and CI infrastructure are deferred to Feature 003.
-Feature 002 specifies the policy; Feature 003 wires the workflows.
+**Deferral status**: At the Sprint 0 authoring epoch, CI workflow content
+(`.github/workflows/`), check definitions, and infrastructure were deferred to
+Feature 003. Feature 002 specifies the policy; Feature 003 subsequently wired
+the workflow. Current observed gate inventory remains in the linked audit.
 
 **Authority note**: CI passing does not advance a privileged-class
 mutation past T19 (Ratification Complete). CI output becomes
@@ -147,16 +148,18 @@ governance artifacts.
 Creator-Engine-governed spec, plan, or tasks artifact. Repo-visible
 artifacts are canonical; tracker entries are non-canonical.
 
-## e. Per-integration deferrals (Features 003–006)
+## e. Historical per-integration deferrals and current delivery state (Features 003–006)
 
-This section is the consolidated deferral table for integrations.
-Each row names the integration surface, the owning future feature,
-and the rationale.
+This section consolidates the Sprint 0 deferral record for integrations and,
+where delivery has since occurred, records the current state. Each row names
+the integration surface, its historical owning feature or current delivery
+state, and the rationale. The historical record remains ratified history; it
+does not make delivered workflow wiring future work.
 
-| Integration surface | Owning future feature | Why deferred |
+| Integration surface | Historical owner / current state | Why deferred or current obligation |
 |---|---|---|
-| `.github/workflows/` baseline CI workflow | Feature 003 (GitHub CI Governance) | Feature 002 specifies the policy CI must obey; wiring CI is a separate ratified batch. CI policy changes are themselves privileged `governance`/`security`/`deploy` mutations per FR-008. |
-| PR template file under `.github/` | Feature 003 | The PR template must surface scope, validation evidence, review evidence, mutation classes, deferrals, and Source ratification requirements; its content and its activation under GitHub are a ratified mutation. |
+| `.github/workflows/` baseline CI workflow | Feature 003 (GitHub CI Governance) at the Sprint 0 deferral epoch; subsequently wired by Feature 003 | At Sprint 0, Feature 002 specified the policy CI must obey and deferred workflow wiring to Feature 003. The live workflow is now delivered; CI policy or workflow changes remain privileged `governance`/`security`/`deploy` mutations per FR-008. |
+| PR template file under `.github/` | Feature 003 at the Sprint 0 deferral epoch; file artifact subsequently delivered as `.github/pull_request_template.md` | At Sprint 0, Feature 002 required the PR template to surface scope, validation evidence, review evidence, mutation classes, deferrals, and Source ratification requirements, and deferred its delivery and GitHub activation to Feature 003. The file bytes are now delivered; full GitHub activation and future policy or content changes remain privileged `governance` mutations requiring Source ratification under FR-008. |
 | Branch protection settings on GitHub | Feature 003 | Branch protection is a live GitHub setting change; itself a privileged `governance` mutation requiring Source ratification. |
 | Codex reviewer identity record | Feature 004 (Independent Review / QA Agent Evidence) | Identity is privileged per FR-008; instantiating an agent identity requires its own ratified spec. Feature 002 names the role and reserves its surfaces. |
 | QA agent identity record + QA evidence schema | Feature 004 | Same. |
@@ -199,6 +202,6 @@ treatment lives in
 This integration-map.md satisfies Feature 002 Canonical Document
 Specification #8: every integration boundary row names ownership
 (Creator Engine governs vs external owns) and deferral status;
-`.github/` is explicitly listed as a Feature 003 deferral; Spec Kit
+`.github/` is explicitly listed as a historical Feature 003 deferral; Spec Kit
 byte-identical invariant is stated; the trust boundaries summary
 links to the SAD.

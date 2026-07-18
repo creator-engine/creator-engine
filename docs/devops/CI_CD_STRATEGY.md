@@ -39,9 +39,15 @@ Consequences:
   neither substitutes for human ratification (Feature 001 FR-017;
   Feature 002 FR-013).
 
-## b. Required CI checks (specified; executed by Feature 003)
+## b. Historical Sprint 0 CI check baseline
 
-The required check set for v0.1 is:
+The following records the v0.1/Sprint 0 policy baseline. All check names,
+future-feature expectations, and reproducibility language in this section are
+historical; this section does not define today's required CI gate inventory. See
+the [CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html) for the sole current
+observed local/CI gate inventory and its fidelity gaps.
+
+The required check set for v0.1 was:
 
 | Check | Purpose | Source |
 |---|---|---|
@@ -64,12 +70,18 @@ Additional checks MAY be required for future-feature batches:
 - Feature 006: deploy-attestation, rollback-evidence, and
   post-release-evidence schema checks once those schemas land.
 
-The check set MUST be reproducible offline from a fresh `git clone`
-per Feature 001 FR-026. Until Feature 003 wires CI workflows, the
-same checks run locally per
+The baseline check set was required to be reproducible offline from a fresh
+`git clone` per Feature 001 FR-026. Before Feature 003 wired CI workflows, the
+same checks ran locally per
 [`../../validators/README.md`](../../validators/README.md).
 
-## c. Protected branch policy summary (Feature 003 deferral)
+## c. Protected branch policy summary (historical Feature 003 baseline)
+
+This section records the protected-branch policy baseline authored before
+Feature 003 instantiated repository CI. Feature 003 has since delivered the
+validation workflow; the [CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html)
+records the current observed gate inventory. The authority and required-check
+obligations below remain current policy.
 
 Branch protection is a live GitHub settings mutation. Per Feature
 001 FR-008, changes to branch protection, environment gates, or
@@ -77,11 +89,11 @@ merge policy are themselves privileged
 `governance`/`security`/`deploy`-class mutations that require Source
 ratification.
 
-The policy CI must enforce when Feature 003 lands:
+The policy CI must enforce:
 
 - The canonical branch (typically `main`) MUST require:
   - At least one approving review distinct from the PR author.
-  - All required CI checks (§b) passing.
+  - All required CI checks for the candidate passing.
   - A signed-off pre-merge attestation linked from the PR.
   - For privileged-class PRs, a Source ratification record linked
     from the PR.
@@ -93,8 +105,8 @@ The policy CI must enforce when Feature 003 lands:
   changing protection rules without Source ratification is an
   `authority` conflict per Feature 002 FR-018.
 
-Until Feature 003 applies these as GitHub settings, the policy is
-enforced as a repo-visible policy here. A manual checklist confirming
+Before Feature 003 applied these as GitHub settings, the policy was enforced
+as repo-visible policy here. The historical manual checklist confirming
 protection equivalents lives in the Sprint 0 exit gates per
 [`../../specs/sprint-0-minimum-viable-delivery-system/README.md`](../../specs/sprint-0-minimum-viable-delivery-system/README.md)
 §4.
@@ -128,7 +140,7 @@ T17 (Independent Review Complete → CI Evidence Complete):
 
 - The required evidence at T17 is the CI status check records and
   validator outputs per Feature 002 §SDLC Transition Matrix.
-- T17 advances only after every required check in §b has passed.
+- T17 advances only after every required check for the candidate has passed.
 - A red CI run halts at T17 until resolved; the mutation does NOT
   advance to T18 (Scope Audit Complete) on stale or skipped CI
   evidence.
@@ -148,8 +160,8 @@ This section records the Sprint 0 Slice A historical snapshot. Feature 003 has
 since delivered `.github/workflows/validate.yml`; see the
 [CI/CD efficiency audit](CI_CD_EFFICIENCY_AUDIT.html) for the current gate inventory.
 
-The following surfaces are deferred to Feature 003 (GitHub CI
-Governance):
+At that historical epoch, the following surfaces were deferred to Feature 003
+(GitHub CI Governance):
 
 - `.github/workflows/` baseline validation workflow.
 - PR template content and its activation.
@@ -158,17 +170,18 @@ Governance):
 - Review policy and/or CODEOWNERS policy where applicable.
 - CI run reporting integration (status badges, summary surfaces).
 
-No `.github/` workflow content is authored in Slice A of Sprint 0
-Execution. The Sprint 0 exit gate "Baseline PR validation exists
+No `.github/` workflow content was authored in Slice A of Sprint 0
+Execution. At that epoch, the Sprint 0 exit gate "Baseline PR validation exists
 through GitHub Actions, or Source ratifies a temporary repo-visible
-exception" remains pending until Feature 003.
+exception" remained pending until Feature 003.
 
 ## Acceptance posture for this document
 
 This CI_CD_STRATEGY.md satisfies Feature 002 Canonical Document
-Specification #15: the verifies-not-ratifies invariant is explicit;
-the Feature 003 deferral is explicit; CI evidence linkage to T17 is
-stated; no `.github/` workflow content is authored.
+Specification #15 as authored at the Sprint 0 epoch: the
+verifies-not-ratifies invariant is explicit; the historical Feature 003
+deferral is explicit; CI evidence linkage to T17 is stated; no `.github/`
+workflow content was authored by that slice.
 
 ## CI efficiency audit
 
