@@ -119,10 +119,13 @@ class VerifyResult:
 class VerifiedCurrentWorkUnitBinding:
     """Opaque handle issued only after a serialized reservation append."""
 
-    __slots__ = ()
+    __slots__ = ("__ce603_issuance",)
 
     def __new__(cls, *args: object, **kwargs: object):
         raise TypeError("work-unit bindings are issued by a serialized reservation only")
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        raise TypeError("work-unit bindings cannot be subclassed")
 
     def __copy__(self):
         raise TypeError("work-unit bindings cannot be copied")
@@ -136,21 +139,21 @@ class VerifiedCurrentWorkUnitBinding:
     def __reduce_ex__(self, protocol: int):
         raise TypeError("work-unit bindings cannot be serialized")
 
-    def _issued_context(self) -> tuple[object, ...] | None:
-        """Return the reservation-local verifier context for this exact object."""
-        verifier = getattr(type(self), "_ce603_issued_context", None)
-        if not callable(verifier):
-            return None
-        try:
-            context = verifier(self)
-        except (AttributeError, TypeError):
-            return None
-        return context if isinstance(context, tuple) and len(context) == 9 else None
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _verified_work_unit_binding_context(binding: object) -> tuple[object, ...] | None:
+    """Read the fixed issuance slot without invoking candidate-controlled code."""
+    if type(binding) is not VerifiedCurrentWorkUnitBinding:
+        return None
+    try:
+        verifier = object.__getattribute__(binding, "_VerifiedCurrentWorkUnitBinding__ce603_issuance")
+        context = verifier(binding) if callable(verifier) else None
+    except (AttributeError, TypeError):
+        return None
+    return context if isinstance(context, tuple) and len(context) == 9 else None
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -411,11 +414,20 @@ def _durable_work_unit_receipts(root: Path, controller_id: str, lane_id: str) ->
             raise WorkUnitReceiptHistoryError(f"ledger record {path} is unreadable") from exc
         if not isinstance(record_data, dict):
             raise WorkUnitReceiptHistoryError(f"ledger record {path} is not an object")
-        details = record_data.get("details", {})
-        if not isinstance(details, dict):
+        if validate_side_effect_ledger_record(record_data, path):
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} is not a well-formed unrelated record")
+        effect_id = record_data.get("effect_id")
+        is_ce603_effect = isinstance(effect_id, str) and effect_id.startswith("work-unit-reservation-")
+        details = record_data.get("details")
+        if details is not None and not isinstance(details, dict):
             raise WorkUnitReceiptHistoryError(f"ledger record {path} has ambiguous details")
+        details = details or {}
         fragment_keys = sorted(key for key in details if key.startswith("work_unit_receipt_part_"))
-        if not fragment_keys:
+        if is_ce603_effect and not fragment_keys:
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has no CE603 receipt fragments")
+        if fragment_keys and not is_ce603_effect:
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has ambiguous CE603 receipt fragments")
+        if not is_ce603_effect:
             continue
         expected_keys = [f"work_unit_receipt_part_{index:03d}" for index in range(len(fragment_keys))]
         if fragment_keys != expected_keys or any(not isinstance(details[key], str) for key in fragment_keys):
@@ -473,23 +485,12 @@ def reserve_work_unit_reservation(
             decision.receipt["reservation_id"], decision.receipt["receipt_id"],
             decision.receipt["policy_sha256"], result.record_sha256, items,
         )
-        binding: VerifiedCurrentWorkUnitBinding
+        binding = object.__new__(VerifiedCurrentWorkUnitBinding)
 
         def issued_context(candidate: object) -> tuple[object, ...] | None:
             return context if candidate is binding else None
 
-        class _SerializedWorkUnitBindingType(type):
-            def __setattr__(cls, name: str, value: object) -> None:
-                raise AttributeError("issued work-unit binding types are immutable")
-
-        class _SerializedWorkUnitBinding(VerifiedCurrentWorkUnitBinding, metaclass=_SerializedWorkUnitBindingType):
-            __slots__ = ()
-
-            @staticmethod
-            def _ce603_issued_context(candidate: object) -> tuple[object, ...] | None:
-                return issued_context(candidate)
-
-        binding = object.__new__(_SerializedWorkUnitBinding)
+        object.__setattr__(binding, "_VerifiedCurrentWorkUnitBinding__ce603_issuance", issued_context)
         return replace(decision, binding=binding)
 
 
@@ -510,7 +511,7 @@ def work_unit_reservation_evidence(
     This contract is intentionally not called from ``decide_automerge``.  It
     rechecks the durable lane while holding the shared serialization lock.
     """
-    issued = binding._issued_context() if isinstance(binding, VerifiedCurrentWorkUnitBinding) else None
+    issued = _verified_work_unit_binding_context(binding)
     if issued is None:
         return {"valid": False, "reason": "missing_or_unverified", "receipt_id": None}
     expected = (controller_id, lane_id, run_id, attempt_id, reservation_id, policy_sha256)
