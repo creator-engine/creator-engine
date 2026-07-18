@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from creator_engine_validator.runner import work_unit_cap as cap
 from creator_engine_validator.schema import validate_with_schema
 
@@ -56,6 +58,40 @@ def test_retry_reuses_a_live_reservation_without_reserving_again():
     )
     assert retry.allowed
     assert retry.receipt == first.receipt
+
+
+def test_retry_reuse_requires_the_extant_reservation_invariants():
+    first = reserve(requested=60)
+    matching = cap.reserve(
+        (first.receipt,), cap=100, run_id="run-1", attempt_id="attempt-1",
+        reservation_id="reservation-1", requested=60, policy_sha256=POLICY_SHA, recorded_at=NOW,
+    )
+    wrong_attempt = cap.reserve(
+        (first.receipt,), cap=100, run_id="run-1", attempt_id="attempt/2",
+        reservation_id="reservation-1", requested=60, policy_sha256=POLICY_SHA, recorded_at=NOW,
+    )
+    wrong_requested = cap.reserve(
+        (first.receipt,), cap=100, run_id="run-1", attempt_id="attempt-1",
+        reservation_id="reservation-1", requested=50, policy_sha256=POLICY_SHA, recorded_at=NOW,
+    )
+    terminal = cap.complete(
+        (first.receipt,), cap=100, run_id="run-1", attempt_id="attempt-1",
+        reservation_id="reservation-1", observed=1, policy_sha256=POLICY_SHA, recorded_at=NOW,
+    )
+    after_terminal = cap.reserve(
+        (first.receipt, terminal.receipt), cap=100, run_id="run-1", attempt_id="attempt-1",
+        reservation_id="reservation-1", requested=60, policy_sha256=POLICY_SHA, recorded_at=NOW,
+    )
+    assert matching.allowed and matching.persist is False
+    assert not wrong_attempt.allowed and wrong_attempt.reason == "work_unit_retry_invariant_invalid"
+    assert not wrong_requested.allowed and wrong_requested.reason == "work_unit_retry_invariant_invalid"
+    assert not after_terminal.allowed and after_terminal.reason == "work_unit_retry_reservation_terminal"
+
+
+@pytest.mark.parametrize("requested", [False, 0, -1, 1.5])
+def test_non_positive_or_non_integer_requests_are_refused_before_receipt_creation(requested):
+    with pytest.raises(ValueError, match="positive integer"):
+        reserve(requested=requested)
 
 
 def test_reconcile_is_idempotent_and_a_gap_fails_closed():

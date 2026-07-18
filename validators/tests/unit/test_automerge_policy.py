@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import copy
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ from creator_engine_validator.forge.automerge_policy import (
 )
 from creator_engine_validator.work_sizing import size_ceremony
 from creator_engine_validator.runner import work_unit_cap
+from creator_engine_validator import side_effect_ledger_runtime as ledger_runtime
 import creator_engine_validator.forge.automerge_policy as automerge_policy
 
 
@@ -47,23 +49,50 @@ REQUIRED_CHECK = "Validate governance artifacts"
 HEAD_SHA = "d" * 40
 
 
-def valid_work_unit_receipt() -> dict:
-    return work_unit_cap.reserve(
+def valid_work_unit_receipt(tmp_path: Path | None = None):
+    if tmp_path is None:
+        tmp_path = Path(tempfile.mkdtemp(prefix="ce603-verified-ledger-"))
+    receipt = work_unit_cap.reserve(
         (), cap=100, run_id="automerge-run", attempt_id="automerge-attempt",
         reservation_id="automerge-reservation", requested=1,
         policy_sha256=automerge_policy.default_mutation_policy().policy_sha,
         recorded_at="2026-07-18T00:00:00Z",
     ).receipt
+    awl_root = tmp_path / ".hermes" / "active-work-ledger"
+    claim_path = awl_root / "claims" / "controller" / "lane.yaml"
+    claim_path.parent.mkdir(parents=True)
+    claim_path.write_text(yaml.safe_dump({
+        "kind": "active-work-ledger-record", "record_type": "claim", "schema_version": "1",
+        "controller_id": "controller", "lane_id": "lane",
+        "record_timestamp": "source-controlled:claims/controller/lane.yaml",
+        "worktree_path": "/worktrees/lane", "envelope_ref": ".hermes/envelopes/lane.md",
+        "lease_seconds": 3600, "claimed_at": "source-controlled:claims/controller/lane.yaml",
+        "last_heartbeat_at": "source-controlled:claims/controller/lane.yaml",
+    }, sort_keys=True), encoding="utf-8")
+    ledger_root = tmp_path / "ledger"
+    ledger_runtime.record_work_unit_reservation(
+        receipt=receipt, controller_id="controller", lane_id="lane", claim_ref="claims/controller/lane.yaml",
+        occurred_at="2026-07-18T00:00:00Z", repo_root=tmp_path,
+        side_effect_ledger_root=ledger_root, active_work_ledger_root=awl_root,
+    )
+    binding = ledger_runtime.verified_current_work_unit_binding(
+        side_effect_ledger_root=ledger_root, active_work_ledger_root=awl_root,
+        controller_id="controller", lane_id="lane", run_id="automerge-run", attempt_id="automerge-attempt",
+        reservation_id="automerge-reservation", policy_sha256=receipt["policy_sha256"],
+    )
+    assert binding is not None
+    return binding
 
 
-def test_a2_a3_automerge_requires_valid_work_unit_receipt():
+def test_a2_a3_automerge_requires_valid_work_unit_receipt(tmp_path: Path):
     receipt = work_unit_cap.reserve(
         (), cap=10, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=1,
         policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z",
     ).receipt
     assert not automerge_policy.work_unit_receipt_evidence(None)["valid"]
     assert not automerge_policy.work_unit_receipt_evidence(dict(receipt, source_state="unknown"))["valid"]
-    assert automerge_policy.work_unit_receipt_evidence(receipt)["valid"]
+    assert not automerge_policy.work_unit_receipt_evidence(receipt)["valid"]
+    assert automerge_policy.work_unit_receipt_evidence(valid_work_unit_receipt(tmp_path))["valid"]
 
 
 @pytest.mark.parametrize("mutate", [
@@ -73,7 +102,7 @@ def test_a2_a3_automerge_requires_valid_work_unit_receipt():
     lambda receipt: dict(receipt, unit="ce.usd.v1"),
     lambda receipt: dict(receipt, policy_sha256="b" * 64),
 ])
-def test_a2_a3_admission_fails_closed_without_current_bound_receipt(mutate) -> None:
+def test_a2_a3_admission_fails_closed_without_current_bound_receipt(mutate, tmp_path: Path) -> None:
     receipt = work_unit_cap.reserve(
         (), cap=10, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=1,
         policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z",
@@ -91,6 +120,16 @@ def test_a2_a3_admission_fails_closed_without_current_bound_receipt(mutate) -> N
         **canary_identity(),
     )
     assert bypass.decision == AUTOMERGE_DECISION_GESTURE
+
+
+def test_a2_a3_admission_accepts_only_an_injected_verified_ledger_binding(tmp_path: Path) -> None:
+    binding = valid_work_unit_receipt(tmp_path)
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]), paths=["README.md"], declared_work_class="tiny",
+        policy_state=state_with_flags("docs"), checks=GREEN_CHECKS,
+        work_unit_receipt=binding, **canary_identity(),
+    )
+    assert not any(item.startswith("work_unit_receipt_") for item in decision.rationale)
 POLICY_SHA = "a" * 64
 
 ALL_CLASSES = (

@@ -9,7 +9,7 @@ from typing import Any, Iterable, Mapping
 
 UNIT = "ce.raw_tokens.v1"
 UNIT_VERSION = 1
-PHASES = frozenset({"pre_dispatch", "mid_run", "retry_reentry", "completion", "rollback", "reconcile"})
+PHASES = frozenset({"pre_dispatch", "mid_run", "completion", "rollback", "reconcile"})
 SOURCE_STATES = frozenset({"measured", "unknown", "late", "replayed"})
 GENESIS_RECEIPT_SHA256 = "0" * 64
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -32,6 +32,25 @@ class WorkUnitProjection:
     safe: bool
     last_sequence: int
     last_receipt: dict[str, Any] | None
+
+
+_VERIFIED_LEDGER_PROOF = object()
+
+
+@dataclass(frozen=True)
+class VerifiedCurrentLedgerBinding:
+    """Opaque result of a current, verified ledger-reservation lookup."""
+
+    controller_id: str
+    lane_id: str
+    run_id: str
+    attempt_id: str
+    reservation_id: str
+    receipt_id: str
+    policy_sha256: str
+    ledger_head_sha256: str
+    _receipt: Mapping[str, Any]
+    _proof: object
 
 
 def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
@@ -160,7 +179,10 @@ def validate_receipts(receipts: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
             if reservation_id in reservations or receipt["sample_sequence"] != 0 or receipt["observed"] != 0 or receipt["reserved"] <= 0:
                 errors.append("receipt_phase_invalid")
                 continue
-            reservations[reservation_id] = {"reserved": receipt["reserved"], "observed": 0, "sequence": 0}
+            reservations[reservation_id] = {
+                "reserved": receipt["reserved"], "observed": 0, "sequence": 0,
+                "attempt_id": receipt["attempt_id"],
+            }
             expected_remaining = run["cap"] - run["committed"] - sum(item["reserved"] for item in reservations.values())
         else:
             current = reservations.get(reservation_id)
@@ -245,15 +267,31 @@ def reserve(
     recorded_at: str,
 ) -> WorkUnitDecision:
     """Reserve raw-token units exactly once for a run, before dispatch."""
-    if not _is_count(requested):
-        raise ValueError("requested must be a non-negative integer")
+    if not _is_count(requested) or requested <= 0:
+        raise ValueError("requested must be a positive integer")
     stream = tuple(receipts)
     projection = project(stream, cap=cap, run_id=run_id)
-    for receipt in reversed(stream):
-        if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id and receipt.get("reservation_id") == reservation_id:
-            if receipt.get("phase") in {"pre_dispatch", "mid_run", "retry_reentry"} and receipt.get("source_state") == "measured":
-                return WorkUnitDecision(True, "work_unit_reservation_reused", dict(receipt), persist=False)
-            break
+    reservation_history = [
+        receipt for receipt in stream
+        if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id
+        and receipt.get("reservation_id") == reservation_id
+    ]
+    if reservation_history:
+        latest = reservation_history[-1]
+        if latest.get("phase") in {"completion", "rollback"}:
+            return WorkUnitDecision(False, "work_unit_retry_reservation_terminal", dict(latest), persist=False)
+        invariant_fields = {
+            "reserved": requested,
+            "policy_sha256": policy_sha256,
+            "cap": cap,
+        }
+        if not isinstance(attempt_id, str) or not _IDENTIFIER_RE.fullmatch(attempt_id):
+            return WorkUnitDecision(False, "work_unit_retry_invariant_invalid", dict(latest), persist=False)
+        if latest.get("phase") not in {"pre_dispatch", "mid_run"} or any(
+            latest.get(name) != value for name, value in invariant_fields.items()
+        ):
+            return WorkUnitDecision(False, "work_unit_retry_invariant_invalid", dict(latest), persist=False)
+        return WorkUnitDecision(True, "work_unit_reservation_reused", dict(latest), persist=False)
     remaining = projection.remaining - requested
     predecessor = projection.last_receipt.get("receipt_sha256") if projection.last_receipt else GENESIS_RECEIPT_SHA256
     receipt = _make_receipt(
@@ -342,12 +380,53 @@ def rollback(receipts: Iterable[Mapping[str, Any]], *, cap: int, run_id: str, at
     return _terminal(receipts, phase="rollback", cap=cap, run_id=run_id, attempt_id=attempt_id, reservation_id=reservation_id, observed=None, policy_sha256=policy_sha256, recorded_at=recorded_at)
 
 
-def dispatch_receipt_allowed(receipt: Mapping[str, Any] | None, *, policy_sha256: str | None = None) -> bool:
-    """True only for a current, measured CE603 pre-dispatch reservation."""
+def verified_current_ledger_binding(
+    *, controller_id: str, lane_id: str, run_id: str, attempt_id: str, reservation_id: str,
+    policy_sha256: str, ledger_head_sha256: str, receipt: Mapping[str, Any],
+) -> VerifiedCurrentLedgerBinding | None:
+    """Seal a receipt after the ledger has verified its live head and binding."""
+    if not _dispatch_receipt_allowed_raw(receipt, policy_sha256=policy_sha256):
+        return None
+    expected = {
+        "run_id": run_id,
+        "attempt_id": attempt_id,
+        "reservation_id": reservation_id,
+        "policy_sha256": policy_sha256,
+    }
+    if any(receipt.get(name) != value for name, value in expected.items()):
+        return None
+    if not all(isinstance(value, str) and _IDENTIFIER_RE.fullmatch(value) for value in (controller_id, lane_id)):
+        return None
+    if not isinstance(ledger_head_sha256, str) or not _SHA256_RE.fullmatch(ledger_head_sha256):
+        return None
+    return VerifiedCurrentLedgerBinding(
+        controller_id=controller_id, lane_id=lane_id, run_id=run_id, attempt_id=attempt_id,
+        reservation_id=reservation_id, receipt_id=str(receipt["receipt_id"]),
+        policy_sha256=policy_sha256, ledger_head_sha256=ledger_head_sha256,
+        _receipt=dict(receipt), _proof=_VERIFIED_LEDGER_PROOF,
+    )
+
+
+def _dispatch_receipt_allowed_raw(receipt: Mapping[str, Any] | None, *, policy_sha256: str | None = None) -> bool:
     if not isinstance(receipt, Mapping) or validate_receipts((receipt,)):
         return False
-    if receipt.get("phase") not in {"pre_dispatch", "retry_reentry"} or receipt.get("source_state") != "measured":
+    if receipt.get("phase") != "pre_dispatch" or receipt.get("source_state") != "measured":
         return False
     if policy_sha256 is not None and receipt.get("policy_sha256") != policy_sha256:
         return False
     return int(receipt.get("reserved", 0)) > 0 and int(receipt.get("remaining", -1)) >= 0
+
+
+def dispatch_receipt_allowed(
+    binding: VerifiedCurrentLedgerBinding | None, *, policy_sha256: str | None = None
+) -> bool:
+    """True only for a sealed current-ledger reservation binding.
+
+    This is an inactive A2/A3 predicate contract. A future conveyor owner must
+    obtain the binding from the durable ledger before calling this function.
+    """
+    if not isinstance(binding, VerifiedCurrentLedgerBinding) or binding._proof is not _VERIFIED_LEDGER_PROOF:
+        return False
+    if policy_sha256 is not None and binding.policy_sha256 != policy_sha256:
+        return False
+    return _dispatch_receipt_allowed_raw(binding._receipt, policy_sha256=binding.policy_sha256)

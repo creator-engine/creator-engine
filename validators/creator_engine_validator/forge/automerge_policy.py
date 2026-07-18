@@ -461,7 +461,7 @@ def decide_automerge(
     brain_ledger_base_text: str | None = None,
     brain_ledger_head_text: str | None = None,
     repo_root: str | Path = ".",
-    work_unit_receipt: Mapping[str, Any] | None = None,
+    work_unit_receipt: Any = None,
     work_unit_required: bool = True,
 ) -> AutoMergeDecision:
     """Return an ``AUTO`` or ``GESTURE`` decision without side effects."""
@@ -760,21 +760,13 @@ def dry_run_automerge_decision(**kwargs: Any) -> AutoMergeDecision:
 
 
 def work_unit_receipt_evidence(
-    receipt: Mapping[str, Any] | None, *, policy_sha256: str | None = None
+    receipt: Any, *, policy_sha256: str | None = None
 ) -> dict[str, Any]:
-    """Validate the CE603 receipt predicate without mutating a conveyor."""
+    """Validate an inactive CE603 predicate without mutating a conveyor."""
     valid = dispatch_receipt_allowed(receipt, policy_sha256=policy_sha256)
     if valid:
-        return {"valid": True, "reason": "allowed", "receipt_id": receipt.get("receipt_id")}
-    if not isinstance(receipt, Mapping):
-        reason = "missing"
-    elif receipt.get("source_state") in {"unknown", "late"}:
-        reason = "stale_or_unknown"
-    elif receipt.get("unit") != "ce.raw_tokens.v1" or receipt.get("unit_version") != 1:
-        reason = "wrong_unit"
-    else:
-        reason = "denied"
-    return {"valid": False, "reason": reason, "receipt_id": receipt.get("receipt_id") if isinstance(receipt, Mapping) else None}
+        return {"valid": True, "reason": "allowed", "receipt_id": receipt.receipt_id}
+    return {"valid": False, "reason": "missing_or_unverified", "receipt_id": None}
 
 
 def _decision(
