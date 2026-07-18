@@ -131,6 +131,12 @@ def test_work_unit_reservation_uses_the_single_record_writer(tmp_path: Path):
     fragments = [result.record["details"][key] for key in sorted(result.record["details"]) if key.startswith("work_unit_receipt_part_")]
     assert json.loads(bytes.fromhex("".join(fragments)).decode("utf-8")) == receipt
     assert result.record["effect_id"].startswith("work-unit-reservation-")
+    assert not runtime.work_unit_reservation_evidence(
+        receipt,
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
+        reservation_id="reservation", policy_sha256="a" * 64,
+    )["valid"]
 
 
 def test_durable_work_unit_reservation_reuses_after_crash_and_never_overbooks(tmp_path: Path):
@@ -147,7 +153,7 @@ def test_durable_work_unit_reservation_reuses_after_crash_and_never_overbooks(tm
     assert sum(result.allowed for result in (first, competing)) == 1
     winner = first if first.allowed else competing
     retry = runtime.reserve_work_unit_reservation(
-        cap=100, run_id="run", attempt_id="retry", reservation_id=winner.receipt["reservation_id"], requested=60,
+        cap=100, run_id="run", attempt_id=winner.receipt["attempt_id"], reservation_id=winner.receipt["reservation_id"], requested=60,
         policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
     )
     assert retry.allowed and retry.persist is False
@@ -189,26 +195,42 @@ def test_generic_record_and_reservation_share_one_lane_lock(tmp_path: Path, monk
     assert verified.summary["chains"][0]["record_count"] == 2
 
 
-def test_verified_current_work_unit_binding_requires_live_current_ledger_evidence(tmp_path: Path):
+def test_verified_current_work_unit_binding_requires_serialized_current_ledger_evidence(tmp_path: Path):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
     decision = runtime.reserve_work_unit_reservation(
         cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
         policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
     )
-    binding = runtime.verified_current_work_unit_binding(
+    binding = decision.binding
+    assert binding is not None
+    evidence = runtime.work_unit_reservation_evidence(
+        binding,
         side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
         controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
         reservation_id="reservation", policy_sha256="a" * 64,
     )
-    assert binding is not None
-    assert binding.receipt_id == decision.receipt["receipt_id"]
-    _append(tmp_path, effect_id="effect-after-reservation")
-    assert runtime.verified_current_work_unit_binding(
+    assert evidence["valid"]
+    assert evidence["receipt_id"] == decision.receipt["receipt_id"]
+    assert not runtime.work_unit_reservation_evidence(
+        dict(decision.receipt),
         side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
         controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
         reservation_id="reservation", policy_sha256="a" * 64,
-    ) is None
+    )["valid"]
+    assert not runtime.work_unit_reservation_evidence(
+        binding,
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+        controller_id=CONTROLLER, lane_id="wrong-lane", run_id="run", attempt_id="attempt",
+        reservation_id="reservation", policy_sha256="a" * 64,
+    )["valid"]
+    _append(tmp_path, effect_id="effect-after-reservation")
+    assert not runtime.work_unit_reservation_evidence(
+        binding,
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
+        reservation_id="reservation", policy_sha256="a" * 64,
+    )["valid"]
 
 
 def test_record_is_valid_under_existing_side_effect_ledger_substrate(tmp_path: Path):

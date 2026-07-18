@@ -50,7 +50,7 @@ def test_retry_reuses_a_live_reservation_without_reserving_again():
         (first.receipt,),
         cap=100,
         run_id="run-1",
-        attempt_id="attempt-2",
+        attempt_id="attempt-1",
         reservation_id="reservation-1",
         requested=60,
         policy_sha256=POLICY_SHA,

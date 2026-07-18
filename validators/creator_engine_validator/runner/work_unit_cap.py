@@ -22,6 +22,7 @@ class WorkUnitDecision:
     reason: str
     receipt: dict[str, Any]
     persist: bool = True
+    binding: object | None = None
 
 
 @dataclass(frozen=True)
@@ -32,25 +33,6 @@ class WorkUnitProjection:
     safe: bool
     last_sequence: int
     last_receipt: dict[str, Any] | None
-
-
-_VERIFIED_LEDGER_PROOF = object()
-
-
-@dataclass(frozen=True)
-class VerifiedCurrentLedgerBinding:
-    """Opaque result of a current, verified ledger-reservation lookup."""
-
-    controller_id: str
-    lane_id: str
-    run_id: str
-    attempt_id: str
-    reservation_id: str
-    receipt_id: str
-    policy_sha256: str
-    ledger_head_sha256: str
-    _receipt: Mapping[str, Any]
-    _proof: object
 
 
 def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
@@ -287,7 +269,7 @@ def reserve(
         }
         if not isinstance(attempt_id, str) or not _IDENTIFIER_RE.fullmatch(attempt_id):
             return WorkUnitDecision(False, "work_unit_retry_invariant_invalid", dict(latest), persist=False)
-        if latest.get("phase") not in {"pre_dispatch", "mid_run"} or any(
+        if latest.get("attempt_id") != attempt_id or latest.get("phase") not in {"pre_dispatch", "mid_run"} or any(
             latest.get(name) != value for name, value in invariant_fields.items()
         ):
             return WorkUnitDecision(False, "work_unit_retry_invariant_invalid", dict(latest), persist=False)
@@ -378,55 +360,3 @@ def complete(receipts: Iterable[Mapping[str, Any]], *, cap: int, run_id: str, at
 def rollback(receipts: Iterable[Mapping[str, Any]], *, cap: int, run_id: str, attempt_id: str, reservation_id: str, policy_sha256: str, recorded_at: str) -> WorkUnitDecision:
     """Release an uncommitted reservation while preserving its observed sample."""
     return _terminal(receipts, phase="rollback", cap=cap, run_id=run_id, attempt_id=attempt_id, reservation_id=reservation_id, observed=None, policy_sha256=policy_sha256, recorded_at=recorded_at)
-
-
-def verified_current_ledger_binding(
-    *, controller_id: str, lane_id: str, run_id: str, attempt_id: str, reservation_id: str,
-    policy_sha256: str, ledger_head_sha256: str, receipt: Mapping[str, Any],
-) -> VerifiedCurrentLedgerBinding | None:
-    """Seal a receipt after the ledger has verified its live head and binding."""
-    if not _dispatch_receipt_allowed_raw(receipt, policy_sha256=policy_sha256):
-        return None
-    expected = {
-        "run_id": run_id,
-        "attempt_id": attempt_id,
-        "reservation_id": reservation_id,
-        "policy_sha256": policy_sha256,
-    }
-    if any(receipt.get(name) != value for name, value in expected.items()):
-        return None
-    if not all(isinstance(value, str) and _IDENTIFIER_RE.fullmatch(value) for value in (controller_id, lane_id)):
-        return None
-    if not isinstance(ledger_head_sha256, str) or not _SHA256_RE.fullmatch(ledger_head_sha256):
-        return None
-    return VerifiedCurrentLedgerBinding(
-        controller_id=controller_id, lane_id=lane_id, run_id=run_id, attempt_id=attempt_id,
-        reservation_id=reservation_id, receipt_id=str(receipt["receipt_id"]),
-        policy_sha256=policy_sha256, ledger_head_sha256=ledger_head_sha256,
-        _receipt=dict(receipt), _proof=_VERIFIED_LEDGER_PROOF,
-    )
-
-
-def _dispatch_receipt_allowed_raw(receipt: Mapping[str, Any] | None, *, policy_sha256: str | None = None) -> bool:
-    if not isinstance(receipt, Mapping) or validate_receipts((receipt,)):
-        return False
-    if receipt.get("phase") != "pre_dispatch" or receipt.get("source_state") != "measured":
-        return False
-    if policy_sha256 is not None and receipt.get("policy_sha256") != policy_sha256:
-        return False
-    return int(receipt.get("reserved", 0)) > 0 and int(receipt.get("remaining", -1)) >= 0
-
-
-def dispatch_receipt_allowed(
-    binding: VerifiedCurrentLedgerBinding | None, *, policy_sha256: str | None = None
-) -> bool:
-    """True only for a sealed current-ledger reservation binding.
-
-    This is an inactive A2/A3 predicate contract. A future conveyor owner must
-    obtain the binding from the durable ledger before calling this function.
-    """
-    if not isinstance(binding, VerifiedCurrentLedgerBinding) or binding._proof is not _VERIFIED_LEDGER_PROOF:
-        return False
-    if policy_sha256 is not None and binding.policy_sha256 != policy_sha256:
-        return False
-    return _dispatch_receipt_allowed_raw(binding._receipt, policy_sha256=binding.policy_sha256)

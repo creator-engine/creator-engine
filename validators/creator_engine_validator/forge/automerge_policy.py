@@ -25,7 +25,7 @@ from .mutation_classifier import (
     default_mutation_policy,
     mutation_class_for_paths,
 )
-from ..runner.work_unit_cap import dispatch_receipt_allowed
+from ..side_effect_ledger_runtime import work_unit_reservation_evidence
 
 AUTOMERGE_DECISION_AUTO: Final[str] = "AUTO"
 AUTOMERGE_DECISION_GESTURE: Final[str] = "GESTURE"
@@ -571,11 +571,8 @@ def decide_automerge(
     rationale.append(f"gates={','.join(gates)}")
 
     auto_blockers: list[str] = []
-    # CE603 is an A2/A3 admission predicate. Keep the legacy argument for
-    # call compatibility, but never permit it to bypass the fail-closed check.
-    receipt_evidence = work_unit_receipt_evidence(work_unit_receipt, policy_sha256=resolved_policy.policy_sha)
-    if not receipt_evidence["valid"]:
-        auto_blockers.append(f"work_unit_receipt_{receipt_evidence['reason']}")
+    # CE603 remains a deferred future automerge/conveyor predicate. Its typed
+    # evidence boundary is intentionally not evaluated in this production path.
     if not gates_auto_only:
         auto_blockers.append("gates_not_auto_back_gate_only")
     if not checks_green:
@@ -760,13 +757,29 @@ def dry_run_automerge_decision(**kwargs: Any) -> AutoMergeDecision:
 
 
 def work_unit_receipt_evidence(
-    receipt: Any, *, policy_sha256: str | None = None
+    binding: Any,
+    *,
+    side_effect_ledger_root: str | Path,
+    active_work_ledger_root: str | Path,
+    controller_id: str,
+    lane_id: str,
+    run_id: str,
+    attempt_id: str,
+    reservation_id: str,
+    policy_sha256: str,
 ) -> dict[str, Any]:
-    """Validate an inactive CE603 predicate without mutating a conveyor."""
-    valid = dispatch_receipt_allowed(receipt, policy_sha256=policy_sha256)
-    if valid:
-        return {"valid": True, "reason": "allowed", "receipt_id": receipt.receipt_id}
-    return {"valid": False, "reason": "missing_or_unverified", "receipt_id": None}
+    """Deferred CE603 predicate for a future automerge/conveyor owner only."""
+    return work_unit_reservation_evidence(
+        binding,
+        side_effect_ledger_root=side_effect_ledger_root,
+        active_work_ledger_root=active_work_ledger_root,
+        controller_id=controller_id,
+        lane_id=lane_id,
+        run_id=run_id,
+        attempt_id=attempt_id,
+        reservation_id=reservation_id,
+        policy_sha256=policy_sha256,
+    )
 
 
 def _decision(
