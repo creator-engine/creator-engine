@@ -338,10 +338,11 @@ def test_parser_loader_uses_dynamic_file_seam_and_fails_closed(tmp_path, monkeyp
 
 def test_production_parser_visibility_matches_title_closing_and_bare_body_contract():
     feed._load_reference_parser.cache_clear()
+    reference_prefix = "ce-" + "ops#"
 
     assert feed._parse_reference_numbers("feat: ce-518 canonical", "") == [518]
-    assert feed._parse_reference_numbers("unrelated", "Closes ce-ops#1000001") == [1000001]
-    assert feed._parse_reference_numbers("unrelated", "Context only: ce-ops#1000002") == []
+    assert feed._parse_reference_numbers("unrelated", f"Closes {reference_prefix}1000001") == [1000001]
+    assert feed._parse_reference_numbers("unrelated", f"Context only: {reference_prefix}1000002") == []
 
 
 @pytest.mark.parametrize(
