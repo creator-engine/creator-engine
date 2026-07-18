@@ -44,6 +44,39 @@ def _codes(note: dict, *, previous=None, now=NOW):
     return {error.code for error in chk.validate_note(note, Path("note.ndjson"), previous=previous, now=now)}
 
 
+def _write_adr(decisions: Path, *, checkpoint: str, bindings: dict[str, str]) -> None:
+    binding_lines = "\n".join(
+        f"- `{reference}`: `sha256:{digest}`" for reference, digest in bindings.items()
+    )
+    (decisions / "ADR-0605-standing-rider-cadence.md").write_text(
+        "---\n"
+        "kind: decision-record\nrecord_type: adr\nschema_version: '1'\n"
+        "id: ADR-0605\ntitle: standing rider\nstatus: proposed\n"
+        "date: '2026-07-11'\ndecision_makers: [ce-dev-3]\n"
+        "review_by: '2026-10-11'\nmutation_class: governance\n"
+        "evidence_refs: [{kind: doc, ref: docs/x.md, tag: x}]\n---\n"
+        "# rider\n\n"
+        "## Authenticated checkpoint\n\n"
+        f"- CE605 stream head: `sha256:{checkpoint}`\n\n"
+        "## Authenticated source bindings\n\n"
+        f"{binding_lines}\n",
+        encoding="utf-8",
+    )
+
+
+def _write_repo_stream(tmp_path: Path, note: dict, *, checkpoint: str | None = None) -> Path:
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True, exist_ok=True)
+    _write_adr(
+        decisions,
+        checkpoint=checkpoint or note["note_sha256"],
+        bindings={ref["path_or_digest"]: ref["sha256"] for ref in note["source_refs"]},
+    )
+    notes = decisions / "ce605-standing-rider-notes.ndjson"
+    notes.write_text(_line(note), encoding="utf-8")
+    return notes
+
+
 def test_registered_in_check_surface():
     registry = registered_checks()
     assert chk.CHECK_NAME in registry
@@ -123,6 +156,60 @@ def test_cadence_due_and_multi_interval_catch_up_are_deterministic():
 def test_future_input_clock_is_rejected():
     note = _note(observed_at="2026-07-19T12:00:00Z")
     assert chk.CODE_CLOCK in _codes(note)
+
+
+def test_registered_run_propagates_injected_clock_for_future_and_due_notes(tmp_path):
+    future = _note(observed_at="2026-07-19T12:00:00Z")
+    _write_repo_stream(tmp_path, future)
+    future_codes = {error.code for error in chk.run([tmp_path], now=NOW).errors}
+    assert chk.CODE_CLOCK in future_codes
+
+    due = _note(cadence_due_at="2026-07-04T12:00:00Z")
+    _write_repo_stream(tmp_path, due)
+    due_codes = {error.code for error in chk.run([tmp_path], now=NOW).errors}
+    assert chk.CODE_CADENCE in due_codes
+
+
+def test_repo_rejects_a_fully_recomputed_stream_rewrite_against_adr_checkpoint(tmp_path):
+    accepted = _note()
+    _write_repo_stream(tmp_path, accepted)
+    replacement = _note(observed_at="2026-07-12T12:00:00Z")
+    notes = tmp_path / "docs" / "decisions" / "ce605-standing-rider-notes.ndjson"
+    notes.write_text(_line(replacement), encoding="utf-8")
+
+    codes = {error.code for error in chk.validate_repo(tmp_path)}
+    assert chk.CODE_CHAIN in codes
+
+
+def test_repo_rejects_semantic_and_malformed_alternate_ce605_streams(tmp_path):
+    note = _note()
+    _write_repo_stream(tmp_path, note)
+    alternate = tmp_path / "docs" / "alternate.ndjson"
+    alternate.write_text(json.dumps(note) + "\n", encoding="utf-8")
+
+    codes = {error.code for error in chk.validate_repo(tmp_path)}
+    assert chk.CODE_ARTIFACT in codes
+
+    alternate.write_text("{\n", encoding="utf-8")
+    malformed_codes = {error.code for error in chk.validate_repo(tmp_path)}
+    assert chk.CODE_ARTIFACT in malformed_codes
+
+
+def test_authenticated_source_refs_require_adr_backed_bindings(tmp_path):
+    note = _note()
+    _write_repo_stream(tmp_path, note)
+    valid_codes = {error.code for error in chk.validate_repo(tmp_path)}
+    assert chk.CODE_SOURCE_REF not in valid_codes
+
+    invented = _note(source_refs=[{
+        "class": "advisory-finding",
+        "path_or_digest": "finding:invented",
+        "sha256": "b" * 64,
+    }])
+    notes = tmp_path / "docs" / "decisions" / "ce605-standing-rider-notes.ndjson"
+    notes.write_text(_line(invented), encoding="utf-8")
+    invented_codes = {error.code for error in chk.validate_repo(tmp_path)}
+    assert chk.CODE_SOURCE_REF in invented_codes
 
 
 def test_ndjson_chain_rejects_duplicate_sequences_and_noncanonical_lines(tmp_path):

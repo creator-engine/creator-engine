@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from ..reporting import CheckResult, ValidationError, make_error
 from ..schema import validate_with_schema
@@ -38,6 +38,8 @@ _PRIVATE_REFERENCE = re.compile(
     r"(?:https?://|\\b(?:private|secret|token|credential|password|key)\\b|^/|\\.ce/state)",
     re.IGNORECASE,
 )
+_CHECKPOINT_LINE = re.compile(r"^- CE605 stream head: `sha256:([0-9a-f]{64})`$")
+_BINDING_LINE = re.compile(r"^- `([^`]+)`: `sha256:([0-9a-f]{64})`$")
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,7 @@ def validate_note(
     *,
     previous: dict[str, Any] | None = None,
     now: datetime | None = None,
+    authenticated_bindings: Mapping[str, str] | None = None,
 ) -> list[ValidationError]:
     """Validate one note and, when supplied, its predecessor and clock seam."""
     errors = validate_with_schema(note, SCHEMA, path, code=CODE_SCHEMA, contract=CONTRACT)
@@ -127,6 +130,20 @@ def validate_note(
                     f"source_refs/{index}/path_or_digest",
                     "must be a public-safe path or opaque digest, not a URL or private-looking reference",
                 ))
+            if (
+                note.get("source_state") == "authenticated"
+                and authenticated_bindings is not None
+                and isinstance(ref, dict)
+            ):
+                digest = ref.get("sha256")
+                expected = authenticated_bindings.get(value) if authenticated_bindings else None
+                if not isinstance(value, str) or not isinstance(digest, str) or expected != digest:
+                    errors.append(_error(
+                        CODE_SOURCE_REF,
+                        path,
+                        f"source_refs/{index}",
+                        "authenticated source references must match an ADR-0605 opaque-digest binding",
+                    ))
 
     expected_tripwire = _expected_tripwire(note)
     if note.get("tripwire") != expected_tripwire:
@@ -183,7 +200,13 @@ def validate_note(
     return errors
 
 
-def validate_note_stream(path: Path, *, now: datetime | None = None) -> list[ValidationError]:
+def validate_note_stream(
+    path: Path,
+    *,
+    now: datetime | None = None,
+    authenticated_bindings: Mapping[str, str] | None = None,
+    expected_checkpoint: str | None = None,
+) -> list[ValidationError]:
     """Validate a canonical NDJSON stream without writing or fetching anything."""
     errors: list[ValidationError] = []
     try:
@@ -206,10 +229,25 @@ def validate_note_stream(path: Path, *, now: datetime | None = None) -> list[Val
             continue
         if raw_line != canonical_note_bytes(note):
             errors.append(_error(CODE_CANONICAL, path, str(line_number), "line is not sorted-key canonical JSON plus newline"))
-        errors.extend(validate_note(note, path, previous=previous, now=now))
+        errors.extend(
+            validate_note(
+                note,
+                path,
+                previous=previous,
+                now=now,
+                authenticated_bindings=authenticated_bindings,
+            )
+        )
         previous = note
     if previous is None:
         errors.append(_error(CODE_ARTIFACT, path, "", "canonical stream must contain at least one note"))
+    elif expected_checkpoint is not None and previous.get("note_sha256") != expected_checkpoint:
+        errors.append(_error(
+            CODE_CHAIN,
+            path,
+            "note_sha256",
+            "stream head does not match the ADR-0605 authenticated checkpoint",
+        ))
     return errors
 
 
@@ -236,18 +274,61 @@ def _note_candidates(root: Path) -> list[Path]:
             candidates.append(path)
             continue
         try:
-            if '"rider_id":"CE605"' in path.read_text(encoding="utf-8"):
-                candidates.append(path)
-        except OSError:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            notes = [json.loads(line) for line in lines]
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            candidates.append(path)
             continue
+        if any(isinstance(note, dict) and note.get("rider_id") == "CE605" for note in notes):
+            candidates.append(path)
     return sorted(candidates)
 
 
-def validate_repo(root: Path) -> list[ValidationError]:
+def _adr_bindings(adr: Path) -> tuple[str | None, dict[str, str], list[ValidationError]]:
+    try:
+        lines = adr.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        return None, {}, [_error(CODE_ARTIFACT, adr, "", str(exc))]
+
+    checkpoint: str | None = None
+    bindings: dict[str, str] = {}
+    errors: list[ValidationError] = []
+    section: str | None = None
+    for line in lines:
+        if line == "## Authenticated checkpoint":
+            section = "checkpoint"
+            continue
+        if line == "## Authenticated source bindings":
+            section = "bindings"
+            continue
+        if line.startswith("## "):
+            section = None
+            continue
+        if section == "checkpoint":
+            match = _CHECKPOINT_LINE.match(line)
+            if match is not None:
+                if checkpoint is not None:
+                    errors.append(_error(CODE_ARTIFACT, adr, "", "ADR-0605 checkpoint is ambiguous"))
+                checkpoint = match.group(1)
+        elif section == "bindings":
+            match = _BINDING_LINE.match(line)
+            if match is not None:
+                reference, digest = match.groups()
+                if reference in bindings:
+                    errors.append(_error(CODE_ARTIFACT, adr, "", "ADR-0605 source binding is ambiguous"))
+                bindings[reference] = digest
+    if checkpoint is None:
+        errors.append(_error(CODE_ARTIFACT, adr, "", "ADR-0605 must carry one authenticated stream checkpoint"))
+    return checkpoint, bindings, errors
+
+
+def validate_repo(root: Path, *, now: datetime | None = None) -> list[ValidationError]:
     """Validate CE605's fixed artifacts under one repository root."""
     errors: list[ValidationError] = []
     adr = root / ADR_RELATIVE_PATH
     notes = root / NOTES_RELATIVE_PATH
+    checkpoint: str | None = None
+    bindings: dict[str, str] = {}
     if not adr.is_file():
         errors.append(_error(CODE_ARTIFACT, adr, "", "missing canonical ADR-0605 artifact"))
     else:
@@ -265,6 +346,8 @@ def validate_repo(root: Path) -> list[ValidationError]:
                     "status",
                     "standing rider is not active until ADR-0605 is human-ratified; immediate review is required",
                 ))
+        checkpoint, bindings, binding_errors = _adr_bindings(adr)
+        errors.extend(binding_errors)
     candidates = _note_candidates(root)
     if candidates != [notes]:
         errors.append(_error(
@@ -274,7 +357,14 @@ def validate_repo(root: Path) -> list[ValidationError]:
             "expected exactly one canonical CE605 note stream and no alternate or duplicate artifact",
         ))
     if notes.is_file():
-        errors.extend(validate_note_stream(notes))
+        errors.extend(
+            validate_note_stream(
+                notes,
+                now=now,
+                authenticated_bindings=bindings,
+                expected_checkpoint=checkpoint,
+            )
+        )
     return errors
 
 
@@ -283,8 +373,8 @@ def validate_repo(root: Path) -> list[ValidationError]:
     [CODE_SCHEMA, CODE_ARTIFACT, CODE_CANONICAL, CODE_DIGEST, CODE_CHAIN, CODE_CLOCK,
      CODE_CADENCE, CODE_SOURCE_REF, CODE_TRIPWIRE, CODE_UNRATIFIED],
 )
-def run(paths: Iterable[Path]) -> CheckResult:
+def run(paths: Iterable[Path], *, now: datetime | None = None) -> CheckResult:
     errors: list[ValidationError] = []
     for root in _repo_roots(paths):
-        errors.extend(validate_repo(root))
+        errors.extend(validate_repo(root, now=now))
     return CheckResult(name=CHECK_NAME, errors=tuple(errors))

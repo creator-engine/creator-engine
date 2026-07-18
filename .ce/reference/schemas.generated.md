@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 78
+Schema files: 79
 
 ## Index
 
@@ -77,6 +77,7 @@ Schema files: 78
 | `schemas/side-effect-ledger.schema.yaml` | Creator Engine Side-Effect Ledger Record | `object` |
 | `schemas/spec-ce-sidecar.schema.yaml` | Creator Engine v2 Spec CE Sidecar | `object` |
 | `schemas/spec-wrapper-sidecar.schema.yaml` | Creator Engine Spec Wrapper Sidecar | `object` |
+| `schemas/standing-rider-note.schema.yaml` | CE605 standing-rider note | `object` |
 | `schemas/state-boundary-contract.schema.yaml` | Creator Engine State Boundary Contract | `object` |
 | `schemas/state-version-record.schema.yaml` | Creator Engine State Version / Migration Record | `object` |
 | `schemas/storage-tier-finding.schema.yaml` | Creator Engine storage-tier advisory finding | `object` |
@@ -2427,6 +2428,35 @@ Properties:
 | `identity_policy_ref` | string | yes | minLength `1` |  |
 | `attestation_record_ref` | string | no | minLength `1` |  |
 | `ratification_record_ref` | string | no | minLength `1` |  |
+
+### `schemas/standing-rider-note.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | CE605 standing-rider note |
+| `$id` | `https://creator-engine.local/schemas/standing-rider-note.schema.yaml` |
+| Root type | `object` |
+
+Required fields:
+
+`kind`, `schema_version`, `rider_id`, `sequence`, `observed_at`, `cadence_due_at`, `source_state`, `source_refs`, `assessment`, `tripwire`, `previous_note_sha256`, `note_sha256`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | const | yes | const `standing-rider-note` |  |
+| `schema_version` | const | yes | const `1` |  |
+| `rider_id` | const | yes | const `CE605` |  |
+| `sequence` | integer | yes | minimum `1` |  |
+| `observed_at` | string | yes | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` |  |
+| `cadence_due_at` | string | yes | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` |  |
+| `source_state` | enum | yes | enum `authenticated`, `unavailable`, `stale`, `contradictory` |  |
+| `source_refs` | array | yes | minItems `1` |  |
+| `assessment` | enum | yes | enum `no_change`, `change_detected`, `deferred` |  |
+| `tripwire` | enum | yes | enum `clear`, `immediate_review_required`, `source_unavailable` |  |
+| `previous_note_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
+| `note_sha256` | string | yes | pattern `^[0-9a-f]{64}$` |  |
 
 ### `schemas/state-boundary-contract.schema.yaml`
 

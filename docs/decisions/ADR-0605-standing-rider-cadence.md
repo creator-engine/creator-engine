@@ -46,3 +46,11 @@ contradictory, changed, or deferred inputs require immediate review. Advisory
 research may be cited only as a class, public-safe path or opaque digest, and
 SHA-256 digest. The validator does not fetch, promote, research, write this
 stream, or record a side-effect ledger entry.
+
+## Authenticated checkpoint
+
+- CE605 stream head: `sha256:e51f68ab613a0a0273da8ee7746ab88b89f82322dbc8a8a8f875a62b98142527`
+
+## Authenticated source bindings
+
+- `finding:ce605-initial`: `sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
