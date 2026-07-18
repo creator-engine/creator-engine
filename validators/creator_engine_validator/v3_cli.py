@@ -4953,15 +4953,41 @@ def _build_parser() -> argparse.ArgumentParser:
         "carrier",
         help="write, stage, and verify the PR path-manifest carrier files",
     )
-    p_carrier.add_argument("--slug", required=True, help="canonical branch/carrier slug")
-    p_carrier.add_argument("--issue", required=True, help="issue reference for the carrier")
-    p_carrier.add_argument("--title", required=True, help="carrier title")
-    p_carrier.add_argument("--kind", required=True, help="declared work kind/class")
-    p_carrier.add_argument("--scope", required=True, help="closed scope summary")
-    p_carrier.add_argument("--body-file", required=True, dest="body_file", help="path to the PR body/source text")
+    # ``carrier`` gained the ``gc`` subcommand, so the write-mode
+    # flags below are no longer argparse-``required`` (a subcommand path must be
+    # reachable without them). ``_cmd_carrier`` enforces them for the default
+    # write mode instead, preserving the same exit(2) refusal for a missing flag.
+    p_carrier.add_argument("--slug", required=False, help="canonical branch/carrier slug")
+    p_carrier.add_argument("--issue", required=False, help="issue reference for the carrier")
+    p_carrier.add_argument("--title", required=False, help="carrier title")
+    p_carrier.add_argument("--kind", required=False, help="declared work kind/class")
+    p_carrier.add_argument("--scope", required=False, help="closed scope summary")
+    p_carrier.add_argument("--body-file", required=False, dest="body_file", help="path to the PR body/source text")
     p_carrier.add_argument("--base", default="origin/main", help="base ref for path-manifest verification")
     p_carrier.add_argument("--date", default=None, help="carrier date stamp override")
     p_carrier.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+    carrier_sub = p_carrier.add_subparsers(dest="carrier_command")
+    p_carrier_gc = carrier_sub.add_parser(
+        "gc",
+        help="sweep dead carrier manifests whose branch/ref is gone (dry-run default; --apply removes)",
+    )
+    p_carrier_gc.add_argument(
+        "--apply",
+        action="store_true",
+        help="remove the dead carriers (default: dry-run report only)",
+    )
+    p_carrier_gc.add_argument(
+        "--pr-manifests-dir",
+        default=None,
+        dest="pr_manifests_dir",
+        help="override the carrier directory (default: <repo>/.ce/pr-manifests)",
+    )
+    p_carrier_gc.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable JSON",
+    )
 
     p_guide = sub.add_parser("guide", help="print the in-product CE guide (what CE is + the five stages)")
     p_guide.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
@@ -6277,8 +6303,152 @@ def _unstaged_non_carrier_paths(status: str, carrier_paths: set[str]) -> list[st
     return sorted(set(blocked))
 
 
+def _cmd_carrier_gc(args: argparse.Namespace) -> int:
+    """Hygiene sweep: report (or ``--apply``-remove) dead carrier manifests.
+
+    Read-only over git refs; never contacts ``origin`` (it reads the local
+    remote-tracking refs as last fetched). Exit 0 in both dry-run and apply
+    modes unless an operational error occurs.
+    """
+    from . import carrier_gc
+
+    try:
+        repo_root_raw = _git_read(Path.cwd(), "rev-parse", "--show-toplevel")
+    except v3_installer.InstallRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier gc failed closed: {exc}"],
+            {"error": "refused", "detail": str(exc)},
+        )
+    if not repo_root_raw:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier gc failed closed: not inside a git repository"],
+            {"error": "carrier_git_repository", "detail": "not inside a git repository"},
+        )
+    repo_root = Path(repo_root_raw).resolve()
+
+    manifests_dir = (
+        Path(args.pr_manifests_dir).resolve()
+        if getattr(args, "pr_manifests_dir", None)
+        else repo_root / carrier_gc.MANIFEST_DIR
+    )
+
+    try:
+        local_raw = _git_read(repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads") or ""
+        remote_raw = _git_read(repo_root, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin") or ""
+        current = _git_read(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD") or ""
+    except v3_installer.InstallRefused as exc:
+        return _emit(
+            args,
+            1,
+            [f"{_BRAND} · carrier gc failed closed: {exc}"],
+            {"error": "refused", "detail": str(exc)},
+        )
+
+    local_branches = [ln.strip() for ln in local_raw.splitlines() if ln.strip()]
+    remote_tracking = [
+        ln[len("origin/"):] if ln.startswith("origin/") else ln
+        for ln in (line.strip() for line in remote_raw.splitlines())
+        if ln and not ln.endswith("/HEAD")
+    ]
+
+    apply = bool(getattr(args, "apply", False))
+    result = carrier_gc.sweep(
+        repo_root=repo_root,
+        manifests_dir=manifests_dir,
+        local_branches=local_branches,
+        remote_tracking=remote_tracking,
+        current_branch=current,
+        apply=apply,
+    )
+
+    payload = {
+        "mode": "apply" if apply else "dry-run",
+        "manifests_dir": manifests_dir.as_posix(),
+        "counts": {
+            "scanned": len(result.all),
+            "dead": len(result.dead),
+            "live": len(result.live),
+            "unparseable": len(result.unparseable),
+            "removed": len(result.removed),
+        },
+        "dead": [
+            {"slug": c.slug, "path": c.path, "checked": list(c.checked), "detail": c.detail}
+            for c in result.dead
+        ],
+        "unparseable": [{"path": c.path, "detail": c.detail} for c in result.unparseable],
+        "removed": list(result.removed),
+        "errors": list(result.errors),
+        "fetch_prune_reminder": (
+            "remote-tracking refs are read as last fetched; run `git fetch --prune` "
+            "first so origin-side branch deletions are reflected"
+        ),
+    }
+
+    lines: list[str] = []
+    header = "apply" if apply else "dry-run"
+    lines.append(
+        f"{_BRAND} · carrier gc ({header}): "
+        f"{len(result.dead)} dead, {len(result.live)} live, "
+        f"{len(result.unparseable)} unparseable of {len(result.all)} carriers"
+    )
+    lines.append(f"    scan dir: {manifests_dir.as_posix()}")
+    lines.append(
+        "    note: remote-tracking refs read as last fetched; "
+        "run `git fetch --prune` first for the true origin view"
+    )
+    for c in result.dead:
+        verb = "removed" if c.path in result.removed else ("would remove" if not apply else "DEAD (not removed)")
+        lines.append(f"    DEAD {c.slug} · {c.path} · {verb}")
+        lines.append(f"         checked: {', '.join(c.checked)}")
+    for c in result.unparseable:
+        lines.append(f"    UNPARSEABLE {c.path} · never deleted · {c.detail}")
+    if apply and result.removed:
+        lines.append(
+            f"    removed {len(result.removed)} carrier(s); commit the deletions to finalize"
+        )
+    if not apply and result.dead:
+        lines.append("    re-run with --apply to remove the dead carriers")
+
+    if result.errors:
+        for err in result.errors:
+            lines.append(f"    ERROR {err}")
+        return _emit(args, 1, lines, payload)
+
+    return _emit(args, 0, lines, payload)
+
+
 def _cmd_carrier(args: argparse.Namespace) -> int:
+    if getattr(args, "carrier_command", None) == "gc":
+        return _cmd_carrier_gc(args)
+
     from .checks import path_manifest_fidelity
+
+    # The write-mode flags are argparse-optional so the ``gc``
+    # subcommand stays reachable; enforce them here for the default write mode.
+    _required = {
+        "--slug": args.slug,
+        "--issue": args.issue,
+        "--title": args.title,
+        "--kind": args.kind,
+        "--scope": args.scope,
+        "--body-file": args.body_file,
+    }
+    _missing = [flag for flag, value in _required.items() if value in (None, "")]
+    if _missing:
+        return _emit(
+            args,
+            2,
+            [f"{_BRAND} · carrier REFUSED (input): missing required argument(s): {', '.join(_missing)}"],
+            {
+                "error": "carrier_input",
+                "detail": "missing required arguments for carrier write mode",
+                "missing": _missing,
+            },
+        )
 
     slug = str(args.slug)
     canonical_slug = path_manifest_fidelity.branch_slug(slug)
