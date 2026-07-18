@@ -8,7 +8,7 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=6
 
-AUTHORIZED_PATHS_SHA256=2e497e5d3f8fd537a016189460ca80d4016c33e01029c2914dab4f958785a5ad
+AUTHORIZED_PATHS_SHA256=8d5fa0f92b1dbad849eb9ddc8bd0b184389009bf82fd9d671de04b55bce712e1
 
 ```text
 .ce/changelog/ce-607-managed-config-bootstrap-s1.md
