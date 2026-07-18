@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -102,6 +103,46 @@ def test_plan_rejects_same_worktree_as_parent(tmp_path):
             parent_worktree=worker,
             environ={},
         )
+
+
+@pytest.mark.parametrize("lexical_worktree", ("noncanonical", "symlinked_ancestor"))
+def test_spawn_refuses_lexical_worktree_before_attestation_materializer_or_launcher(
+    tmp_path, monkeypatch, lexical_worktree
+):
+    parent, worker = _worktrees(tmp_path)
+    if lexical_worktree == "noncanonical":
+        worktree = f"{worker}/."
+    else:
+        linked_parent = tmp_path / "linked-parent"
+        linked_parent.symlink_to(tmp_path, target_is_directory=True)
+        worktree = linked_parent / "worker"
+    launcher = FakeLauncher()
+    calls = []
+
+    def attest_never_called(_worktree):
+        calls.append("attest")
+        raise AssertionError("attestation must not see a lexical worktree")
+
+    def materialize_never_called(*_args):
+        calls.append("materialize")
+        raise AssertionError("materializer must not see a lexical worktree")
+
+    monkeypatch.setattr(worker_spawn.codex_worker_config, "attest_allocated_worktree", attest_never_called)
+    monkeypatch.setattr(worker_spawn.codex_worker_config, "materialize_worker_config", materialize_never_called)
+    with pytest.raises(worker_spawn.InvalidWorkerWorktree):
+        worker_spawn.spawn_worker(
+            role="implementer",
+            harness="codex",
+            worktree=worktree,
+            scope_id="ce-ops#607",
+            brief="refuse lexical symlink",
+            parent_worktree=parent,
+            environ={},
+            launcher=launcher,
+        )
+
+    assert calls == []
+    assert launcher.calls == []
 
 
 def test_depth_bound_fails_closed(tmp_path):
@@ -358,3 +399,70 @@ def test_default_launcher_passes_clean_env_and_pinned_cwd_to_launch_runtime(tmp_
     assert "GH_CONFIG_DIR" not in captured["launch_env"]
     assert "SSH_AUTH_SOCK" not in captured["launch_env"]
     assert "GH_TOKEN" not in captured["launch_env"]
+
+
+def test_codex_spawn_materializes_managed_config_before_fake_prompt_seam(tmp_path):
+    parent, worker = _worktrees(tmp_path)
+
+    class FakeCodexPromptLauncher:
+        def launch(self, plan):
+            config_path = Path(plan.child_env["HOME"]) / ".codex" / "config.toml"
+            assert config_path.is_file()
+            assert config_path.read_text(encoding="utf-8") == (
+                'approval_policy = "never"\n'
+                'sandbox_mode = "danger-full-access"\n'
+                f'[projects."{worker.resolve()}"]\n'
+                'trust_level = "trusted"\n'
+            )
+            assert "OPENAI_API_KEY" not in plan.child_env
+            assert "GH_TOKEN" not in plan.child_env
+            assert "--dangerously-bypass-approvals-and-sandbox" not in plan.launch_command
+            return worker_spawn.WorkerLaunchOutcome(spawned=True, attached=False)
+
+    result = worker_spawn.spawn_worker(
+        role="implementer",
+        harness="codex",
+        worktree=worker,
+        scope_id="ce-ops#607",
+        brief="hermetic fake prompt seam",
+        parent_worktree=parent,
+        environ={"HOME": str(tmp_path / "ambient-home"), "OPENAI_API_KEY": "secret", "GH_TOKEN": "secret"},
+        launcher=FakeCodexPromptLauncher(),
+    )
+
+    assert result.written is True
+
+
+@pytest.mark.parametrize("receipt_change", ("absent", "tampered", "stale", "mismatched"))
+def test_codex_spawn_revalidates_receipt_before_fake_launcher(tmp_path, monkeypatch, receipt_change):
+    parent, worker = _worktrees(tmp_path)
+    launcher = FakeLauncher()
+    original_materialize = worker_spawn._materialize_codex_worker_config
+
+    def materialize_with_changed_receipt(plan):
+        receipt = original_materialize(plan)
+        assert receipt is not None
+        if receipt_change == "absent":
+            return None
+        if receipt_change == "tampered":
+            return dataclasses.replace(receipt, sha256="0" * 64)
+        if receipt_change == "stale":
+            return dataclasses.replace(receipt, inode=receipt.inode + 1)
+        config_path = receipt.path
+        config_path.write_text('approval_policy = "never"\n', encoding="utf-8")
+        return receipt
+
+    monkeypatch.setattr(worker_spawn, "_materialize_codex_worker_config", materialize_with_changed_receipt)
+    with pytest.raises(worker_spawn.WorkerManagedConfigRefused):
+        worker_spawn.spawn_worker(
+            role="implementer",
+            harness="codex",
+            worktree=worker,
+            scope_id="ce-ops#607",
+            brief="receipt launch-boundary check",
+            parent_worktree=parent,
+            environ={},
+            launcher=launcher,
+        )
+
+    assert launcher.calls == []
