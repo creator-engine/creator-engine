@@ -1001,18 +1001,41 @@ def test_runtime_policy_recovery_rename_failure_is_best_effort_and_preserves_bac
     )
     policy_path = Path(first["policy_path"])
     receipt_path = Path(first["receipt_path"])
-    original_policy = policy_path.read_bytes()
-    original_receipt = receipt_path.read_bytes()
+    original_by_name = {
+        policy_path.name: policy_path.read_bytes(),
+        receipt_path.name: receipt_path.read_bytes(),
+    }
+    proposed_by_name = {
+        name: payload + f"\n# proposed replacement for {name}\n".encode("utf-8")
+        for name, payload in original_by_name.items()
+    }
+    assert all(
+        proposed_by_name[name] != original_by_name[name] for name in original_by_name
+    )
+
+    original_stage_private_write = onboard_apply._stage_private_write
+    staged_names: list[str] = []
+
+    def stage_proposed_after_existing_pair_admission(path, payload):
+        destination_name = Path(path).name
+        assert payload == original_by_name[destination_name]
+        assert {
+            policy_path.name: policy_path.read_bytes(),
+            receipt_path.name: receipt_path.read_bytes(),
+        } == original_by_name
+        staged_names.append(destination_name)
+        return original_stage_private_write(path, proposed_by_name[destination_name])
 
     original_replace = onboard_apply.os.replace
     replace_calls = 0
+    initiating_error = OSError("injected second replace failure")
 
     def fail_second_replace(source, destination):
         nonlocal replace_calls
         replace_calls += 1
+        original_replace(source, destination)
         if replace_calls == 2:
-            raise OSError("injected second replace failure")
-        return original_replace(source, destination)
+            raise initiating_error
 
     original_rename = onboard_apply.os.rename
     failing_names = {
@@ -1021,13 +1044,19 @@ def test_runtime_policy_recovery_rename_failure_is_best_effort_and_preserves_bac
         "both": {policy_path.name, receipt_path.name},
     }[failing_restore]
     attempted_restores: list[str] = []
+    restore_snapshots: dict[str, bytes] = {}
 
     def fail_selected_recovery_rename(source, destination, **kwargs):
-        attempted_restores.append(Path(destination).name)
-        if Path(destination).name in failing_names:
+        destination_name = Path(destination).name
+        attempted_restores.append(destination_name)
+        restore_snapshots[destination_name] = Path(destination).read_bytes()
+        if destination_name in failing_names:
             raise OSError("injected recovery rename failure")
         return original_rename(source, destination, **kwargs)
 
+    monkeypatch.setattr(
+        onboard_apply, "_stage_private_write", stage_proposed_after_existing_pair_admission
+    )
     monkeypatch.setattr(onboard_apply.os, "replace", fail_second_replace)
     monkeypatch.setattr(onboard_apply.os, "rename", fail_selected_recovery_rename)
 
@@ -1037,26 +1066,31 @@ def test_runtime_policy_recovery_rename_failure_is_best_effort_and_preserves_bac
         )
 
     assert caught.value.code == "runtime_policy_recovery_failed"
-    assert str(caught.value.__cause__) == "injected second replace failure"
+    assert caught.value.__cause__ is initiating_error
+    assert staged_names == [policy_path.name, receipt_path.name]
+    assert replace_calls == 2
     # Best effort: the second restore is attempted even after the first fails.
     assert attempted_restores == [policy_path.name, receipt_path.name]
-    # The destination pair itself stays byte-consistent last-known-good.
-    assert policy_path.read_bytes() == original_policy
-    assert receipt_path.read_bytes() == original_receipt
+    assert restore_snapshots == proposed_by_name
+    for destination in (policy_path, receipt_path):
+        destination_name = destination.name
+        if destination_name in failing_names:
+            assert destination.read_bytes() == proposed_by_name[destination_name]
+        else:
+            assert destination.read_bytes() == original_by_name[destination_name]
+            assert destination.read_bytes() != proposed_by_name[destination_name]
     # Every failed restore keeps its last-known-good recovery link on disk
     # instead of unlinking it during cleanup.
     preserved = {
-        candidate.name.split(".backup.")[0]: candidate.read_bytes()
+        candidate.name.split(".backup.")[0].removeprefix("."): candidate.read_bytes()
         for candidate in policy_path.parent.glob(".*.backup.*")
     }
     assert preserved == {
-        name: bytes_
-        for name, bytes_ in (
-            (f".{policy_path.name}", original_policy),
-            (f".{receipt_path.name}", original_receipt),
-        )
-        if name.removeprefix(".") in failing_names
+        name: original_by_name[name]
+        for name in failing_names
     }
+    for name in failing_names:
+        assert preserved[name] != proposed_by_name[name]
     assert not list(policy_path.parent.glob(".*.tmp.*"))
 
 
