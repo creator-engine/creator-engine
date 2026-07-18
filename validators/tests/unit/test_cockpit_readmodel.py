@@ -27,6 +27,18 @@ from creator_engine_validator.runner import cockpit_demo_seed, cockpit_readmodel
 from creator_engine_validator.runtime_evidence_spine import verify_chain
 from creator_engine_validator.schema import validate_with_schema
 
+
+def test_work_unit_cap_projection_is_read_only_and_deterministic():
+    receipt = {
+        "record_type": "runtime_work_unit_cap", "kind": "runtime-work-unit-cap",
+        "run_id": "run-1", "unit": "ce.raw_tokens.v1", "unit_version": 1,
+        "cap": 100, "reserved": 40, "observed": 0, "remaining": 60,
+        "source_state": "measured", "phase": "pre_dispatch", "recorded_at": "2026-07-18T00:00:00Z",
+    }
+    first = cockpit_readmodel.fold_work_unit_cap([[receipt]])
+    assert first == cockpit_readmodel.fold_work_unit_cap([[receipt]])
+    assert first["run-1"]["reserved"] == 40
+
 VALIDATORS_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = VALIDATORS_DIR.parent
 

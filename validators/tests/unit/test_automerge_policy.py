@@ -38,11 +38,23 @@ from creator_engine_validator.forge.automerge_policy import (
     save_automerge_policy_state,
 )
 from creator_engine_validator.work_sizing import size_ceremony
+from creator_engine_validator.runner import work_unit_cap
+import creator_engine_validator.forge.automerge_policy as automerge_policy
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REQUIRED_CHECK = "Validate governance artifacts"
 HEAD_SHA = "d" * 40
+
+
+def test_a2_a3_automerge_requires_valid_work_unit_receipt():
+    receipt = work_unit_cap.reserve(
+        (), cap=10, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=1,
+        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z",
+    ).receipt
+    assert not automerge_policy.work_unit_receipt_evidence(None)["valid"]
+    assert not automerge_policy.work_unit_receipt_evidence(dict(receipt, source_state="unknown"))["valid"]
+    assert automerge_policy.work_unit_receipt_evidence(receipt)["valid"]
 POLICY_SHA = "a" * 64
 
 ALL_CLASSES = (
