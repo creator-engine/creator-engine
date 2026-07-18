@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -173,6 +174,21 @@ def _read_head(head_path: Path) -> dict[str, Any] | None:
     return data
 
 
+@contextmanager
+def _work_unit_lane_lock(root: Path, controller_id: str, lane_id: str):
+    """Serialize CE603 read-project-append reservations for one ledger lane."""
+    import fcntl
+
+    lock_path = _lane_root(root, controller_id, lane_id) / ".work-unit-reservation.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 # ---------------------------------------------------------------------------
 # ce ledger record
 # ---------------------------------------------------------------------------
@@ -301,6 +317,30 @@ def record(
         record_sha256=record_sha256,
         previous_record_sha256=previous_sha,
     )
+
+
+def record_work_unit_reservation(*, receipt: dict[str, Any], **record_kwargs: Any) -> RecordResult:
+    """Atomically append one CE603 reservation through the sole record writer."""
+    if not isinstance(receipt, dict):
+        raise DetailsNotObject("work-unit receipt must be a JSON object")
+    root = Path(record_kwargs["side_effect_ledger_root"])
+    controller_id = str(record_kwargs["controller_id"])
+    lane_id = str(record_kwargs["lane_id"])
+    details = dict(record_kwargs.pop("details", {}) or {})
+    # The landed ledger schema permits scalar detail values only. Preserve the
+    # complete closed receipt as canonical JSON plus its independently checked digest.
+    details["work_unit_receipt_json"] = _canonical_bytes(receipt).rstrip("\n")
+    details["work_unit_receipt_sha256"] = str(receipt.get("receipt_sha256") or "")
+    receipt_id = str(receipt.get("receipt_id") or "unknown")
+    record_kwargs.update(
+        effect_id=f"work-unit-reservation-{receipt_id[:32]}",
+        effect_kind="tracked_file_change",
+        effect_status="succeeded",
+        summary="Recorded CE603 work-unit reservation.",
+        details=details,
+    )
+    with _work_unit_lane_lock(root, controller_id, lane_id):
+        return record(**record_kwargs)
 
 
 def _require_live_claim(

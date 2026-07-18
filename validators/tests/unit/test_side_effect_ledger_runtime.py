@@ -121,6 +121,15 @@ def test_second_record_chains_to_previous_record_sha(tmp_path: Path):
     assert head["head_sha256"] == second.record_sha256
 
 
+def test_work_unit_reservation_uses_the_single_record_writer(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    receipt = {"receipt_id": "r", "unit": "ce.raw_tokens.v1", "unit_version": 1}
+    result = runtime.record_work_unit_reservation(receipt=receipt, **_kwargs(tmp_path))
+    assert json.loads(result.record["details"]["work_unit_receipt_json"]) == receipt
+    assert result.record["effect_id"].startswith("work-unit-reservation-")
+
+
 def test_record_is_valid_under_existing_side_effect_ledger_substrate(tmp_path: Path):
     from creator_engine_validator.checks.side_effect_ledger import (
         validate_side_effect_ledger_record,
