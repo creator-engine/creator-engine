@@ -177,8 +177,10 @@ def test_mint_model_api_delivers_only_on_socket_not_env_argv_subprocess_or_files
             assert _MODEL_SECRET not in path.read_text(encoding="utf-8", errors="ignore")
 
 
-def test_live_cli_mismatched_peercred_rejects_jit_mint_without_credential(tmp_path):
-    socket_path = tmp_path / "jit-peercred.sock"
+def test_live_cli_mismatched_peercred_rejects_jit_mint_without_credential(
+    tmp_path, unix_socket_tmp_path
+):
+    socket_path = unix_socket_tmp_path / "jit-peercred.sock"
     server_result = {}
 
     def run_server():

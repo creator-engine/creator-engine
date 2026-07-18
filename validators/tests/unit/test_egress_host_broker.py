@@ -469,8 +469,8 @@ def test_json_line_seam_returns_one_secret_free_response_line(tmp_path):
     assert _SENTINEL not in raw
 
 
-def test_serve_unix_socket_audits_real_peercred(tmp_path):
-    socket_path = tmp_path / "peercred-real.sock"
+def test_serve_unix_socket_audits_real_peercred(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "peercred-real.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
@@ -501,8 +501,8 @@ def test_serve_unix_socket_audits_real_peercred(tmp_path):
     assert peercred["decision"] == "flag"
 
 
-def test_serve_unix_socket_allows_matching_expected_peercred(tmp_path):
-    socket_path = tmp_path / "peercred-allow.sock"
+def test_serve_unix_socket_allows_matching_expected_peercred(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "peercred-allow.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
@@ -529,8 +529,8 @@ def test_serve_unix_socket_allows_matching_expected_peercred(tmp_path):
     assert peercred["decision"] == "allow"
 
 
-def test_serve_unix_socket_rejects_unexpected_peercred_when_enabled(tmp_path):
-    socket_path = tmp_path / "peercred-reject.sock"
+def test_serve_unix_socket_rejects_unexpected_peercred_when_enabled(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "peercred-reject.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
@@ -559,8 +559,9 @@ def test_serve_unix_socket_rejects_unexpected_peercred_when_enabled(tmp_path):
 
 def test_serve_unix_socket_rejects_unexpected_peercred_by_default_when_expected_configured(
     tmp_path,
+    unix_socket_tmp_path,
 ):
-    socket_path = tmp_path / "pd-rej.sock"
+    socket_path = unix_socket_tmp_path / "pd-rej.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
@@ -601,8 +602,8 @@ def test_serve_unix_socket_requires_peercred_expectations_for_credential_request
     assert not socket_path.exists()
 
 
-def test_systemd_activation_helper_uses_fromfd_and_unsets_environment(tmp_path, monkeypatch):
-    socket_path = tmp_path / "activated-helper.sock"
+def test_systemd_activation_helper_uses_fromfd_and_unsets_environment(tmp_path, monkeypatch, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "activated-helper.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(socket_path))
     listener.listen(1)
@@ -641,8 +642,8 @@ def test_systemd_activation_helper_requires_listen_pid(monkeypatch):
         assert "LISTEN_FDNAMES" not in os.environ
 
 
-def test_serve_unix_socket_activation_keeps_existing_inode(tmp_path):
-    socket_path = tmp_path / "activated-self-push.sock"
+def test_serve_unix_socket_activation_keeps_existing_inode(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "activated-self-push.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(socket_path))
     listener.listen(16)
@@ -685,8 +686,8 @@ def test_serve_unix_socket_activation_keeps_existing_inode(tmp_path):
     assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
 
 
-def test_serve_unix_socket_empty_connection_continues(tmp_path):
-    socket_path = tmp_path / "empty-connection.sock"
+def test_serve_unix_socket_empty_connection_continues(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "empty-connection.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
@@ -709,8 +710,8 @@ def test_serve_unix_socket_empty_connection_continues(tmp_path):
     assert server_thread.is_alive()
 
 
-def test_serve_unix_socket_mid_recv_disconnect_continues(tmp_path):
-    socket_path = tmp_path / "mid-recv-disconnect.sock"
+def test_serve_unix_socket_mid_recv_disconnect_continues(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "mid-recv-disconnect.sock"
     courier_calls = []
 
     def fake_courier(request, *, config, apply, **kw):
@@ -806,9 +807,9 @@ def test_serve_unix_socket_recv_disconnect_exception_continues(tmp_path, monkeyp
 
 
 def test_serve_unix_socket_courier_oserror_returns_generic_500_and_continues(
-    tmp_path, capsys
+    tmp_path, capsys, unix_socket_tmp_path
 ):
-    socket_path = tmp_path / "courier-oserror.sock"
+    socket_path = unix_socket_tmp_path / "courier-oserror.sock"
     courier_calls = []
 
     def flaky_courier(request, *, config, apply, **kw):
@@ -838,9 +839,9 @@ def test_serve_unix_socket_courier_oserror_returns_generic_500_and_continues(
 
 
 def test_serve_unix_socket_peer_audit_persistence_oserror_fails_closed_and_continues(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, unix_socket_tmp_path
 ):
-    socket_path = tmp_path / "peer-audit-oserror.sock"
+    socket_path = unix_socket_tmp_path / "peer-audit-oserror.sock"
     real_append_audit = host_broker.append_audit
     audit_calls = []
     courier_calls = []
@@ -876,8 +877,8 @@ def test_serve_unix_socket_peer_audit_persistence_oserror_fails_closed_and_conti
     _assert_sentinel_absent(first_response, second_response, stderr)
 
 
-def test_serve_unix_socket_push_refused_returns_403(tmp_path):
-    socket_path = tmp_path / "push-refused.sock"
+def test_serve_unix_socket_push_refused_returns_403(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "push-refused.sock"
     spy = _HostSpy()
 
     def refuse_push(token):
@@ -909,8 +910,8 @@ def test_serve_unix_socket_push_refused_returns_403(tmp_path):
     assert server_thread.is_alive()
 
 
-def test_serve_unix_socket_forge_config_error_returns_500(tmp_path):
-    socket_path = tmp_path / "forge-config-error.sock"
+def test_serve_unix_socket_forge_config_error_returns_500(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "forge-config-error.sock"
 
     def mint_failure(*args, **kwargs):
         raise ForgeConfigError("mint failed")
@@ -934,8 +935,25 @@ def test_serve_unix_socket_forge_config_error_returns_500(tmp_path):
     assert server_thread.is_alive()
 
 
-def test_serve_unix_socket_half_closed_client(tmp_path):
-    socket_path = tmp_path / "self-push.sock"
+def test_serve_unix_socket_rejects_overlong_explicit_path_without_fallback(tmp_path):
+    socket_path = tmp_path / ("x" * 120) / "self-push.sock"
+
+    with pytest.raises(OSError):
+        serve_self_push_unix_socket(
+            socket_path,
+            config=_config(tmp_path),
+            broker_seat_id="dev-4",
+            host_repo_path="/host/workspaces/creator-engine",
+            once=True,
+            allow_credential_requests=False,
+        )
+
+    assert not socket_path.exists()
+    assert list(tmp_path.rglob("*.sock")) == []
+
+
+def test_serve_unix_socket_half_closed_client(tmp_path, unix_socket_tmp_path):
+    socket_path = unix_socket_tmp_path / "self-push.sock"
     courier_started = threading.Event()
     release_response = threading.Event()
     server_exceptions = []
