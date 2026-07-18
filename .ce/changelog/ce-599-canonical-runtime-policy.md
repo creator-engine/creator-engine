@@ -42,3 +42,9 @@ mechanism after the docs-reconciliation evidence changed, superseding the stale
 static-evidence record with its newly hashed replacement. The append-only
 supersede pair raises the intentional flat active-assertion ratchet from 120 to
 121.
+
+Corrects the documented-verbs gate's shipped-command model to include the
+complete pre-argparse dispatch registry alongside argparse subcommands. The
+hermetic registry-wide regression keeps those shipped verbs documentable and
+retires the obsolete `ce conveyor` baseline offense without changing the CLI
+or its public reference.
