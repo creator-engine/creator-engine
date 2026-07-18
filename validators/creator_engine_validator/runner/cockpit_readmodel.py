@@ -50,7 +50,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 import yaml
 
@@ -1393,7 +1393,29 @@ def _fold_meters(
         # ``chains is None`` UNAVAILABLE discipline lives inside the fold.
         "cost": fold_cost_meter(chains),
         "banners": banners,
+        "work_unit_cap": fold_work_unit_cap([flat_records]),
     }
+
+
+def fold_work_unit_cap(chains: Iterable[Iterable[Mapping[str, Any]]]) -> dict[str, dict[str, Any]]:
+    """Read-only CE603 receipt projection; it never reserves or reconciles."""
+    runs: dict[str, dict[str, Any]] = {}
+    for chain in chains or ():
+        for record in chain or ():
+            if not isinstance(record, Mapping) or record.get("record_type") not in {"runtime_work_unit_cap", "runtime_work_unit_reconcile"}:
+                continue
+            if record.get("unit") != "ce.raw_tokens.v1" or record.get("unit_version") != 1:
+                continue
+            run_id = str(record.get("run_id") or "")
+            if not run_id:
+                continue
+            runs[run_id] = {
+                "cap": record.get("cap"), "reserved": record.get("reserved"),
+                "observed": record.get("observed"), "remaining": record.get("remaining"),
+                "phase": record.get("phase"), "source_state": record.get("source_state"),
+                "recorded_at": record.get("recorded_at"), "unit": record.get("unit"),
+            }
+    return {run_id: runs[run_id] for run_id in sorted(runs)}
 
 
 def _priced_leaves(chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
