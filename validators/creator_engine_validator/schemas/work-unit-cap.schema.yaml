@@ -22,10 +22,10 @@ required:
   - receipt_sha256
   - recorded_at
 properties:
-  receipt_id: {type: string, minLength: 1}
-  run_id: {type: string, minLength: 1}
-  attempt_id: {type: string, minLength: 1}
-  reservation_id: {type: string, minLength: 1}
+  receipt_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+  run_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+  attempt_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+  reservation_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
   phase: {type: string, enum: [pre_dispatch, mid_run, retry_reentry, completion, rollback, reconcile]}
   unit: {type: string, const: ce.raw_tokens.v1}
   unit_version: {type: integer, const: 1}
