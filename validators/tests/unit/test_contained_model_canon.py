@@ -41,12 +41,10 @@ def _config_heredoc(
     )
 
 
-HEREDOC_OPENER = re.compile(
+TARGET_HEREDOC_OPENER = re.compile(
     r'^\s*cat\s+>\s*"\$\{CE_(?:VPS|DGX)_CONTAINED_CODEX_CONFIG\}"\s*'
-    r"<<(?P<strip_tabs>-?)\s*(?P<delimiter>\S+)"
-    r"\s*(?:#.*)?$"
+    r"<<(?P<strip_tabs>-?)"
 )
-ANY_HEREDOC_OPENER = re.compile(r"(?<!<)<<(?P<strip_tabs>-?)\s*(?P<delimiter>\S+)")
 
 
 def _canon_pair(seat_id: str) -> tuple[str, str]:
@@ -96,6 +94,70 @@ def _heredoc_delimiter(word: str) -> str | None:
     return result if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", result) else None
 
 
+def _shell_heredoc_word(line: str, start: int) -> tuple[str, int]:
+    while start < len(line) and line[start].isspace():
+        start += 1
+
+    word: list[str] = []
+    quote: str | None = None
+    index = start
+    while index < len(line):
+        character = line[index]
+        if quote is not None:
+            word.append(character)
+            if character == "\\" and quote == '"' and index + 1 < len(line):
+                index += 1
+                word.append(line[index])
+            elif character == quote:
+                quote = None
+        elif character in "'\"":
+            quote = character
+            word.append(character)
+        elif character == "\\":
+            word.append(character)
+            if index + 1 < len(line):
+                index += 1
+                word.append(line[index])
+        elif character.isspace() or character in ";|&<>()":
+            break
+        else:
+            word.append(character)
+        index += 1
+    return "".join(word), index
+
+
+def _shell_control_text(line: str) -> str:
+    result: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if quote == "'":
+            result.append(character)
+            if character == "'":
+                quote = None
+        elif quote == '"':
+            result.append(character)
+            if character == "\\" and index + 1 < len(line):
+                index += 1
+                result.append(line[index])
+            elif character == '"':
+                quote = None
+        elif character == "#":
+            break
+        elif character in "'\"":
+            quote = character
+            result.append(character)
+        elif character == "\\" and index + 1 < len(line):
+            result.append(character)
+            index += 1
+            result.append(line[index])
+        else:
+            result.append(character)
+        index += 1
+    return "".join(result).strip()
+
+
 def _shell_code_line_indexes(lines: list[str]) -> set[int]:
     code_lines: set[int] = set()
     quote: str | None = None
@@ -112,6 +174,7 @@ def _shell_code_line_indexes(lines: list[str]) -> set[int]:
         if quote is None:
             code_lines.add(line_index)
 
+        pending_heredoc: tuple[str, bool] | None = None
         index = 0
         while index < len(line):
             character = line[index]
@@ -129,14 +192,23 @@ def _shell_code_line_indexes(lines: list[str]) -> set[int]:
                 quote = character
             elif character == "\\":
                 index += 1
+            elif (
+                character == "<"
+                and line.startswith("<<", index)
+                and (index == 0 or line[index - 1] != "<")
+                and not line.startswith("<<<", index)
+            ):
+                strip_tabs = line.startswith("<<-", index)
+                word, word_end = _shell_heredoc_word(line, index + 2 + int(strip_tabs))
+                delimiter = _heredoc_delimiter(word)
+                if delimiter is not None and pending_heredoc is None:
+                    pending_heredoc = (delimiter, strip_tabs)
+                index = word_end
+                continue
             index += 1
 
-        if quote is None:
-            opener = ANY_HEREDOC_OPENER.search(line)
-            if opener is not None:
-                delimiter = _heredoc_delimiter(opener.group("delimiter"))
-                if delimiter is not None:
-                    heredoc_closing = (delimiter, opener.group("strip_tabs") == "-")
+        if quote is None and pending_heredoc is not None:
+            heredoc_closing = pending_heredoc
 
     return code_lines
 
@@ -144,27 +216,32 @@ def _shell_code_line_indexes(lines: list[str]) -> set[int]:
 def _generated_toml_span(source: str, banner: str) -> tuple[int, int]:
     lines = source.splitlines(keepends=True)
     code_lines = _shell_code_line_indexes(lines)
-    matching_spans: list[tuple[int, int]] = []
+    target_spans: list[tuple[int, int]] = []
     offset = 0
     inactive_depth = 0
 
     for opener_index, opener_line in enumerate(lines):
         line_start = offset
         offset += len(opener_line)
-        stripped = opener_line.strip()
-        if opener_index in code_lines and re.fullmatch(r"if\s+false\s*;\s*then", stripped):
+        control_text = _shell_control_text(opener_line)
+        if opener_index in code_lines and re.fullmatch(r"if\s+false\s*;\s*then", control_text):
             inactive_depth += 1
 
         if opener_index not in code_lines or inactive_depth:
-            if opener_index in code_lines and stripped == "fi" and inactive_depth:
+            if (
+                opener_index in code_lines
+                and re.fullmatch(r"fi\s*;?", control_text)
+                and inactive_depth
+            ):
                 inactive_depth -= 1
             continue
 
-        opener = HEREDOC_OPENER.search(opener_line)
+        opener = TARGET_HEREDOC_OPENER.search(opener_line)
         if opener is None:
             continue
 
-        delimiter = _heredoc_delimiter(opener.group("delimiter"))
+        word, _word_end = _shell_heredoc_word(opener_line, opener.end())
+        delimiter = _heredoc_delimiter(word)
         if delimiter is None:
             continue
         strip_tabs = opener.group("strip_tabs") == "-"
@@ -189,13 +266,15 @@ def _generated_toml_span(source: str, banner: str) -> tuple[int, int]:
 
         body_start = line_start + len(opener_line)
         body_end = body_start + sum(len(line) for line in lines[opener_index + 1 : closing_index])
-        body = source[body_start:body_end].removesuffix("\n")
-        if banner in body:
-            matching_spans.append((body_start, body_end))
+        target_spans.append((body_start, body_end))
 
-    if len(matching_spans) != 1:
-        raise AssertionError("expected exactly one banner-containing generated configuration heredoc")
-    return matching_spans[0]
+    if len(target_spans) != 1:
+        raise AssertionError("expected exactly one structurally valid active generated configuration heredoc")
+
+    body_start, body_end = target_spans[0]
+    if banner not in source[body_start:body_end].removesuffix("\n"):
+        raise AssertionError("sole generated configuration heredoc must contain the expected banner")
+    return body_start, body_end
 
 
 def _generated_toml_body(source: str, banner: str) -> str:
@@ -308,9 +387,8 @@ def test_unterminated_generated_heredoc_fails_closed(
 def test_duplicate_banner_containing_heredoc_fails_closed(
     _seat_id: str, _launcher_path: Path, banner: str
 ) -> None:
-    toml = f'{banner}\nmodel = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"'
-    source = f"cat <<CONFIG\n{toml}\nCONFIG\ncat <<CONFIG\n{toml}\nCONFIG"
-    with pytest.raises(AssertionError, match="exactly one"):
+    source = "\n".join((_config_heredoc(banner), _config_heredoc(banner)))
+    with pytest.raises(AssertionError, match="exactly one structurally valid active"):
         _launcher_pair(source, banner)
 
 
@@ -373,6 +451,52 @@ def test_malformed_generated_toml_fails_closed(
         'model = "gpt-5.6-terra"', "model = ["
     )
     with pytest.raises(AssertionError, match="valid TOML"):
+        _launcher_pair(source, banner)
+
+
+@pytest.mark.parametrize(("_seat_id", "_launcher_path", "banner"), LAUNCHERS)
+def test_unrelated_heredoc_with_command_terminator_is_not_active_code(
+    _seat_id: str, _launcher_path: Path, banner: str
+) -> None:
+    source = "\n".join(
+        (
+            "cat <<EXAMPLE; :",
+            _config_heredoc(banner),
+            "EXAMPLE",
+        )
+    )
+    with pytest.raises(AssertionError, match="exactly one structurally valid active"):
+        _launcher_pair(source, banner)
+
+
+@pytest.mark.parametrize(("_seat_id", "_launcher_path", "banner"), LAUNCHERS)
+def test_later_unbannered_target_write_fails_closed(
+    _seat_id: str, _launcher_path: Path, banner: str
+) -> None:
+    override = "\n".join(
+        (
+            'cat >"${CE_VPS_CONTAINED_CODEX_CONFIG}" <<OVERRIDE',
+            'model = "different-model"',
+            'model_reasoning_effort = "low"',
+            "OVERRIDE",
+        )
+    )
+    with pytest.raises(AssertionError, match="exactly one structurally valid active"):
+        _launcher_pair(f"{_config_heredoc(banner)}\n{override}", banner)
+
+
+@pytest.mark.parametrize(("_seat_id", "_launcher_path", "banner"), LAUNCHERS)
+def test_commented_unreachable_target_write_fails_closed(
+    _seat_id: str, _launcher_path: Path, banner: str
+) -> None:
+    source = "\n".join(
+        (
+            "if false; then # documentation example",
+            _config_heredoc(banner),
+            "fi",
+        )
+    )
+    with pytest.raises(AssertionError, match="exactly one structurally valid active"):
         _launcher_pair(source, banner)
 
 
