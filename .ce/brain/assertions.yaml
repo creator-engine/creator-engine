@@ -5122,4 +5122,60 @@ records:
   verification_method:
     evidence_ref: .claude/agents/reviewer.md
     type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: 703b7107019b67dff2daef83cb953571c7a4a0cf40262cb9657d240a3da01517
+    item: 9
+    object: validators/tests/unit/test_v1_docs_reconciliation.py
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: 211a94c9312b28d1e27d233840ff35ddf1d8a2702a3a919d3f73857f575c2b5e
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-18d7fd1a8e7c2e66f5f3d646-v4
+  kind: brain-assertion
+  prev_hash: da95ef7a7431bbc690e71fcd38720621ad35fa13b6557fb213fac109661d9c0a
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 196
+  statement: Adding a top-level ce CLI group couples docs reconciliation and generated
+    CLI reference updates in the same change.
+  status: superseded
+  superseded_by: brain-assertion-0ca9d4cfca4dc66ee6e5286e
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
+- claim:
+    details: Adding a top-level ce CLI group couples docs reconciliation and generated
+      CLI reference updates in the same change.
+    evidence_sha256: 8c1514f5905bade9baec8c0da3d2ddb9d975b24e852fe3d08dbda4677e5a7d48
+    item: 9
+    object: validators/tests/unit/test_v1_docs_reconciliation.py
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/cli_reference_autogen_sync.py
+    - README.md
+    subject: doctrine-item
+  content_hash: 0c8b84dc498fb1215b37110a18042ba0808cf6511ab69c447ff2e6280bc00783
+  evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+  id: brain-assertion-0ca9d4cfca4dc66ee6e5286e
+  kind: brain-assertion
+  prev_hash: 211a94c9312b28d1e27d233840ff35ddf1d8a2702a3a919d3f73857f575c2b5e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 197
+  statement: Adding a top-level ce CLI group couples docs reconciliation and generated
+    CLI reference updates in the same change.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
+    type: static
 schema_version: '1'

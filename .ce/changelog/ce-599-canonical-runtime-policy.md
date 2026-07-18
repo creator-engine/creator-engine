@@ -36,3 +36,9 @@ source checkout, while still refusing stale gVisor evidence before posture
 mutation. Focused coverage includes the complete live-driver module and proves
 invalid direct gVisor checkout roots leave both runtime state and host tools
 untouched.
+
+Reconciles the canonical brain ledger through the governed accepted-plan
+mechanism after the docs-reconciliation evidence changed, superseding the stale
+static-evidence record with its newly hashed replacement. The append-only
+supersede pair raises the intentional flat active-assertion ratchet from 120 to
+121.
