@@ -161,20 +161,20 @@ def _shell_control_text(line: str) -> str:
 def _shell_code_line_indexes(lines: list[str]) -> set[int]:
     code_lines: set[int] = set()
     quote: str | None = None
-    heredoc_closing: tuple[str, bool] | None = None
+    heredoc_closings: list[tuple[str, bool]] = []
 
     for line_index, line in enumerate(lines):
-        if heredoc_closing is not None:
-            delimiter, strip_tabs = heredoc_closing
+        if heredoc_closings:
+            delimiter, strip_tabs = heredoc_closings[0]
             candidate = line.rstrip("\r\n")
             if (candidate.lstrip("\t") if strip_tabs else candidate) == delimiter:
-                heredoc_closing = None
+                heredoc_closings.pop(0)
             continue
 
         if quote is None:
             code_lines.add(line_index)
 
-        pending_heredoc: tuple[str, bool] | None = None
+        pending_heredocs: list[tuple[str, bool]] = []
         index = 0
         while index < len(line):
             character = line[index]
@@ -201,14 +201,14 @@ def _shell_code_line_indexes(lines: list[str]) -> set[int]:
                 strip_tabs = line.startswith("<<-", index)
                 word, word_end = _shell_heredoc_word(line, index + 2 + int(strip_tabs))
                 delimiter = _heredoc_delimiter(word)
-                if delimiter is not None and pending_heredoc is None:
-                    pending_heredoc = (delimiter, strip_tabs)
+                if delimiter is not None:
+                    pending_heredocs.append((delimiter, strip_tabs))
                 index = word_end
                 continue
             index += 1
 
-        if quote is None and pending_heredoc is not None:
-            heredoc_closing = pending_heredoc
+        if quote is None:
+            heredoc_closings.extend(pending_heredocs)
 
     return code_lines
 
@@ -462,6 +462,26 @@ def test_unrelated_heredoc_with_command_terminator_is_not_active_code(
         (
             "cat <<EXAMPLE; :",
             _config_heredoc(banner),
+            "EXAMPLE",
+        )
+    )
+    with pytest.raises(AssertionError, match="exactly one structurally valid active"):
+        _launcher_pair(source, banner)
+
+
+@pytest.mark.parametrize(("_seat_id", "_launcher_path", "banner"), LAUNCHERS)
+def test_later_heredoc_body_is_not_active_code(
+    _seat_id: str, _launcher_path: Path, banner: str
+) -> None:
+    source = "\n".join(
+        (
+            "cat <<SKIP <<EXAMPLE",
+            "SKIP",
+            'cat >"${CE_VPS_CONTAINED_CODEX_CONFIG}" <<CONFIG',
+            banner,
+            'model = "gpt-5.6-terra"',
+            'model_reasoning_effort = "high"',
+            "CONFIG",
             "EXAMPLE",
         )
     )
