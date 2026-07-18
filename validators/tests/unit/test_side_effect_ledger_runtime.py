@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,6 +152,63 @@ def test_durable_work_unit_reservation_reuses_after_crash_and_never_overbooks(tm
     )
     assert retry.allowed and retry.persist is False
     assert retry.receipt == winner.receipt
+
+
+def test_generic_record_and_reservation_share_one_lane_lock(tmp_path: Path, monkeypatch):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    generic_record_written = threading.Event()
+    release_generic_record = threading.Event()
+    original_atomic_write = runtime._atomic_write
+
+    def barrier_atomic_write(path: Path, content: str) -> None:
+        if path.name == "000001-effect-generic.json":
+            generic_record_written.set()
+            assert release_generic_record.wait(timeout=5)
+        original_atomic_write(path, content)
+
+    monkeypatch.setattr(runtime, "_atomic_write", barrier_atomic_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        generic = pool.submit(_append, tmp_path, effect_id="effect-generic")
+        assert generic_record_written.wait(timeout=5)
+        reservation = pool.submit(
+            runtime.reserve_work_unit_reservation,
+            cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
+            policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+        )
+        assert not reservation.done()
+        release_generic_record.set()
+        generic_result = generic.result(timeout=5)
+        reservation_result = reservation.result(timeout=5)
+    assert generic_result.sequence == 1
+    assert reservation_result.allowed
+    verified = runtime.verify(
+        side_effect_ledger_root=str(tmp_path / "side-effect-ledger"), active_work_ledger_root=str(awl),
+    )
+    assert verified.ok, verified.errors
+    assert verified.summary["chains"][0]["record_count"] == 2
+
+
+def test_verified_current_work_unit_binding_requires_live_current_ledger_evidence(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    decision = runtime.reserve_work_unit_reservation(
+        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
+        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+    )
+    binding = runtime.verified_current_work_unit_binding(
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
+        reservation_id="reservation", policy_sha256="a" * 64,
+    )
+    assert binding is not None
+    assert binding.receipt_id == decision.receipt["receipt_id"]
+    _append(tmp_path, effect_id="effect-after-reservation")
+    assert runtime.verified_current_work_unit_binding(
+        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
+        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
+        reservation_id="reservation", policy_sha256="a" * 64,
+    ) is None
 
 
 def test_record_is_valid_under_existing_side_effect_ledger_substrate(tmp_path: Path):

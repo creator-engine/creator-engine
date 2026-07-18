@@ -26,7 +26,7 @@ properties:
   run_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
   attempt_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
   reservation_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
-  phase: {type: string, enum: [pre_dispatch, mid_run, retry_reentry, completion, rollback, reconcile]}
+  phase: {type: string, enum: [pre_dispatch, mid_run, completion, rollback, reconcile]}
   unit: {type: string, const: ce.raw_tokens.v1}
   unit_version: {type: integer, const: 1}
   cap: {type: integer, minimum: 0}

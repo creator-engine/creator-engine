@@ -175,11 +175,11 @@ def _read_head(head_path: Path) -> dict[str, Any] | None:
 
 
 @contextmanager
-def _work_unit_lane_lock(root: Path, controller_id: str, lane_id: str):
-    """Serialize CE603 read-project-append reservations for one ledger lane."""
+def _lane_lock(root: Path, controller_id: str, lane_id: str):
+    """Serialize every read-validate-append-head mutation for one ledger lane."""
     import fcntl
 
-    lock_path = _lane_root(root, controller_id, lane_id) / ".work-unit-reservation.lock"
+    lock_path = _lane_root(root, controller_id, lane_id) / ".lane-record.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -194,7 +194,7 @@ def _work_unit_lane_lock(root: Path, controller_id: str, lane_id: str):
 # ---------------------------------------------------------------------------
 
 
-def record(
+def _record_unlocked(
     *,
     controller_id: str,
     lane_id: str,
@@ -319,6 +319,15 @@ def record(
     )
 
 
+def record(**record_kwargs: Any) -> RecordResult:
+    """Append one record while holding the shared lane lock exactly once."""
+    root = Path(record_kwargs["side_effect_ledger_root"])
+    controller_id = str(record_kwargs["controller_id"])
+    lane_id = str(record_kwargs["lane_id"])
+    with _lane_lock(root, controller_id, lane_id):
+        return _record_unlocked(**record_kwargs)
+
+
 def record_work_unit_reservation(*, receipt: dict[str, Any], **record_kwargs: Any) -> RecordResult:
     """Atomically append one CE603 reservation through the sole record writer."""
     if not isinstance(receipt, dict):
@@ -326,7 +335,7 @@ def record_work_unit_reservation(*, receipt: dict[str, Any], **record_kwargs: An
     root = Path(record_kwargs["side_effect_ledger_root"])
     controller_id = str(record_kwargs["controller_id"])
     lane_id = str(record_kwargs["lane_id"])
-    with _work_unit_lane_lock(root, controller_id, lane_id):
+    with _lane_lock(root, controller_id, lane_id):
         return _record_work_unit_reservation(receipt=receipt, record_kwargs=record_kwargs)
 
 
@@ -346,7 +355,7 @@ def _record_work_unit_reservation(*, receipt: dict[str, Any], record_kwargs: dic
         summary="Recorded CE603 work-unit reservation.",
         details=details,
     )
-    return record(**record_kwargs)
+    return _record_unlocked(**record_kwargs)
 
 
 def _durable_work_unit_receipts(root: Path, controller_id: str, lane_id: str) -> tuple[dict[str, Any], ...]:
@@ -379,7 +388,7 @@ def reserve_work_unit_reservation(
     root = Path(record_kwargs["side_effect_ledger_root"])
     controller_id = str(record_kwargs["controller_id"])
     lane_id = str(record_kwargs["lane_id"])
-    with _work_unit_lane_lock(root, controller_id, lane_id):
+    with _lane_lock(root, controller_id, lane_id):
         decision = work_unit_cap.reserve(
             _durable_work_unit_receipts(root, controller_id, lane_id), cap=cap, run_id=run_id,
             attempt_id=attempt_id, reservation_id=reservation_id, requested=requested,
@@ -389,6 +398,58 @@ def reserve_work_unit_reservation(
             return decision
         _record_work_unit_reservation(receipt=decision.receipt, record_kwargs=record_kwargs)
         return decision
+
+
+def verified_current_work_unit_binding(
+    *, side_effect_ledger_root: Path | str, active_work_ledger_root: Path | str,
+    controller_id: str, lane_id: str, run_id: str, attempt_id: str,
+    reservation_id: str, policy_sha256: str,
+):
+    """Return a sealed CE603 binding only for this lane's verified current head.
+
+    This is a read-only contract for a future enforcement owner; it does not
+    dispatch, reconcile, or activate a provider/conveyor lifecycle.
+    """
+    from .runner import work_unit_cap
+
+    root = Path(side_effect_ledger_root)
+    awl_root = Path(active_work_ledger_root)
+    with _lane_lock(root, controller_id, lane_id):
+        verification = verify(
+            side_effect_ledger_root=root, active_work_ledger_root=awl_root,
+            controller_id=controller_id, lane_id=lane_id,
+        )
+        if not verification.ok:
+            return None
+        try:
+            head = _read_head(_head_path(root, controller_id, lane_id))
+            if not isinstance(head, dict):
+                return None
+            head_sha = head.get("head_sha256")
+            last_ref = head.get("last_record_ref")
+            if not isinstance(head_sha, str) or not isinstance(last_ref, str):
+                return None
+            ref_path = Path(last_ref)
+            if ref_path.is_absolute() or ".." in ref_path.parts:
+                return None
+            record_path = root / ref_path
+            record_data = json.loads(record_path.read_text(encoding="utf-8"))
+            if not isinstance(record_data, dict) or _sha256_file(record_path) != head_sha:
+                return None
+            _require_live_claim(awl_root, str(record_data.get("claim_ref") or ""), controller_id, lane_id)
+            details = record_data.get("details", {})
+            fragments = [details[key] for key in sorted(details) if key.startswith("work_unit_receipt_part_")]
+            encoded = "".join(fragments) if fragments and all(isinstance(value, str) for value in fragments) else ""
+            receipt = json.loads(bytes.fromhex(encoded).decode("utf-8")) if encoded else None
+        except (LedgerRuntimeError, OSError, ValueError, TypeError, AttributeError):
+            return None
+        if not isinstance(receipt, dict):
+            return None
+        return work_unit_cap.verified_current_ledger_binding(
+            controller_id=controller_id, lane_id=lane_id, run_id=run_id, attempt_id=attempt_id,
+            reservation_id=reservation_id, policy_sha256=policy_sha256,
+            ledger_head_sha256=head_sha, receipt=receipt,
+        )
 
 
 def _require_live_claim(
