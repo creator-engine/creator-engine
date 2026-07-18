@@ -12,6 +12,7 @@ import pytest
 from creator_engine_validator import runtime_evidence_spine as spine
 from creator_engine_validator.runner import spend_gate as sg
 from creator_engine_validator.runner.audit_overlay import AgentActionEvent
+from creator_engine_validator.runner.work_unit_cap import WorkUnitDecision
 
 PSHA = "a" * 64
 
@@ -31,6 +32,17 @@ ENV = [
     {"scope": "fleet", "amount": 50.0, "unit": "$", "window": "total", "fleet_id": "f1"},
     {"scope": "run", "amount": 10.0, "unit": "$", "window": "total"},
 ]
+
+
+def test_work_unit_cap_precedes_usd_spend_without_changing_usd_behavior():
+    event = AgentActionEvent(op="read", fidelity="faithful", timing="pre")
+    denied = sg.decide_with_spend(
+        event,
+        {"gate_mode": "full"},
+        work_unit_decision=WorkUnitDecision(False, "work_unit_cap_exhausted", {}, persist=False),
+    )
+    assert denied.verdict == "denied"
+    assert "work-unit cap precedence" in denied.reason
 
 
 # --- cost metering: the two regimes (Fork C) ---------------------------------

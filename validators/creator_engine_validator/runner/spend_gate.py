@@ -585,7 +585,8 @@ def meter_and_check(
 # Composition with the G-4 control point — spend precedence before the ladder
 # ---------------------------------------------------------------------------
 def decide_with_spend(
-    event: Any, runtime_policy: Any, *, spend_decision: SpendDecision | None = None
+    event: Any, runtime_policy: Any, *, spend_decision: SpendDecision | None = None,
+    work_unit_decision: Any | None = None,
 ) -> Decision:
     """Compose the spend breaker with the G-4 ``decide()`` (PURE).
 
@@ -596,6 +597,12 @@ def decide_with_spend(
     ``escalate``, never silently allowed. Absent a hard breach (no breach, or a soft
     alert that only warns), this delegates to the unmodified stateless action gate.
     """
+    if work_unit_decision is not None and not bool(getattr(work_unit_decision, "allowed", False)):
+        return Decision(
+            verdict=DENIED,
+            mode="deny",
+            reason=f"work-unit cap precedence (before USD spend and gate-mode ladder): {getattr(work_unit_decision, 'reason', 'receipt denied')}",
+        )
     if spend_decision is not None and spend_decision.tier == "hard":
         return Decision(
             verdict=spend_decision.verdict,

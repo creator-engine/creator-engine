@@ -49,6 +49,16 @@ _COST_USAGE_KEYS = (
 )
 
 
+def canonical_raw_tokens(usage: dict[str, Any]) -> int:
+    """Return CE603's raw unit: input plus output, excluding every cache field."""
+    if not isinstance(usage, dict):
+        raise ValueError("usage must be an object")
+    counts = (usage.get("input_tokens"), usage.get("output_tokens"))
+    if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in counts):
+        raise ValueError("input_tokens and output_tokens must be non-negative integers")
+    return counts[0] + counts[1]
+
+
 @dataclass(frozen=True)
 class UsageTurn:
     """One assistant turn's metered usage, lifted from a transcript record (PURE value).
