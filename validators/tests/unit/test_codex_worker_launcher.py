@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -18,6 +19,7 @@ from creator_engine_validator import ce_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POLICY_PATH = REPO_ROOT / "governance" / "policies" / "codex-one-shot-launch-v1.yaml"
+RUNTIME_POLICY_PATH = REPO_ROOT / "governance" / "policies" / "runtime" / "default-controller-v1.yaml"
 PINNED_BINARY = "/opt/creator-engine/codex/0.145.0-alpha.9/bin/codex"
 NON_IMPLEMENTER_MATRIX_MUTATIONS = [
     (venue, role, "workspace-write" if sandbox == "read-only" else "read-only")
@@ -371,10 +373,15 @@ def _hermetic_subprocess_policy(
 
 
 @pytest.fixture
-def worktree(tmp_path: Path) -> Path:
+def worktree(tmp_path: Path, request, monkeypatch) -> Path:
     root = tmp_path / "allocated-worker"
     (root / "governance" / "policies").mkdir(parents=True)
     shutil.copy2(POLICY_PATH, root / "governance" / "policies" / POLICY_PATH.name)
+    (root / "governance" / "policies" / "runtime").mkdir()
+    shutil.copy2(
+        RUNTIME_POLICY_PATH,
+        root / "governance" / "policies" / "runtime" / RUNTIME_POLICY_PATH.name,
+    )
     (root / "validators").mkdir()
     (root / ".claude" / "agents").mkdir(parents=True)
     for role in ("architect_research", "implementer", "reviewer", "verification"):
@@ -383,7 +390,60 @@ def worktree(tmp_path: Path) -> Path:
         )
     (root / ".ce" / "briefs").mkdir(parents=True)
     (root / ".ce" / "state").mkdir()
+    if getattr(request.node, "originalname", request.node.name) != (
+        "test_canonical_runtime_floor_refuses_every_role_venue_before_probe"
+    ):
+        # Legacy argv/TOCTOU tests need a reachable baseline to exercise their
+        # downstream mechanics. Create an unmistakably non-production,
+        # tmp-root-only post-migration fixture; tracked policy bytes and the
+        # production venue floor remain exact and are tested separately.
+        registry = root / "governance" / "policies" / POLICY_PATH.name
+        raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
+        raw["runtime_policy_binding"]["allowed_venues"] = [
+            "vps-tmux",
+            "in-seat",
+            "dev1-local",
+        ]
+        registry.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        monkeypatch.setattr(
+            launcher,
+            "V1_RUNTIME_POLICY_ALLOWED_VENUES",
+            ("vps-tmux", "in-seat", "dev1-local"),
+        )
+    stage_runtime_policy(root)
     return root
+
+
+def stage_runtime_policy(worktree: Path) -> None:
+    raw = yaml.safe_load(
+        (worktree / "governance" / "policies" / POLICY_PATH.name).read_text(encoding="utf-8")
+    )
+    binding = raw["runtime_policy_binding"]
+    source = worktree / binding["source_path"]
+    runtime_dir = worktree / ".ce" / "state" / "onboard" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    local = worktree / binding["local_policy_relative_path"]
+    local.write_bytes(source.read_bytes())
+    local.chmod(0o600)
+    registry = worktree / launcher.CANONICAL_POLICY_RELATIVE_PATH
+    receipt = {
+        "canonical_source_path": binding["source_path"],
+        "canonical_source_sha256": binding["source_sha256"],
+        "kind": launcher.RUNTIME_RECEIPT_KIND,
+        "local_policy_relative_path": binding["local_policy_relative_path"],
+        "policy_id": binding["policy_id"],
+        "policy_sha": binding["policy_sha"],
+        "registry_path": launcher.CANONICAL_POLICY_RELATIVE_PATH,
+        "registry_sha256": hashlib.sha256(registry.read_bytes()).hexdigest(),
+        "rendered_sha256": binding["source_sha256"],
+        "schema_version": "1",
+    }
+    receipt_path = worktree / binding["local_receipt_relative_path"]
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    receipt_path.chmod(0o600)
 
 
 def policy(worktree: Path) -> launcher.CodexOneShotPolicy:
@@ -395,6 +455,7 @@ def rewrite_policy(worktree: Path, mutate) -> None:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     mutate(raw)
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    stage_runtime_policy(worktree)
 
 
 def governed_input(
@@ -449,6 +510,7 @@ def launch_request_from_plan(
         role=built.role,
         venue=built.venue,
         worktree=built.worktree,
+        seat_repo_root=built.seat_repo_root,
         run_id=built.run_id,
     )
 
@@ -461,6 +523,37 @@ def test_canonical_policy_pins_deployment_version_and_actual_venues(worktree: Pa
     assert loaded.provider_credentials_for("implementer") == ("OPENAI_API_KEY",)
     assert loaded.provider_credentials_for("reviewer") == ()
     assert loaded.provider_credentials_for("verification") == ()
+
+
+@pytest.mark.parametrize("venue", launcher.V1_VENUES)
+@pytest.mark.parametrize("role", launcher.V1_SUPPORTED_ROLES)
+def test_canonical_runtime_floor_refuses_every_role_venue_before_probe(
+    worktree: Path, venue: str, role: str
+) -> None:
+    loaded = policy(worktree)
+    worker_input = governed_input(worktree, role=role)
+    probe = FixedVersionProbe()
+    runner = RecordingRunner()
+    with pytest.raises(launcher.CodexWorkerLaunchError):
+        built = launcher.build_launch_plan(
+            policy=loaded,
+            governed_input=worker_input,
+            role=role,
+            venue=venue,
+            worktree=str(worktree),
+            run_id=f"strict-floor-{venue}-{role}",
+            filesystem=HermeticFilesystem(),
+            version_probe=probe,
+        )
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+    assert probe.calls == []
+    assert runner.calls == []
 
 
 @pytest.mark.parametrize(
@@ -978,13 +1071,14 @@ def test_production_subprocess_path_enforces_hermetic_leaf_behavior_matrix(
     }
     assert (after != before) is writes
     assert (worktree / "bounded-result.txt").exists() is writes
+    assert Path(built.runtime_policy_dispatch_path).read_bytes() == RUNTIME_POLICY_PATH.read_bytes()
     assert subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=worktree,
         check=True,
         capture_output=True,
         text=True,
-    ).stdout == ""
+    ).stdout == "?? .ce/state/dispatches/\n"
     assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
 
 
@@ -1103,13 +1197,14 @@ def test_production_subprocess_path_refuses_nested_reserved_or_fallback_requests
     assert observation["head_changed"] is False
     assert after == before
     assert not (worktree / "bounded-result.txt").exists()
+    assert Path(built.runtime_policy_dispatch_path).read_bytes() == RUNTIME_POLICY_PATH.read_bytes()
     assert subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=worktree,
         check=True,
         capture_output=True,
         text=True,
-    ).stdout == ""
+    ).stdout == "?? .ce/state/dispatches/\n"
     assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
 
 
@@ -1918,6 +2013,117 @@ def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree
         runner=runner,
     ) == 0
     assert runner.calls == [(built.argv, worker_input.stdin)]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing-policy",
+        "missing-receipt",
+        "stale-policy",
+        "forged-receipt",
+        "insecure-mode",
+        "policy-symlink",
+        "policy-directory",
+    ],
+)
+def test_runtime_policy_evidence_refuses_before_version_probe(
+    worktree: Path, mutation: str
+) -> None:
+    raw = yaml.safe_load(
+        (worktree / launcher.CANONICAL_POLICY_RELATIVE_PATH).read_text()
+    )
+    binding = raw["runtime_policy_binding"]
+    local = worktree / binding["local_policy_relative_path"]
+    receipt = worktree / binding["local_receipt_relative_path"]
+    if mutation == "missing-policy":
+        local.unlink()
+    elif mutation == "missing-receipt":
+        receipt.unlink()
+    elif mutation == "stale-policy":
+        local.write_bytes(local.read_bytes() + b"# stale\n")
+        local.chmod(0o600)
+    elif mutation == "forged-receipt":
+        forged = json.loads(receipt.read_text())
+        forged["policy_id"] = "forged-policy-v1"
+        receipt.write_text(json.dumps(forged, sort_keys=True, separators=(",", ":")) + "\n")
+        receipt.chmod(0o600)
+    elif mutation == "insecure-mode":
+        local.chmod(0o644)
+    elif mutation == "policy-symlink":
+        outside = worktree.parent / "outside-policy.yaml"
+        outside.write_bytes(local.read_bytes())
+        local.unlink()
+        local.symlink_to(outside)
+    else:
+        local.unlink()
+        local.mkdir()
+    probe = FixedVersionProbe()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="runtime policy refused"):
+        plan(worktree, version_probe=probe)
+    assert probe.calls == []
+
+
+def test_runtime_policy_refuses_deferred_dgx_before_version_probe(worktree: Path) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    probe = FixedVersionProbe()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="execution venue"):
+        launcher.build_launch_plan(
+            policy=policy(worktree),
+            governed_input=worker_input,
+            role="architect_research",
+            venue="dgx-relay",
+            worktree=str(worktree),
+            run_id="dgx-refused",
+            filesystem=HermeticFilesystem(),
+            version_probe=probe,
+        )
+    assert probe.calls == []
+
+
+def test_runtime_policy_same_byte_replacement_is_refused_before_runner(worktree: Path) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    local = Path(built.runtime_policy_path)
+    payload = local.read_bytes()
+    replacement = local.with_name("replacement-policy.yaml")
+    replacement.write_bytes(payload)
+    replacement.chmod(0o600)
+    os.replace(replacement, local)
+    runner = RecordingRunner()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="identity or metadata changed"):
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+    assert runner.calls == []
+
+
+def test_runtime_policy_dispatch_copy_is_private_and_idempotent(worktree: Path) -> None:
+    binary = worktree.parent / "codex" / "0.145.0-alpha.9" / "bin" / "codex"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["venues"]["dev1-local"].__setitem__(
+            "codex_binary_template", str(binary).replace("0.145.0-alpha.9", "{version}")
+        ),
+    )
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    runner = RecordingRunner()
+    request = launch_request_from_plan(built)
+    assert launcher.launch(built, request=request, governed_input=worker_input, runner=runner) == 0
+    first = Path(built.runtime_policy_dispatch_path)
+    first_binding = first.stat()
+    assert launcher.launch(built, request=request, governed_input=worker_input, runner=runner) == 0
+    assert first.read_bytes() == Path(built.runtime_policy_source_path).read_bytes()
+    assert first.stat().st_ino == first_binding.st_ino
+    assert first.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize("returncode", [0, 1])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import ast
 from dataclasses import replace
@@ -642,7 +643,7 @@ def test_absent_profile_defaults_to_os_native_posture(tmp_path):
     assert posture_json["isolation_backend"] == "os-native"
 
 
-def test_runtime_posture_emits_valid_default_docker_runtime_policy(tmp_path):
+def test_runtime_posture_copies_canonical_runtime_policy_and_compact_receipt(tmp_path):
     driver = FakeDriver()
     summary = _apply(tmp_path, driver)
     assert summary["failed"] == 0
@@ -653,26 +654,55 @@ def test_runtime_posture_emits_valid_default_docker_runtime_policy(tmp_path):
 
     assert errors == []
     assert record["kind"] == ce_runtime_policy.KIND_VALUE
-    assert record["isolation_backend"] == "docker"
+    assert policy_path.read_bytes() == Path(
+        "governance/policies/runtime/default-controller-v1.yaml"
+    ).read_bytes()
+    assert record["isolation_backend"] == "gvisor-proxy"
     assert record["role"] == "controller"
-    # Derive the expected image ref from the same function the production code
-    # uses (which in turn reads surfaces/manifest.yaml as SSOT).  This ensures
-    # that future digest bumps in the manifest automatically track here without
-    # requiring a separate test-literal update.
-    assert record["image_ref"] == onboard_apply._canonical_seat_image_ref()
-    mounts = record["mount_manifest"]
-    assert mounts[0]["path"] == str((tmp_path / "workspaces").resolve())
-    assert mounts[0]["mode"] == "rw"
-    mounted_paths = {entry["path"] for entry in mounts[1:]}
-    home = Path.home()
-    assert mounted_paths == {
-        str(home / ".claude"),
-        str(home / ".config" / "claude"),
-        str(home / ".codex"),
-        str(home / ".config" / "codex"),
-    }
-    assert record["egress_allowlist"] == []
-    assert record["secret_allowlist"] == []
+    assert record["policy_sha"] == "b26588442318a163d687e0e4fa10265ec2b1f41dccec5a9963df93b872281f55"
+    receipt_path = policy_path.with_name("runtime-policy.receipt.json")
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_bytes)
+    assert receipt_bytes == (
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    assert receipt["canonical_source_sha256"] == receipt["rendered_sha256"] == "2cf79aefe9239a23cd21997f7bde13e030231a3aa30f0887be9797e24bccc31f"
+    assert receipt["registry_sha256"] == hashlib.sha256(
+        Path("governance/policies/codex-one-shot-launch-v1.yaml").read_bytes()
+    ).hexdigest()
+    assert policy_path.stat().st_mode & 0o777 == 0o600
+    assert receipt_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_runtime_policy_provision_is_byte_idempotent(tmp_path):
+    first = onboard_apply.provision_canonical_runtime_policy(state_root=tmp_path / "state")
+    first_policy = Path(first["policy_path"]).read_bytes()
+    first_receipt = Path(first["receipt_path"]).read_bytes()
+    second = onboard_apply.provision_canonical_runtime_policy(state_root=tmp_path / "state")
+    assert Path(second["policy_path"]).read_bytes() == first_policy
+    assert Path(second["receipt_path"]).read_bytes() == first_receipt
+
+
+def test_runtime_policy_provision_refuses_symlink_destination(tmp_path):
+    runtime = tmp_path / "state" / "onboard" / "runtime"
+    runtime.mkdir(parents=True)
+    target = tmp_path / "outside"
+    target.write_text("outside\n")
+    (runtime / "runtime-policy.yaml").symlink_to(target)
+    with pytest.raises(onboard_apply.ApplyFailed, match="destination"):
+        onboard_apply.provision_canonical_runtime_policy(state_root=tmp_path / "state")
+    assert target.read_text() == "outside\n"
+
+
+def test_runtime_policy_provision_refuses_symlink_destination_parent(tmp_path):
+    state = tmp_path / "state"
+    (state / "onboard").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (state / "onboard" / "runtime").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(onboard_apply.ApplyFailed, match="destination parent"):
+        onboard_apply.provision_canonical_runtime_policy(state_root=state)
+    assert list(outside.iterdir()) == []
 
 
 def test_cli_exposure_records_owned_rollback(tmp_path):

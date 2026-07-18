@@ -1,0 +1,39 @@
+kind: runtime-policy-record
+record_type: runtime_policy
+schema_version: '1'
+policy_id: default-controller-v1
+policy_sha: b26588442318a163d687e0e4fa10265ec2b1f41dccec5a9963df93b872281f55
+role: controller
+isolation_backend: gvisor-proxy
+image_ref:
+  name: docker.io/creator-engine/codex-runsc:x86_64
+  sha: sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639
+mount_manifest:
+- path: /workspace/creator-engine
+  mode: rw
+  write_justification: governed controller repository and coordination state
+- path: /workspace/creator-engine/governance
+  mode: ro
+- path: /workspace/creator-engine/validators
+  mode: ro
+- path: /var/tmp
+  mode: rw
+  write_justification: seat-private allocated worktrees and bounded scratch
+egress_allowlist:
+- host: auth.openai.com
+  port: 443
+  protocol: https
+  assurance:
+  - l4
+- host: chatgpt.com
+  port: 443
+  protocol: https
+  assurance:
+  - l4
+secret_allowlist:
+- codex-subscription-auth
+grant_extensible: false
+grant_authority: controller
+note: 'DF-3 canonical controller-seat policy: subscription-auth by brokered name only;
+  no API key, host auth-directory mount, engine socket, controller key, or ambient
+  egress.'

@@ -19,10 +19,12 @@ import weakref
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Any, Protocol, Sequence
 
 import yaml
+
+from .checks import ce_runtime_policy
 
 
 CANONICAL_POLICY_RELATIVE_PATH = "governance/policies/codex-one-shot-launch-v1.yaml"
@@ -39,8 +41,38 @@ POLICY_REQUIRED_KEYS = frozenset(
         "venues",
         "model_defaults",
         "canonical_add_dirs",
+        "runtime_policy_binding",
     }
 )
+RUNTIME_BINDING_REQUIRED_KEYS = frozenset(
+    {
+        "source_path",
+        "source_sha256",
+        "policy_id",
+        "policy_sha",
+        "local_policy_relative_path",
+        "local_receipt_relative_path",
+        "dispatch_policy_relative_template",
+        "allowed_venues",
+    }
+)
+RUNTIME_RECEIPT_REQUIRED_KEYS = frozenset(
+    {
+        "canonical_source_path",
+        "canonical_source_sha256",
+        "kind",
+        "local_policy_relative_path",
+        "policy_id",
+        "policy_sha",
+        "registry_path",
+        "registry_sha256",
+        "rendered_sha256",
+        "schema_version",
+    }
+)
+RUNTIME_RECEIPT_KIND = "runtime-policy-provenance-receipt"
+MAX_RUNTIME_POLICY_BYTES = 256 * 1024
+MAX_RUNTIME_RECEIPT_BYTES = 64 * 1024
 VENUE_REQUIRED_KEYS = frozenset(
     {"codex_binary_template", "outer_isolation_attestation", "role_sandboxes"}
 )
@@ -79,6 +111,7 @@ ROLE_ENVELOPE_PROHIBITIONS = (
     "reserved_act",
 )
 V1_VENUES = ("dgx-relay", "vps-tmux", "dev1-local", "in-seat")
+V1_RUNTIME_POLICY_ALLOWED_VENUES = ("vps-tmux", "in-seat")
 V1_ROLE_SANDBOX_MATRIX = (
     (
         "dgx-relay",
@@ -367,6 +400,18 @@ class VenuePolicy:
 
 
 @dataclass(frozen=True)
+class RuntimePolicyBinding:
+    source_path: str
+    source_sha256: str
+    policy_id: str
+    policy_sha: str
+    local_policy_relative_path: str
+    local_receipt_relative_path: str
+    dispatch_policy_relative_template: str
+    allowed_venues: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class CodexOneShotPolicy:
     policy_id: str
     version: str
@@ -376,6 +421,7 @@ class CodexOneShotPolicy:
     effort: str
     role_provider_credentials: tuple[tuple[str, tuple[str, ...]], ...]
     canonical_add_dirs: tuple[str, ...]
+    runtime_policy_binding: RuntimePolicyBinding
     worktree: str
     source_path: str
     source_sha256: str
@@ -445,6 +491,7 @@ class CodexWorkerLaunchRequest:
     role: str
     venue: str
     worktree: str
+    seat_repo_root: str
     run_id: str
 
 
@@ -465,10 +512,18 @@ class CodexWorkerLaunchPlan:
     effort: str
     provider_credential_env_names: tuple[str, ...]
     worktree: str
+    seat_repo_root: str
     run_id: str
     output: str
     binary: str
     add_dirs: tuple[str, ...]
+    runtime_policy_source_path: str
+    runtime_policy_source_sha256: str
+    runtime_policy_path: str
+    runtime_policy_sha256: str
+    runtime_policy_receipt_path: str
+    runtime_policy_receipt_sha256: str
+    runtime_policy_dispatch_path: str
     developer_instructions: str
     argv: tuple[str, ...]
 
@@ -489,10 +544,18 @@ class CodexWorkerLaunchPlan:
             "effort": self.effort,
             "provider_credential_env_names": list(self.provider_credential_env_names),
             "worktree": self.worktree,
+            "seat_repo_root": self.seat_repo_root,
             "run_id": self.run_id,
             "output": self.output,
             "binary": self.binary,
             "add_dirs": list(self.add_dirs),
+            "runtime_policy_source_path": self.runtime_policy_source_path,
+            "runtime_policy_source_sha256": self.runtime_policy_source_sha256,
+            "runtime_policy_path": self.runtime_policy_path,
+            "runtime_policy_sha256": self.runtime_policy_sha256,
+            "runtime_policy_receipt_path": self.runtime_policy_receipt_path,
+            "runtime_policy_receipt_sha256": self.runtime_policy_receipt_sha256,
+            "runtime_policy_dispatch_path": self.runtime_policy_dispatch_path,
             "developer_instructions": self.developer_instructions,
             "argv": list(self.argv),
         }
@@ -503,6 +566,26 @@ class CodexWorkerLaunchPlan:
 # produces an unbound plan that cannot authorize itself.
 _BOUND_LAUNCH_REQUESTS: weakref.WeakKeyDictionary[
     CodexWorkerLaunchPlan, CodexWorkerLaunchRequest
+] = weakref.WeakKeyDictionary()
+
+
+@dataclass(frozen=True)
+class RuntimePolicyEvidence:
+    source_path: str
+    source_bytes: bytes
+    source_binding: RegularFileBinding
+    local_path: str
+    local_bytes: bytes
+    local_binding: RegularFileBinding
+    receipt_path: str
+    receipt_bytes: bytes
+    receipt_binding: RegularFileBinding
+    registry_binding: RegularFileBinding
+    dispatch_path: str
+
+
+_BOUND_RUNTIME_EVIDENCE: weakref.WeakKeyDictionary[
+    CodexWorkerLaunchPlan, RuntimePolicyEvidence
 ] = weakref.WeakKeyDictionary()
 
 
@@ -807,6 +890,58 @@ def _read_contained_regular_file(
     return resolved, payload, binding
 
 
+def _require_relative_policy_path(value: Any, field: str) -> str:
+    path = _require_string(value, field)
+    pure = PurePath(path)
+    if pure.is_absolute() or ".." in pure.parts or os.path.normpath(path) != path:
+        raise CodexWorkerLaunchError(f"policy {field} must be canonical relative path text")
+    return path
+
+
+def _parse_runtime_policy_binding(raw: Any) -> RuntimePolicyBinding:
+    if not isinstance(raw, dict) or set(raw) != RUNTIME_BINDING_REQUIRED_KEYS:
+        raise CodexWorkerLaunchError(
+            "policy runtime_policy_binding keys must exactly match the v1 schema"
+        )
+    source_sha256 = _require_string(
+        raw["source_sha256"], "runtime_policy_binding.source_sha256"
+    )
+    policy_sha = _require_string(raw["policy_sha"], "runtime_policy_binding.policy_sha")
+    if not _SHA256_RE.fullmatch(source_sha256) or not _SHA256_RE.fullmatch(policy_sha):
+        raise CodexWorkerLaunchError("policy runtime-policy digests must be lowercase SHA-256")
+    allowed_venues = _require_string_list(
+        raw["allowed_venues"], "runtime_policy_binding.allowed_venues"
+    )
+    if tuple(allowed_venues) != V1_RUNTIME_POLICY_ALLOWED_VENUES:
+        raise CodexWorkerLaunchError(
+            "policy runtime_policy_binding must define the exact ratified venue floor"
+        )
+    dispatch_template = _require_string(
+        raw["dispatch_policy_relative_template"],
+        "runtime_policy_binding.dispatch_policy_relative_template",
+    )
+    if dispatch_template != ".ce/state/dispatches/{run_id}/runtime-policy.yaml":
+        raise CodexWorkerLaunchError("policy runtime-policy dispatch template is not canonical")
+    return RuntimePolicyBinding(
+        source_path=_require_relative_policy_path(
+            raw["source_path"], "runtime_policy_binding.source_path"
+        ),
+        source_sha256=source_sha256,
+        policy_id=_require_string(raw["policy_id"], "runtime_policy_binding.policy_id"),
+        policy_sha=policy_sha,
+        local_policy_relative_path=_require_relative_policy_path(
+            raw["local_policy_relative_path"],
+            "runtime_policy_binding.local_policy_relative_path",
+        ),
+        local_receipt_relative_path=_require_relative_policy_path(
+            raw["local_receipt_relative_path"],
+            "runtime_policy_binding.local_receipt_relative_path",
+        ),
+        dispatch_policy_relative_template=dispatch_template,
+        allowed_venues=allowed_venues,
+    )
+
+
 def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> CodexOneShotPolicy:
     try:
         raw = yaml.safe_load(raw_bytes)
@@ -901,6 +1036,7 @@ def _parse_policy(raw_bytes: bytes, *, worktree: str, source_path: str) -> Codex
         effort=_require_string(defaults["effort"], "model_defaults.effort"),
         role_provider_credentials=tuple(role_provider_credentials),
         canonical_add_dirs=_require_canonical_add_dir_list(raw["canonical_add_dirs"]),
+        runtime_policy_binding=_parse_runtime_policy_binding(raw["runtime_policy_binding"]),
         worktree=worktree,
         source_path=source_path,
         source_sha256=hashlib.sha256(raw_bytes).hexdigest(),
@@ -990,6 +1126,151 @@ def load_governed_worker_input(
         brief_sha256=actual_brief_sha256,
         role_policy=role_bytes,
         stdin=brief_bytes,
+    )
+
+
+def _runtime_policy_refusal(reason: str) -> CodexWorkerLaunchError:
+    return CodexWorkerLaunchError(
+        f"runtime policy refused: {reason}; remediate with ce onboard --apply"
+    )
+
+
+def _load_runtime_policy_evidence(
+    *,
+    policy: CodexOneShotPolicy,
+    request: CodexWorkerLaunchRequest,
+    filesystem: LauncherFilesystem,
+) -> RuntimePolicyEvidence:
+    """Bind canonical source, seat render, receipt, registry, and venue before probe."""
+    binding = policy.runtime_policy_binding
+    if request.venue not in binding.allowed_venues:
+        raise _runtime_policy_refusal("execution venue is not in the canonical binding")
+    worktree = _real_directory(request.worktree, field="worktree", filesystem=filesystem)
+    seat_root = _real_directory(
+        request.seat_repo_root, field="seat repository root", filesystem=filesystem
+    )
+    policy_area = _real_directory(
+        os.path.join(worktree, "governance", "policies"),
+        field="canonical launcher policy area",
+        filesystem=filesystem,
+    )
+    registry_path, registry_bytes, registry_binding = _read_contained_regular_file(
+        os.path.join(worktree, CANONICAL_POLICY_RELATIVE_PATH),
+        root=policy_area,
+        field="canonical launcher policy",
+        filesystem=filesystem,
+        max_bytes=MAX_RUNTIME_POLICY_BYTES,
+    )
+    if registry_path != policy.source_path or hashlib.sha256(registry_bytes).hexdigest() != policy.source_sha256:
+        raise _runtime_policy_refusal("launcher registry changed after parsing")
+    source_path, source_bytes, source_binding = _read_contained_regular_file(
+        os.path.join(worktree, binding.source_path),
+        root=policy_area,
+        field="canonical runtime policy source",
+        filesystem=filesystem,
+        max_bytes=MAX_RUNTIME_POLICY_BYTES,
+    )
+    source_sha = hashlib.sha256(source_bytes).hexdigest()
+    if source_sha != binding.source_sha256:
+        raise _runtime_policy_refusal("canonical source byte digest does not match registry")
+    try:
+        source_record = yaml.safe_load(source_bytes)
+    except yaml.YAMLError as exc:
+        raise _runtime_policy_refusal("canonical source is malformed YAML") from exc
+    if not isinstance(source_record, dict):
+        raise _runtime_policy_refusal("canonical source is not a mapping")
+    if ce_runtime_policy.validate_runtime_policy(source_record, Path(source_path)):
+        raise _runtime_policy_refusal("canonical source fails runtime-policy validation")
+    if (
+        source_record.get("policy_id") != binding.policy_id
+        or source_record.get("policy_sha") != binding.policy_sha
+        or ce_runtime_policy.runtime_policy_semantic_sha256(source_record) != binding.policy_sha
+        or source_record.get("isolation_backend") != "gvisor-proxy"
+        or source_record.get("image_ref")
+        != {
+            "name": "docker.io/creator-engine/codex-runsc:x86_64",
+            "sha": "sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639",
+        }
+    ):
+        raise _runtime_policy_refusal("canonical identity, backend, or image pin drifted")
+
+    state_root = _real_directory(
+        os.path.join(seat_root, ".ce", "state"),
+        field="seat state root",
+        filesystem=filesystem,
+    )
+    runtime_root = _real_directory(
+        os.path.join(state_root, "onboard", "runtime"),
+        field="onboarded runtime policy area",
+        filesystem=filesystem,
+    )
+    try:
+        local_path, local_bytes, local_binding = _read_contained_regular_file(
+            os.path.join(seat_root, binding.local_policy_relative_path),
+            root=runtime_root,
+            field="onboarded runtime policy",
+            filesystem=filesystem,
+            max_bytes=MAX_RUNTIME_POLICY_BYTES,
+        )
+        receipt_path, receipt_bytes, receipt_binding = _read_contained_regular_file(
+            os.path.join(seat_root, binding.local_receipt_relative_path),
+            root=runtime_root,
+            field="runtime policy provenance receipt",
+            filesystem=filesystem,
+            max_bytes=MAX_RUNTIME_RECEIPT_BYTES,
+        )
+    except CodexWorkerLaunchError as exc:
+        raise _runtime_policy_refusal(
+            "onboarded policy or provenance receipt is missing or unsafe"
+        ) from exc
+    current_uid = os.getuid()
+    if (
+        local_binding.mode != 0o600
+        or receipt_binding.mode != 0o600
+        or local_binding.uid != current_uid
+        or receipt_binding.uid != current_uid
+    ):
+        raise _runtime_policy_refusal("onboarded policy ownership or mode is insecure")
+    if local_bytes != source_bytes:
+        raise _runtime_policy_refusal("onboarded policy bytes differ from canonical source")
+    try:
+        receipt = json.loads(receipt_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _runtime_policy_refusal("runtime policy receipt is malformed JSON") from exc
+    if not isinstance(receipt, dict) or set(receipt) != RUNTIME_RECEIPT_REQUIRED_KEYS:
+        raise _runtime_policy_refusal("runtime policy receipt keys are not canonical")
+    expected_receipt = {
+        "canonical_source_path": binding.source_path,
+        "canonical_source_sha256": binding.source_sha256,
+        "kind": RUNTIME_RECEIPT_KIND,
+        "local_policy_relative_path": binding.local_policy_relative_path,
+        "policy_id": binding.policy_id,
+        "policy_sha": binding.policy_sha,
+        "registry_path": CANONICAL_POLICY_RELATIVE_PATH,
+        "registry_sha256": policy.source_sha256,
+        "rendered_sha256": binding.source_sha256,
+        "schema_version": "1",
+    }
+    if receipt != expected_receipt:
+        raise _runtime_policy_refusal("runtime policy receipt does not match canonical pins")
+    dispatch_relative = binding.dispatch_policy_relative_template.format(
+        run_id=request.run_id
+    )
+    dispatch_path = os.path.normpath(os.path.join(seat_root, dispatch_relative))
+    if not _inside(dispatch_path, state_root):
+        raise _runtime_policy_refusal("dispatch policy path escapes seat state")
+    return RuntimePolicyEvidence(
+        source_path=source_path,
+        source_bytes=source_bytes,
+        source_binding=source_binding,
+        local_path=local_path,
+        local_bytes=local_bytes,
+        local_binding=local_binding,
+        receipt_path=receipt_path,
+        receipt_bytes=receipt_bytes,
+        receipt_binding=receipt_binding,
+        registry_binding=registry_binding,
+        dispatch_path=dispatch_path,
     )
 
 
@@ -1135,6 +1416,7 @@ def build_launch_request(
     role: str,
     venue: str,
     worktree: str,
+    seat_repo_root: str | None = None,
     run_id: str | None = None,
     filesystem: LauncherFilesystem | None = None,
 ) -> CodexWorkerLaunchRequest:
@@ -1142,6 +1424,9 @@ def build_launch_request(
     _require_trusted_v1_matrix(policy)
     fs = filesystem or RealLauncherFilesystem()
     root = _real_directory(worktree, field="worktree", filesystem=fs)
+    seat_root = _real_directory(
+        seat_repo_root or root, field="seat repository root", filesystem=fs
+    )
     if root != policy.worktree:
         raise CodexWorkerLaunchError("policy does not belong to the allocated worktree")
     if role not in policy.supported_roles:
@@ -1167,6 +1452,7 @@ def build_launch_request(
         role=role,
         venue=venue,
         worktree=root,
+        seat_repo_root=seat_root,
         run_id=chosen_run_id,
     )
 
@@ -1179,6 +1465,7 @@ def build_launch_plan(
     role: str | None = None,
     venue: str | None = None,
     worktree: str | None = None,
+    seat_repo_root: str | None = None,
     run_id: str | None = None,
     filesystem: LauncherFilesystem | None = None,
     version_probe: CodexVersionProbe | None = None,
@@ -1201,10 +1488,11 @@ def build_launch_plan(
             role=role,
             venue=venue,
             worktree=worktree,
+            seat_repo_root=seat_repo_root,
             run_id=run_id,
             filesystem=filesystem,
         )
-    elif any(value is not None for value in (role, venue, worktree, run_id)):
+    elif any(value is not None for value in (role, venue, worktree, seat_repo_root, run_id)):
         raise CodexWorkerLaunchError(
             "launch request must not be combined with mutable request fields"
         )
@@ -1231,6 +1519,11 @@ def build_launch_plan(
     )
     encoded_developer_instructions = toml_encode_config_value(developer_instructions)
     add_dirs = _canonical_add_dirs(policy, root, filesystem=fs)
+    runtime_evidence = _load_runtime_policy_evidence(
+        policy=policy,
+        request=request,
+        filesystem=fs,
+    )
     binary = _preflight_binary(
         policy=policy, venue=venue_policy, filesystem=fs, version_probe=probe
     )
@@ -1275,14 +1568,23 @@ def build_launch_plan(
         effort=policy.effort,
         provider_credential_env_names=policy.provider_credentials_for(role),
         worktree=root,
+        seat_repo_root=request.seat_repo_root,
         run_id=chosen_run_id,
         output=output,
         binary=binary,
         add_dirs=add_dirs,
+        runtime_policy_source_path=runtime_evidence.source_path,
+        runtime_policy_source_sha256=hashlib.sha256(runtime_evidence.source_bytes).hexdigest(),
+        runtime_policy_path=runtime_evidence.local_path,
+        runtime_policy_sha256=hashlib.sha256(runtime_evidence.local_bytes).hexdigest(),
+        runtime_policy_receipt_path=runtime_evidence.receipt_path,
+        runtime_policy_receipt_sha256=hashlib.sha256(runtime_evidence.receipt_bytes).hexdigest(),
+        runtime_policy_dispatch_path=runtime_evidence.dispatch_path,
         developer_instructions=developer_instructions,
         argv=tuple(argv),
     )
     _BOUND_LAUNCH_REQUESTS[plan] = request
+    _BOUND_RUNTIME_EVIDENCE[plan] = runtime_evidence
     return plan
 
 
@@ -1314,6 +1616,11 @@ def _validate_launch_envelope(
             current_policy_bytes,
             worktree=root,
             source_path=current_policy_path,
+        )
+        runtime_evidence = _load_runtime_policy_evidence(
+            policy=current_policy,
+            request=request,
+            filesystem=filesystem,
         )
         role = request.role
         if governed_input.role != role:
@@ -1408,12 +1715,20 @@ def _validate_launch_envelope(
             sandbox=sandbox,
             model=current_policy.model,
             effort=current_policy.effort,
-            provider_credential_env_names=current_policy.provider_credentials_for(role),
-            worktree=root,
-            run_id=request.run_id,
+                provider_credential_env_names=current_policy.provider_credentials_for(role),
+                worktree=root,
+                seat_repo_root=request.seat_repo_root,
+                run_id=request.run_id,
             output=expected_output,
             binary=expected_binary,
             add_dirs=expected_add_dirs,
+            runtime_policy_source_path=runtime_evidence.source_path,
+            runtime_policy_source_sha256=hashlib.sha256(runtime_evidence.source_bytes).hexdigest(),
+            runtime_policy_path=runtime_evidence.local_path,
+            runtime_policy_sha256=hashlib.sha256(runtime_evidence.local_bytes).hexdigest(),
+            runtime_policy_receipt_path=runtime_evidence.receipt_path,
+            runtime_policy_receipt_sha256=hashlib.sha256(runtime_evidence.receipt_bytes).hexdigest(),
+            runtime_policy_dispatch_path=runtime_evidence.dispatch_path,
             developer_instructions=expected_instructions,
             argv=tuple(expected_argv),
         )
@@ -1423,6 +1738,107 @@ def _validate_launch_envelope(
             )
     except CodexWorkerLaunchError as exc:
         raise CodexWorkerLaunchError(f"launch envelope mismatch: {exc}") from exc
+
+
+def _ensure_private_directory(path: str) -> None:
+    """Create one owned no-follow directory and reject non-directory collisions."""
+    try:
+        os.mkdir(path, mode=0o700)
+    except FileExistsError:
+        pass
+    try:
+        metadata = os.lstat(path)
+    except OSError as exc:
+        raise _runtime_policy_refusal("dispatch policy directory cannot be inspected") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise _runtime_policy_refusal("dispatch policy directory is not a real directory")
+    if metadata.st_uid != os.getuid():
+        raise _runtime_policy_refusal("dispatch policy directory owner drifted")
+
+
+def _materialize_dispatch_policy(evidence: RuntimePolicyEvidence) -> None:
+    """Atomically create or verify the immutable per-dispatch policy copy."""
+    dispatch = evidence.dispatch_path
+    parent = os.path.dirname(dispatch)
+    state_root = str(Path(dispatch).parents[2])
+    dispatches = os.path.join(state_root, "dispatches")
+    _ensure_private_directory(dispatches)
+    _ensure_private_directory(parent)
+    if os.path.lexists(dispatch):
+        try:
+            payload, binding = RealLauncherFilesystem().read_bytes_with_binding(
+                dispatch, max_bytes=MAX_RUNTIME_POLICY_BYTES
+            )
+        except OSError as exc:
+            raise _runtime_policy_refusal("existing dispatch policy is not a regular file") from exc
+        if payload != evidence.source_bytes or binding.mode != 0o600 or binding.uid != os.getuid():
+            raise _runtime_policy_refusal("existing dispatch policy collision does not match")
+        return
+    temporary = os.path.join(parent, f".runtime-policy.yaml.tmp.{os.getpid()}")
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(temporary, flags, 0o600)
+        os.write(descriptor, evidence.source_bytes)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        os.replace(temporary, dispatch)
+        directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise _runtime_policy_refusal("dispatch policy could not be atomically materialized") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _verify_runtime_evidence_final(
+    *,
+    plan: CodexWorkerLaunchPlan,
+    request: CodexWorkerLaunchRequest,
+    initial: RuntimePolicyEvidence,
+    filesystem: LauncherFilesystem,
+) -> None:
+    policy = load_canonical_policy(request.worktree, filesystem=filesystem)
+    current = _load_runtime_policy_evidence(
+        policy=policy, request=request, filesystem=filesystem
+    )
+    for label, first, final in (
+        ("canonical source", initial.source_binding, current.source_binding),
+        ("onboarded policy", initial.local_binding, current.local_binding),
+        ("provenance receipt", initial.receipt_binding, current.receipt_binding),
+        ("launcher registry", initial.registry_binding, current.registry_binding),
+    ):
+        if first != final:
+            raise _runtime_policy_refusal(f"{label} identity or metadata changed before runner")
+    if current != initial:
+        raise _runtime_policy_refusal("runtime policy evidence changed before runner")
+    try:
+        dispatch_bytes, dispatch_binding = filesystem.read_bytes_with_binding(
+            plan.runtime_policy_dispatch_path, max_bytes=MAX_RUNTIME_POLICY_BYTES
+        )
+    except OSError as exc:
+        raise _runtime_policy_refusal("dispatch policy cannot be rebound before runner") from exc
+    if (
+        dispatch_bytes != initial.source_bytes
+        or dispatch_binding.mode != 0o600
+        or dispatch_binding.uid != os.getuid()
+    ):
+        raise _runtime_policy_refusal("dispatch policy bytes, owner, or mode drifted")
 
 
 def launch(
@@ -1445,11 +1861,30 @@ def launch(
         raise CodexWorkerLaunchError(
             "launch envelope mismatch: immutable launch request is not bound to plan"
         )
+    fs = filesystem or RealLauncherFilesystem()
     _validate_launch_envelope(
         plan,
         request,
         governed_input,
-        filesystem=filesystem or RealLauncherFilesystem(),
+        filesystem=fs,
+    )
+    runtime_evidence = _BOUND_RUNTIME_EVIDENCE.get(plan)
+    if runtime_evidence is None:
+        raise CodexWorkerLaunchError(
+            "launch envelope mismatch: runtime policy evidence is not bound to plan"
+        )
+    _materialize_dispatch_policy(runtime_evidence)
+    _validate_launch_envelope(
+        plan,
+        request,
+        governed_input,
+        filesystem=fs,
+    )
+    _verify_runtime_evidence_final(
+        plan=plan,
+        request=request,
+        initial=runtime_evidence,
+        filesystem=fs,
     )
     try:
         return runner.run(

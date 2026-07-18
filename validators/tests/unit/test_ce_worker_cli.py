@@ -28,6 +28,16 @@ CONTROLLER = "hermes-primary"
 LANE = "pco-slice2ir-worker"
 
 
+@pytest.fixture(autouse=True)
+def _nonproduction_post_migration_runtime_floor(monkeypatch):
+    """Keep legacy CLI mechanics reachable only in hermetic tmp-root fixtures."""
+    monkeypatch.setattr(
+        ce_cli.codex_worker_launcher,
+        "V1_RUNTIME_POLICY_ALLOWED_VENUES",
+        ("vps-tmux", "in-seat", "dev1-local"),
+    )
+
+
 @dataclass
 class FakeRunner:
     available_flag: bool = True
@@ -262,6 +272,10 @@ def _one_shot_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
     source_policy = Path(__file__).resolve().parents[3] / "governance" / "policies" / "codex-one-shot-launch-v1.yaml"
     policy_path = worktree / "governance" / "policies" / source_policy.name
     policy_path.write_bytes(source_policy.read_bytes())
+    source_runtime = source_policy.parent / "runtime" / "default-controller-v1.yaml"
+    runtime_target = worktree / "governance" / "policies" / "runtime" / source_runtime.name
+    runtime_target.parent.mkdir()
+    runtime_target.write_bytes(source_runtime.read_bytes())
     test_binary = tmp_path / "codex" / "0.145.0-alpha.9" / "bin" / "codex"
     test_binary.parent.mkdir(parents=True)
     test_binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -270,6 +284,11 @@ def _one_shot_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
     policy_record["venues"]["dev1-local"]["codex_binary_template"] = str(
         test_binary
     ).replace("0.145.0-alpha.9", "{version}")
+    policy_record["runtime_policy_binding"]["allowed_venues"] = [
+        "vps-tmux",
+        "in-seat",
+        "dev1-local",
+    ]
     policy_path.write_text(
         yaml.safe_dump(policy_record, sort_keys=False), encoding="utf-8"
     )
@@ -284,6 +303,26 @@ def _one_shot_worktree(tmp_path: Path) -> tuple[Path, Path, str]:
     brief.parent.mkdir(parents=True)
     brief.write_text("bounded cli brief\n", encoding="utf-8")
     (worktree / ".ce" / "state").mkdir()
+    binding = policy_record["runtime_policy_binding"]
+    local = worktree / binding["local_policy_relative_path"]
+    local.parent.mkdir(parents=True)
+    local.write_bytes(runtime_target.read_bytes())
+    local.chmod(0o600)
+    receipt = {
+        "canonical_source_path": binding["source_path"],
+        "canonical_source_sha256": binding["source_sha256"],
+        "kind": ce_cli.codex_worker_launcher.RUNTIME_RECEIPT_KIND,
+        "local_policy_relative_path": binding["local_policy_relative_path"],
+        "policy_id": binding["policy_id"],
+        "policy_sha": binding["policy_sha"],
+        "registry_path": ce_cli.codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH,
+        "registry_sha256": hashlib.sha256(policy_path.read_bytes()).hexdigest(),
+        "rendered_sha256": binding["source_sha256"],
+        "schema_version": "1",
+    }
+    receipt_path = worktree / binding["local_receipt_relative_path"]
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n")
+    receipt_path.chmod(0o600)
     return worktree, brief, hashlib.sha256(brief.read_bytes()).hexdigest()
 
 
@@ -334,17 +373,17 @@ def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, m
     monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: called.append(True))
     monkeypatch.setattr(
         ce_cli, "_make_codex_launcher_filesystem", lambda: __import__(
-            "validators.tests.unit.test_codex_worker_launcher", fromlist=["HermeticFilesystem"]
+            "unit.test_codex_worker_launcher", fromlist=["HermeticFilesystem"]
         ).HermeticFilesystem()
     )
     monkeypatch.setattr(
         ce_cli, "_make_codex_version_probe", lambda: __import__(
-            "validators.tests.unit.test_codex_worker_launcher", fromlist=["FixedVersionProbe"]
+            "unit.test_codex_worker_launcher", fromlist=["FixedVersionProbe"]
         ).FixedVersionProbe()
     )
     assert ce_cli.main([
         "worker", "launch", "--dry-run", "--json",
-        "--role", "architect_research", "--venue", "dev1-local", "--worktree", str(worktree),
+        "--role", "architect_research", "--venue", "dev1-local", "--worktree", str(worktree), "--seat-repo-root", str(worktree),
         "--brief", str(brief), "--brief-sha256", digest,
         "--run-id", "cli-test",
     ]) == 0
@@ -374,7 +413,7 @@ def test_worker_launch_unknown_role_refuses_before_probe_or_runner(
     )
     assert ce_cli.main([
         "worker", "launch", "--dry-run", "--role", "foreman",
-        "--venue", "dev1-local", "--worktree", str(worktree),
+        "--venue", "dev1-local", "--worktree", str(worktree), "--seat-repo-root", str(worktree),
         "--brief", str(brief), "--brief-sha256", digest,
     ]) == 1
     assert "unknown role" in capsys.readouterr().err
@@ -387,7 +426,7 @@ def test_worker_launch_refuses_removed_policy_binary_and_stdin_overrides(tmp_pat
         with pytest.raises(SystemExit) as exc:
             ce_cli.main([
                 "worker", "launch", "--role", "architect_research", "--venue", "dev1-local",
-                "--worktree", str(worktree), "--brief", str(brief),
+                "--worktree", str(worktree), "--seat-repo-root", str(worktree), "--brief", str(brief),
                 "--brief-sha256", digest, removed, "untrusted",
             ])
         assert exc.value.code == 2
@@ -409,7 +448,7 @@ class FakeOneShotRunner:
 
 def _patch_one_shot_preflight(monkeypatch, runner: FakeOneShotRunner) -> None:
     support = __import__(
-        "validators.tests.unit.test_codex_worker_launcher",
+        "unit.test_codex_worker_launcher",
         fromlist=["HermeticFilesystem", "FixedVersionProbe"],
     )
     monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: runner)
@@ -424,7 +463,7 @@ def _patch_one_shot_preflight(monkeypatch, runner: FakeOneShotRunner) -> None:
 def _worker_launch_argv(worktree: Path, brief: Path, digest: str) -> list[str]:
     return [
         "worker", "launch", "--role", "architect_research", "--venue", "dev1-local",
-        "--worktree", str(worktree), "--brief", str(brief),
+        "--worktree", str(worktree), "--seat-repo-root", str(worktree), "--brief", str(brief),
         "--brief-sha256", digest, "--run-id", "cli-reporting-test",
     ]
 
@@ -435,7 +474,7 @@ def test_worker_launch_refuses_implementer_native_venues_before_runner_construct
 ) -> None:
     worktree, brief, digest = _one_shot_worktree(tmp_path)
     support = __import__(
-        "validators.tests.unit.test_codex_worker_launcher",
+        "unit.test_codex_worker_launcher",
         fromlist=["HermeticFilesystem", "FixedVersionProbe"],
     )
     monkeypatch.setattr(
@@ -449,7 +488,7 @@ def test_worker_launch_refuses_implementer_native_venues_before_runner_construct
     )
     assert ce_cli.main([
         "worker", "launch", "--role", "implementer", "--venue", venue,
-        "--worktree", str(worktree), "--brief", str(brief),
+        "--worktree", str(worktree), "--seat-repo-root", str(worktree), "--brief", str(brief),
         "--brief-sha256", digest, "--run-id", "cli-refusal-test",
     ]) == 1
     assert "not attested for required isolation" in capsys.readouterr().err
@@ -482,7 +521,7 @@ def test_worker_launch_refuses_mutated_v1_policy_before_probe_or_runner_construc
     worktree, brief, digest = _one_shot_worktree(tmp_path)
     _mutate_one_shot_policy(worktree, mutation)
     support = __import__(
-        "validators.tests.unit.test_codex_worker_launcher",
+        "unit.test_codex_worker_launcher",
         fromlist=["HermeticFilesystem"],
     )
     monkeypatch.setattr(
@@ -497,7 +536,7 @@ def test_worker_launch_refuses_mutated_v1_policy_before_probe_or_runner_construc
     role = "architect_research" if mutation.startswith("binary-") else "implementer"
     assert ce_cli.main([
         "worker", "launch", "--role", role, "--venue", "dev1-local",
-        "--worktree", str(worktree), "--brief", str(brief),
+        "--worktree", str(worktree), "--seat-repo-root", str(worktree), "--brief", str(brief),
         "--brief-sha256", digest, "--run-id", "cli-mutated-policy-test",
     ]) == 1
     assert "ce worker launch refused" in capsys.readouterr().err
@@ -541,7 +580,7 @@ def test_worker_launch_rechecks_role_policy_after_planning_before_runner(
 ) -> None:
     worktree, brief, digest = _one_shot_worktree(tmp_path)
     support = __import__(
-        "validators.tests.unit.test_codex_worker_launcher",
+        "unit.test_codex_worker_launcher",
         fromlist=["HermeticFilesystem", "FixedVersionProbe"],
     )
     runner = FakeOneShotRunner()

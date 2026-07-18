@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import uuid
@@ -33,6 +34,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import brain_runtime, claude_hook_pack, v3_installer, version as ce_version
 from .checks import ce_runtime_policy
+from . import codex_worker_launcher
 from .forge.github_repo_config import DEFAULT_MAIN_PROTECTION, BranchProtectionPolicy
 from .forge.protection_diagnostics import (
     PROTECTION_FLOOR_REMEDIATION,
@@ -403,17 +405,9 @@ KNOWN_SHARED_OR_FOREIGN_APP_IDS: Mapping[str, str] = {
     "4085526": "known CE dev-4 App",
 }
 RUNTIME_POLICY_BASENAME = "runtime-policy.yaml"
-CANONICAL_SEAT_IMAGE_NAME = "ghcr.io/creator-engine/creator-engine/ce-seat"
-CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA = "sha256:" + ("0" * 64)
-DEFAULT_CONTROLLER_POLICY_ID = "default-controller-docker"
-_RUNTIME_POLICY_HASH_PLACEHOLDER = "0" * 64
-_SURFACES_MANIFEST = Path(__file__).resolve().parents[2] / "surfaces" / "manifest.yaml"
-_AGENT_CONFIG_DIRS: tuple[tuple[str, ...], ...] = (
-    (".claude",),
-    (".config", "claude"),
-    (".codex",),
-    (".config", "codex"),
-)
+RUNTIME_POLICY_RECEIPT_BASENAME = "runtime-policy.receipt.json"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_CANONICAL_LAUNCHER_POLICY = _REPOSITORY_ROOT / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH
 _BRAIN_GENESIS_ASSERTION_ID = "brain-assertion-genesis-0001"
 _BRAIN_GENESIS_SCOPE = "global"
 _BRAIN_GENESIS_CLAIM = {
@@ -424,78 +418,154 @@ _BRAIN_GENESIS_CLAIM = {
 _BRAIN_GENESIS_EVIDENCE_REF = "ce-ops#206:ce-brain-init"
 
 
-def _runtime_policy_sha(record: Mapping[str, Any]) -> str:
-    canonical = dict(record)
-    canonical["policy_sha"] = _RUNTIME_POLICY_HASH_PLACEHOLDER
-    payload = yaml.safe_dump(canonical, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _canonical_seat_image_ref() -> dict[str, str]:
-    image_ref = {
-        "name": CANONICAL_SEAT_IMAGE_NAME,
-        "sha": CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA,
-    }
+def _read_regular_nofollow(path: Path, *, max_bytes: int = 256 * 1024) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        manifest = yaml.safe_load(_SURFACES_MANIFEST.read_text(encoding="utf-8"))
-    except OSError:
-        return image_ref
-    surfaces = manifest.get("surfaces") if isinstance(manifest, Mapping) else None
-    if not isinstance(surfaces, list):
-        return image_ref
-    seat = next(
-        (
-            surface
-            for surface in surfaces
-            if isinstance(surface, Mapping) and surface.get("name") == "CE seat image"
-        ),
-        None,
-    )
-    if not isinstance(seat, Mapping):
-        return image_ref
-    source = seat.get("source")
-    digest = seat.get("commit_or_digest")
-    if isinstance(source, str) and source.strip():
-        image_ref["name"] = source.strip()
-    if (
-        isinstance(digest, str)
-        and digest.startswith("sha256:")
-        and len(digest) == len(CANONICAL_SEAT_IMAGE_PLACEHOLDER_SHA)
-    ):
-        image_ref["sha"] = digest
-    return image_ref
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input is unreadable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input is not regular")
+        payload = bytearray()
+        while len(payload) <= max_bytes:
+            chunk = os.read(descriptor, min(64 * 1024, max_bytes + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        if len(payload) > max_bytes:
+            raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input exceeds size bound")
+        return bytes(payload)
+    finally:
+        os.close(descriptor)
 
 
-def _default_controller_runtime_policy(*, workspace_root: Path) -> dict[str, Any]:
-    workspace = str(workspace_root.resolve())
-    home = Path.home()
-    mount_manifest: list[dict[str, Any]] = [
-        {
-            "path": workspace,
-            "mode": "rw",
-            "write_justification": "tenant workspace for the controller seat",
-        }
-    ]
-    for parts in _AGENT_CONFIG_DIRS:
-        mount_manifest.append({"path": str(home.joinpath(*parts)), "mode": "ro"})
+def _ensure_nofollow_directory_path(path: Path) -> Path:
+    """Create a directory tree only when every existing component is a real directory."""
+    absolute = path.absolute()
+    chain = tuple(reversed((absolute, *absolute.parents)))
+    try:
+        for candidate in chain:
+            if os.path.lexists(candidate):
+                metadata = os.lstat(candidate)
+                if not stat.S_ISDIR(metadata.st_mode):
+                    raise ApplyFailed(
+                        "runtime_policy_destination_refused",
+                        "runtime-policy destination parent is not a real directory",
+                    )
+        absolute.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for candidate in chain:
+            metadata = os.lstat(candidate)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise ApplyFailed(
+                    "runtime_policy_destination_refused",
+                    "runtime-policy destination parent changed during creation",
+                )
+    except OSError as exc:
+        raise ApplyFailed(
+            "runtime_policy_destination_refused",
+            "runtime-policy destination parent cannot be created safely",
+        ) from exc
+    return absolute
 
-    record: dict[str, Any] = {
-        "kind": ce_runtime_policy.KIND_VALUE,
-        "record_type": "runtime_policy",
+
+def _atomic_private_write(path: Path, payload: bytes) -> None:
+    path = _ensure_nofollow_directory_path(path.parent) / path.name
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ApplyFailed("runtime_policy_destination_refused", "runtime-policy destination is not a regular file")
+    temporary = path.parent / f".{path.name}.tmp.{os.getpid()}"
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise ApplyFailed("runtime_policy_atomic_write_failed", "runtime-policy atomic write failed") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def provision_canonical_runtime_policy(
+    *, state_root: Path, repository_root: Path = _REPOSITORY_ROOT
+) -> dict[str, Any]:
+    """Validate, copy exact canonical bytes, and emit a compact provenance receipt."""
+    launcher = codex_worker_launcher.load_canonical_policy(str(repository_root))
+    binding = launcher.runtime_policy_binding
+    source_path = repository_root / binding.source_path
+    source_bytes = _read_regular_nofollow(source_path)
+    if hashlib.sha256(source_bytes).hexdigest() != binding.source_sha256:
+        raise ApplyFailed("runtime_policy_source_digest_mismatch", "canonical runtime-policy source digest mismatch")
+    try:
+        record = yaml.safe_load(source_bytes)
+    except yaml.YAMLError as exc:
+        raise ApplyFailed("runtime_policy_source_invalid", "canonical runtime-policy source is malformed") from exc
+    if not isinstance(record, dict) or ce_runtime_policy.validate_runtime_policy(record, source_path):
+        raise ApplyFailed("runtime_policy_source_invalid", "canonical runtime-policy source fails validation")
+    if record.get("policy_id") != binding.policy_id or record.get("policy_sha") != binding.policy_sha:
+        raise ApplyFailed("runtime_policy_registry_mismatch", "canonical runtime-policy identity does not match registry")
+    registry_bytes = _read_regular_nofollow(repository_root / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH)
+    registry_sha = hashlib.sha256(registry_bytes).hexdigest()
+    if registry_sha != launcher.source_sha256:
+        raise ApplyFailed("runtime_policy_registry_mismatch", "launcher registry changed during provisioning")
+    policy_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_BASENAME
+    receipt_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_RECEIPT_BASENAME
+    receipt = {
+        "canonical_source_path": binding.source_path,
+        "canonical_source_sha256": binding.source_sha256,
+        "kind": codex_worker_launcher.RUNTIME_RECEIPT_KIND,
+        "local_policy_relative_path": binding.local_policy_relative_path,
+        "policy_id": binding.policy_id,
+        "policy_sha": binding.policy_sha,
+        "registry_path": codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH,
+        "registry_sha256": registry_sha,
+        "rendered_sha256": binding.source_sha256,
         "schema_version": "1",
-        "policy_id": DEFAULT_CONTROLLER_POLICY_ID,
-        "policy_sha": _RUNTIME_POLICY_HASH_PLACEHOLDER,
-        "role": "controller",
-        "isolation_backend": "docker",
-        "image_ref": _canonical_seat_image_ref(),
-        "mount_manifest": mount_manifest,
-        "egress_allowlist": [],
-        "secret_allowlist": [],
-        "grant_extensible": False,
-        "grant_authority": "controller",
     }
-    record["policy_sha"] = _runtime_policy_sha(record)
-    return record
+    receipt_bytes = (
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    try:
+        _atomic_private_write(policy_path, source_bytes)
+        _atomic_private_write(receipt_path, receipt_bytes)
+        if (
+            _read_regular_nofollow(policy_path) != source_bytes
+            or _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) != receipt_bytes
+            or stat.S_IMODE(policy_path.stat().st_mode) != 0o600
+            or stat.S_IMODE(receipt_path.stat().st_mode) != 0o600
+        ):
+            raise ApplyFailed("runtime_policy_post_replace_mismatch", "runtime-policy pair failed post-replace verification")
+    except Exception:
+        for candidate in (policy_path, receipt_path):
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+    return {
+        "policy_path": policy_path,
+        "receipt_path": receipt_path,
+        "source_sha256": binding.source_sha256,
+        "policy_sha": binding.policy_sha,
+        "registry_sha256": registry_sha,
+    }
 
 
 class ApplyRefused(Exception):
@@ -652,8 +722,8 @@ class ApplyDriver:
         # ``os-native``, no privileged runtime). The posture records the selection.
         runtime_dir = state_root / ONBOARD_SUBDIR / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        runtime_policy_path = runtime_dir / RUNTIME_POLICY_BASENAME
-        runtime_policy = _default_controller_runtime_policy(workspace_root=workspace_root)
+        runtime_policy_result = provision_canonical_runtime_policy(state_root=state_root)
+        runtime_policy_path = Path(runtime_policy_result["policy_path"])
         config = {
             "isolation_backend": backend,
             "egress": "deny-by-default",
@@ -661,17 +731,17 @@ class ApplyDriver:
             "workspace_root": str(workspace_root),
             "runtime_policy": str(runtime_policy_path),
         }
-        runtime_policy_path.write_text(
-            yaml.safe_dump(runtime_policy, sort_keys=True),
-            encoding="utf-8",
-        )
         (runtime_dir / "posture.json").write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         return {
             "ok": True,
-            "created": [str(runtime_policy_path), str(runtime_dir / "posture.json")],
+            "created": [
+                str(runtime_policy_path),
+                str(runtime_policy_result["receipt_path"]),
+                str(runtime_dir / "posture.json"),
+            ],
         }
 
     def verify_runtime(

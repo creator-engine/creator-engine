@@ -50,6 +50,8 @@ See:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 from copy import deepcopy
@@ -74,6 +76,7 @@ CODE_FORBIDDEN_MOUNT = "runtime_policy_forbidden_mount"
 CODE_RW_WITHOUT_JUSTIFICATION = "runtime_policy_rw_mount_without_justification"
 CODE_SECRET_NAMES_ONLY = "runtime_policy_secret_names_only_violation"
 CODE_EGRESS_NOT_DENY_BY_DEFAULT = "runtime_policy_egress_not_deny_by_default"
+CODE_SEMANTIC_DIGEST_MISMATCH = "runtime_policy_semantic_digest_mismatch"
 
 DEFAULT_ISOLATION_BACKEND = "gvisor-proxy"
 CLI_BACKEND_CHOICES = ("gvisor", "docker", "openshell", "local-noop")
@@ -86,10 +89,38 @@ _BACKEND_ALIASES = {
     "os-native": "os-native",
 }
 _CONTRACT_BACKENDS = tuple(sorted(set(_BACKEND_ALIASES.values())))
+_POLICY_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class RuntimePolicyResolutionError(ValueError):
     """A runtime-policy backend selector cannot be resolved or honored."""
+
+
+def runtime_policy_semantic_material(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a detached record whose asserted digest cannot influence its hash."""
+    material = deepcopy(dict(record))
+    material.pop("policy_sha", None)
+    return material
+
+
+def runtime_policy_semantic_bytes(record: Mapping[str, Any]) -> bytes:
+    """Encode semantic material using the v1 canonical JSON contract."""
+    return json.dumps(
+        runtime_policy_semantic_material(record),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def runtime_policy_semantic_sha256(record: Mapping[str, Any]) -> str:
+    """Compute the semantic SHA-256 independently of the asserted ``policy_sha``."""
+    return hashlib.sha256(runtime_policy_semantic_bytes(record)).hexdigest()
+
+
+def runtime_policy_source_sha256(source: bytes) -> str:
+    """Compute the separate exact-byte binding for a YAML source/render."""
+    return hashlib.sha256(source).hexdigest()
 
 
 def _canonical_backend(value: Any, *, field: str) -> str:
@@ -452,6 +483,24 @@ def validate_runtime_policy(record: dict[str, Any], path: Path) -> list[Validati
     errors.extend(_check_mounts(record, path))
     errors.extend(_check_secret_allowlist(record, path))
     errors.extend(_check_egress(record, path))
+    asserted = record.get("policy_sha")
+    computed = runtime_policy_semantic_sha256(record)
+    requires_bound_digest = (
+        record.get("policy_id") == "default-controller-v1"
+        or path.name == "default-controller-v1.yaml"
+    )
+    if requires_bound_digest and (
+        not isinstance(asserted, str)
+        or not _POLICY_SHA_RE.fullmatch(asserted)
+        or asserted != computed
+    ):
+        errors.append(make_error(
+            CODE_SEMANTIC_DIGEST_MISMATCH,
+            path,
+            "policy_sha",
+            "policy_sha does not match the canonical semantic digest with policy_sha excluded",
+            CONTRACT,
+        ))
     return errors
 
 
@@ -465,6 +514,7 @@ def validate_runtime_policy(record: dict[str, Any], path: Path) -> list[Validati
         CODE_RW_WITHOUT_JUSTIFICATION,
         CODE_SECRET_NAMES_ONLY,
         CODE_EGRESS_NOT_DENY_BY_DEFAULT,
+        CODE_SEMANTIC_DIGEST_MISMATCH,
     ],
 )
 def run(paths: Iterable[Path]) -> CheckResult:
