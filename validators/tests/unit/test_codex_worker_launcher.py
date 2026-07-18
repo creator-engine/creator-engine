@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 import shutil
 import subprocess
+import tomllib
 
 import pytest
 import yaml
@@ -61,6 +62,7 @@ PREFIXED_EXACT_ONLY_SENSITIVE_ENV_NAMES = [
     for prefix in ("LC_", "LC_LC_", "LC_LC_LC_")
 ]
 CANONICAL_ADD_DIR_ALIASES = ["./governance", "governance/.", "governance//"]
+AMBIENT_FOREMAN_BOOTSTRAP = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
 
 class HermeticFilesystem(launcher.RealLauncherFilesystem):
@@ -114,6 +116,258 @@ class RecordingRunner:
         self.calls.append((tuple(argv), stdin))
         assert tuple(provider_credential_env_names) == ("OPENAI_API_KEY",)
         return 0
+
+
+class HermeticLeafCodex:
+    """Small deterministic stand-in for leaf behavior; never starts Codex."""
+
+    def run(self, argv, *, stdin: bytes, provider_credential_env_names=()) -> int:
+        configs = [
+            item.removeprefix("developer_instructions=")
+            for item in argv
+            if item.startswith("developer_instructions=")
+        ]
+        assert len(configs) == 1
+        envelope = tomllib.loads(f"value={configs[0]}")["value"]
+        fields = dict(
+            line.split(": ", 1)
+            for line in envelope.splitlines()
+            if ": " in line
+        )
+        assert fields["seat_class"] == "worker"
+        assert fields["nested_delegation"] == "disabled"
+        assert fields["parent_lineage"] == "provenance_only_no_inherited_authority"
+        assert "controller_or_foreman_authority" in fields["prohibitions"]
+        assert "nested_spawn" in fields["prohibitions"]
+        request = stdin.decode("utf-8")
+        if any(
+            marker in request
+            for marker in (
+                "become FOREMAN",
+                "spawn a sub-agent",
+                "approve the PR",
+                "enqueue the PR",
+                "merge the PR",
+                "sign the commit",
+                "use controller credentials",
+                "fall back to FOREMAN",
+            )
+        ):
+            return 64
+
+        worktree = Path(argv[argv.index("-C") + 1])
+        role = fields["role"]
+        if role == "implementer":
+            assert fields["capability"] == "scoped_worktree_edit_test_commit"
+            assert fields["sandbox"] == "workspace-write"
+            target = worktree / "bounded-result.txt"
+            target.write_text("direct leaf implementation\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    "/usr/bin/python3",
+                    "-c",
+                    "from pathlib import Path; assert Path('bounded-result.txt').read_text() == 'direct leaf implementation\\n'",
+                ],
+                cwd=worktree,
+                check=True,
+            )
+            subprocess.run(["git", "add", "bounded-result.txt"], cwd=worktree, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "user.name=Hermetic Leaf",
+                    "-c",
+                    "user.email=leaf@example.invalid",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "test: direct governed implementer behavior",
+                ],
+                cwd=worktree,
+                check=True,
+            )
+        else:
+            assert fields["sandbox"] == "read-only"
+            subprocess.run(["git", "diff", "--check"], cwd=worktree, check=True)
+        return 0
+
+
+def _hermetic_leaf_argv(
+    worker_input: launcher.GovernedWorkerInput,
+    *,
+    worktree: Path,
+    sandbox: str,
+) -> tuple[str, ...]:
+    envelope = launcher.build_governed_role_envelope(
+        governed_input=worker_input,
+        worktree=str(worktree),
+        sandbox=sandbox,
+    )
+    return (
+        "/hermetic/fake-codex",
+        "exec",
+        "--strict-config",
+        "-c",
+        "features.multi_agent=false",
+        "-c",
+        f"developer_instructions={launcher.toml_encode_config_value(envelope)}",
+        "-s",
+        sandbox,
+        "-C",
+        str(worktree),
+        "-",
+    )
+
+
+HERMETIC_CODEX_EXECUTABLE = r'''#!/usr/bin/python3
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tomllib
+
+argv = sys.argv[1:]
+assert "HOSTILE_AMBIENT" not in os.environ
+assert Path(os.environ["HOME"]).parent == Path(os.environ["CODEX_HOME"]).parent
+assert argv[:5] == ["exec", "--strict-config", "--ephemeral", "-m", "gpt-5.6-terra"]
+index = 5
+configs = []
+while argv[index] == "-c":
+    configs.append(argv[index + 1])
+    index += 2
+assert len(configs) == 4
+assert configs[:3] == [
+    "model_reasoning_effort=high",
+    "features.multi_agent=false",
+    "features.multi_agent_v2=false",
+]
+assert configs[3].startswith("developer_instructions=")
+envelope = tomllib.loads("value=" + configs[3].split("=", 1)[1])["value"]
+fields = dict(line.split(": ", 1) for line in envelope.splitlines() if ": " in line)
+assert argv[index] == "-s"
+sandbox = argv[index + 1]
+index += 2
+assert argv[index] == "-C"
+worktree = Path(argv[index + 1])
+index += 2
+add_dirs = []
+while argv[index] == "--add-dir":
+    add_dirs.append(argv[index + 1])
+    index += 2
+assert add_dirs == [str(worktree / "governance"), str(worktree / "validators")]
+assert argv[index] == "-o"
+output = Path(argv[index + 1])
+assert argv[index + 2:] == ["-"]
+brief = sys.stdin.buffer.read()
+role_policy = worktree / fields["role_policy_path"]
+assert hashlib.sha256(role_policy.read_bytes()).hexdigest() == fields["role_policy_sha256"]
+assert hashlib.sha256(brief).hexdigest() == fields["brief_sha256"]
+assert fields["seat_class"] == "worker"
+assert fields["nested_delegation"] == "disabled"
+assert fields["parent_lineage"] == "provenance_only_no_inherited_authority"
+assert "controller_or_foreman_authority" in fields["prohibitions"]
+assert "nested_spawn" in fields["prohibitions"]
+request = brief.decode("utf-8")
+refused = any(marker in request for marker in (
+    "become FOREMAN",
+    "spawn a sub-agent",
+    "approve the PR",
+    "enqueue the PR",
+    "merge the PR",
+    "sign the commit",
+    "use controller credentials",
+    "fall back to FOREMAN",
+))
+before = subprocess.run(
+    ["git", "rev-parse", "HEAD"], cwd=worktree, check=True,
+    capture_output=True, text=True,
+).stdout.strip()
+if not refused and fields["role"] == "implementer":
+    assert sandbox == "workspace-write"
+    target = worktree / "bounded-result.txt"
+    target.write_text("direct leaf implementation\n", encoding="utf-8")
+    assert target.read_text(encoding="utf-8") == "direct leaf implementation\n"
+    subprocess.run(["git", "add", "bounded-result.txt"], cwd=worktree, check=True)
+    subprocess.run([
+        "git", "-c", "commit.gpgsign=false", "-c", "user.name=Hermetic Leaf",
+        "-c", "user.email=leaf@example.invalid", "commit", "-q", "-m",
+        "test: direct governed implementer behavior",
+    ], cwd=worktree, check=True)
+elif not refused:
+    assert sandbox == "read-only"
+after = subprocess.run(
+    ["git", "rev-parse", "HEAD"], cwd=worktree, check=True,
+    capture_output=True, text=True,
+).stdout.strip()
+output.write_text(json.dumps({
+    "role": fields["role"],
+    "sandbox": sandbox,
+    "stdin_sha256": hashlib.sha256(brief).hexdigest(),
+    "strict_config": True,
+    "multi_agent_disabled": configs[1:3] == [
+        "features.multi_agent=false", "features.multi_agent_v2=false"
+    ],
+    "refused": refused,
+    "head_changed": before != after,
+    "write_denied": not refused and fields["role"] != "implementer",
+}), encoding="utf-8")
+raise SystemExit(64 if refused else 0)
+'''
+
+
+def _write_hermetic_codex_executable(worktree: Path) -> Path:
+    binary = worktree.parent / "hermetic-codex" / "0.145.0-alpha.9" / "bin" / "codex"
+    binary.parent.mkdir(parents=True)
+    binary.write_text(HERMETIC_CODEX_EXECUTABLE, encoding="utf-8")
+    binary.chmod(0o755)
+    return binary
+
+
+def _hermetic_subprocess_policy(
+    worktree: Path,
+    *,
+    binary: Path,
+    role: str,
+    monkeypatch,
+) -> launcher.CodexOneShotPolicy:
+    loaded = policy(worktree)
+    template = str(binary).replace(loaded.version, "{version}")
+
+    def stage_hermetic_policy(raw) -> None:
+        for venue_policy in raw["venues"].values():
+            venue_policy["codex_binary_template"] = template
+        if role == "implementer":
+            raw["venues"]["dev1-local"]["outer_isolation_attestation"] = (
+                "hermetic disposable worktree"
+            )
+            raw["venues"]["dev1-local"]["role_sandboxes"]["implementer"] = (
+                "workspace-write"
+            )
+
+    rewrite_policy(worktree, stage_hermetic_policy)
+    if role == "implementer":
+        trusted_matrix = tuple(
+            (
+                venue,
+                tuple(
+                    (
+                        candidate,
+                        "workspace-write"
+                        if venue == "dev1-local" and candidate == "implementer"
+                        else sandbox,
+                    )
+                    for candidate, sandbox in cells
+                ),
+            )
+            for venue, cells in launcher.V1_ROLE_SANDBOX_MATRIX
+        )
+        monkeypatch.setattr(launcher, "V1_ROLE_SANDBOX_MATRIX", trusted_matrix)
+    return policy(worktree)
 
 
 @pytest.fixture
@@ -175,7 +429,28 @@ def plan(worktree: Path, **overrides) -> launcher.CodexWorkerLaunchPlan:
         "version_probe": FixedVersionProbe(),
     }
     values.update(overrides)
-    return launcher.build_launch_plan(**values)
+    request = launcher.build_launch_request(
+        policy=values["policy"],
+        governed_input=values["governed_input"],
+        role=values.pop("role"),
+        venue=values.pop("venue"),
+        worktree=values.pop("worktree"),
+        run_id=values.pop("run_id"),
+        filesystem=values["filesystem"],
+    )
+    return launcher.build_launch_plan(request=request, **values)
+
+
+def launch_request_from_plan(
+    built: launcher.CodexWorkerLaunchPlan,
+) -> launcher.CodexWorkerLaunchRequest:
+    """Recover the separately held immutable request used by test callers."""
+    return launcher.CodexWorkerLaunchRequest(
+        role=built.role,
+        venue=built.venue,
+        worktree=built.worktree,
+        run_id=built.run_id,
+    )
 
 
 def test_canonical_policy_pins_deployment_version_and_actual_venues(worktree: Path) -> None:
@@ -456,11 +731,13 @@ def test_planner_refuses_non_string_binary_template_before_filesystem_or_version
 
 def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path) -> None:
     built = plan(worktree)
+    config = launcher.toml_encode_config_value(built.developer_instructions)
     assert built.model == "gpt-5.6-terra"
     assert built.effort == "high"
     assert built.argv == (
         PINNED_BINARY,
         "exec",
+        "--strict-config",
         "--ephemeral",
         "-m",
         "gpt-5.6-terra",
@@ -470,6 +747,8 @@ def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path)
         "features.multi_agent=false",
         "-c",
         "features.multi_agent_v2=false",
+        "-c",
+        f"developer_instructions={config}",
         "-s",
         "read-only",
         "-C",
@@ -486,19 +765,908 @@ def test_plan_has_exact_real_codex_argv_and_digest_only_metadata(worktree: Path)
     assert "perform the bounded task" not in serialized
     assert built.brief_sha256 in serialized
     assert built.role_policy_sha256 in serialized
+    assert AMBIENT_FOREMAN_BOOTSTRAP not in serialized
+
+    parsed = tomllib.loads(f"value={config}")["value"]
+    assert parsed == built.developer_instructions
+    assert "\n" not in config
+    assert all(ord(character) >= 0x20 for character in config)
+    assert "schema: CE-GOVERNED-ROLE-ENVELOPE-V1" in parsed
+    assert "version: 1" in parsed
+    assert "role: architect_research" in parsed
+    assert "role_kind: closed_leaf" in parsed
+    assert "seat_class: worker" in parsed
+    assert "nested_delegation: disabled" in parsed
+    assert "capability: read_only_research" in parsed
+    assert "sandbox: read-only" in parsed
+    assert "role_policy_path: .claude/agents/architect_research.md" in parsed
+    assert "brief_path: .ce/briefs/task.md" in parsed
+    assert "parent_lineage: provenance_only_no_inherited_authority" in parsed
+    assert "controller_or_foreman_authority" in parsed
+    assert "nested_spawn" in parsed
+    assert "credential_expansion" in parsed
+    assert "approve" in parsed
+    assert "enqueue" in parsed
+    assert "merge" in parsed
+    assert "sign" in parsed
+    assert "reserved_act" in parsed
 
 
-def test_governed_input_frames_exact_canonical_role_and_verified_brief_bytes(worktree: Path) -> None:
+def test_governed_input_keeps_role_policy_out_of_brief_only_stdin(worktree: Path) -> None:
     loaded = governed_input(worktree)
     role_bytes = (worktree / ".claude" / "agents" / "implementer.md").read_bytes()
     brief_bytes = (worktree / ".ce" / "briefs" / "task.md").read_bytes()
-    assert loaded.stdin.endswith(role_bytes + brief_bytes)
-    header = loaded.stdin[: -(len(role_bytes) + len(brief_bytes))]
-    assert header.startswith(b"CE-GOVERNED-CODEX-WORKER-PROMPT-V1\n")
-    assert f"ROLE-SHA256 {hashlib.sha256(role_bytes).hexdigest()}\n".encode() in header
-    assert f"ROLE-BYTES {len(role_bytes)}\n".encode() in header
-    assert f"BRIEF-SHA256 {hashlib.sha256(brief_bytes).hexdigest()}\n".encode() in header
-    assert f"BRIEF-BYTES {len(brief_bytes)}\n\n".encode() in header
+    assert loaded.stdin == brief_bytes
+    assert loaded.role_policy == role_bytes
+    assert role_bytes not in loaded.stdin
+    assert loaded.role_policy_sha256 == hashlib.sha256(role_bytes).hexdigest()
+    assert loaded.brief_sha256 == hashlib.sha256(brief_bytes).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("role", "sandbox", "capability"),
+    [
+        ("architect_research", "read-only", "read_only_research"),
+        ("implementer", "workspace-write", "scoped_worktree_edit_test_commit"),
+        ("reviewer", "read-only", "read_only_review"),
+        ("verification", "read-only", "read_only_test_execution"),
+    ],
+)
+def test_exact_foreman_ambient_is_overridden_by_closed_leaf_envelope_matrix(
+    worktree: Path, role: str, sandbox: str, capability: str
+) -> None:
+    worker_input = governed_input(worktree, role=role)
+    envelope = launcher.build_governed_role_envelope(
+        governed_input=worker_input,
+        worktree=str(worktree),
+        sandbox=sandbox,
+    )
+    encoded = launcher.toml_encode_config_value(envelope)
+    parsed = tomllib.loads(f"developer_instructions={encoded}")[
+        "developer_instructions"
+    ]
+    assert parsed == envelope
+    assert f"role: {role}" in parsed
+    assert f"capability: {capability}" in parsed
+    assert "seat_class: worker" in parsed
+    assert "Do not inherit controller or foreman authority" in parsed
+    assert AMBIENT_FOREMAN_BOOTSTRAP not in parsed
+    assert worker_input.stdin == b"perform the bounded task\n"
+
+
+def _initialize_disposable_foreman_repo(worktree: Path) -> str:
+    (worktree / "AGENTS.md").write_text(AMBIENT_FOREMAN_BOOTSTRAP, encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+    subprocess.run(["git", "add", "."], cwd=worktree, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Hermetic Parent",
+            "-c",
+            "user.email=parent@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "test: ambient foreman baseline",
+        ],
+        cwd=worktree,
+        check=True,
+    )
+    return hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("role", "sandbox", "writes"),
+    [
+        ("architect_research", "read-only", False),
+        ("implementer", "workspace-write", True),
+        ("reviewer", "read-only", False),
+        ("verification", "read-only", False),
+    ],
+)
+def test_hermetic_leaf_behavior_is_direct_for_implementer_and_read_only_otherwise(
+    worktree: Path, role: str, sandbox: str, writes: bool
+) -> None:
+    worker_input = governed_input(worktree, role=role)
+    foreman_digest = _initialize_disposable_foreman_repo(worktree)
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    argv = _hermetic_leaf_argv(worker_input, worktree=worktree, sandbox=sandbox)
+    assert HermeticLeafCodex().run(argv, stdin=worker_input.stdin) == 0
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert (after != before) is writes
+    assert (worktree / "bounded-result.txt").exists() is writes
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+    assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
+
+
+@pytest.mark.parametrize(
+    ("role", "sandbox", "writes"),
+    [
+        ("architect_research", "read-only", False),
+        ("implementer", "workspace-write", True),
+        ("reviewer", "read-only", False),
+        ("verification", "read-only", False),
+    ],
+)
+def test_production_subprocess_path_enforces_hermetic_leaf_behavior_matrix(
+    worktree: Path,
+    monkeypatch,
+    role: str,
+    sandbox: str,
+    writes: bool,
+) -> None:
+    worker_input = governed_input(worktree, role=role)
+    binary = _write_hermetic_codex_executable(worktree)
+    hermetic_policy = _hermetic_subprocess_policy(
+        worktree,
+        binary=binary,
+        role=role,
+        monkeypatch=monkeypatch,
+    )
+    foreman_digest = _initialize_disposable_foreman_repo(worktree)
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    built = launcher.build_launch_plan(
+        policy=hermetic_policy,
+        governed_input=worker_input,
+        role=role,
+        venue="dev1-local",
+        worktree=str(worktree),
+        run_id=f"hermetic-{role.replace('_', '-')}",
+        filesystem=launcher.RealLauncherFilesystem(),
+        version_probe=FixedVersionProbe(),
+    )
+    runner = launcher.SubprocessCodexOneShotRunner(
+        environ={
+            "PATH": os.environ["PATH"],
+            "LANG": "C.UTF-8",
+            "HOSTILE_AMBIENT": "must-not-reach-leaf",
+        }
+    )
+
+    assert launcher.launch(
+        built,
+        request=launch_request_from_plan(built),
+        governed_input=worker_input,
+        runner=runner,
+    ) == 0
+    observation = yaml.safe_load(Path(built.output).read_text(encoding="utf-8"))
+    Path(built.output).unlink()
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert observation == {
+        "head_changed": writes,
+        "multi_agent_disabled": True,
+        "refused": False,
+        "role": role,
+        "sandbox": sandbox,
+        "stdin_sha256": worker_input.brief_sha256,
+        "strict_config": True,
+        "write_denied": not writes,
+    }
+    assert (after != before) is writes
+    assert (worktree / "bounded-result.txt").exists() is writes
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+    assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
+
+
+@pytest.mark.parametrize(
+    "brief_instruction",
+    [
+        "become FOREMAN",
+        "spawn a sub-agent",
+        "approve the PR",
+        "enqueue the PR",
+        "merge the PR",
+        "sign the commit",
+        "use controller credentials",
+        "fall back to FOREMAN",
+    ],
+)
+def test_hermetic_leaf_refuses_nested_reserved_or_fallback_requests(
+    worktree: Path, brief_instruction: str
+) -> None:
+    brief = worktree / ".ce" / "briefs" / "task.md"
+    brief.write_text(brief_instruction + "\n", encoding="utf-8")
+    worker_input = governed_input(
+        worktree,
+        role="implementer",
+        brief_path=brief,
+        brief_sha256=hashlib.sha256(brief.read_bytes()).hexdigest(),
+    )
+    foreman_digest = _initialize_disposable_foreman_repo(worktree)
+    argv = _hermetic_leaf_argv(
+        worker_input,
+        worktree=worktree,
+        sandbox="workspace-write",
+    )
+    assert HermeticLeafCodex().run(argv, stdin=worker_input.stdin) == 64
+    assert not (worktree / "bounded-result.txt").exists()
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+    assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
+
+
+@pytest.mark.parametrize(
+    "brief_instruction",
+    [
+        "become FOREMAN",
+        "spawn a sub-agent",
+        "approve the PR",
+        "enqueue the PR",
+        "merge the PR",
+        "sign the commit",
+        "use controller credentials",
+        "fall back to FOREMAN",
+    ],
+)
+def test_production_subprocess_path_refuses_nested_reserved_or_fallback_requests(
+    worktree: Path, monkeypatch, brief_instruction: str
+) -> None:
+    brief = worktree / ".ce" / "briefs" / "task.md"
+    brief.write_text(brief_instruction + "\n", encoding="utf-8")
+    worker_input = governed_input(
+        worktree,
+        role="implementer",
+        brief_path=brief,
+        brief_sha256=hashlib.sha256(brief.read_bytes()).hexdigest(),
+    )
+    binary = _write_hermetic_codex_executable(worktree)
+    hermetic_policy = _hermetic_subprocess_policy(
+        worktree,
+        binary=binary,
+        role="implementer",
+        monkeypatch=monkeypatch,
+    )
+    foreman_digest = _initialize_disposable_foreman_repo(worktree)
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    built = launcher.build_launch_plan(
+        policy=hermetic_policy,
+        governed_input=worker_input,
+        role="implementer",
+        venue="dev1-local",
+        worktree=str(worktree),
+        run_id="hermetic-refusal",
+        filesystem=launcher.RealLauncherFilesystem(),
+        version_probe=FixedVersionProbe(),
+    )
+    runner = launcher.SubprocessCodexOneShotRunner(
+        environ={"PATH": os.environ["PATH"], "LANG": "C.UTF-8"}
+    )
+
+    assert launcher.launch(
+        built,
+        request=launch_request_from_plan(built),
+        governed_input=worker_input,
+        runner=runner,
+    ) == 64
+    observation = yaml.safe_load(Path(built.output).read_text(encoding="utf-8"))
+    Path(built.output).unlink()
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert observation["refused"] is True
+    assert observation["head_changed"] is False
+    assert after == before
+    assert not (worktree / "bounded-result.txt").exists()
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+    assert hashlib.sha256((worktree / "AGENTS.md").read_bytes()).hexdigest() == foreman_digest
+
+
+@pytest.mark.parametrize(
+    ("role", "sandbox"),
+    [
+        ("architect_research", "workspace-write"),
+        ("implementer", "read-only"),
+        ("reviewer", "danger-full-access"),
+        ("verification", "workspace-write"),
+    ],
+)
+def test_envelope_refuses_role_capability_or_sandbox_escalation(
+    worktree: Path, role: str, sandbox: str
+) -> None:
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="sandbox posture"):
+        launcher.build_governed_role_envelope(
+            governed_input=governed_input(worktree, role=role),
+            worktree=str(worktree),
+            sandbox=sandbox,
+        )
+
+
+def test_envelope_refuses_digest_path_control_and_size_ambiguity(worktree: Path) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="role policy SHA-256 mismatch"):
+        launcher.build_governed_role_envelope(
+            governed_input=replace(worker_input, role_policy_sha256="0" * 64),
+            worktree=str(worktree),
+            sandbox="read-only",
+        )
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="brief SHA-256 mismatch"):
+        launcher.build_governed_role_envelope(
+            governed_input=replace(worker_input, brief_sha256="0" * 64),
+            worktree=str(worktree),
+            sandbox="read-only",
+        )
+
+    ambiguous = worktree / ".ce" / "briefs" / "line\nbreak.md"
+    ambiguous.write_bytes(worker_input.stdin)
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="canonical envelope path"):
+        launcher.build_governed_role_envelope(
+            governed_input=replace(worker_input, brief_path=str(ambiguous)),
+            worktree=str(worktree),
+            sandbox="read-only",
+        )
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="size"):
+        launcher.toml_encode_config_value("x" * (launcher.MAX_DEVELOPER_INSTRUCTIONS_BYTES + 1))
+
+
+def test_launch_refuses_omitted_mismatched_or_authority_widened_envelope_before_runner(
+    worktree: Path,
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    mutations = [
+        replace(
+            built,
+            argv=tuple(item for item in built.argv if item != "--strict-config"),
+        ),
+        replace(built, developer_instructions=built.developer_instructions + "\nfallback: foreman"),
+        replace(
+            built,
+            argv=tuple(
+                "danger-full-access" if item == "read-only" else item
+                for item in built.argv
+            ),
+        ),
+        replace(
+            built,
+            argv=tuple(
+                item
+                for item in built.argv
+                if item != "features.multi_agent=false"
+            ),
+        ),
+    ]
+    for mutation in mutations:
+        runner = RecordingRunner()
+        with pytest.raises(
+            launcher.CodexWorkerLaunchError,
+            match="complete launch plan and executable argv are not canonical",
+        ):
+            launcher.launch(
+                mutation,
+                request=launch_request_from_plan(built),
+                governed_input=worker_input,
+                runner=runner,
+                filesystem=HermeticFilesystem(),
+            )
+        assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "mutate_argv",
+    [
+        lambda argv: ("/untrusted/codex", *argv[1:]),
+        lambda argv: (argv[0], "run", *argv[2:]),
+        lambda argv: (*argv[:-1], "--dangerously-bypass-approvals-and-sandbox", argv[-1]),
+        lambda argv: (*argv[:-1], "--config", "features.multi_agent=true", argv[-1]),
+        lambda argv: (*argv[:-1], "--sandbox", "danger-full-access", argv[-1]),
+        lambda argv: (*argv[:-1], "-m", "untrusted-model", argv[-1]),
+        lambda argv: tuple(
+            "untrusted-model" if item == "gpt-5.6-terra" else item for item in argv
+        ),
+        lambda argv: tuple(
+            "--model" if item == "-m" else item for item in argv
+        ),
+        lambda argv: tuple(item for item in argv if item != "--ephemeral"),
+        lambda argv: (
+            *argv[: argv.index("-C") + 1],
+            "/untrusted/worktree",
+            *argv[argv.index("-C") + 2 :],
+        ),
+        lambda argv: tuple(
+            "/untrusted/add-dir" if item.endswith("/governance") else item
+            for item in argv
+        ),
+        lambda argv: (
+            *argv[: argv.index("-o") + 1],
+            "/untrusted/output.json",
+            *argv[argv.index("-o") + 2 :],
+        ),
+        lambda argv: argv[:-1],
+        lambda argv: (argv[0], argv[1], argv[3], argv[2], *argv[4:]),
+    ],
+    ids=[
+        "executable",
+        "subcommand",
+        "unexpected-bypass",
+        "long-config-override",
+        "long-sandbox-override",
+        "duplicate-model",
+        "model-value",
+        "long-model-form",
+        "missing-ephemeral",
+        "worktree-value",
+        "add-dir-value",
+        "output-value",
+        "missing-stdin-marker",
+        "reordered-options",
+    ],
+)
+def test_launch_refuses_every_noncanonical_argv_mutation_before_runner(
+    worktree: Path, mutate_argv
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    runner = RecordingRunner()
+
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
+        launcher.launch(
+            replace(built, argv=tuple(mutate_argv(built.argv))),
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+def _replace_argv_value(
+    argv: tuple[str, ...], old: str, new: str
+) -> tuple[str, ...]:
+    assert argv.count(old) == 1
+    return tuple(new if item == old else item for item in argv)
+
+
+def test_launch_refuses_coordinated_valid_venue_mutation_before_runner(
+    worktree: Path,
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    request = launcher.build_launch_request(
+        policy=policy(worktree),
+        governed_input=worker_input,
+        role="architect_research",
+        venue="dev1-local",
+        worktree=str(worktree),
+        run_id="test-run",
+        filesystem=HermeticFilesystem(),
+    )
+    runner = RecordingRunner()
+
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
+        launcher.launch(
+            replace(built, venue="dgx-relay"),
+            request=request,
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+def test_launch_refuses_coordinated_alternate_valid_run_request_before_runner(
+    worktree: Path,
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    request = launcher.build_launch_request(
+        policy=policy(worktree),
+        governed_input=worker_input,
+        role="architect_research",
+        venue="dev1-local",
+        worktree=str(worktree),
+        run_id="test-run",
+        filesystem=HermeticFilesystem(),
+    )
+    alternate_run_id = "alternate-valid-run"
+    alternate_output = str(worktree / ".ce" / "state" / f"{alternate_run_id}.json")
+    runner = RecordingRunner()
+
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
+        launcher.launch(
+            replace(
+                built,
+                run_id=alternate_run_id,
+                output=alternate_output,
+                argv=_replace_argv_value(built.argv, built.output, alternate_output),
+            ),
+            request=request,
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda built, worktree: replace(
+            built,
+            binary="/tmp/untrusted-codex",
+            argv=("/tmp/untrusted-codex", *built.argv[1:]),
+        ),
+        lambda built, worktree: replace(
+            built,
+            model="untrusted-model",
+            argv=_replace_argv_value(
+                built.argv, built.model, "untrusted-model"
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            effort="low",
+            argv=_replace_argv_value(
+                built.argv,
+                f"model_reasoning_effort={built.effort}",
+                "model_reasoning_effort=low",
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            add_dirs=(str(worktree / ".ce"), *built.add_dirs[1:]),
+            argv=_replace_argv_value(
+                built.argv, built.add_dirs[0], str(worktree / ".ce")
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            sandbox="workspace-write",
+            argv=_replace_argv_value(
+                built.argv, built.sandbox, "workspace-write"
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            run_id="../escape",
+            output=str(worktree.parent / "escape.json"),
+            argv=_replace_argv_value(
+                built.argv, built.output, str(worktree.parent / "escape.json")
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            run_id="bad/slash",
+            output=str(worktree / ".ce" / "state" / "bad" / "slash.json"),
+            argv=_replace_argv_value(
+                built.argv,
+                built.output,
+                str(worktree / ".ce" / "state" / "bad" / "slash.json"),
+            ),
+        ),
+        lambda built, worktree: replace(
+            built,
+            binary="/tmp/untrusted-codex",
+            model="untrusted-model",
+            effort="low",
+            add_dirs=(str(worktree / ".ce"), *built.add_dirs[1:]),
+            argv=_replace_argv_value(
+                _replace_argv_value(
+                    _replace_argv_value(
+                        ("/tmp/untrusted-codex", *built.argv[1:]),
+                        built.model,
+                        "untrusted-model",
+                    ),
+                    f"model_reasoning_effort={built.effort}",
+                    "model_reasoning_effort=low",
+                ),
+                built.add_dirs[0],
+                str(worktree / ".ce"),
+            ),
+        ),
+    ],
+    ids=[
+        "binary-plus-argv",
+        "model-plus-argv",
+        "effort-plus-argv",
+        "add-dirs-plus-argv",
+        "sandbox-plus-argv",
+        "traversal-run-id-output-plus-argv",
+        "malformed-run-id-output-plus-argv",
+        "combined-policy-derived-fields-plus-argv",
+    ],
+)
+def test_launch_refuses_coordinated_plan_and_argv_mutation_before_runner(
+    worktree: Path, mutation
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    runner = RecordingRunner()
+
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
+        launcher.launch(
+            mutation(built, worktree),
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("node_kind", ["symlink", "directory"])
+def test_launch_refuses_coordinated_existing_output_node_before_runner(
+    worktree: Path, node_kind: str
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    run_id = "coordinated-output-node"
+    output = worktree / ".ce" / "state" / f"{run_id}.json"
+    if node_kind == "symlink":
+        outside = worktree.parent / "outside-output.json"
+        outside.write_text("outside\n", encoding="utf-8")
+        output.symlink_to(outside)
+    else:
+        output.mkdir()
+    mutated = replace(
+        built,
+        run_id=run_id,
+        output=str(output),
+        argv=_replace_argv_value(built.argv, built.output, str(output)),
+    )
+    runner = RecordingRunner()
+
+    with pytest.raises(
+        launcher.CodexWorkerLaunchError,
+        match="complete launch plan and executable argv are not canonical",
+    ):
+        launcher.launch(
+            mutated,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        ("OPENAI_API_KEY",),
+        ("OPENAI_API_KEY", "OPENAI_API_KEY"),
+        ("OPENAI_API_KEY", "GITHUB_TOKEN"),
+    ],
+    ids=["empty-to-provider", "duplicate", "cross-role"],
+)
+def test_launch_refuses_reviewer_credential_tuple_mutation_before_runner(
+    worktree: Path, credentials: tuple[str, ...]
+) -> None:
+    worker_input = governed_input(worktree, role="reviewer")
+    built = plan(worktree, governed_input=worker_input, role="reviewer")
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(built, provider_credential_env_names=credentials),
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        (),
+        ("OPENAI_API_KEY", "OPENAI_API_KEY"),
+        ("GITHUB_TOKEN",),
+    ],
+    ids=["provider-to-empty", "duplicate", "cross-role"],
+)
+def test_launch_refuses_provider_role_credential_tuple_mutation_before_runner(
+    worktree: Path, credentials: tuple[str, ...]
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input, role="architect_research")
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(built, provider_credential_env_names=credentials),
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+def test_launch_refuses_reordered_role_credential_tuple_before_runner(
+    worktree: Path, monkeypatch
+) -> None:
+    second_name = "SECOND_PROVIDER_KEY"
+    monkeypatch.setattr(
+        launcher,
+        "ALLOWED_MODEL_PROVIDER_CREDENTIAL_ENV_NAMES",
+        frozenset({"OPENAI_API_KEY", second_name}),
+    )
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["role_provider_credentials"].__setitem__(
+            "architect_research", ["OPENAI_API_KEY", second_name]
+        ),
+    )
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input, role="architect_research")
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            replace(
+                built,
+                provider_credential_env_names=(second_name, "OPENAI_API_KEY"),
+            ),
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("mutation", ["replace", "symlink", "remove", "oversize"])
+def test_launch_reopens_and_rebinds_canonical_role_policy_before_runner(
+    worktree: Path, mutation: str
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    role_path = Path(worker_input.role_policy_path)
+    if mutation == "replace":
+        role_path.write_bytes(b"# replaced after planning\n")
+    elif mutation == "symlink":
+        role_path.unlink()
+        role_path.symlink_to(worktree / ".claude" / "agents" / "reviewer.md")
+    elif mutation == "remove":
+        role_path.unlink()
+    else:
+        role_path.write_bytes(b"x" * (launcher.MAX_ROLE_POLICY_BYTES + 1))
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("mutation", ["same-byte-replace", "chmod"])
+def test_launch_refuses_role_policy_identity_or_mode_drift_before_runner(
+    worktree: Path, mutation: str
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    role_path = Path(worker_input.role_policy_path)
+    if mutation == "same-byte-replace":
+        replacement = role_path.with_suffix(".replacement")
+        replacement.write_bytes(role_path.read_bytes())
+        replacement.chmod(role_path.stat().st_mode)
+        replacement.replace(role_path)
+    else:
+        role_path.chmod(role_path.stat().st_mode ^ 0o022)
+    runner = RecordingRunner()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+
+    assert runner.calls == []
+
+
+def test_launch_refuses_role_policy_ownership_drift_before_runner(worktree: Path) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    runner = RecordingRunner()
+
+    class OwnershipDriftFilesystem(HermeticFilesystem):
+        def read_bytes_with_binding(self, path: str, *, max_bytes: int | None = None):
+            payload, binding = super().read_bytes_with_binding(path, max_bytes=max_bytes)
+            if os.path.normpath(path) == worker_input.role_policy_path:
+                binding = replace(binding, uid=binding.uid + 1)
+            return payload, binding
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="launch envelope"):
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=OwnershipDriftFilesystem(),
+        )
+
+    assert runner.calls == []
 
 
 @pytest.mark.parametrize("digest", ["A" * 64, "f" * 63, "0" * 64])
@@ -728,11 +1896,27 @@ def test_binary_preflight_refuses_missing_nonexecutable_escape_or_version_mismat
 
 
 def test_only_explicit_launch_calls_injected_runner_with_verified_bytes(worktree: Path) -> None:
+    binary = worktree.parent / "codex" / "0.145.0-alpha.9" / "bin" / "codex"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    rewrite_policy(
+        worktree,
+        lambda raw: raw["venues"]["dev1-local"].__setitem__(
+            "codex_binary_template",
+            str(binary).replace("0.145.0-alpha.9", "{version}"),
+        ),
+    )
     runner = RecordingRunner()
     worker_input = governed_input(worktree, role="architect_research")
     built = plan(worktree, governed_input=worker_input)
     assert runner.calls == []
-    assert launcher.launch(built, governed_input=worker_input, runner=runner) == 0
+    assert launcher.launch(
+        built,
+        request=launch_request_from_plan(built),
+        governed_input=worker_input,
+        runner=runner,
+    ) == 0
     assert runner.calls == [(built.argv, worker_input.stdin)]
 
 
