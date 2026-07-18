@@ -406,8 +406,6 @@ KNOWN_SHARED_OR_FOREIGN_APP_IDS: Mapping[str, str] = {
 }
 RUNTIME_POLICY_BASENAME = "runtime-policy.yaml"
 RUNTIME_POLICY_RECEIPT_BASENAME = "runtime-policy.receipt.json"
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-_CANONICAL_LAUNCHER_POLICY = _REPOSITORY_ROOT / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH
 _BRAIN_GENESIS_ASSERTION_ID = "brain-assertion-genesis-0001"
 _BRAIN_GENESIS_SCOPE = "global"
 _BRAIN_GENESIS_CLAIM = {
@@ -503,10 +501,35 @@ def _atomic_private_write(path: Path, payload: bytes) -> None:
             pass
 
 
+def _validated_repository_root(repository_root: Path) -> Path:
+    """Bind one explicit, canonical source checkout without ambient searching."""
+    root = Path(repository_root)
+    if not root.is_absolute():
+        raise ApplyRefused(
+            "runtime_policy_repository_root_refused",
+            "runtime-policy repository root must be an explicit absolute path",
+        )
+    try:
+        metadata = root.lstat()
+        resolved = root.resolve(strict=True)
+    except OSError as exc:
+        raise ApplyRefused(
+            "runtime_policy_repository_root_refused",
+            "runtime-policy repository root must be an existing real directory",
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode) or resolved != root:
+        raise ApplyRefused(
+            "runtime_policy_repository_root_refused",
+            "runtime-policy repository root must be a canonical real directory",
+        )
+    return root
+
+
 def provision_canonical_runtime_policy(
-    *, state_root: Path, repository_root: Path = _REPOSITORY_ROOT
+    *, state_root: Path, repository_root: Path
 ) -> dict[str, Any]:
     """Validate, copy exact canonical bytes, and emit a compact provenance receipt."""
+    repository_root = _validated_repository_root(repository_root)
     launcher = codex_worker_launcher.load_canonical_policy(str(repository_root))
     binding = launcher.runtime_policy_binding
     source_path = repository_root / binding.source_path
@@ -600,6 +623,7 @@ class ApplyRequest:
     answers: dict[str, Any]
     answers_sha256: str | None
     state_root: Path
+    repository_root: Path = field(default_factory=Path.cwd)
     mode: str = "agent-native"
     detected: Mapping[str, Any] = field(default_factory=dict)
     dependency_probe: Mapping[str, bool] = field(default_factory=dict)
@@ -715,6 +739,7 @@ class ApplyDriver:
         state_root: Path,
         workspace_root: Path,
         provider: str | None,
+        repository_root: Path,
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
     ) -> dict[str, Any]:
         # ce-ops#71 Edit A: the backend is no longer hardwired to ``gvisor-proxy`` —
@@ -722,26 +747,34 @@ class ApplyDriver:
         # ``os-native``, no privileged runtime). The posture records the selection.
         runtime_dir = state_root / ONBOARD_SUBDIR / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        runtime_policy_result = provision_canonical_runtime_policy(state_root=state_root)
-        runtime_policy_path = Path(runtime_policy_result["policy_path"])
         config = {
             "isolation_backend": backend,
             "egress": "deny-by-default",
             "provider": provider,
             "workspace_root": str(workspace_root),
-            "runtime_policy": str(runtime_policy_path),
         }
+        created: list[str] = []
+        if backend == "gvisor-proxy":
+            runtime_policy_result = provision_canonical_runtime_policy(
+                state_root=state_root,
+                repository_root=repository_root,
+            )
+            runtime_policy_path = Path(runtime_policy_result["policy_path"])
+            config["runtime_policy"] = str(runtime_policy_path)
+            created.extend(
+                [
+                    str(runtime_policy_path),
+                    str(runtime_policy_result["receipt_path"]),
+                ]
+            )
         (runtime_dir / "posture.json").write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        created.append(str(runtime_dir / "posture.json"))
         return {
             "ok": True,
-            "created": [
-                str(runtime_policy_path),
-                str(runtime_policy_result["receipt_path"]),
-                str(runtime_dir / "posture.json"),
-            ],
+            "created": created,
         }
 
     def verify_runtime(
@@ -1294,6 +1327,7 @@ def apply_onboard(
     clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     """Run one bounded E2 apply pass and return the deterministic summary."""
+    _validated_repository_root(request.repository_root)
     driver = driver or ApplyDriver()
     invocation_id = invocation_id or str(uuid.uuid4())
     state_root = request.state_root
@@ -1827,6 +1861,7 @@ def _run_leg(
             state_root=request.state_root,
             workspace_root=prepared.workspace_root,
             provider=provider,
+            repository_root=request.repository_root,
             backend=backend,
         )
         if not action.get("ok"):

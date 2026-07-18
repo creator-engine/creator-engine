@@ -122,6 +122,7 @@ def _request(
         answers=answer_doc,
         answers_sha256=v3_installer.content_digest(answer_bytes),
         state_root=tmp_path / "state",
+        repository_root=Path.cwd(),
         dependency_probe=probes or {tool: True for tool in v3_installer.REQUIRED_DEPENDENCIES},
         non_interactive=True,
         spawn_smoke=spawn_smoke,
@@ -196,13 +197,26 @@ class FakeDriver(onboard_apply.ApplyDriver):
         self.calls.append(f"verify_tool:{name}")
         return self.tools.get(name, False)
 
-    def provision_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
+    def provision_runtime(
+        self,
+        *,
+        state_root,
+        workspace_root,
+        provider,
+        repository_root,
+        backend=v3_installer.DEFAULT_ISOLATION_BACKEND,
+    ):
         self.calls.append("provision_runtime")
         self.provisioned_backend = backend
+        self.provisioned_repository_root = repository_root
         # Delegate to the real (pure file-write) provision so posture.json records
         # the resolved backend — exercises ce-ops#71 Edit A end-to-end.
         return super().provision_runtime(
-            state_root=state_root, workspace_root=workspace_root, provider=provider, backend=backend
+            state_root=state_root,
+            workspace_root=workspace_root,
+            provider=provider,
+            repository_root=repository_root,
+            backend=backend,
         )
 
     def verify_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
@@ -627,6 +641,11 @@ def test_solo_pilot_materializes_os_native_with_no_runsc_or_proxy(tmp_path):
         (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
     )
     assert posture_json["isolation_backend"] == "os-native"
+    assert "runtime_policy" not in posture_json
+    assert not (tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml").exists()
+    assert not (
+        tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.receipt.json"
+    ).exists()
 
 
 def test_absent_profile_defaults_to_os_native_posture(tmp_path):
@@ -641,11 +660,101 @@ def test_absent_profile_defaults_to_os_native_posture(tmp_path):
         (tmp_path / "state" / "onboard" / "runtime" / "posture.json").read_text(encoding="utf-8")
     )
     assert posture_json["isolation_backend"] == "os-native"
+    assert "runtime_policy" not in posture_json
+
+
+@pytest.mark.parametrize("backend", ["os-native", "openshell"])
+def test_held_backend_posture_does_not_emit_or_claim_gvisor_policy(tmp_path, backend):
+    driver = onboard_apply.ApplyDriver()
+    result = driver.provision_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        backend=backend,
+        repository_root=Path.cwd(),
+    )
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    posture = json.loads((runtime_dir / "posture.json").read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert posture["isolation_backend"] == backend
+    assert "runtime_policy" not in posture
+    assert not (runtime_dir / "runtime-policy.yaml").exists()
+    assert not (runtime_dir / "runtime-policy.receipt.json").exists()
+    verification = driver.verify_runtime(
+        state_root=tmp_path / "state",
+        workspace_root=tmp_path / "workspace",
+        provider="codex",
+        backend=backend,
+    )
+    assert verification["ok"] is False
+    assert verification["held"] is True
+    assert verification["backend"] == backend
+    assert verification["posture_applied"] is True
+
+
+def test_installed_module_onboarding_uses_explicit_real_checkout_root(
+    tmp_path, monkeypatch
+):
+    checkout = (tmp_path / "explicit-checkout").resolve()
+    for relative in (
+        Path("governance/policies/codex-one-shot-launch-v1.yaml"),
+        Path("governance/policies/runtime/default-controller-v1.yaml"),
+    ):
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(relative.read_bytes())
+    installed_module = (
+        tmp_path
+        / "wheel-site"
+        / "creator_engine_validator"
+        / "onboard_apply.py"
+    )
+    installed_module.parent.mkdir(parents=True)
+    installed_module.write_text("# non-editable installed module location\n", encoding="utf-8")
+    monkeypatch.setattr(onboard_apply, "__file__", str(installed_module))
+    answers = _answers(tmp_path)
+    answers["profile"] = "team"
+    request = replace(
+        _request(tmp_path, answers=answers),
+        repository_root=checkout,
+    )
+    driver = FakeDriver()
+
+    summary = onboard_apply.apply_onboard(
+        request,
+        verifier=_verifier(),
+        driver=driver,
+        invocation_id="installed-wheel-explicit-checkout",
+    )
+
+    assert summary["failed"] == 0
+    assert summary["refused"] == 0
+    assert driver.provisioned_repository_root == checkout
+    assert (
+        tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
+    ).read_bytes() == (
+        checkout / "governance/policies/runtime/default-controller-v1.yaml"
+    ).read_bytes()
+
+
+def test_runtime_policy_repository_root_refuses_relative_or_symlink(tmp_path):
+    checkout_link = tmp_path / "checkout-link"
+    checkout_link.symlink_to(Path.cwd(), target_is_directory=True)
+
+    for repository_root in (Path("."), checkout_link):
+        with pytest.raises(onboard_apply.ApplyRefused, match="repository root"):
+            onboard_apply.provision_canonical_runtime_policy(
+                state_root=tmp_path / "state",
+                repository_root=repository_root,
+            )
 
 
 def test_runtime_posture_copies_canonical_runtime_policy_and_compact_receipt(tmp_path):
     driver = FakeDriver()
-    summary = _apply(tmp_path, driver)
+    answers = _answers(tmp_path)
+    answers["profile"] = "team"
+    summary = _apply(tmp_path, driver, answers=answers)
     assert summary["failed"] == 0
 
     policy_path = tmp_path / "state" / "onboard" / "runtime" / "runtime-policy.yaml"
@@ -675,10 +784,14 @@ def test_runtime_posture_copies_canonical_runtime_policy_and_compact_receipt(tmp
 
 
 def test_runtime_policy_provision_is_byte_idempotent(tmp_path):
-    first = onboard_apply.provision_canonical_runtime_policy(state_root=tmp_path / "state")
+    first = onboard_apply.provision_canonical_runtime_policy(
+        state_root=tmp_path / "state", repository_root=Path.cwd()
+    )
     first_policy = Path(first["policy_path"]).read_bytes()
     first_receipt = Path(first["receipt_path"]).read_bytes()
-    second = onboard_apply.provision_canonical_runtime_policy(state_root=tmp_path / "state")
+    second = onboard_apply.provision_canonical_runtime_policy(
+        state_root=tmp_path / "state", repository_root=Path.cwd()
+    )
     assert Path(second["policy_path"]).read_bytes() == first_policy
     assert Path(second["receipt_path"]).read_bytes() == first_receipt
 
@@ -690,7 +803,9 @@ def test_runtime_policy_provision_refuses_symlink_destination(tmp_path):
     target.write_text("outside\n")
     (runtime / "runtime-policy.yaml").symlink_to(target)
     with pytest.raises(onboard_apply.ApplyFailed, match="destination"):
-        onboard_apply.provision_canonical_runtime_policy(state_root=tmp_path / "state")
+        onboard_apply.provision_canonical_runtime_policy(
+            state_root=tmp_path / "state", repository_root=Path.cwd()
+        )
     assert target.read_text() == "outside\n"
 
 
@@ -701,7 +816,9 @@ def test_runtime_policy_provision_refuses_symlink_destination_parent(tmp_path):
     outside.mkdir()
     (state / "onboard" / "runtime").symlink_to(outside, target_is_directory=True)
     with pytest.raises(onboard_apply.ApplyFailed, match="destination parent"):
-        onboard_apply.provision_canonical_runtime_policy(state_root=state)
+        onboard_apply.provision_canonical_runtime_policy(
+            state_root=state, repository_root=Path.cwd()
+        )
     assert list(outside.iterdir()) == []
 
 

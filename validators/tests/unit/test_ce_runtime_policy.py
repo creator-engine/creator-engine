@@ -10,6 +10,7 @@ import copy
 import hashlib
 from pathlib import Path
 
+import pytest
 import yaml
 
 from creator_engine_validator.checks import registered_checks
@@ -123,6 +124,44 @@ def test_self_asserted_digest_replacement_cannot_forge_semantic_material(tmp_pat
     assert CODE_SEMANTIC_DIGEST_MISMATCH in _codes(
         validate_runtime_policy(record, tmp_path / "default-controller-v1.yaml")
     )
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "mixed-key",
+        "recursive-anchor",
+        "non-finite",
+    ],
+)
+def test_bound_canonical_policy_malformed_semantic_material_fails_closed(
+    tmp_path, malformed
+):
+    if malformed == "mixed-key":
+        record = valid_policy()
+        record[1] = "non-json-key"
+    elif malformed == "recursive-anchor":
+        record = yaml.safe_load("policy_id: default-controller-v1\ncycle: &cycle [*cycle]\n")
+        record["policy_sha"] = "a" * 64
+    else:
+        record = valid_policy()
+        record["policy_id"] = "default-controller-v1"
+        record["timeout"] = float("nan")
+
+    errors = validate_runtime_policy(
+        record, tmp_path / "default-controller-v1.yaml"
+    )
+
+    assert CODE_SEMANTIC_DIGEST_MISMATCH in _codes(errors)
+
+
+def test_unbound_malformed_semantic_material_is_not_canonicalized(tmp_path):
+    record = valid_policy()
+    record[1] = "non-json-key"
+
+    errors = validate_runtime_policy(record, tmp_path / "unbound-policy.yaml")
+
+    assert CODE_SEMANTIC_DIGEST_MISMATCH not in _codes(errors)
 
 
 def test_reformat_is_byte_distinct_but_semantically_stable():

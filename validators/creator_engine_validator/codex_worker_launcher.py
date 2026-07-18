@@ -1233,9 +1233,20 @@ def _load_runtime_policy_evidence(
         raise _runtime_policy_refusal("onboarded policy ownership or mode is insecure")
     if local_bytes != source_bytes:
         raise _runtime_policy_refusal("onboarded policy bytes differ from canonical source")
+    def reject_duplicate_receipt_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        parsed: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise ValueError(f"duplicate runtime policy receipt key: {key}")
+            parsed[key] = value
+        return parsed
+
     try:
-        receipt = json.loads(receipt_bytes)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        receipt = json.loads(
+            receipt_bytes,
+            object_pairs_hook=reject_duplicate_receipt_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise _runtime_policy_refusal("runtime policy receipt is malformed JSON") from exc
     if not isinstance(receipt, dict) or set(receipt) != RUNTIME_RECEIPT_REQUIRED_KEYS:
         raise _runtime_policy_refusal("runtime policy receipt keys are not canonical")
@@ -1251,7 +1262,16 @@ def _load_runtime_policy_evidence(
         "rendered_sha256": binding.source_sha256,
         "schema_version": "1",
     }
-    if receipt != expected_receipt:
+    expected_receipt_bytes = (
+        json.dumps(
+            expected_receipt,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if receipt != expected_receipt or receipt_bytes != expected_receipt_bytes:
         raise _runtime_policy_refusal("runtime policy receipt does not match canonical pins")
     dispatch_relative = binding.dispatch_policy_relative_template.format(
         run_id=request.run_id

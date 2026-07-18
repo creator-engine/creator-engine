@@ -401,6 +401,37 @@ def test_worker_launch_dry_run_is_json_and_never_constructs_a_runner(tmp_path, m
     assert called == []
 
 
+def test_worker_launch_omitted_seat_root_uses_real_worktree_preflight(
+    tmp_path, monkeypatch, capsys
+):
+    worktree, brief, digest = _one_shot_worktree(tmp_path)
+    called = []
+    monkeypatch.chdir(worktree)
+    monkeypatch.setattr(ce_cli, "_make_codex_one_shot_runner", lambda: called.append(True))
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_launcher_filesystem", lambda: __import__(
+            "unit.test_codex_worker_launcher", fromlist=["HermeticFilesystem"]
+        ).HermeticFilesystem()
+    )
+    monkeypatch.setattr(
+        ce_cli, "_make_codex_version_probe", lambda: __import__(
+            "unit.test_codex_worker_launcher", fromlist=["FixedVersionProbe"]
+        ).FixedVersionProbe()
+    )
+
+    assert ce_cli.main([
+        "worker", "launch", "--dry-run", "--json",
+        "--role", "architect_research", "--venue", "dev1-local",
+        "--worktree", str(worktree), "--brief", str(brief),
+        "--brief-sha256", digest, "--run-id", "cli-omitted-seat-root",
+    ]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["seat_repo_root"] == str(worktree)
+    assert payload["runtime_policy_path"].startswith(str(worktree))
+    assert called == []
+
+
 def test_worker_launch_unknown_role_refuses_before_probe_or_runner(
     tmp_path, monkeypatch, capsys
 ) -> None:

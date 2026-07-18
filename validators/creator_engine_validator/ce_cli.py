@@ -849,8 +849,8 @@ def _build_parser() -> argparse.ArgumentParser:
     wlaunch.add_argument("--worktree", required=True, help="absolute allocated worktree path")
     wlaunch.add_argument(
         "--seat-repo-root",
-        default=".",
-        help="real seat repository root containing onboarded runtime policy state (default: cwd)",
+        default=None,
+        help="real seat repository root containing onboarded runtime policy state (default: worktree)",
     )
     wlaunch.add_argument("--brief", required=True, help="regular brief file inside <worktree>/.ce/briefs")
     wlaunch.add_argument(

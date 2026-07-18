@@ -110,6 +110,7 @@ def runtime_policy_semantic_bytes(record: Mapping[str, Any]) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
+        allow_nan=False,
     ).encode("utf-8")
 
 
@@ -483,17 +484,23 @@ def validate_runtime_policy(record: dict[str, Any], path: Path) -> list[Validati
     errors.extend(_check_mounts(record, path))
     errors.extend(_check_secret_allowlist(record, path))
     errors.extend(_check_egress(record, path))
-    asserted = record.get("policy_sha")
-    computed = runtime_policy_semantic_sha256(record)
     requires_bound_digest = (
         record.get("policy_id") == "default-controller-v1"
         or path.name == "default-controller-v1.yaml"
     )
-    if requires_bound_digest and (
-        not isinstance(asserted, str)
-        or not _POLICY_SHA_RE.fullmatch(asserted)
-        or asserted != computed
-    ):
+    digest_matches = False
+    if requires_bound_digest:
+        asserted = record.get("policy_sha")
+        try:
+            computed = runtime_policy_semantic_sha256(record)
+        except (TypeError, ValueError, RecursionError):
+            computed = None
+        digest_matches = bool(
+            isinstance(asserted, str)
+            and _POLICY_SHA_RE.fullmatch(asserted)
+            and asserted == computed
+        )
+    if requires_bound_digest and not digest_matches:
         errors.append(make_error(
             CODE_SEMANTIC_DIGEST_MISMATCH,
             path,

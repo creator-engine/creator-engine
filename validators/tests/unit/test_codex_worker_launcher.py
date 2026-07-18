@@ -2064,6 +2064,41 @@ def test_runtime_policy_evidence_refuses_before_version_probe(
     assert probe.calls == []
 
 
+@pytest.mark.parametrize(
+    "encoding",
+    ["duplicate-key", "whitespace", "reordered"],
+)
+def test_runtime_policy_receipt_refuses_noncanonical_bytes_before_version_probe(
+    worktree: Path, encoding: str
+) -> None:
+    raw = yaml.safe_load(
+        (worktree / launcher.CANONICAL_POLICY_RELATIVE_PATH).read_text()
+    )
+    binding = raw["runtime_policy_binding"]
+    receipt_path = worktree / binding["local_receipt_relative_path"]
+    receipt = json.loads(receipt_path.read_bytes())
+    if encoding == "duplicate-key":
+        members = json.dumps(receipt, sort_keys=True, separators=(",", ":"))[1:-1]
+        payload = (
+            '{"kind":"runtime-policy-provenance-receipt",' + members + "}\n"
+        ).encode("utf-8")
+    elif encoding == "whitespace":
+        payload = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    else:
+        reordered = dict(reversed(tuple(receipt.items())))
+        payload = (
+            json.dumps(reordered, sort_keys=False, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
+    receipt_path.write_bytes(payload)
+    receipt_path.chmod(0o600)
+    probe = FixedVersionProbe()
+
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="runtime policy refused"):
+        plan(worktree, version_probe=probe)
+
+    assert probe.calls == []
+
+
 def test_runtime_policy_refuses_deferred_dgx_before_version_probe(worktree: Path) -> None:
     worker_input = governed_input(worktree, role="architect_research")
     probe = FixedVersionProbe()
