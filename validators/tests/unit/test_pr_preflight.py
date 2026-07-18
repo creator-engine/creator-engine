@@ -1646,3 +1646,189 @@ def test_preflight_keeps_strict_behavior_when_local_pr_body_fallback_unreadable(
     assert "--pr-body-file" not in coupling_call
     assert "could not read local PR body fallback" in out.getvalue()
     assert coupling_chk.CODE_MISSING_TEST in out.getvalue()
+
+
+# --- Governed workflow-permissions audit ---------------------------------
+
+
+def _write_workflow(root: Path, name: str, body: str) -> Path:
+    workflow_dir = root / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    path = workflow_dir / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+_READ_ONLY_WORKFLOW = """\
+name: Read Only
+on:
+  pull_request: {}
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+"""
+
+_WRITE_CAPABLE_WORKFLOW = """\
+name: Write Capable
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - run: 'true'
+"""
+
+
+def test_workflow_permissions_audit_accepts_read_only_governed_profile(tmp_path: Path, monkeypatch):
+    _write_workflow(tmp_path, "read-only.yml", _READ_ONLY_WORKFLOW)
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {"read-only.yml": {"": {"contents": "read", "pull-requests": "read"}}},
+    )
+
+    # No exception == pass.
+    pr_preflight._workflow_permissions_audit(tmp_path)
+
+
+def test_workflow_permissions_audit_accepts_write_capable_governed_profile(tmp_path: Path, monkeypatch):
+    _write_workflow(tmp_path, "write-capable.yml", _WRITE_CAPABLE_WORKFLOW)
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {
+            "write-capable.yml": {
+                "": {"contents": "read"},
+                "jobs.publish": {"contents": "read", "packages": "write"},
+            }
+        },
+    )
+
+    pr_preflight._workflow_permissions_audit(tmp_path)
+
+
+def test_workflow_permissions_audit_discovers_yaml_and_yml_extensions(tmp_path: Path, monkeypatch):
+    _write_workflow(tmp_path, "a.yml", _READ_ONLY_WORKFLOW)
+    _write_workflow(tmp_path, "b.yaml", _READ_ONLY_WORKFLOW)
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {
+            "a.yml": {"": {"contents": "read", "pull-requests": "read"}},
+            "b.yaml": {"": {"contents": "read", "pull-requests": "read"}},
+        },
+    )
+
+    pr_preflight._workflow_permissions_audit(tmp_path)
+
+
+def test_workflow_permissions_audit_rejects_unregistered_workflow_with_permissions(tmp_path: Path, monkeypatch, capsys):
+    _write_workflow(tmp_path, "rogue.yml", _READ_ONLY_WORKFLOW)
+    monkeypatch.setattr(pr_preflight, "GOVERNED_WORKFLOW_PERMISSIONS", {})
+
+    with pytest.raises(RuntimeError, match="workflow permissions audit failed"):
+        pr_preflight._workflow_permissions_audit(tmp_path)
+
+    output = capsys.readouterr().out
+    assert "FAIL rogue.yml: unregistered workflow declares permissions" in output
+    assert ".permissions (top-level)" in output
+
+
+def test_workflow_permissions_audit_rejects_unratified_expansion(tmp_path: Path, monkeypatch, capsys):
+    _write_workflow(tmp_path, "expander.yml", _WRITE_CAPABLE_WORKFLOW)
+    # Registry only sanctions read at the job node; the committed workflow adds
+    # packages: write -> unratified expansion.
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {
+            "expander.yml": {
+                "": {"contents": "read"},
+                "jobs.publish": {"contents": "read"},
+            }
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="workflow permissions audit failed"):
+        pr_preflight._workflow_permissions_audit(tmp_path)
+
+    output = capsys.readouterr().out
+    assert "FAIL expander.yml: permission profile drift" in output
+    assert ".jobs.publish.permissions" in output
+    assert "packages" in output
+
+
+def test_workflow_permissions_audit_rejects_undeclared_block(tmp_path: Path, monkeypatch, capsys):
+    _write_workflow(tmp_path, "write-capable.yml", _WRITE_CAPABLE_WORKFLOW)
+    # Registry omits the job-level block entirely -> undeclared permissions.
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {"write-capable.yml": {"": {"contents": "read"}}},
+    )
+
+    with pytest.raises(RuntimeError, match="workflow permissions audit failed"):
+        pr_preflight._workflow_permissions_audit(tmp_path)
+
+    output = capsys.readouterr().out
+    assert "FAIL write-capable.yml: undeclared permissions block" in output
+    assert ".jobs.publish.permissions" in output
+
+
+def test_workflow_permissions_audit_flags_missing_governed_block(tmp_path: Path, monkeypatch, capsys):
+    _write_workflow(tmp_path, "read-only.yml", _READ_ONLY_WORKFLOW)
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {
+            "read-only.yml": {
+                "": {"contents": "read", "pull-requests": "read"},
+                "jobs.check": {"contents": "write"},
+            }
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="workflow permissions audit failed"):
+        pr_preflight._workflow_permissions_audit(tmp_path)
+
+    output = capsys.readouterr().out
+    assert "governed permissions block" in output
+    assert "is missing from the workflow" in output
+
+
+def test_workflow_permissions_audit_string_form_never_matches_scoped_profile(tmp_path: Path, monkeypatch, capsys):
+    _write_workflow(
+        tmp_path,
+        "shorthand.yml",
+        "name: Shorthand\non:\n  push: {}\npermissions: write-all\njobs:\n"
+        "  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n",
+    )
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {"shorthand.yml": {"": {"contents": "write"}}},
+    )
+
+    with pytest.raises(RuntimeError, match="workflow permissions audit failed"):
+        pr_preflight._workflow_permissions_audit(tmp_path)
+
+    output = capsys.readouterr().out
+    assert "__all__" in output
+
+
+def test_governed_registry_matches_committed_workflows():
+    # The shipped registry must keep the real repository green: every governed
+    # profile audits clean against the checked-in workflows.
+    repo_root = Path(__file__).resolve().parents[3]
+    pr_preflight._workflow_permissions_audit(repo_root)
