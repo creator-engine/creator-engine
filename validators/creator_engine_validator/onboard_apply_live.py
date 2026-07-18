@@ -1255,6 +1255,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         provider: str | None,
         repository_root: Path,
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
+        runtime_policy_binding: onboard_apply.CanonicalRuntimePolicyBinding | None = None,
     ) -> dict[str, Any]:
         """Provision the runtime posture and, for gVisor, the concrete pinned host binaries."""
         runtime_tools: dict[str, str] = {}
@@ -1269,6 +1270,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             provider=provider,
             repository_root=repository_root,
             backend=backend,
+            runtime_policy_binding=runtime_policy_binding,
         )
         if runtime_tools:
             result = dict(result)

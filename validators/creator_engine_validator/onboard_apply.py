@@ -638,41 +638,173 @@ def _validated_repository_root(repository_root: Path) -> Path:
     return root
 
 
-def provision_canonical_runtime_policy(
-    *, state_root: Path, repository_root: Path
-) -> dict[str, Any]:
-    """Validate, copy exact canonical bytes, and emit a compact provenance receipt."""
-    repository_root = _validated_repository_root(repository_root)
-    launcher = codex_worker_launcher.load_canonical_policy(str(repository_root))
-    binding = launcher.runtime_policy_binding
-    source_path = repository_root / binding.source_path
-    source_bytes = _read_regular_nofollow(source_path)
-    if hashlib.sha256(source_bytes).hexdigest() != binding.source_sha256:
-        raise ApplyFailed("runtime_policy_source_digest_mismatch", "canonical runtime-policy source digest mismatch")
+@dataclass(frozen=True)
+class CanonicalRuntimePolicyBinding:
+    """Immutable canonical bytes admitted before any apply-side mutation."""
+
+    repository_root: Path
+    source_path: Path
+    source_relative_path: str
+    source_bytes: bytes
+    source_sha256: str
+    policy_id: str
+    policy_sha: str
+    local_policy_relative_path: str
+    registry_path: Path
+    registry_bytes: bytes
+    registry_sha256: str
+
+
+def _validate_bound_runtime_policy(binding: CanonicalRuntimePolicyBinding) -> None:
+    """Revalidate an immutable binding without reopening checkout material."""
+    if hashlib.sha256(binding.registry_bytes).hexdigest() != binding.registry_sha256:
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "bound launcher registry bytes do not match their admitted digest",
+        )
     try:
-        record = yaml.safe_load(source_bytes)
+        launcher = codex_worker_launcher._parse_policy(
+            binding.registry_bytes,
+            worktree=str(binding.repository_root),
+            source_path=str(binding.registry_path),
+        )
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        raise ApplyRefused(
+            "runtime_policy_registry_invalid",
+            "bound launcher registry bytes are malformed or noncanonical",
+        ) from exc
+    registry_binding = launcher.runtime_policy_binding
+    if (
+        launcher.source_sha256 != binding.registry_sha256
+        or binding.registry_path
+        != binding.repository_root / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH
+        or binding.source_path != binding.repository_root / registry_binding.source_path
+        or binding.source_relative_path != registry_binding.source_path
+        or binding.source_sha256 != registry_binding.source_sha256
+        or binding.policy_id != registry_binding.policy_id
+        or binding.policy_sha != registry_binding.policy_sha
+        or binding.local_policy_relative_path
+        != registry_binding.local_policy_relative_path
+    ):
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "bound canonical runtime-policy identity does not match strict registry bytes",
+        )
+    if hashlib.sha256(binding.source_bytes).hexdigest() != binding.source_sha256:
+        raise ApplyRefused(
+            "runtime_policy_source_digest_mismatch",
+            "bound canonical runtime-policy bytes do not match their admitted digest",
+        )
+    try:
+        record = yaml.safe_load(binding.source_bytes)
     except yaml.YAMLError as exc:
-        raise ApplyFailed("runtime_policy_source_invalid", "canonical runtime-policy source is malformed") from exc
-    if not isinstance(record, dict) or ce_runtime_policy.validate_runtime_policy(record, source_path):
-        raise ApplyFailed("runtime_policy_source_invalid", "canonical runtime-policy source fails validation")
-    if record.get("policy_id") != binding.policy_id or record.get("policy_sha") != binding.policy_sha:
-        raise ApplyFailed("runtime_policy_registry_mismatch", "canonical runtime-policy identity does not match registry")
-    registry_bytes = _read_regular_nofollow(repository_root / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH)
+        raise ApplyRefused(
+            "runtime_policy_source_invalid",
+            "canonical runtime-policy source is malformed",
+        ) from exc
+    if not isinstance(record, dict) or ce_runtime_policy.validate_runtime_policy(
+        record, binding.source_path
+    ):
+        raise ApplyRefused(
+            "runtime_policy_source_invalid",
+            "canonical runtime-policy source fails validation",
+        )
+    if (
+        record.get("policy_id") != binding.policy_id
+        or record.get("policy_sha") != binding.policy_sha
+        or ce_runtime_policy.runtime_policy_semantic_sha256(record) != binding.policy_sha
+    ):
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "canonical runtime-policy semantic identity does not match registry",
+        )
+
+
+def bind_canonical_runtime_policy(
+    repository_root: Path,
+) -> CanonicalRuntimePolicyBinding:
+    """Preflight and capture exact canonical policy and strict registry bytes."""
+    repository_root = _validated_repository_root(repository_root)
+    try:
+        launcher = codex_worker_launcher.load_canonical_policy(str(repository_root))
+    except codex_worker_launcher.CodexWorkerLaunchError as exc:
+        raise ApplyRefused(
+            "runtime_policy_registry_invalid",
+            "canonical launcher registry is missing, malformed, or noncanonical",
+        ) from exc
+
+    binding = launcher.runtime_policy_binding
+    registry_path = repository_root / codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH
+    source_path = repository_root / binding.source_path
+    try:
+        registry_bytes = _read_regular_nofollow(
+            registry_path, max_bytes=codex_worker_launcher.MAX_RUNTIME_POLICY_BYTES
+        )
+    except (ApplyFailed, OSError) as exc:
+        raise ApplyRefused(
+            "runtime_policy_registry_invalid",
+            "canonical launcher registry cannot be read as a regular file",
+        ) from exc
     registry_sha = hashlib.sha256(registry_bytes).hexdigest()
     if registry_sha != launcher.source_sha256:
-        raise ApplyFailed("runtime_policy_registry_mismatch", "launcher registry changed during provisioning")
+        raise ApplyRefused(
+            "runtime_policy_registry_mismatch",
+            "canonical launcher registry changed during admission",
+        )
+    try:
+        source_bytes = _read_regular_nofollow(
+            source_path, max_bytes=codex_worker_launcher.MAX_RUNTIME_POLICY_BYTES
+        )
+    except (ApplyFailed, OSError) as exc:
+        raise ApplyRefused(
+            "runtime_policy_source_invalid",
+            "canonical runtime-policy source is missing or unreadable",
+        ) from exc
+
+    admitted = CanonicalRuntimePolicyBinding(
+        repository_root=repository_root,
+        source_path=source_path,
+        source_relative_path=binding.source_path,
+        source_bytes=source_bytes,
+        source_sha256=binding.source_sha256,
+        policy_id=binding.policy_id,
+        policy_sha=binding.policy_sha,
+        local_policy_relative_path=binding.local_policy_relative_path,
+        registry_path=registry_path,
+        registry_bytes=registry_bytes,
+        registry_sha256=registry_sha,
+    )
+    _validate_bound_runtime_policy(admitted)
+    return admitted
+
+
+def provision_canonical_runtime_policy(
+    *,
+    state_root: Path,
+    repository_root: Path,
+    binding: CanonicalRuntimePolicyBinding | None = None,
+) -> dict[str, Any]:
+    """Copy pre-admitted exact bytes and emit a compact provenance receipt."""
+    repository_root = _validated_repository_root(repository_root)
+    admitted = binding or bind_canonical_runtime_policy(repository_root)
+    if admitted.repository_root != repository_root:
+        raise ApplyRefused(
+            "runtime_policy_repository_root_mismatch",
+            "bound canonical runtime-policy belongs to a different repository root",
+        )
+    _validate_bound_runtime_policy(admitted)
     policy_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_BASENAME
     receipt_path = state_root / ONBOARD_SUBDIR / "runtime" / RUNTIME_POLICY_RECEIPT_BASENAME
     receipt = {
-        "canonical_source_path": binding.source_path,
-        "canonical_source_sha256": binding.source_sha256,
+        "canonical_source_path": admitted.source_relative_path,
+        "canonical_source_sha256": admitted.source_sha256,
         "kind": codex_worker_launcher.RUNTIME_RECEIPT_KIND,
-        "local_policy_relative_path": binding.local_policy_relative_path,
-        "policy_id": binding.policy_id,
-        "policy_sha": binding.policy_sha,
+        "local_policy_relative_path": admitted.local_policy_relative_path,
+        "policy_id": admitted.policy_id,
+        "policy_sha": admitted.policy_sha,
         "registry_path": codex_worker_launcher.CANONICAL_POLICY_RELATIVE_PATH,
-        "registry_sha256": registry_sha,
-        "rendered_sha256": binding.source_sha256,
+        "registry_sha256": admitted.registry_sha256,
+        "rendered_sha256": admitted.source_sha256,
         "schema_version": "1",
     }
     receipt_bytes = (
@@ -680,16 +812,16 @@ def provision_canonical_runtime_policy(
     ).encode("utf-8")
     _commit_runtime_policy_pair(
         policy_path=policy_path,
-        policy_bytes=source_bytes,
+        policy_bytes=admitted.source_bytes,
         receipt_path=receipt_path,
         receipt_bytes=receipt_bytes,
     )
     return {
         "policy_path": policy_path,
         "receipt_path": receipt_path,
-        "source_sha256": binding.source_sha256,
-        "policy_sha": binding.policy_sha,
-        "registry_sha256": registry_sha,
+        "source_sha256": admitted.source_sha256,
+        "policy_sha": admitted.policy_sha,
+        "registry_sha256": admitted.registry_sha256,
     }
 
 
@@ -726,6 +858,7 @@ class ApplyRequest:
     answers_sha256: str | None
     state_root: Path
     repository_root: Path = field(default_factory=Path.cwd)
+    canonical_runtime_policy: CanonicalRuntimePolicyBinding | None = None
     mode: str = "agent-native"
     detected: Mapping[str, Any] = field(default_factory=dict)
     dependency_probe: Mapping[str, bool] = field(default_factory=dict)
@@ -843,6 +976,7 @@ class ApplyDriver:
         provider: str | None,
         repository_root: Path,
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
+        runtime_policy_binding: CanonicalRuntimePolicyBinding | None = None,
     ) -> dict[str, Any]:
         # ce-ops#71 Edit A: the backend is no longer hardwired to ``gvisor-proxy`` —
         # it is the one RESOLVED from the profile/answers (``solo-pilot`` →
@@ -860,6 +994,7 @@ class ApplyDriver:
             runtime_policy_result = provision_canonical_runtime_policy(
                 state_root=state_root,
                 repository_root=repository_root,
+                binding=runtime_policy_binding,
             )
             runtime_policy_path = Path(runtime_policy_result["policy_path"])
             config["runtime_policy"] = str(runtime_policy_path)
@@ -1437,14 +1572,26 @@ def apply_onboard(
     clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     """Run one bounded E2 apply pass and return the deterministic summary."""
-    _validated_repository_root(request.repository_root)
+    repository_root = _validated_repository_root(request.repository_root)
+    signed = parse_signed_spec(request.spec_bytes, request.explicit_signature)
+    prepared = _prepare(request, signed=signed, verifier=verifier)
+    runtime_policy_binding = request.canonical_runtime_policy
+    if prepared.isolation_backend == "gvisor-proxy":
+        runtime_policy_binding = runtime_policy_binding or bind_canonical_runtime_policy(
+            repository_root
+        )
+        if runtime_policy_binding.repository_root != repository_root:
+            raise ApplyRefused(
+                "runtime_policy_repository_root_mismatch",
+                "bound canonical runtime-policy belongs to a different repository root",
+            )
+        _validate_bound_runtime_policy(runtime_policy_binding)
     driver = driver or ApplyDriver()
     invocation_id = invocation_id or str(uuid.uuid4())
     state_root = request.state_root
-    signed = parse_signed_spec(request.spec_bytes, request.explicit_signature)
     identity = {
-        "target_repo": _target_repo_from_answers(request.schema, request.answers, request.detected),
-        "workspace_root": _workspace_root_from_answers(request.schema, request.answers, request.detected),
+        "target_repo": prepared.target_repo,
+        "workspace_root": str(prepared.workspace_root),
         "install_spec_digest": signed.canonical_sha256,
     }
     with ApplyLock(
@@ -1452,7 +1599,6 @@ def apply_onboard(
         identity,
         request.lock_timeout_seconds,
     ):
-        prepared = _prepare(request, signed=signed, verifier=verifier)
         summary = prepared.summary
         ledger = Ledger(
             state_root / ONBOARD_SUBDIR / LEDGER_BASENAME,
@@ -1480,6 +1626,7 @@ def apply_onboard(
                         workspace_holder,
                         installation_holder,
                         adoption_holder,
+                        runtime_policy_binding,
                     )
                 except ApplyRefused as exc:
                     outcome = LegOutcome(
@@ -1895,6 +2042,7 @@ def _run_leg(
     workspace_holder: dict[str, Path],
     installation_holder: dict[str, int],
     adoption_holder: dict[str, Any],
+    runtime_policy_binding: CanonicalRuntimePolicyBinding | None,
 ) -> LegOutcome:
     # ce-ops#85 mode gate (E2 §6 seam 1; LegOutcome shape unchanged): in an authorized
     # adoption run the greenfield FORGE legs skip ("brownfield_adoption_mode"); in every
@@ -1973,6 +2121,7 @@ def _run_leg(
             provider=provider,
             repository_root=request.repository_root,
             backend=backend,
+            runtime_policy_binding=runtime_policy_binding,
         )
         if not action.get("ok"):
             raise ApplyFailed("runtime_posture_apply_failed", str(action.get("reason", "runtime provisioning failed")))

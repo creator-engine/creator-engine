@@ -3608,6 +3608,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
     # ``team``/``gvisor-proxy`` behavior is unchanged.
     isolation_backend = v3_installer.resolve_onboard_isolation_backend(profile=merged.value("profile"))
     repository_root_arg = getattr(args, "repository_root", None)
+    canonical_runtime_policy = None
     if apply_mode and isolation_backend == "gvisor-proxy" and not repository_root_arg:
         return _emit(
             args,
@@ -3639,6 +3640,18 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
         # request value for the common driver signature without treating cwd as
         # a canonical policy source.
         canonical_repository_root = Path.cwd().resolve()
+    if apply_mode and isolation_backend == "gvisor-proxy":
+        try:
+            canonical_runtime_policy = onboard_apply.bind_canonical_runtime_policy(
+                canonical_repository_root
+            )
+        except onboard_apply.ApplyRefused as exc:
+            return _emit(
+                args,
+                1,
+                [f"{_BRAND} · onboard apply REFUSED: {exc.detail}"],
+                {"error": "refused", "code": exc.code, "detail": exc.detail},
+            )
     backend_deps = v3_installer.BACKEND_DEPS[isolation_backend]
     probe = {tool: _which(tool) for tool in backend_deps}
     dep_plan = v3_installer.plan_dependencies(isolation_backend, probe)
@@ -3849,6 +3862,7 @@ def _cmd_onboard(args: argparse.Namespace) -> int:
             answers_sha256=answers_sha,
             state_root=Path(args.root),
             repository_root=canonical_repository_root,
+            canonical_runtime_policy=canonical_runtime_policy,
             mode=args.mode,
             detected=detected,
             dependency_probe=probe,

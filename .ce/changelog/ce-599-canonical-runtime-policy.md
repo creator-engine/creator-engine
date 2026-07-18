@@ -22,3 +22,9 @@ through both the console and live-driver paths, refuses held-backend reruns
 while launchable gVisor evidence exists, and stages policy/receipt replacements
 with recoverable last-known-good semantics across write and verification
 failures.
+
+Canonical launcher-registry bytes, runtime-policy source bytes, and semantic
+identity are now preflighted and captured before the apply lock or live-driver
+selection. Runtime provisioning reuses that immutable binding, so a missing,
+malformed, stale, or mismatched explicit checkout refuses without state writes
+or host-tool mutation and is never retrusted from a later checkout read.

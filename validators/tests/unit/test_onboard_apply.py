@@ -207,6 +207,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
         provider,
         repository_root,
         backend=v3_installer.DEFAULT_ISOLATION_BACKEND,
+        runtime_policy_binding=None,
     ):
         self.calls.append("provision_runtime")
         self.provisioned_backend = backend
@@ -219,6 +220,7 @@ class FakeDriver(onboard_apply.ApplyDriver):
             provider=provider,
             repository_root=repository_root,
             backend=backend,
+            runtime_policy_binding=runtime_policy_binding,
         )
 
     def verify_runtime(self, *, state_root, workspace_root, provider, backend=v3_installer.DEFAULT_ISOLATION_BACKEND):
@@ -2249,6 +2251,132 @@ def test_noneditable_console_apply_binds_explicit_canonical_checkout_outside_sou
     ).read_bytes() == (
         checkout / "governance/policies/runtime/default-controller-v1.yaml"
     ).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "invalid_material",
+    (
+        "missing_source",
+        "malformed_source",
+        "stale_source_bytes",
+        "mismatched_source_identity",
+        "malformed_registry",
+        "mismatched_registry_binding",
+    ),
+)
+def test_noneditable_console_invalid_canonical_checkout_refuses_before_any_side_effect(
+    tmp_path, capsys, monkeypatch, invalid_material
+):
+    source_root = Path.cwd().resolve()
+    checkout = (tmp_path / "canonical-checkout").resolve()
+    registry_relative = Path("governance/policies/codex-one-shot-launch-v1.yaml")
+    policy_relative = Path("governance/policies/runtime/default-controller-v1.yaml")
+    for relative in (registry_relative, policy_relative):
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((source_root / relative).read_bytes())
+
+    policy_path = checkout / policy_relative
+    registry_path = checkout / registry_relative
+    if invalid_material == "missing_source":
+        policy_path.unlink()
+    elif invalid_material == "malformed_source":
+        policy_path.write_bytes(b"[unterminated\n")
+    elif invalid_material == "stale_source_bytes":
+        policy_path.write_bytes(policy_path.read_bytes() + b"# stale checkout\n")
+    elif invalid_material == "mismatched_source_identity":
+        policy = yaml.safe_load(policy_path.read_bytes())
+        policy["policy_sha"] = "0" * 64
+        mutated_policy = yaml.safe_dump(policy, sort_keys=False).encode("utf-8")
+        policy_path.write_bytes(mutated_policy)
+        registry = yaml.safe_load(registry_path.read_bytes())
+        registry["runtime_policy_binding"]["source_sha256"] = hashlib.sha256(
+            mutated_policy
+        ).hexdigest()
+        registry_path.write_text(
+            yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+        )
+    elif invalid_material == "malformed_registry":
+        registry_path.write_bytes(b"[unterminated\n")
+    else:
+        registry = yaml.safe_load(registry_path.read_bytes())
+        registry["runtime_policy_binding"]["source_sha256"] = "0" * 64
+        registry_path.write_text(
+            yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+        )
+
+    spec = (tmp_path / "signed-install.md").resolve()
+    spec.write_bytes(_signed_spec())
+    answer_doc = _answers(tmp_path)
+    answer_doc["profile"] = "team"
+    answers = (tmp_path / "answers.yaml").resolve()
+    answers.write_text(yaml.safe_dump(answer_doc, sort_keys=True), encoding="utf-8")
+    schema = (source_root / "schemas/install-answers.schema.yaml").resolve()
+    outside = (tmp_path / "outside-source").resolve()
+    outside.mkdir()
+    wheel_module = (
+        tmp_path / "wheel-site" / "creator_engine_validator" / "v3_cli.py"
+    ).resolve()
+    wheel_module.parent.mkdir(parents=True)
+    wheel_module.write_text("# installed console module\n", encoding="utf-8")
+
+    selected = FakeDriver()
+    selector_calls = []
+    pinned_tool_ensure_calls = []
+
+    def select_driver(*, merged, policy_sha, adoption):
+        selector_calls.append(
+            {"merged": merged, "policy_sha": policy_sha, "adoption": adoption}
+        )
+        return selected
+
+    monkeypatch.setattr(v3_cli, "_select_onboard_apply_driver", select_driver)
+    monkeypatch.setattr(
+        onboard_apply_live.LiveForgeApplyDriver,
+        "_ensure_pinned_system_tools",
+        lambda *_args, **_kwargs: pinned_tool_ensure_calls.append(True),
+    )
+    monkeypatch.setattr(v3_cli, "_ssh_keygen_verify_runner", lambda **_kw: True)
+    monkeypatch.setattr(
+        v3_cli,
+        "_detect_brownfield_project",
+        lambda _root: _brownfield_probe_without_origin(),
+    )
+    monkeypatch.setattr(v3_cli.shutil, "which", lambda _tool: "/usr/bin/tool")
+    monkeypatch.setattr(v3_cli, "_which", lambda tool: tool != "claude")
+    monkeypatch.setattr(v3_cli, "__file__", str(wheel_module))
+    monkeypatch.setattr(
+        onboard_apply, "__file__", str(wheel_module.with_name("onboard_apply.py"))
+    )
+    monkeypatch.chdir(outside)
+
+    state_root = tmp_path / "state"
+    code = v3_cli.main(
+        [
+            "install",
+            "--spec",
+            str(spec),
+            "--answers",
+            str(answers),
+            "--answers-schema",
+            str(schema),
+            "--apply",
+            "--non-interactive",
+            "--repository-root",
+            str(checkout),
+            "--root",
+            str(state_root),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert payload["code"].startswith("runtime_policy_")
+    assert not state_root.exists()
+    assert selector_calls == []
+    assert selected.calls == []
+    assert pinned_tool_ensure_calls == []
 
 
 # ---------------------------------------------------------------------------
