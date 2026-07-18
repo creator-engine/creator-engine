@@ -465,7 +465,7 @@ def decide_automerge(
     brain_ledger_head_text: str | None = None,
     repo_root: str | Path = ".",
     work_unit_receipt: Mapping[str, Any] | None = None,
-    work_unit_required: bool = False,
+    work_unit_required: bool = True,
 ) -> AutoMergeDecision:
     """Return an ``AUTO`` or ``GESTURE`` decision without side effects."""
 
@@ -574,10 +574,11 @@ def decide_automerge(
     rationale.append(f"gates={','.join(gates)}")
 
     auto_blockers: list[str] = []
-    if work_unit_required:
-        receipt_evidence = work_unit_receipt_evidence(work_unit_receipt, policy_sha256=resolved_policy.policy_sha)
-        if not receipt_evidence["valid"]:
-            auto_blockers.append(f"work_unit_receipt_{receipt_evidence['reason']}")
+    # CE603 is an A2/A3 admission predicate. Keep the legacy argument for
+    # call compatibility, but never permit it to bypass the fail-closed check.
+    receipt_evidence = work_unit_receipt_evidence(work_unit_receipt, policy_sha256=resolved_policy.policy_sha)
+    if not receipt_evidence["valid"]:
+        auto_blockers.append(f"work_unit_receipt_{receipt_evidence['reason']}")
     if not gates_auto_only:
         auto_blockers.append("gates_not_auto_back_gate_only")
     if not checks_green:
@@ -721,6 +722,7 @@ def emit_automerge_dry_run_decision(
     brain_ledger_base_text: str | None = None,
     brain_ledger_head_text: str | None = None,
     repo_root: str | Path = ".",
+    work_unit_receipt: Mapping[str, Any] | None = None,
 ) -> AutoMergeDecision:
     """Write a dry-run decision JSON record and return the decision."""
 
@@ -744,6 +746,8 @@ def emit_automerge_dry_run_decision(
         brain_ledger_base_text=brain_ledger_base_text,
         brain_ledger_head_text=brain_ledger_head_text,
         repo_root=repo_root,
+        work_unit_receipt=work_unit_receipt,
+        work_unit_required=True,
     )
     decisions_dir = Path(output_dir) if output_dir is not None else Path(resolved_policy.decisions_dir)
     decisions_dir.mkdir(parents=True, exist_ok=True)
