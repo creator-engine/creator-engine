@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import re
 import ast
 from dataclasses import replace
@@ -988,6 +989,116 @@ def test_runtime_policy_reprovision_failure_preserves_last_known_good_pair(
     assert receipt_path.read_bytes() == original_receipt
     assert not list(policy_path.parent.glob(".*.tmp.*"))
     assert not list(policy_path.parent.glob(".*.backup.*"))
+
+
+@pytest.mark.parametrize("failing_restore", ["policy", "receipt", "both"])
+def test_runtime_policy_recovery_rename_failure_is_best_effort_and_preserves_backups(
+    tmp_path, monkeypatch, failing_restore
+):
+    state_root = tmp_path / "state"
+    first = onboard_apply.provision_canonical_runtime_policy(
+        state_root=state_root, repository_root=Path.cwd()
+    )
+    policy_path = Path(first["policy_path"])
+    receipt_path = Path(first["receipt_path"])
+    original_policy = policy_path.read_bytes()
+    original_receipt = receipt_path.read_bytes()
+
+    original_replace = onboard_apply.os.replace
+    replace_calls = 0
+
+    def fail_second_replace(source, destination):
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 2:
+            raise OSError("injected second replace failure")
+        return original_replace(source, destination)
+
+    original_rename = onboard_apply.os.rename
+    failing_names = {
+        "policy": {policy_path.name},
+        "receipt": {receipt_path.name},
+        "both": {policy_path.name, receipt_path.name},
+    }[failing_restore]
+    attempted_restores: list[str] = []
+
+    def fail_selected_recovery_rename(source, destination, **kwargs):
+        attempted_restores.append(Path(destination).name)
+        if Path(destination).name in failing_names:
+            raise OSError("injected recovery rename failure")
+        return original_rename(source, destination, **kwargs)
+
+    monkeypatch.setattr(onboard_apply.os, "replace", fail_second_replace)
+    monkeypatch.setattr(onboard_apply.os, "rename", fail_selected_recovery_rename)
+
+    with pytest.raises(onboard_apply.ApplyFailed) as caught:
+        onboard_apply.provision_canonical_runtime_policy(
+            state_root=state_root, repository_root=Path.cwd()
+        )
+
+    assert caught.value.code == "runtime_policy_recovery_failed"
+    assert str(caught.value.__cause__) == "injected second replace failure"
+    # Best effort: the second restore is attempted even after the first fails.
+    assert attempted_restores == [policy_path.name, receipt_path.name]
+    # The destination pair itself stays byte-consistent last-known-good.
+    assert policy_path.read_bytes() == original_policy
+    assert receipt_path.read_bytes() == original_receipt
+    # Every failed restore keeps its last-known-good recovery link on disk
+    # instead of unlinking it during cleanup.
+    preserved = {
+        candidate.name.split(".backup.")[0]: candidate.read_bytes()
+        for candidate in policy_path.parent.glob(".*.backup.*")
+    }
+    assert preserved == {
+        name: bytes_
+        for name, bytes_ in (
+            (f".{policy_path.name}", original_policy),
+            (f".{receipt_path.name}", original_receipt),
+        )
+        if name.removeprefix(".") in failing_names
+    }
+    assert not list(policy_path.parent.glob(".*.tmp.*"))
+
+
+def test_runtime_policy_existing_pair_mode_check_uses_symlink_metadata(
+    tmp_path, monkeypatch
+):
+    state_root = tmp_path / "state"
+    first = onboard_apply.provision_canonical_runtime_policy(
+        state_root=state_root, repository_root=Path.cwd()
+    )
+    policy_path = Path(first["policy_path"])
+    original_policy = policy_path.read_bytes()
+    aside = policy_path.parent / "aside-runtime-policy.yaml"
+    os.rename(policy_path, aside)
+    policy_path.symlink_to(aside)
+
+    original_read = onboard_apply._read_regular_nofollow
+
+    def follow_symlink_read(path, *args, **kwargs):
+        # Adversarial seam: model the race where the no-follow read admitted
+        # the destination bytes before the name was swapped to a symlink; the
+        # mode check must still refuse on the name's own lstat metadata
+        # instead of following the link to its 0o600 target.
+        if path == policy_path:
+            return aside.read_bytes()
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(onboard_apply, "_read_regular_nofollow", follow_symlink_read)
+    with pytest.raises(onboard_apply.ApplyFailed, match="last-known-good"):
+        onboard_apply.provision_canonical_runtime_policy(
+            state_root=state_root, repository_root=Path.cwd()
+        )
+    assert policy_path.is_symlink()
+    assert aside.read_bytes() == original_policy
+    assert not list(policy_path.parent.glob(".*.backup.*"))
+
+
+def test_runtime_policy_destination_with_parent_traversal_is_refused(tmp_path):
+    nested = tmp_path / "state" / ".." / "state" / "onboard" / "runtime"
+    with pytest.raises(onboard_apply.ApplyFailed, match="normalized"):
+        onboard_apply._ensure_nofollow_directory_path(nested)
+    assert not (tmp_path / "state").exists()
 
 
 def test_runtime_policy_provision_refuses_symlink_destination(tmp_path):

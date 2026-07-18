@@ -439,32 +439,52 @@ def _read_regular_nofollow(path: Path, *, max_bytes: int = 256 * 1024) -> bytes:
         os.close(descriptor)
 
 
+_NOFOLLOW_DIRECTORY_OPEN_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+
+
 def _ensure_nofollow_directory_path(path: Path) -> Path:
-    """Create a directory tree only when every existing component is a real directory."""
+    """Create a directory tree with a dirfd walk so no component can be a symlink."""
     absolute = path.absolute()
-    chain = tuple(reversed((absolute, *absolute.parents)))
+    parts = absolute.parts
+    if any(part in {".", ".."} for part in parts[1:]):
+        raise ApplyFailed(
+            "runtime_policy_destination_refused",
+            "runtime-policy destination path must be absolute and normalized",
+        )
+    if os.open not in os.supports_dir_fd or os.mkdir not in os.supports_dir_fd:
+        raise ApplyFailed(
+            "runtime_policy_destination_refused",
+            "runtime-policy destination cannot be pinned without dir_fd support",
+        )
+    descriptor: int | None = None
     try:
-        for candidate in chain:
-            if os.path.lexists(candidate):
-                metadata = os.lstat(candidate)
-                if not stat.S_ISDIR(metadata.st_mode):
-                    raise ApplyFailed(
-                        "runtime_policy_destination_refused",
-                        "runtime-policy destination parent is not a real directory",
-                    )
-        absolute.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for candidate in chain:
-            metadata = os.lstat(candidate)
-            if not stat.S_ISDIR(metadata.st_mode):
-                raise ApplyFailed(
-                    "runtime_policy_destination_refused",
-                    "runtime-policy destination parent changed during creation",
-                )
+        descriptor = os.open(parts[0], _NOFOLLOW_DIRECTORY_OPEN_FLAGS)
+        for name in parts[1:]:
+            try:
+                os.mkdir(name, mode=0o700, dir_fd=descriptor)
+            except FileExistsError:
+                pass
+            child = os.open(name, _NOFOLLOW_DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise ApplyFailed(
+                "runtime_policy_destination_refused",
+                "runtime-policy destination parent is not a real directory",
+            )
     except OSError as exc:
         raise ApplyFailed(
             "runtime_policy_destination_refused",
             "runtime-policy destination parent cannot be created safely",
         ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     return absolute
 
 
@@ -527,7 +547,10 @@ def _commit_runtime_policy_pair(
     destination changes.  Because a reprovision of one canonical binding has
     identical policy and receipt bytes, replacing the two names cannot expose a
     semantically mixed pair.  Any commit or post-commit verification failure
-    atomically renames both recovery links back over the destinations.
+    atomically renames both recovery links back over the destinations; that
+    restore is best-effort for both names, and a failed restore preserves its
+    recovery link on disk and raises a typed recovery failure chained to the
+    original error.
     """
     policy_path = _ensure_nofollow_directory_path(policy_path.parent) / policy_path.name
     receipt_path = policy_path.parent / receipt_path.name
@@ -543,8 +566,8 @@ def _commit_runtime_policy_pair(
             existing_valid = (
                 _read_regular_nofollow(policy_path) == policy_bytes
                 and _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) == receipt_bytes
-                and stat.S_IMODE(policy_path.stat().st_mode) == 0o600
-                and stat.S_IMODE(receipt_path.stat().st_mode) == 0o600
+                and stat.S_IMODE(os.lstat(policy_path).st_mode) == 0o600
+                and stat.S_IMODE(os.lstat(receipt_path).st_mode) == 0o600
             )
         except (ApplyFailed, OSError):
             existing_valid = False
@@ -578,8 +601,8 @@ def _commit_runtime_policy_pair(
         if (
             _read_regular_nofollow(policy_path) != policy_bytes
             or _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) != receipt_bytes
-            or stat.S_IMODE(policy_path.stat().st_mode) != 0o600
-            or stat.S_IMODE(receipt_path.stat().st_mode) != 0o600
+            or stat.S_IMODE(os.lstat(policy_path).st_mode) != 0o600
+            or stat.S_IMODE(os.lstat(receipt_path).st_mode) != 0o600
         ):
             raise ApplyFailed(
                 "runtime_policy_post_replace_mismatch",
@@ -588,16 +611,34 @@ def _commit_runtime_policy_pair(
     except Exception as exc:
         if commit_started:
             if backup_policy is not None and backup_receipt is not None:
-                os.rename(backup_policy, policy_path)
-                with contextlib.suppress(FileNotFoundError):
-                    backup_policy.unlink()
+                # Best-effort restore of BOTH names: one failed rename must not
+                # abandon the other restore, and a failed restore must keep its
+                # recovery link on disk instead of unlinking last-known-good.
+                recovery_failed = False
+                for backup, destination in (
+                    (backup_policy, policy_path),
+                    (backup_receipt, receipt_path),
+                ):
+                    try:
+                        os.rename(backup, destination)
+                    except OSError:
+                        recovery_failed = True
+                        continue
+                    # A same-inode restore (the destination name was never
+                    # replaced) is a POSIX rename no-op that leaves the
+                    # recovery link behind; drop the leftover name only after
+                    # a successful restore.
+                    with contextlib.suppress(FileNotFoundError):
+                        backup.unlink()
                 backup_policy = None
-                os.rename(backup_receipt, receipt_path)
-                with contextlib.suppress(FileNotFoundError):
-                    backup_receipt.unlink()
                 backup_receipt = None
                 with contextlib.suppress(OSError):
                     _fsync_directory(policy_path.parent)
+                if recovery_failed:
+                    raise ApplyFailed(
+                        "runtime_policy_recovery_failed",
+                        "runtime-policy pair recovery could not restore the last-known-good pair",
+                    ) from exc
             else:
                 for candidate in (policy_path, receipt_path):
                     with contextlib.suppress(FileNotFoundError):

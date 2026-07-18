@@ -1760,70 +1760,167 @@ def _validate_launch_envelope(
         raise CodexWorkerLaunchError(f"launch envelope mismatch: {exc}") from exc
 
 
-def _ensure_private_directory(path: str) -> None:
-    """Create one owned no-follow directory and reject non-directory collisions."""
+_TRUSTED_DIRECTORY_OPEN_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+
+
+def _require_dispatch_dir_fd_support() -> None:
+    """Refuse materialization on hosts that cannot pin every directory handle."""
+    # os.rename is the documented supports_dir_fd sentinel for the shared
+    # rename/replace implementation; os.replace itself is never registered.
+    required = (os.open, os.mkdir, os.rename, os.unlink)
+    if any(operation not in os.supports_dir_fd for operation in required):
+        raise _runtime_policy_refusal(
+            "dispatch policy directories cannot be pinned without dir_fd support"
+        )
+
+
+def _open_trusted_state_root(state_root: str) -> int:
+    """dirfd-walk the validated absolute state root so no component can be a symlink."""
+    parts = Path(state_root).parts
+    if not os.path.isabs(state_root) or any(part in {".", ".."} for part in parts[1:]):
+        raise _runtime_policy_refusal("dispatch policy state root is not canonical")
+    descriptor: int | None = None
     try:
-        os.mkdir(path, mode=0o700)
+        descriptor = os.open(parts[0], _TRUSTED_DIRECTORY_OPEN_FLAGS)
+        for name in parts[1:]:
+            child = os.open(name, _TRUSTED_DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        opened = descriptor
+        descriptor = None
+        return opened
+    except OSError as exc:
+        raise _runtime_policy_refusal("dispatch policy state root cannot be resolved") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _ensure_private_directory(name: str, *, dir_fd: int) -> int:
+    """Create one owned no-follow directory relative to a trusted descriptor."""
+    try:
+        os.mkdir(name, mode=0o700, dir_fd=dir_fd)
     except FileExistsError:
         pass
-    try:
-        metadata = os.lstat(path)
     except OSError as exc:
+        raise _runtime_policy_refusal("dispatch policy directory cannot be created") from exc
+    try:
+        opened = os.open(name, _TRUSTED_DIRECTORY_OPEN_FLAGS, dir_fd=dir_fd)
+    except OSError as exc:
+        raise _runtime_policy_refusal("dispatch policy directory is not a real directory") from exc
+    try:
+        metadata = os.fstat(opened)
+    except OSError as exc:
+        os.close(opened)
         raise _runtime_policy_refusal("dispatch policy directory cannot be inspected") from exc
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+    if not stat.S_ISDIR(metadata.st_mode):
+        os.close(opened)
         raise _runtime_policy_refusal("dispatch policy directory is not a real directory")
     if metadata.st_uid != os.getuid():
+        os.close(opened)
         raise _runtime_policy_refusal("dispatch policy directory owner drifted")
+    return opened
+
+
+def _existing_dispatch_copy_is_verified(
+    name: str, *, evidence: RuntimePolicyEvidence, dir_fd: int
+) -> bool:
+    """Admit an existing dispatch copy only when bytes, mode, and owner all match."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=dir_fd)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise _runtime_policy_refusal("existing dispatch policy is not a regular file") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise _runtime_policy_refusal("existing dispatch policy is not a regular file")
+        payload = bytearray()
+        while len(payload) <= MAX_RUNTIME_POLICY_BYTES:
+            chunk = os.read(
+                descriptor, min(64 * 1024, MAX_RUNTIME_POLICY_BYTES + 1 - len(payload))
+            )
+            if not chunk:
+                break
+            payload.extend(chunk)
+    except OSError as exc:
+        raise _runtime_policy_refusal("existing dispatch policy is not a regular file") from exc
+    finally:
+        os.close(descriptor)
+    if (
+        bytes(payload) != evidence.source_bytes
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid != os.getuid()
+    ):
+        raise _runtime_policy_refusal("existing dispatch policy collision does not match")
+    return True
 
 
 def _materialize_dispatch_policy(evidence: RuntimePolicyEvidence) -> None:
     """Atomically create or verify the immutable per-dispatch policy copy."""
     dispatch = evidence.dispatch_path
-    parent = os.path.dirname(dispatch)
+    dispatch_name = os.path.basename(dispatch)
+    run_directory_name = os.path.basename(os.path.dirname(dispatch))
     state_root = str(Path(dispatch).parents[2])
-    dispatches = os.path.join(state_root, "dispatches")
-    _ensure_private_directory(dispatches)
-    _ensure_private_directory(parent)
-    if os.path.lexists(dispatch):
-        try:
-            payload, binding = RealLauncherFilesystem().read_bytes_with_binding(
-                dispatch, max_bytes=MAX_RUNTIME_POLICY_BYTES
-            )
-        except OSError as exc:
-            raise _runtime_policy_refusal("existing dispatch policy is not a regular file") from exc
-        if payload != evidence.source_bytes or binding.mode != 0o600 or binding.uid != os.getuid():
-            raise _runtime_policy_refusal("existing dispatch policy collision does not match")
-        return
-    temporary = os.path.join(parent, f".runtime-policy.yaml.tmp.{os.getpid()}")
-    flags = (
-        os.O_WRONLY
-        | os.O_CREAT
-        | os.O_EXCL
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
-    descriptor: int | None = None
+    if (
+        dispatch_name in {"", ".", ".."}
+        or run_directory_name in {"", ".", ".."}
+        or dispatch
+        != os.path.normpath(
+            os.path.join(state_root, "dispatches", run_directory_name, dispatch_name)
+        )
+    ):
+        raise _runtime_policy_refusal("dispatch policy path shape is not canonical")
+    _require_dispatch_dir_fd_support()
+    state_fd: int | None = _open_trusted_state_root(state_root)
+    dispatches_fd: int | None = None
+    run_fd: int | None = None
     try:
-        descriptor = os.open(temporary, flags, 0o600)
-        os.write(descriptor, evidence.source_bytes)
-        os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = None
-        os.replace(temporary, dispatch)
-        directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        dispatches_fd = _ensure_private_directory("dispatches", dir_fd=state_fd)
+        run_fd = _ensure_private_directory(run_directory_name, dir_fd=dispatches_fd)
+        if _existing_dispatch_copy_is_verified(
+            dispatch_name, evidence=evidence, dir_fd=run_fd
+        ):
+            return
+        temporary = f".runtime-policy.yaml.tmp.{os.getpid()}"
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor: int | None = None
         try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    except OSError as exc:
-        raise _runtime_policy_refusal("dispatch policy could not be atomically materialized") from exc
-    finally:
-        if descriptor is not None:
+            descriptor = os.open(temporary, flags, 0o600, dir_fd=run_fd)
+            os.write(descriptor, evidence.source_bytes)
+            os.fsync(descriptor)
             os.close(descriptor)
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
+            descriptor = None
+            os.replace(temporary, dispatch_name, src_dir_fd=run_fd, dst_dir_fd=run_fd)
+            os.fsync(run_fd)
+        except OSError as exc:
+            raise _runtime_policy_refusal(
+                "dispatch policy could not be atomically materialized"
+            ) from exc
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            try:
+                os.unlink(temporary, dir_fd=run_fd)
+            except FileNotFoundError:
+                pass
+    finally:
+        for opened in (state_fd, dispatches_fd, run_fd):
+            if opened is not None:
+                os.close(opened)
 
 
 def _verify_runtime_evidence_final(

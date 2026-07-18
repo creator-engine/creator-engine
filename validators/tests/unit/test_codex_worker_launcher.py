@@ -2161,6 +2161,80 @@ def test_runtime_policy_dispatch_copy_is_private_and_idempotent(worktree: Path) 
     assert first.stat().st_mode & 0o777 == 0o600
 
 
+@pytest.mark.parametrize("component", ["dispatches", "run"])
+def test_dispatch_directory_symlink_component_is_refused_before_runner(
+    worktree: Path, component: str
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    state = worktree / ".ce" / "state"
+    outside = worktree / "outside-dispatch-target"
+    outside.mkdir()
+    if component == "dispatches":
+        (state / "dispatches").symlink_to(outside, target_is_directory=True)
+    else:
+        (state / "dispatches").mkdir(mode=0o700)
+        (state / "dispatches" / "test-run").symlink_to(outside, target_is_directory=True)
+    runner = RecordingRunner()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="not a real directory"):
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+    assert runner.calls == []
+    assert list(outside.iterdir()) == []
+
+
+def test_dispatch_materialization_refuses_without_dir_fd_support(
+    worktree: Path, monkeypatch
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+    monkeypatch.setattr(launcher.os, "supports_dir_fd", frozenset())
+    runner = RecordingRunner()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="dir_fd support"):
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+    assert runner.calls == []
+    assert not (worktree / ".ce" / "state" / "dispatches").exists()
+
+
+def test_dispatch_directory_mkdir_permission_error_is_typed_refusal(
+    worktree: Path, monkeypatch
+) -> None:
+    worker_input = governed_input(worktree, role="architect_research")
+    built = plan(worktree, governed_input=worker_input)
+
+    def deny_mkdir(*_args, **_kwargs):
+        raise PermissionError("injected mkdir denial")
+
+    # Keep the dir_fd capability gate satisfied for the patched callable so
+    # the typed wrapping of the mkdir failure itself is what gets exercised.
+    monkeypatch.setattr(
+        launcher.os, "supports_dir_fd", launcher.os.supports_dir_fd | {deny_mkdir}
+    )
+    monkeypatch.setattr(launcher.os, "mkdir", deny_mkdir)
+    runner = RecordingRunner()
+    with pytest.raises(launcher.CodexWorkerLaunchError, match="cannot be created"):
+        launcher.launch(
+            built,
+            request=launch_request_from_plan(built),
+            governed_input=worker_input,
+            runner=runner,
+            filesystem=HermeticFilesystem(),
+        )
+    assert runner.calls == []
+    assert not (worktree / ".ce" / "state" / "dispatches").exists()
+
+
 @pytest.mark.parametrize("returncode", [0, 1])
 def test_production_version_probe_uses_cleanup_bound_credential_free_environment(
     tmp_path: Path, monkeypatch, returncode: int
