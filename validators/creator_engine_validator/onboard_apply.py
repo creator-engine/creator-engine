@@ -468,12 +468,14 @@ def _ensure_nofollow_directory_path(path: Path) -> Path:
     return absolute
 
 
-def _atomic_private_write(path: Path, payload: bytes) -> None:
+def _stage_private_write(path: Path, payload: bytes) -> Path:
+    """Write and verify one private replacement without changing its destination."""
     path = _ensure_nofollow_directory_path(path.parent) / path.name
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise ApplyFailed("runtime_policy_destination_refused", "runtime-policy destination is not a regular file")
-    temporary = path.parent / f".{path.name}.tmp.{os.getpid()}"
+    temporary = path.parent / f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
     descriptor: int | None = None
+    staged = False
     try:
         descriptor = os.open(
             temporary,
@@ -484,21 +486,132 @@ def _atomic_private_write(path: Path, payload: bytes) -> None:
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = None
-        os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        if (
+            _read_regular_nofollow(temporary, max_bytes=max(len(payload), 1)) != payload
+            or stat.S_IMODE(temporary.stat().st_mode) != 0o600
+        ):
+            raise ApplyFailed(
+                "runtime_policy_stage_mismatch",
+                "runtime-policy replacement failed staging verification",
+            )
+        staged = True
+        return temporary
     except OSError as exc:
         raise ApplyFailed("runtime_policy_atomic_write_failed", "runtime-policy atomic write failed") from exc
     finally:
         if descriptor is not None:
             os.close(descriptor)
+        if not staged:
+            with contextlib.suppress(FileNotFoundError):
+                temporary.unlink()
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _commit_runtime_policy_pair(
+    *,
+    policy_path: Path,
+    policy_bytes: bytes,
+    receipt_path: Path,
+    receipt_bytes: bytes,
+) -> None:
+    """Stage a pair, then replace it with recoverable last-known-good semantics.
+
+    A valid existing pair is hard-linked to private recovery names before either
+    destination changes.  Because a reprovision of one canonical binding has
+    identical policy and receipt bytes, replacing the two names cannot expose a
+    semantically mixed pair.  Any commit or post-commit verification failure
+    atomically renames both recovery links back over the destinations.
+    """
+    policy_path = _ensure_nofollow_directory_path(policy_path.parent) / policy_path.name
+    receipt_path = policy_path.parent / receipt_path.name
+    present = tuple(os.path.lexists(path) for path in (policy_path, receipt_path))
+    existing_valid = False
+    if any(present):
+        if not all(present):
+            raise ApplyFailed(
+                "runtime_policy_existing_pair_refused",
+                "runtime-policy destination contains an incomplete existing pair",
+            )
         try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+            existing_valid = (
+                _read_regular_nofollow(policy_path) == policy_bytes
+                and _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) == receipt_bytes
+                and stat.S_IMODE(policy_path.stat().st_mode) == 0o600
+                and stat.S_IMODE(receipt_path.stat().st_mode) == 0o600
+            )
+        except (ApplyFailed, OSError):
+            existing_valid = False
+        if not existing_valid:
+            raise ApplyFailed(
+                "runtime_policy_existing_pair_refused",
+                "runtime-policy destination does not contain a valid last-known-good pair",
+            )
+
+    staged_policy: Path | None = None
+    staged_receipt: Path | None = None
+    backup_policy: Path | None = None
+    backup_receipt: Path | None = None
+    commit_started = False
+    try:
+        staged_policy = _stage_private_write(policy_path, policy_bytes)
+        staged_receipt = _stage_private_write(receipt_path, receipt_bytes)
+        if existing_valid:
+            nonce = f"{os.getpid()}.{uuid.uuid4().hex}"
+            backup_policy = policy_path.parent / f".{policy_path.name}.backup.{nonce}"
+            backup_receipt = receipt_path.parent / f".{receipt_path.name}.backup.{nonce}"
+            os.link(policy_path, backup_policy, follow_symlinks=False)
+            os.link(receipt_path, backup_receipt, follow_symlinks=False)
+
+        commit_started = True
+        os.replace(staged_policy, policy_path)
+        staged_policy = None
+        os.replace(staged_receipt, receipt_path)
+        staged_receipt = None
+        _fsync_directory(policy_path.parent)
+        if (
+            _read_regular_nofollow(policy_path) != policy_bytes
+            or _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) != receipt_bytes
+            or stat.S_IMODE(policy_path.stat().st_mode) != 0o600
+            or stat.S_IMODE(receipt_path.stat().st_mode) != 0o600
+        ):
+            raise ApplyFailed(
+                "runtime_policy_post_replace_mismatch",
+                "runtime-policy pair failed post-replace verification",
+            )
+    except Exception as exc:
+        if commit_started:
+            if backup_policy is not None and backup_receipt is not None:
+                os.rename(backup_policy, policy_path)
+                with contextlib.suppress(FileNotFoundError):
+                    backup_policy.unlink()
+                backup_policy = None
+                os.rename(backup_receipt, receipt_path)
+                with contextlib.suppress(FileNotFoundError):
+                    backup_receipt.unlink()
+                backup_receipt = None
+                with contextlib.suppress(OSError):
+                    _fsync_directory(policy_path.parent)
+            else:
+                for candidate in (policy_path, receipt_path):
+                    with contextlib.suppress(FileNotFoundError):
+                        candidate.unlink()
+        if isinstance(exc, ApplyFailed):
+            raise
+        raise ApplyFailed(
+            "runtime_policy_atomic_write_failed", "runtime-policy atomic pair write failed"
+        ) from exc
+    finally:
+        for candidate in (staged_policy, staged_receipt, backup_policy, backup_receipt):
+            if candidate is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    candidate.unlink()
 
 
 def _validated_repository_root(repository_root: Path) -> Path:
@@ -565,23 +678,12 @@ def provision_canonical_runtime_policy(
     receipt_bytes = (
         json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
     ).encode("utf-8")
-    try:
-        _atomic_private_write(policy_path, source_bytes)
-        _atomic_private_write(receipt_path, receipt_bytes)
-        if (
-            _read_regular_nofollow(policy_path) != source_bytes
-            or _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) != receipt_bytes
-            or stat.S_IMODE(policy_path.stat().st_mode) != 0o600
-            or stat.S_IMODE(receipt_path.stat().st_mode) != 0o600
-        ):
-            raise ApplyFailed("runtime_policy_post_replace_mismatch", "runtime-policy pair failed post-replace verification")
-    except Exception:
-        for candidate in (policy_path, receipt_path):
-            try:
-                candidate.unlink()
-            except FileNotFoundError:
-                pass
-        raise
+    _commit_runtime_policy_pair(
+        policy_path=policy_path,
+        policy_bytes=source_bytes,
+        receipt_path=receipt_path,
+        receipt_bytes=receipt_bytes,
+    )
     return {
         "policy_path": policy_path,
         "receipt_path": receipt_path,
@@ -767,6 +869,14 @@ class ApplyDriver:
                     str(runtime_policy_result["receipt_path"]),
                 ]
             )
+        elif backend in {"os-native", "openshell"}:
+            policy_path = runtime_dir / RUNTIME_POLICY_BASENAME
+            receipt_path = runtime_dir / RUNTIME_POLICY_RECEIPT_BASENAME
+            if os.path.lexists(policy_path) or os.path.lexists(receipt_path):
+                raise ApplyRefused(
+                    "runtime_policy_held_transition_refused",
+                    "held backend transition refused while canonical runtime-policy evidence exists",
+                )
         (runtime_dir / "posture.json").write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",

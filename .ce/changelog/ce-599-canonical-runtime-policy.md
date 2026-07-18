@@ -16,3 +16,9 @@ launches bind an immutable per-dispatch policy copy and recheck source, render,
 receipt, registry, ownership, mode, and descriptor identity at the final
 boundary. The slice does not provision seats, handle subscription credentials,
 enable the deferred DGX venue, or perform any provider login or deployment act.
+
+The production onboarding closure forwards the explicit canonical checkout
+through both the console and live-driver paths, refuses held-backend reruns
+while launchable gVisor evidence exists, and stages policy/receipt replacements
+with recoverable last-known-good semantics across write and verification
+failures.

@@ -1253,6 +1253,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
         state_root: Path,
         workspace_root: Path,
         provider: str | None,
+        repository_root: Path,
         backend: str = v3_installer.DEFAULT_ISOLATION_BACKEND,
     ) -> dict[str, Any]:
         """Provision the runtime posture and, for gVisor, the concrete pinned host binaries."""
@@ -1266,6 +1267,7 @@ class LiveForgeApplyDriver(onboard_apply.ApplyDriver):
             state_root=state_root,
             workspace_root=workspace_root,
             provider=provider,
+            repository_root=repository_root,
             backend=backend,
         )
         if runtime_tools:
