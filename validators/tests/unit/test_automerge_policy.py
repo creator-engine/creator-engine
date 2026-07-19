@@ -386,6 +386,54 @@ def test_docs_envelope_tier_predicate_rejects_code_path() -> None:
     )
 
 
+# ce-ops#619 — extension allow-list deny cases
+def test_docs_envelope_tier_predicate_rejects_python_in_docs() -> None:
+    assert not docs_envelope_tier_matches(["docs/scripts/build.py"])
+
+
+def test_docs_envelope_tier_predicate_rejects_shell_in_docs() -> None:
+    assert not docs_envelope_tier_matches(["docs/hooks/x.sh"])
+
+
+def test_docs_envelope_tier_predicate_rejects_yaml_in_docs() -> None:
+    assert not docs_envelope_tier_matches(["docs/conf.yaml"])
+
+
+def test_docs_envelope_tier_predicate_rejects_no_extension_in_docs() -> None:
+    assert not docs_envelope_tier_matches(["docs/Makefile"])
+
+
+# ce-ops#619 — extension allow-list allow cases
+def test_docs_envelope_tier_predicate_allows_md_in_docs() -> None:
+    assert docs_envelope_tier_matches(["docs/guide.md"])
+
+
+def test_docs_envelope_tier_predicate_allows_root_readme() -> None:
+    assert docs_envelope_tier_matches(["README.md"])
+
+
+def test_docs_envelope_tier_predicate_allows_svg_in_docs() -> None:
+    assert docs_envelope_tier_matches(["docs/img/logo.svg"])
+
+
+def test_docs_envelope_tier_predicate_allows_mixed_valid_set() -> None:
+    assert docs_envelope_tier_matches(
+        [
+            "docs/guide.md",
+            "README.md",
+            "docs/img/logo.svg",
+            ".ce/changelog/ce-619-docs-envelope-allowlist.md",
+            ".ce/pr-manifests/ce-619-docs-envelope-allowlist.md",
+        ]
+    )
+
+
+# ce-ops#619 — extension match is case-insensitive
+def test_docs_envelope_tier_predicate_extension_match_is_case_insensitive() -> None:
+    assert docs_envelope_tier_matches(["docs/screenshot.PNG"])
+    assert not docs_envelope_tier_matches(["docs/script.PY"])
+
+
 def test_brain_supersede_tier_predicate_accepts_real_supersede_fixture() -> None:
     old_text, new_text, _old_records, _new_records = brain_supersede_fixture()
 
