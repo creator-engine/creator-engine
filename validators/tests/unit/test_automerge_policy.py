@@ -5,7 +5,6 @@ import os
 import socket
 import subprocess
 import copy
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -39,101 +38,11 @@ from creator_engine_validator.forge.automerge_policy import (
     save_automerge_policy_state,
 )
 from creator_engine_validator.work_sizing import size_ceremony
-from creator_engine_validator.runner import work_unit_cap
-from creator_engine_validator import side_effect_ledger_runtime as ledger_runtime
-import creator_engine_validator.forge.automerge_policy as automerge_policy
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REQUIRED_CHECK = "Validate governance artifacts"
 HEAD_SHA = "d" * 40
-
-
-def valid_work_unit_receipt(tmp_path: Path | None = None):
-    if tmp_path is None:
-        tmp_path = Path(tempfile.mkdtemp(prefix="ce603-verified-ledger-"))
-    awl_root = tmp_path / ".hermes" / "active-work-ledger"
-    claim_path = awl_root / "claims" / "controller" / "lane.yaml"
-    claim_path.parent.mkdir(parents=True)
-    claim_path.write_text(yaml.safe_dump({
-        "kind": "active-work-ledger-record", "record_type": "claim", "schema_version": "1",
-        "controller_id": "controller", "lane_id": "lane",
-        "record_timestamp": "source-controlled:claims/controller/lane.yaml",
-        "worktree_path": "/worktrees/lane", "envelope_ref": ".hermes/envelopes/lane.md",
-        "lease_seconds": 3600, "claimed_at": "source-controlled:claims/controller/lane.yaml",
-        "last_heartbeat_at": "source-controlled:claims/controller/lane.yaml",
-    }, sort_keys=True), encoding="utf-8")
-    ledger_root = tmp_path / "ledger"
-    reservation = ledger_runtime.reserve_work_unit_reservation(
-        cap=100, run_id="automerge-run", attempt_id="automerge-attempt",
-        reservation_id="automerge-reservation", requested=1,
-        policy_sha256=automerge_policy.default_mutation_policy().policy_sha,
-        recorded_at="2026-07-18T00:00:00Z",
-        occurred_at="2026-07-18T00:00:00Z", repo_root=tmp_path,
-        side_effect_ledger_root=ledger_root, active_work_ledger_root=awl_root,
-        controller_id="controller", lane_id="lane", claim_ref="claims/controller/lane.yaml",
-    )
-    binding = reservation.binding
-    assert binding is not None
-    return binding, {
-        "side_effect_ledger_root": ledger_root,
-        "active_work_ledger_root": awl_root,
-        "controller_id": "controller",
-        "lane_id": "lane",
-        "run_id": "automerge-run",
-        "attempt_id": "automerge-attempt",
-        "reservation_id": "automerge-reservation",
-        "policy_sha256": reservation.receipt["policy_sha256"],
-    }
-
-
-def test_a2_a3_automerge_requires_valid_work_unit_receipt(tmp_path: Path):
-    receipt = work_unit_cap.reserve(
-        (), cap=10, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=1,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z",
-    ).receipt
-    binding, context = valid_work_unit_receipt(tmp_path)
-    assert not automerge_policy.work_unit_receipt_evidence(None, **context)["valid"]
-    assert not automerge_policy.work_unit_receipt_evidence(dict(receipt, source_state="unknown"), **context)["valid"]
-    assert not automerge_policy.work_unit_receipt_evidence(receipt, **context)["valid"]
-    assert automerge_policy.work_unit_receipt_evidence(binding, **context)["valid"]
-
-
-@pytest.mark.parametrize("mutate", [
-    lambda receipt: None,
-    lambda receipt: dict(receipt, receipt_id="0" * 64),
-    lambda receipt: dict(receipt, source_state="late"),
-    lambda receipt: dict(receipt, unit="ce.usd.v1"),
-    lambda receipt: dict(receipt, policy_sha256="b" * 64),
-])
-def test_a2_a3_predicate_is_not_live_in_production_decide_path(mutate, tmp_path: Path) -> None:
-    receipt = work_unit_cap.reserve(
-        (), cap=10, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=1,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z",
-    ).receipt
-    decision = decide_automerge(
-        numstat=numstat_for(["README.md"]), paths=["README.md"], declared_work_class="tiny",
-        policy_state=state_with_flags("docs"), checks=GREEN_CHECKS,
-        work_unit_receipt=mutate(receipt), **canary_identity(),
-    )
-    assert not any(item.startswith("work_unit_receipt_") for item in decision.rationale)
-    bypass = decide_automerge(
-        numstat=numstat_for(["README.md"]), paths=["README.md"], declared_work_class="tiny",
-        policy_state=state_with_flags("docs"), checks=GREEN_CHECKS, work_unit_required=False,
-        **canary_identity(),
-    )
-    assert decision.decision == bypass.decision
-    assert decision.rationale == bypass.rationale
-
-
-def test_a2_a3_bound_receipt_does_not_change_production_decide_path(tmp_path: Path) -> None:
-    binding, _context = valid_work_unit_receipt(tmp_path)
-    decision = decide_automerge(
-        numstat=numstat_for(["README.md"]), paths=["README.md"], declared_work_class="tiny",
-        policy_state=state_with_flags("docs"), checks=GREEN_CHECKS,
-        work_unit_receipt=binding, **canary_identity(),
-    )
-    assert not any(item.startswith("work_unit_receipt_") for item in decision.rationale)
 POLICY_SHA = "a" * 64
 
 ALL_CLASSES = (
@@ -544,7 +453,6 @@ def test_brain_supersede_tier_predicate_accepts_real_supersede_fixture() -> None
         base="main",
         brain_ledger_base_text=old_text,
         brain_ledger_head_text=new_text,
-        work_unit_receipt=valid_work_unit_receipt(),
         **canary_identity(),
     )
 
@@ -691,7 +599,6 @@ def test_composes_classifier_with_size_ceremony_for_docs_auto() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
-        work_unit_receipt=valid_work_unit_receipt(),
         repo="creator-engine/creator-engine",
         branch="ce/docs",
         base="main",
@@ -722,7 +629,6 @@ def test_carrier_changelog_tier_flag_off_blocks_tier_default() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
-        work_unit_receipt=valid_work_unit_receipt(),
         repo="creator-engine/creator-engine",
         branch="ce-412-automerge-tier-a",
         base="main",
@@ -752,7 +658,6 @@ def test_carrier_changelog_tier_auto_payload_includes_audit_fields() -> None:
             enabled_tiers=(AUTOMERGE_TIER_CARRIER_CHANGELOG,),
         ),
         checks=GREEN_CHECKS,
-        work_unit_receipt=valid_work_unit_receipt(),
         repo="creator-engine/creator-engine",
         branch="ce-412-automerge-tier-a",
         base="main",
@@ -780,7 +685,6 @@ def test_mixed_carrier_changelog_path_set_uses_docs_envelope_tier() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
-        work_unit_receipt=valid_work_unit_receipt(),
         repo="creator-engine/creator-engine",
         branch="ce-412-automerge-tier-a",
         base="main",
@@ -799,7 +703,6 @@ def test_docs_envelope_tier_771_path_set_auto_when_docs_class_armed() -> None:
         declared_work_class="tiny",
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
-        work_unit_receipt=valid_work_unit_receipt(),
         repo="creator-engine/creator-engine",
         branch="ce-a3-docs-envelope-automerge",
         base="main",
@@ -902,7 +805,6 @@ def test_decide_returns_auto_with_live_pr_data_when_policy_is_armed() -> None:
         policy_state=state_with_flags("docs", run_mode="ceo"),
         checks=LIVE_GREEN_CHECKS,
         review_decision="APPROVED",
-        work_unit_receipt=valid_work_unit_receipt(),
         pr_number=313,
         head_sha=HEAD_SHA,
         repo="creator-engine/creator-engine",
@@ -926,7 +828,6 @@ def test_canary_work_class_aliases_are_accepted(declared_work_class: str) -> Non
         policy_state=state_with_flags("docs", run_mode="ceo"),
         checks=LIVE_GREEN_CHECKS,
         review_decision="APPROVED",
-        work_unit_receipt=valid_work_unit_receipt(),
         **canary_identity(),
     )
 
@@ -1187,7 +1088,6 @@ def test_dry_run_writes_decision_and_merges_nothing(tmp_path, monkeypatch) -> No
         policy_state=state_with_flags("docs"),
         checks=GREEN_CHECKS,
         output_dir=tmp_path,
-        work_unit_receipt=valid_work_unit_receipt(),
         repo="creator-engine/creator-engine",
         branch="ce/docs",
         base="main",
@@ -1393,7 +1293,6 @@ def test_materialized_decision_reaches_actuator_with_change_ref(
         declared_work_class="tiny",
         policy_state=state,
         checks=GREEN_CHECKS,
-        work_unit_receipt=valid_work_unit_receipt(),
         pr_number=313,
         head_sha=HEAD_SHA,
         repo="strange-loop/creator-engine",

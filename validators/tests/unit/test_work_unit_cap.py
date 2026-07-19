@@ -341,3 +341,22 @@ def test_reconcile_rejects_decreasing_observed_but_accepts_exact_replay():
     assert replay.allowed and replay.receipt == first.receipt
     assert not decreasing.allowed
     assert decreasing.reason == "work_unit_observed_decreased"
+
+
+def test_same_interpreter_can_forge_advisory_binding_without_act_authority():
+    context = ("run-1", "attempt-1", "reservation-1")
+    issued = cap.issue_advisory_binding(context)
+    forged = object.__new__(cap.VerifiedCurrentWorkUnitBinding)
+
+    # The ruling documents ordinary object access/setattr as sufficient to
+    # forge this advisory object in a shared interpreter.
+    object.__getattribute__(issued, "_VerifiedCurrentWorkUnitBinding__ce603_issuance")
+    object.__setattr__(
+        forged,
+        "_VerifiedCurrentWorkUnitBinding__ce603_issuance",
+        lambda candidate: context if candidate is forged else None,
+    )
+    assert cap.advisory_binding_matches(forged, context)
+
+    # No policy act accepts this advisory value; receipt evidence still decides.
+    assert not reserve(requested=101).allowed

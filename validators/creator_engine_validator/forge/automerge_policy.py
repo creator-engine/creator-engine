@@ -25,7 +25,6 @@ from .mutation_classifier import (
     default_mutation_policy,
     mutation_class_for_paths,
 )
-from ..side_effect_ledger_runtime import work_unit_reservation_evidence
 
 AUTOMERGE_DECISION_AUTO: Final[str] = "AUTO"
 AUTOMERGE_DECISION_GESTURE: Final[str] = "GESTURE"
@@ -464,8 +463,6 @@ def decide_automerge(
     brain_ledger_base_text: str | None = None,
     brain_ledger_head_text: str | None = None,
     repo_root: str | Path = ".",
-    work_unit_receipt: Any = None,
-    work_unit_required: bool = True,
 ) -> AutoMergeDecision:
     """Return an ``AUTO`` or ``GESTURE`` decision without side effects."""
 
@@ -574,8 +571,6 @@ def decide_automerge(
     rationale.append(f"gates={','.join(gates)}")
 
     auto_blockers: list[str] = []
-    # CE603 remains a deferred future automerge/conveyor predicate. Its typed
-    # evidence boundary is intentionally not evaluated in this production path.
     if not gates_auto_only:
         auto_blockers.append("gates_not_auto_back_gate_only")
     if not checks_green:
@@ -719,7 +714,6 @@ def emit_automerge_dry_run_decision(
     brain_ledger_base_text: str | None = None,
     brain_ledger_head_text: str | None = None,
     repo_root: str | Path = ".",
-    work_unit_receipt: Mapping[str, Any] | None = None,
 ) -> AutoMergeDecision:
     """Write a dry-run decision JSON record and return the decision."""
 
@@ -743,8 +737,6 @@ def emit_automerge_dry_run_decision(
         brain_ledger_base_text=brain_ledger_base_text,
         brain_ledger_head_text=brain_ledger_head_text,
         repo_root=repo_root,
-        work_unit_receipt=work_unit_receipt,
-        work_unit_required=True,
     )
     decisions_dir = Path(output_dir) if output_dir is not None else Path(resolved_policy.decisions_dir)
     decisions_dir.mkdir(parents=True, exist_ok=True)
@@ -757,32 +749,6 @@ def dry_run_automerge_decision(**kwargs: Any) -> AutoMergeDecision:
     """Compatibility alias for the dry-run emitter."""
 
     return emit_automerge_dry_run_decision(**kwargs)
-
-
-def work_unit_receipt_evidence(
-    binding: Any,
-    *,
-    side_effect_ledger_root: str | Path,
-    active_work_ledger_root: str | Path,
-    controller_id: str,
-    lane_id: str,
-    run_id: str,
-    attempt_id: str,
-    reservation_id: str,
-    policy_sha256: str,
-) -> dict[str, Any]:
-    """Deferred CE603 predicate for a future automerge/conveyor owner only."""
-    return work_unit_reservation_evidence(
-        binding,
-        side_effect_ledger_root=side_effect_ledger_root,
-        active_work_ledger_root=active_work_ledger_root,
-        controller_id=controller_id,
-        lane_id=lane_id,
-        run_id=run_id,
-        attempt_id=attempt_id,
-        reservation_id=reservation_id,
-        policy_sha256=policy_sha256,
-    )
 
 
 def _decision(

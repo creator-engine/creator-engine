@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 78
+Schema files: 79
 
 ## Index
 
@@ -85,6 +85,7 @@ Schema files: 78
 | `schemas/tenant-record.schema.yaml` | Creator Engine Tenant Record | `object` |
 | `schemas/work-sizing-floor.schema.yaml` | Creator Engine Work-Sizing Floor Record | `object` |
 | `schemas/work-sizing.schema.yaml` | Creator Engine Work-Sizing Record | `object` |
+| `schemas/work-unit-cap.schema.yaml` | Creator Engine CE603 Work-Unit Receipt | `object` |
 | `schemas/worker-container-policy.schema.yaml` | Creator Engine Worker-Container Policy Record | `object` |
 | `schemas/worker-tier-contract.schema.yaml` | Creator Engine governed worker tier contract | `object` |
 | `schemas/worktree-lease.schema.yaml` | Creator Engine Worktree Lease Record | `object` |
@@ -2005,6 +2006,8 @@ Definitions:
 | `runtime_agent_action_record` | object | no | unevaluatedProperties `false` | A typed per-action record (v3 G-4). It attests one observed agent action — WHAT was done (`op` × `mutation_class`), at WHAT observation `fidelity`, gated HOW (`classification` + `decision_mode`) — appended to the SAME... |
 | `runtime_spend_ledger_record` | object | no | unevaluatedProperties `false` | A typed spend-METER / ledger record (v3 G-5). It attests one metered cost leaf — `$` (API-USD, the fleet regime) or `%` (the single subscription seat meter) — appended to the SAME tamper-evident hash chain (content-ad... |
 | `runtime_spend_breach_record` | object | no | unevaluatedProperties `false` | A typed spend-BREACH record (v3 G-5). It attests a circuit-breaker trip — `soft` (~80% alert, continue) or `hard` (100% pause + escalate) — on the nested deny-by-default envelope hierarchy, appended to the SAME tamper... |
+| `runtime_work_unit_cap_record` | object | no | unevaluatedProperties `false` |  |
+| `runtime_work_unit_reconcile_record` | unspecified | no |  |  |
 | `runtime_change_restamp_record` | object | no | unevaluatedProperties `false` | A typed F6 Phase-0 CHANGE-RE-STAMP record. It attests that the active merge head for a run moved by BASE-ONLY motion and that CE machine-proved rebase-equivalence — unchanged path-set, unchanged content-pins, unchange... |
 | `runtime_merge_audit_record` | object | no | unevaluatedProperties `false` | A typed F6 Phase-0 MERGE-AUDIT record. Squash-merge makes the merged commit SHA neither the reviewed PR head nor a parent of it, so the conserved invariant is tree/diff equivalence: the TESTED head tree MUST equal the... |
 
@@ -2674,6 +2677,40 @@ Properties:
 | `decomposition_depth` | integer | yes | minimum `0`<br>maximum `3` | Size-axis depth: 0=XS/no decomposition, 1=S/tasks, 2=M/stories/tasks, 3=L/features/stories/thin slice. |
 | `ratification_gates` | array | yes | minItems `1`<br>uniqueItems `true` |  |
 | `adr_required` | boolean | yes |  |  |
+
+### `schemas/work-unit-cap.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine CE603 Work-Unit Receipt |
+| `$id` | `https://creator-engine.local/schemas/work-unit-cap.schema.yaml` |
+| Root type | `object` |
+
+Required fields:
+
+`receipt_id`, `run_id`, `attempt_id`, `reservation_id`, `phase`, `unit`, `unit_version`, `cap`, `reserved`, `observed`, `remaining`, `sample_sequence`, `source_state`, `policy_sha256`, `previous_receipt_sha256`, `receipt_sha256`, `recorded_at`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `receipt_id` | unspecified | yes |  |  |
+| `run_id` | unspecified | yes |  |  |
+| `attempt_id` | unspecified | yes |  |  |
+| `reservation_id` | unspecified | yes |  |  |
+| `phase` | unspecified | yes |  |  |
+| `unit` | unspecified | yes |  |  |
+| `unit_version` | unspecified | yes |  |  |
+| `cap` | unspecified | yes |  |  |
+| `reserved` | unspecified | yes |  |  |
+| `observed` | unspecified | yes |  |  |
+| `remaining` | unspecified | yes |  |  |
+| `sample_sequence` | unspecified | yes |  |  |
+| `source_state` | unspecified | yes |  |  |
+| `policy_sha256` | unspecified | yes |  |  |
+| `previous_receipt_sha256` | unspecified | yes |  |  |
+| `receipt_sha256` | unspecified | yes |  |  |
+| `recorded_at` | unspecified | yes |  |  |
 
 ### `schemas/worker-container-policy.schema.yaml`
 
