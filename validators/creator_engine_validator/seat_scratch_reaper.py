@@ -1,6 +1,6 @@
-"""Seat-scratch space reaper — per-ticket worktree and sandbox retention policy (ce-ops#564).
+"""Seat-scratch space reaper — per-ticket worktree and sandbox retention policy.
 
-Ratified retention policy (Operator, 2026-07-19 — ce-ops#564):
+Ratified retention policy (Operator, 2026-07-19):
 
   RETAIN: anything referenced by an open claim or unharvested ledger entry
   (manifest-safe refusal is MANDATORY); anything with mtime within the

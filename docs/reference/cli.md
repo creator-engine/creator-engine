@@ -91,6 +91,7 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce escalation` | Manage local awaiting-operator escalation records. |
 | `ce notify` | Read the operator-notify feed for awaiting-operator entry and exit. |
 | `ce reap` | Retire seats and venues after terminal sentinel events. |
+| `ce seat-scratch` | Manage per-ticket scratch space (worktrees, sandboxes, and temporary directories) on the controller host. |
 | `ce approval-capability` | Use controller-only approval-capability wall utilities. |
 | `ce heartbeat` | Check whether supervised CE services are reporting fresh health signals so operators can spot an alarm before work stalls. |
 

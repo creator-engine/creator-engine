@@ -1,4 +1,4 @@
-"""Unit tests for seat_scratch_reaper — ce-ops#564 slice 1.
+"""Unit tests for seat_scratch_reaper.
 
 Uses a synthetic epoch-dir fixture (``tmp_path``) so no real disk state is ever
 touched.  All tests use injected ``now`` timestamps to make age-based decisions
@@ -119,7 +119,7 @@ class TestClassification:
             ("cv-validator-smoke", SCRATCH_CLASS_CV_SANDBOX),
             # pytest temp
             ("pytest-of-root", SCRATCH_CLASS_PYTEST_TEMP),
-            ("pytest-of-ce-dev-2", SCRATCH_CLASS_PYTEST_TEMP),
+            ("pytest-of-myuser", SCRATCH_CLASS_PYTEST_TEMP),
             # preflight workspace
             ("preflight-main-20260719", SCRATCH_CLASS_PREFLIGHT_WORKSPACE),
             ("preflight_pr1039", SCRATCH_CLASS_PREFLIGHT_WORKSPACE),

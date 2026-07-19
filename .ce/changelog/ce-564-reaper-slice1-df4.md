@@ -2,13 +2,13 @@
 slug: ce-564-reaper-slice1-df4
 date: 2026-07-19
 kind: feature
-scope: seat-scratch reaper slice 1 — ce seat-scratch reap (ce-ops#564)
+scope: seat-scratch reaper slice 1 — ce seat-scratch reap
 issue: ce-ops#564
 ---
 
 **Seat-scratch space reaper — slice 1: policy module, CLI surface, and unit tests.**
 
-First implementation slice of the seat-scratch reaper (arc DF-4 lane L5, ce-ops#564).
+First implementation slice of the seat-scratch reaper.
 Implements the ratified retention policy for per-ticket scratch space on controller hosts.
 
 - **`validators/creator_engine_validator/seat_scratch_reaper.py`** — pure policy module
