@@ -44,3 +44,9 @@ Updated `DOCS_ENVELOPE_PATHS` test fixture in `test_automerge_policy.py`:
 the prior fixture used `docs/adr/ADR-0071-docs-envelope-automerge.md` as a
 docs-class representative; that path now correctly escalates to governance. The
 fixture is updated to `docs/guide/automerge-feature.md` (plain docs path, unaffected).
+
+Updated `DOCS_ENVELOPE_PATHS` test fixture in `test_automerge_actuator.py`:
+the same stale `docs/adr/ADR-0071-docs-envelope-automerge.md` entry was present
+in the actuator unit test fixture, internally contradicting the PR's invariant.
+Replaced with `docs/guide/automerge-feature.md` matching the policy-test companion
+fixture exactly. Comment added mirroring `test_automerge_policy.py` style.
