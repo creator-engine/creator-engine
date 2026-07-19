@@ -1,4 +1,4 @@
-"""Dispatch-receipt build/validate/write library (ce-ops#615, slice 1).
+"""Dispatch-receipt build/validate/write library — transport-agnostic receipts.
 
 Provides a transport-agnostic receipt substrate for CE fleet dispatch.
 Watchers call :func:`verify_receipt` to assert seat activation instead of
@@ -312,7 +312,7 @@ def patch_receipt(
 def receipt_filename(slug: str, ts: str | None = None) -> str:
     """Return the canonical receipt filename for a given slug and UTC stamp.
 
-    The slug is typically derived from ``work_unit`` (e.g. ``ce-ops-615``).
+    The slug is typically derived from ``work_unit`` (e.g. ``receipt-0001``).
     The timestamp is the receipt's ``emitted_at`` field, compacted to
     ``YYYYMMDDTHHMMSSZ``.
     """

@@ -7,8 +7,7 @@ description: |
   capturing enough evidence for a watcher to assert activation rather than
   infer it from scrollback.
 
-  Background (ce-ops#615): CE fleet dispatch suffers three activation-gap
-  classes:
+  CE fleet dispatch suffers three activation-gap classes:
     * grant-without-wake      — claim granted, seat never woken
     * dispatch-without-transport — pointer sent, transport not verified
     * receipt-without-activation — receipt written, seat never truly active
@@ -123,13 +122,13 @@ properties:
     minLength: 1
     description: |
       Identity of the controller or operator that performed the dispatch
-      (e.g. "ce-dev-2", "operator"). Value-free controller slug; NEVER a
+      (e.g. "controller-1", "operator"). Value-free controller slug; NEVER a
       credential, token, or raw account.
   work_unit:
     type: string
     minLength: 1
     description: |
-      The ticket / work unit this dispatch is bound to (e.g. "ce-ops#615").
+      The ticket / work unit this dispatch is bound to (e.g. "wu-615").
       Informational; used by watchers and dashboards to join receipts to
       open claims.
 $defs:

@@ -1,4 +1,4 @@
-"""Unit tests for the ce-ops#615 dispatch-receipt library (slice 1).
+"""Unit tests for the dispatch-receipt library — transport-agnostic activation receipts.
 
 Covers:
   - Schema validation: happy path and sad paths
@@ -37,8 +37,8 @@ def _minimal_receipt(**overrides) -> dict:
         activation_method="send-keys",
         separate_enter=True,
         model_effort_line="claude-sonnet-4-5 / effort:normal",
-        dispatcher="ce-dev-2",
-        work_unit="ce-ops#615",
+        dispatcher="controller-1",
+        work_unit="wu-615",
         post_check_kind="working-state",
         post_check_verified_at=_TIMESTAMP_2,
         post_check_result="working",
@@ -58,8 +58,8 @@ def _bare_receipt(**overrides) -> dict:
         activation_method="send-keys",
         separate_enter=True,
         model_effort_line="claude-sonnet-4-5 / effort:normal",
-        dispatcher="ce-dev-2",
-        work_unit="ce-ops#615",
+        dispatcher="controller-1",
+        work_unit="wu-615",
         emitted_at=_TIMESTAMP,
     )
     base.update(overrides)
@@ -121,8 +121,8 @@ class TestBuildReceiptHappy:
             activation_method="send-keys",
             separate_enter=True,
             model_effort_line="model/effort",
-            dispatcher="ce-dev-2",
-            work_unit="ce-ops#1",
+            dispatcher="controller-1",
+            work_unit="wu-1",
         )
         # emitted_at is auto-set and matches the timestamp pattern
         import re
@@ -145,8 +145,8 @@ class TestBuildReceiptSadPaths:
                 activation_method="send-keys",
                 separate_enter=True,
                 model_effort_line="m/e",
-                dispatcher="ce-dev-2",
-                work_unit="ce-ops#1",
+                dispatcher="controller-1",
+                work_unit="wu-1",
             )
 
     def test_bad_brief_sha256_raises(self):
@@ -159,8 +159,8 @@ class TestBuildReceiptSadPaths:
                 activation_method="send-keys",
                 separate_enter=True,
                 model_effort_line="m/e",
-                dispatcher="ce-dev-2",
-                work_unit="ce-ops#1",
+                dispatcher="controller-1",
+                work_unit="wu-1",
             )
 
     def test_claim_path_without_sha256_raises(self):
@@ -173,8 +173,8 @@ class TestBuildReceiptSadPaths:
                 activation_method="send-keys",
                 separate_enter=True,
                 model_effort_line="m/e",
-                dispatcher="ce-dev-2",
-                work_unit="ce-ops#1",
+                dispatcher="controller-1",
+                work_unit="wu-1",
                 claim_path=".ce/claims/c.md",
                 # claim_sha256 omitted intentionally
             )
@@ -189,8 +189,8 @@ class TestBuildReceiptSadPaths:
                 activation_method="send-keys",
                 separate_enter=True,
                 model_effort_line="m/e",
-                dispatcher="ce-dev-2",
-                work_unit="ce-ops#1",
+                dispatcher="controller-1",
+                work_unit="wu-1",
                 post_check_kind="working-state",
                 # post_check_verified_at and result omitted
             )
@@ -205,8 +205,8 @@ class TestBuildReceiptSadPaths:
                 activation_method="send-keys",
                 separate_enter=True,
                 model_effort_line="",
-                dispatcher="ce-dev-2",
-                work_unit="ce-ops#1",
+                dispatcher="controller-1",
+                work_unit="wu-1",
             )
 
     def test_invalid_transport_kind_fails_schema(self):
@@ -222,8 +222,8 @@ class TestBuildReceiptSadPaths:
                 activation_method="send-keys",
                 separate_enter=True,
                 model_effort_line="m/e",
-                dispatcher="ce-dev-2",
-                work_unit="ce-ops#1",
+                dispatcher="controller-1",
+                work_unit="wu-1",
             )
 
 
@@ -451,8 +451,8 @@ class TestCliEmit:
             "--activation-method", "send-keys",
             # NOTE: --separate-enter NOT passed → defaults to False
             "--model-effort-line", "claude-sonnet-4-5 / effort:normal",
-            "--dispatcher", "ce-dev-2",
-            "--work-unit", "ce-ops#615",
+            "--dispatcher", "controller-1",
+            "--work-unit", "wu-615",
             "--state-root", str(tmp_path / "state"),
         ])
         # CLI exits 0 even when gaps exist (gaps are warnings, not hard errors)
@@ -474,8 +474,8 @@ class TestCliEmit:
             "--activation-method", "send-keys",
             "--separate-enter",
             "--model-effort-line", "m/e",
-            "--dispatcher", "ce-dev-2",
-            "--work-unit", "ce-ops#615",
+            "--dispatcher", "controller-1",
+            "--work-unit", "wu-615",
             "--state-root", str(tmp_path / "state"),
             "--json",
         ])
@@ -493,8 +493,8 @@ class TestCliEmit:
             "--transport-target", "s:0.0",
             "--activation-method", "send-keys",
             "--model-effort-line", "m/e",
-            "--dispatcher", "ce-dev-2",
-            "--work-unit", "ce-ops#615",
+            "--dispatcher", "controller-1",
+            "--work-unit", "wu-615",
             "--state-root", str(tmp_path / "state"),
         ])
         assert rc == 1

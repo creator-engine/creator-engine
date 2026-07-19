@@ -853,8 +853,8 @@ Properties:
 | `activation` | $ref #/$defs/activation | yes |  | Evidence block for the Enter-delivery step. The `separate_enter` field is the load-bearing bit: a `false` or absent value means the combined send-keys form was used, which silently drops the Enter on many tmux builds... |
 | `post_check` | $ref #/$defs/post_check | no |  | Optional post-dispatch probe result. When absent the watcher cannot assert the seat is in Working state — the `receipt-without-activation` gap class. When present, the `result` field captures the observed seat state. |
 | `model_effort_line` | string | yes | minLength `1` | The seat's observable model/effort status-line text as seen by the dispatcher at the moment of send (per the 2026-07-19 Operator floor ruling). Example: "claude-sonnet-4-5 / effort:normal". Value-free: this is an obse... |
-| `dispatcher` | string | yes | minLength `1` | Identity of the controller or operator that performed the dispatch (e.g. "ce-dev-2", "operator"). Value-free controller slug; NEVER a credential, token, or raw account. |
-| `work_unit` | string | yes | minLength `1` | The ticket / work unit this dispatch is bound to (e.g. "ce-ops#615"). Informational; used by watchers and dashboards to join receipts to open claims. |
+| `dispatcher` | string | yes | minLength `1` | Identity of the controller or operator that performed the dispatch (e.g. "controller-1", "operator"). Value-free controller slug; NEVER a credential, token, or raw account. |
+| `work_unit` | string | yes | minLength `1` | The ticket / work unit this dispatch is bound to (e.g. "wu-615"). Informational; used by watchers and dashboards to join receipts to open claims. |
 
 Definitions:
 
