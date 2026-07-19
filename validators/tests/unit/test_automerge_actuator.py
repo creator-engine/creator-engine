@@ -29,7 +29,9 @@ BRAIN_SUPERSEDE_PATHS = [
     ".ce/pr-manifests/ce-413-automerge-tier-b.md",
 ]
 DOCS_ENVELOPE_PATHS = [
-    "docs/adr/ADR-0071-docs-envelope-automerge.md",
+    # ce-621: must not be a docs/adr/** or docs/decisions/** or docs/governance/**
+    # path — those are now governance class (ADR-0016 §8 non-goal 8).
+    "docs/guide/automerge-feature.md",
     ".ce/changelog/ce-a3-docs-envelope-automerge.md",
     ".ce/pr-manifests/ce-a3-docs-envelope-automerge.md",
 ]

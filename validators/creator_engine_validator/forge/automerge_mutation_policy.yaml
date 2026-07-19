@@ -49,6 +49,9 @@ path_predicates:
     - "governance/**"
     - "GOVERNANCE.md"
     - "CODEOWNERS"
+    - "docs/decisions/**"
+    - "docs/adr/**"
+    - "docs/governance/**"
   identity:
     - "identity-registry/**"
     - "identity/**"

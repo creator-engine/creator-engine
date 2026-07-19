@@ -117,7 +117,9 @@ BRAIN_SUPERSEDE_PATHS = [
     ".ce/pr-manifests/ce-413-automerge-tier-b.md",
 ]
 DOCS_ENVELOPE_PATHS = [
-    "docs/adr/ADR-0071-docs-envelope-automerge.md",
+    # ce-621: must not be a docs/adr/** or docs/decisions/** or docs/governance/**
+    # path — those are now governance class (ADR-0016 §8 non-goal 8).
+    "docs/guide/automerge-feature.md",
     ".ce/changelog/ce-a3-docs-envelope-automerge.md",
     ".ce/pr-manifests/ce-a3-docs-envelope-automerge.md",
 ]
@@ -1512,4 +1514,98 @@ def test_pull_request_paths_use_pr_file_list_not_stale_base_diff(tmp_path: Path)
         **canary_identity(),
     )
     assert decision.mutation_class == "docs"
+
+
+# ce-621: ADR-0016 §8 non-goal 8 — decisions/ paths must force GESTURE even inside docs_envelope
+
+
+_DECISIONS_ADR_PATH = "docs/decisions/ADR-9999-x.md"
+_DECISIONS_ENVELOPE_PATHS = [
+    _DECISIONS_ADR_PATH,
+    ".ce/changelog/ce-621-decisions-governance-class.md",
+    ".ce/pr-manifests/ce-621-decisions-governance-class.md",
+]
+
+
+def test_decisions_adr_path_classifies_governance_not_docs() -> None:
+    """docs/decisions/ADR-9999-x.md must be classified governance by the mutation policy.
+
+    ADR-0016 §8 non-goal 8: ADR / ratification records are governance class, always two-key.
+    Precedence: governance rank (5) > docs rank (1) in class_order → governance wins.
+    """
+    from creator_engine_validator.forge.mutation_classifier import mutation_class_for_paths
+
+    assert mutation_class_for_paths([_DECISIONS_ADR_PATH]) == "governance"
+
+
+def test_decide_automerge_returns_gesture_for_decisions_adr_even_when_docs_armed() -> None:
+    """decide_automerge must return GESTURE when a docs_envelope-shaped PR contains an ADR path.
+
+    Engagement path (automerge_policy.py):
+      1. mutation_class_for_paths([...]) → "governance"  (governance rank > docs rank)
+      2. mutation_class in GESTURE_CLASSES → True
+      3. automerge_policy.py:586 appends "gesture_class" to auto_blockers → GESTURE
+    The docs_envelope_tier_matches() predicate still passes for .md under docs/**,
+    but mutation-class escalation to governance is what blocks AUTO before tier logic
+    can fire (docs_envelope_tier_matches requires mutation_class == "docs" at line 1024).
+    """
+    decision = decide_automerge(
+        numstat=numstat_for(_DECISIONS_ENVELOPE_PATHS),
+        paths=_DECISIONS_ENVELOPE_PATHS,
+        declared_work_class="XS",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-621-decisions-governance-class",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert decision.mutation_class == "governance"
+    assert "gesture_class" in decision.rationale
+
+
+def test_decide_automerge_returns_gesture_for_decisions_adr_with_tiers_armed() -> None:
+    """GESTURE is returned even when docs class flag AND docs_envelope tier flag are both True.
+
+    The mutation-class escalation to governance (GESTURE_CLASSES) at
+    automerge_policy.py:586 fires before the tier auto-merge path is reached.
+    """
+    decision = decide_automerge(
+        numstat=numstat_for(_DECISIONS_ENVELOPE_PATHS),
+        paths=_DECISIONS_ENVELOPE_PATHS,
+        declared_work_class="S",
+        policy_state=state_with_flags(
+            "docs",
+            enabled_tiers=(AUTOMERGE_TIER_DOCS_ENVELOPE,),
+        ),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-621-decisions-governance-class",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert decision.mutation_class == "governance"
+    assert "gesture_class" in decision.rationale
+
+
+def test_plain_docs_guide_still_classifies_docs_and_may_auto() -> None:
+    """Regression: plain docs/guide.md must still classify docs (not promoted to governance)."""
+    decision = decide_automerge(
+        numstat=numstat_for(["docs/guide.md"]),
+        paths=["docs/guide.md"],
+        declared_work_class="XS",
+        policy_state=state_with_flags("docs"),
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce/docs-guide",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.mutation_class == "docs"
+    assert decision.decision == AUTOMERGE_DECISION_AUTO
     assert decision.mutation_class != "deploy"
