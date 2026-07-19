@@ -3,7 +3,7 @@ slug: ce-df4-mc1-arming
 date: 2026-07-19
 kind: added
 scope: automerge policy — MC1 docs_envelope arming materialization surface
-issue: DF-4-MC1-arming
+issue: ce-ops#626
 ---
 
 **Arm MC1 (docs_envelope) zero-gesture merge tier: add policy materialization surface and arming decision record.**

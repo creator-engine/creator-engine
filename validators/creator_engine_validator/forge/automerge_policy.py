@@ -1034,7 +1034,7 @@ def _tier_flag_for_decision(
     if tier is None:
         return None
     if tier == AUTOMERGE_TIER_DOCS_ENVELOPE:
-        return state.class_flag("docs")
+        return state.class_flag("docs") and state.tier_flag(AUTOMERGE_TIER_DOCS_ENVELOPE)
     if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
         return state.tier_flag(tier)
     if tier == AUTOMERGE_TIER_CARRIER_CHANGELOG:

@@ -353,3 +353,60 @@ def test_p13_enabling_decision_ref_cites_adr_0016(tmp_path: Path):
     assert "d99b5dea8268df79e9c95e8a550b20fabae73a1c7ffe68299b43a1eeff5bb0f8" in ref, (
         f"P13: enabling_decision_ref does not include the ratification_prompt_sha: {ref!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Malformed declaration: unknown mutation-class and unknown tier name
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_mutation_class_exits_2(tmp_path: Path):
+    """Unknown mutation class name in classes section must exit 2, nothing written."""
+    import yaml
+    decl_path = _make_declaration(tmp_path)
+    raw = yaml.safe_load(decl_path.read_text(encoding="utf-8"))
+    raw["classes"]["malicious_class"] = {"auto_merge": False}
+    decl_path.write_text(yaml.dump(raw), encoding="utf-8")
+
+    result = _run("--dry-run", repo_root=tmp_path, declaration=decl_path)
+    assert result.returncode == 2, f"expected exit 2, got {result.returncode}\nstderr: {result.stderr}"
+    assert not (tmp_path / _POLICY_RELATIVE).exists()
+
+
+def test_unknown_mutation_class_no_write(tmp_path: Path):
+    """Even in non-dry-run mode, unknown mutation class must block the write."""
+    import yaml
+    decl_path = _make_declaration(tmp_path)
+    raw = yaml.safe_load(decl_path.read_text(encoding="utf-8"))
+    raw["classes"]["malicious_class"] = {"auto_merge": False}
+    decl_path.write_text(yaml.dump(raw), encoding="utf-8")
+
+    result = _run(repo_root=tmp_path, declaration=decl_path)
+    assert result.returncode == 2
+    assert not (tmp_path / _POLICY_RELATIVE).exists()
+
+
+def test_unknown_tier_name_exits_2(tmp_path: Path):
+    """Unknown tier name in tiers section must exit 2, nothing written."""
+    import yaml
+    decl_path = _make_declaration(tmp_path)
+    raw = yaml.safe_load(decl_path.read_text(encoding="utf-8"))
+    raw["tiers"]["nonexistent_tier"] = {"auto_merge": False}
+    decl_path.write_text(yaml.dump(raw), encoding="utf-8")
+
+    result = _run("--dry-run", repo_root=tmp_path, declaration=decl_path)
+    assert result.returncode == 2, f"expected exit 2, got {result.returncode}\nstderr: {result.stderr}"
+    assert not (tmp_path / _POLICY_RELATIVE).exists()
+
+
+def test_unknown_tier_name_no_write(tmp_path: Path):
+    """Even in non-dry-run mode, unknown tier name must block the write."""
+    import yaml
+    decl_path = _make_declaration(tmp_path)
+    raw = yaml.safe_load(decl_path.read_text(encoding="utf-8"))
+    raw["tiers"]["nonexistent_tier"] = {"auto_merge": False}
+    decl_path.write_text(yaml.dump(raw), encoding="utf-8")
+
+    result = _run(repo_root=tmp_path, declaration=decl_path)
+    assert result.returncode == 2
+    assert not (tmp_path / _POLICY_RELATIVE).exists()

@@ -6,15 +6,20 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=d19ab86c96542ba3a71f6b5d6088a5182d9cf35e36461a43509573ba0680aecb
+AUTHORIZED_PATHS_SHA256=907f5f48d7d1c37c5771aff0a3ff399ce433179c3b250fc6007528e54bbeff87
 
 ```text
 .ce/changelog/ce-df4-mc1-arming.md
 .ce/pr-manifests/ce-df4-mc1-arming.md
 deploy/automerge/materialize-automerge-policy.py
 deploy/automerge/policy-declaration.yaml
+docs/decisions/ADR-0016-pre-delegated-merge-classes.md
 docs/decisions/DEC-0017-mc1-docs-envelope-arming.md
+validators/creator_engine_validator/forge/automerge_actuator.py
+validators/creator_engine_validator/forge/automerge_policy.py
+validators/tests/unit/test_automerge_actuator.py
+validators/tests/unit/test_automerge_policy.py
 validators/tests/unit/test_automerge_policy_materializer.py
 ```
