@@ -2,7 +2,7 @@
 kind: decision-record
 record_type: adr
 schema_version: "1"
-id: DEC-0017
+id: ADR-0017
 title: "MC1 docs_envelope arming: arm the pre-delegated docs-envelope merge tier under ADR-0016"
 status: accepted
 date: "2026-07-19"

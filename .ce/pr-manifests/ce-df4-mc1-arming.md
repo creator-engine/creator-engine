@@ -8,7 +8,7 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=907f5f48d7d1c37c5771aff0a3ff399ce433179c3b250fc6007528e54bbeff87
+AUTHORIZED_PATHS_SHA256=a7c5f4cebe5775aae9a398186f3313dd57f67a4d4c357b1e81bed0391d35f25e
 
 ```text
 .ce/changelog/ce-df4-mc1-arming.md
@@ -16,7 +16,7 @@ AUTHORIZED_PATHS_SHA256=907f5f48d7d1c37c5771aff0a3ff399ce433179c3b250fc6007528e5
 deploy/automerge/materialize-automerge-policy.py
 deploy/automerge/policy-declaration.yaml
 docs/decisions/ADR-0016-pre-delegated-merge-classes.md
-docs/decisions/DEC-0017-mc1-docs-envelope-arming.md
+docs/decisions/ADR-0017-mc1-docs-envelope-arming.md
 validators/creator_engine_validator/forge/automerge_actuator.py
 validators/creator_engine_validator/forge/automerge_policy.py
 validators/tests/unit/test_automerge_actuator.py

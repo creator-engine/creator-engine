@@ -16,6 +16,6 @@ Changes:
 
 - **`deploy/automerge/materialize-automerge-policy.py`** — New standalone deploy script invoked as `python3 deploy/automerge/materialize-automerge-policy.py --repo-root <root> [--dry-run]`. Loads the declaration YAML, validates it strictly (unknown keys, non-bool flags, empty enabling_decision_ref, run_mode outside valid set → exit 2, nothing written), constructs `AutoMergePolicyState` via `from_payload`, and on non-dry-run writes atomically via `save_automerge_policy_state` to `automerge_policy_state_path`. Re-loads and prints effective state after write. Imports from `creator_engine_validator` (PYTHONPATH=validators); no new ce CLI command group.
 
-- **`docs/decisions/DEC-0017-mc1-docs-envelope-arming.md`** — Arming decision record: declares MC1 docs_envelope armed under ADR-0016 ratification; cites prerequisite merges PR #1041 and PR #1043; records activation procedure and disarm paths.
+- **`docs/decisions/ADR-0017-mc1-docs-envelope-arming.md`** — Arming decision record: declares MC1 docs_envelope armed under ADR-0016 ratification; cites prerequisite merges PR #1041 and PR #1043; records activation procedure and disarm paths.
 
 - **`validators/tests/unit/test_automerge_policy_materializer.py`** — Unit tests: declaration→payload round-trip; dry-run writes nothing; malformed declaration (unknown key, bad run_mode, empty enabling ref, non-bool flag) refuses with exit 2; idempotent re-run; materialized state satisfies ADR-0016 predicates P11, P12, P13.
