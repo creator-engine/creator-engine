@@ -87,6 +87,13 @@ def _work_unit_receipt():
     ).receipt
 
 
+def _successor_receipt(receipt):
+    return cap.reserve(
+        (receipt,), cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation-2",
+        requested=10, policy_sha256="a" * 64, recorded_at="2026-07-18T00:01:00Z",
+    ).receipt
+
+
 # ---------------------------------------------------------------------------
 # Append + hash chain
 # ---------------------------------------------------------------------------
@@ -140,6 +147,48 @@ def test_work_unit_reservation_uses_the_single_record_writer(tmp_path: Path):
     assert json.loads(bytes.fromhex("".join(fragments)).decode("utf-8")) == receipt
     assert result.record["effect_id"].startswith("work-unit-reservation-")
     assert runtime._durable_work_unit_receipts(tmp_path / "side-effect-ledger", CONTROLLER, LANE) == (receipt,)
+
+
+def test_work_unit_reservation_persists_a_valid_durable_successor_under_lane_lock(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first_receipt = _work_unit_receipt()
+    first = runtime.record_work_unit_reservation(receipt=first_receipt, **_kwargs(tmp_path))
+    second_receipt = _successor_receipt(first_receipt)
+    second = runtime.record_work_unit_reservation(receipt=second_receipt, **_kwargs(tmp_path))
+
+    assert second_receipt["previous_receipt_sha256"] == first_receipt["receipt_sha256"]
+    assert (first.sequence, second.sequence) == (1, 2)
+    assert runtime._durable_work_unit_receipts(tmp_path / "side-effect-ledger", CONTROLLER, LANE) == (
+        first_receipt,
+        second_receipt,
+    )
+
+
+def test_corrupt_durable_ce603_history_refuses_successor_without_ledger_write(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first_receipt = _work_unit_receipt()
+    first = runtime.record_work_unit_reservation(receipt=first_receipt, **_kwargs(tmp_path))
+    record = json.loads(first.record_path.read_text(encoding="utf-8"))
+    record["details"] = {"work_unit_receipt_part_000": "zz"}
+    first.record_path.write_text(runtime._canonical_bytes(record), encoding="utf-8")
+    head = json.loads(first.head_path.read_text(encoding="utf-8"))
+    head["head_sha256"] = hashlib.sha256(first.record_path.read_bytes()).hexdigest()
+    first.head_path.write_text(json.dumps(head, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    before = {
+        path.relative_to(tmp_path / "side-effect-ledger").as_posix(): path.read_bytes()
+        for path in (tmp_path / "side-effect-ledger").rglob("*.json")
+    }
+
+    with pytest.raises(runtime.WorkUnitReceiptHistoryError):
+        runtime.record_work_unit_reservation(receipt=_successor_receipt(first_receipt), **_kwargs(tmp_path))
+
+    after = {
+        path.relative_to(tmp_path / "side-effect-ledger").as_posix(): path.read_bytes()
+        for path in (tmp_path / "side-effect-ledger").rglob("*.json")
+    }
+    assert after == before
 
 
 def test_generic_record_and_reservation_share_one_lane_lock(tmp_path: Path, monkeypatch):

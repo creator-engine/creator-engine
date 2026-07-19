@@ -8,10 +8,10 @@ Declared work class: feature
 
 AUTHORIZED_PATHS_COUNT=17
 
-AUTHORIZED_PATHS_SHA256=461b162fc6f567e29c725b16fc06049af7a50b0a2b3e43cc12dddd4d73710c6c
+AUTHORIZED_PATHS_SHA256=a9350cb259c7e7c19476356eb227cacc52f6f872c022634ea0145c90b362d39b
 
 ```text
-.ce/changelog/ce603-work-unit-token-cap-dev3.md
+.ce/changelog/ce-603-work-unit-token-cap-dev3-r2.md
 .ce/pr-manifests/ce-603-work-unit-token-cap-dev3-r2.md
 .ce/reference/schemas.generated.md
 validators/creator_engine_validator/runner/cockpit_readmodel.py
