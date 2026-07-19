@@ -8,13 +8,10 @@ split.
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
-import pickle
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,6 +19,7 @@ import pytest
 import yaml
 
 from creator_engine_validator import side_effect_ledger_runtime as runtime
+from creator_engine_validator.runner import work_unit_cap as cap
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +80,13 @@ def _append(tmp_path: Path, **overrides):
     return runtime.record(**_kwargs(tmp_path, **overrides))
 
 
+def _work_unit_receipt():
+    return cap.reserve(
+        (), cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation",
+        requested=10, policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z",
+    ).receipt
+
+
 # ---------------------------------------------------------------------------
 # Append + hash chain
 # ---------------------------------------------------------------------------
@@ -129,38 +134,12 @@ def test_second_record_chains_to_previous_record_sha(tmp_path: Path):
 def test_work_unit_reservation_uses_the_single_record_writer(tmp_path: Path):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
-    receipt = {"receipt_id": "r", "unit": "ce.raw_tokens.v1", "unit_version": 1}
+    receipt = _work_unit_receipt()
     result = runtime.record_work_unit_reservation(receipt=receipt, **_kwargs(tmp_path))
     fragments = [result.record["details"][key] for key in sorted(result.record["details"]) if key.startswith("work_unit_receipt_part_")]
     assert json.loads(bytes.fromhex("".join(fragments)).decode("utf-8")) == receipt
     assert result.record["effect_id"].startswith("work-unit-reservation-")
-    assert not runtime.work_unit_reservation_evidence(
-        receipt,
-        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
-        reservation_id="reservation", policy_sha256="a" * 64,
-    )["valid"]
-
-
-def test_durable_work_unit_reservation_reuses_after_crash_and_never_overbooks(tmp_path: Path):
-    awl = tmp_path / ".hermes" / "active-work-ledger"
-    _claim(awl)
-    def reserve_once(reservation_id: str):
-        return runtime.reserve_work_unit_reservation(
-            cap=100, run_id="run", attempt_id=reservation_id, reservation_id=reservation_id, requested=60,
-            policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-        )
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        first, competing = list(pool.map(reserve_once, ("one", "two")))
-    assert sum(result.allowed for result in (first, competing)) == 1
-    winner = first if first.allowed else competing
-    retry = runtime.reserve_work_unit_reservation(
-        cap=100, run_id="run", attempt_id=winner.receipt["attempt_id"], reservation_id=winner.receipt["reservation_id"], requested=60,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-    )
-    assert retry.allowed and retry.persist is False
-    assert retry.receipt == winner.receipt
+    assert runtime._durable_work_unit_receipts(tmp_path / "side-effect-ledger", CONTROLLER, LANE) == (receipt,)
 
 
 def test_generic_record_and_reservation_share_one_lane_lock(tmp_path: Path, monkeypatch):
@@ -181,16 +160,15 @@ def test_generic_record_and_reservation_share_one_lane_lock(tmp_path: Path, monk
         generic = pool.submit(_append, tmp_path, effect_id="effect-generic")
         assert generic_record_written.wait(timeout=5)
         reservation = pool.submit(
-            runtime.reserve_work_unit_reservation,
-            cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
-            policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
+            runtime.record_work_unit_reservation,
+            receipt=_work_unit_receipt(), **_kwargs(tmp_path),
         )
         assert not reservation.done()
         release_generic_record.set()
         generic_result = generic.result(timeout=5)
         reservation_result = reservation.result(timeout=5)
     assert generic_result.sequence == 1
-    assert reservation_result.allowed
+    assert reservation_result.sequence == 2
     verified = runtime.verify(
         side_effect_ledger_root=str(tmp_path / "side-effect-ledger"), active_work_ledger_root=str(awl),
     )
@@ -198,127 +176,10 @@ def test_generic_record_and_reservation_share_one_lane_lock(tmp_path: Path, monk
     assert verified.summary["chains"][0]["record_count"] == 2
 
 
-def test_verified_current_work_unit_binding_requires_serialized_current_ledger_evidence(tmp_path: Path):
-    awl = tmp_path / ".hermes" / "active-work-ledger"
-    _claim(awl)
-    decision = runtime.reserve_work_unit_reservation(
-        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-    )
-    binding = decision.binding
-    assert binding is not None
-    evidence = runtime.work_unit_reservation_evidence(
-        binding,
-        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
-        reservation_id="reservation", policy_sha256="a" * 64,
-    )
-    assert evidence["valid"]
-    assert evidence["receipt_id"] == decision.receipt["receipt_id"]
-    assert not runtime.work_unit_reservation_evidence(
-        dict(decision.receipt),
-        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
-        reservation_id="reservation", policy_sha256="a" * 64,
-    )["valid"]
-    assert not runtime.work_unit_reservation_evidence(
-        binding,
-        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-        controller_id=CONTROLLER, lane_id="wrong-lane", run_id="run", attempt_id="attempt",
-        reservation_id="reservation", policy_sha256="a" * 64,
-    )["valid"]
-    _append(tmp_path, effect_id="effect-after-reservation")
-    assert not runtime.work_unit_reservation_evidence(
-        binding,
-        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
-        reservation_id="reservation", policy_sha256="a" * 64,
-    )["valid"]
-
-
-def test_verified_binding_is_opaque_issued_and_rejects_raw_copy_and_substitution(tmp_path: Path):
-    awl = tmp_path / ".hermes" / "active-work-ledger"
-    _claim(awl)
-    decision = runtime.reserve_work_unit_reservation(
-        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-    )
-    binding = decision.binding
-    assert binding is not None
-
-    with pytest.raises(TypeError):
-        runtime.VerifiedCurrentWorkUnitBinding()
-    with pytest.raises(TypeError):
-        copy.copy(binding)
-    with pytest.raises(TypeError):
-        copy.deepcopy(binding)
-    with pytest.raises(TypeError):
-        replace(binding)
-    with pytest.raises(TypeError):
-        pickle.dumps(binding)
-    with pytest.raises(AttributeError):
-        binding.run_id = "substituted"
-    with pytest.raises(AttributeError):
-        _ = binding.__dict__
-    with pytest.raises(TypeError):
-        class ForgedBinding(runtime.VerifiedCurrentWorkUnitBinding):
-            pass
-
-    raw = runtime.record_work_unit_reservation(receipt=decision.receipt, **_kwargs(tmp_path, effect_id="raw"))
-    assert raw.record_sha256
-    assert not runtime.work_unit_reservation_evidence(
-        object.__new__(runtime.VerifiedCurrentWorkUnitBinding),
-        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
-        reservation_id="reservation", policy_sha256="a" * 64,
-    )["valid"]
-
-
-def test_verified_binding_has_no_module_global_issuance_registry_or_forgeable_copy(tmp_path: Path):
-    awl = tmp_path / ".hermes" / "active-work-ledger"
-    _claim(awl)
-    decision = runtime.reserve_work_unit_reservation(
-        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-    )
-    binding = decision.binding
-    assert binding is not None
-    assert "_ISSUED_WORK_UNIT_BINDINGS" not in vars(runtime)
-    assert "_IssuedWorkUnitBinding" not in vars(runtime)
-
-    assert type(binding) is runtime.VerifiedCurrentWorkUnitBinding
-    # A forged base object can receive the private issuance closure but cannot
-    # satisfy the closure's captured exact-object identity check.
-    forged = object.__new__(runtime.VerifiedCurrentWorkUnitBinding)
-    issuance = object.__getattribute__(binding, "_VerifiedCurrentWorkUnitBinding__ce603_issuance")
-    object.__setattr__(forged, "_VerifiedCurrentWorkUnitBinding__ce603_issuance", issuance)
-    assert not runtime.work_unit_reservation_evidence(
-        forged,
-        side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-        controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
-        reservation_id="reservation", policy_sha256="a" * 64,
-    )["valid"]
-    with pytest.raises(AttributeError):
-        object.__setattr__(forged, "run_id", "substituted")
-    type.__setattr__(type(binding), "_ce603_issued_context", lambda candidate: ())
-    try:
-        assert not runtime.work_unit_reservation_evidence(
-            forged,
-            side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
-            controller_id=CONTROLLER, lane_id=LANE, run_id="run", attempt_id="attempt",
-            reservation_id="reservation", policy_sha256="a" * 64,
-        )["valid"]
-    finally:
-        delattr(type(binding), "_ce603_issued_context")
-
-
 def test_ce603_shaped_record_without_fragments_refuses_before_reservation_mutation(tmp_path: Path):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
-    decision = runtime.reserve_work_unit_reservation(
-        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-    )
+    runtime.record_work_unit_reservation(receipt=_work_unit_receipt(), **_kwargs(tmp_path))
     record_path = next((tmp_path / "side-effect-ledger").rglob("*-work-unit-reservation-*.json"))
     record = json.loads(record_path.read_text(encoding="utf-8"))
     del record["details"]
@@ -327,26 +188,15 @@ def test_ce603_shaped_record_without_fragments_refuses_before_reservation_mutati
     head = json.loads(head_path.read_text(encoding="utf-8"))
     head["head_sha256"] = hashlib.sha256(record_path.read_bytes()).hexdigest()
     head_path.write_text(json.dumps(head, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-    before = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
-
     with pytest.raises(runtime.WorkUnitReceiptHistoryError):
-        runtime.reserve_work_unit_reservation(
-            cap=100, run_id="run", attempt_id="retry", reservation_id="retry", requested=10,
-            policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-        )
-
-    after = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
-    assert after == before
+        runtime._durable_work_unit_receipts(tmp_path / "side-effect-ledger", CONTROLLER, LANE)
 
 
 @pytest.mark.parametrize("fragment", ("zz", "7b", "7b7d"))
 def test_corrupt_persisted_ce603_receipt_history_refuses_before_mutation(tmp_path: Path, fragment: str):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
-    decision = runtime.reserve_work_unit_reservation(
-        cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
-        policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-    )
+    runtime.record_work_unit_reservation(receipt=_work_unit_receipt(), **_kwargs(tmp_path))
     record_path = next((tmp_path / "side-effect-ledger").rglob("*-work-unit-reservation-*.json"))
     record = json.loads(record_path.read_text(encoding="utf-8"))
     record["details"] = {"work_unit_receipt_part_000": fragment}
@@ -358,16 +208,8 @@ def test_corrupt_persisted_ce603_receipt_history_refuses_before_mutation(tmp_pat
     assert runtime.verify(
         side_effect_ledger_root=tmp_path / "side-effect-ledger", active_work_ledger_root=awl,
     ).ok
-    before = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
-
     with pytest.raises(runtime.WorkUnitReceiptHistoryError):
-        runtime.reserve_work_unit_reservation(
-            cap=100, run_id="run", attempt_id="attempt", reservation_id="reservation", requested=10,
-            policy_sha256="a" * 64, recorded_at="2026-07-18T00:00:00Z", **_kwargs(tmp_path),
-        )
-
-    after = {path: path.read_bytes() for path in (tmp_path / "side-effect-ledger").rglob("*.json")}
-    assert after == before
+        runtime._durable_work_unit_receipts(tmp_path / "side-effect-ledger", CONTROLLER, LANE)
 
 
 def test_record_is_valid_under_existing_side_effect_ledger_substrate(tmp_path: Path):
