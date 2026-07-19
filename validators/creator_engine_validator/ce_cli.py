@@ -67,6 +67,7 @@ ce automerge-status     # read dry-run automerge decision logs (read-only; no me
 ce automerge-kill-switch # read or toggle durable live-policy automerge kill-switch
 ce takeover             # read-only controller continuity takeover evidence packet
 ce continuity-drill     # scheduled benign Controller continuity drill proof
+ce board sync        # sync the org Projects-v2 board to a declarative desired-state YAML
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -1411,6 +1412,46 @@ def _build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--payload", default=None, help="path to a JSON request-body file (optional)")
     cs.add_argument("--base-url", default=connector_runtime.DEFAULT_GITHUB_API_BASE, help="write API base URL")
     cs.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce board — org Projects-v2 board desired-state sync (ce-ops#617).
+    board = groups.add_parser(
+        "board",
+        help="org project board desired-state sync (Projects-v2; ce-ops#617)",
+    )
+    board_sub = board.add_subparsers(dest="board_cmd")
+    board_sync_p = board_sub.add_parser(
+        "sync",
+        help=(
+            "sync the board to a declarative desired-state YAML "
+            "(dry-run by default; --execute to apply)"
+        ),
+    )
+    board_sync_p.add_argument(
+        "--state-file",
+        dest="state_file",
+        default=".ce/board/board-state.yaml",
+        help="path to the board desired-state YAML (default: .ce/board/board-state.yaml)",
+    )
+    _board_sync_mode = board_sync_p.add_mutually_exclusive_group()
+    _board_sync_mode.add_argument(
+        "--dry-run",
+        dest="execute",
+        action="store_false",
+        help="print the drift report without applying changes (default)",
+    )
+    _board_sync_mode.add_argument(
+        "--execute",
+        dest="execute",
+        action="store_true",
+        help="apply drift: add missing items and update stale status fields",
+    )
+    board_sync_p.set_defaults(execute=False)
+    board_sync_p.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable JSON drift report and sync result",
+    )
 
     playbook = groups.add_parser(
         "playbook",
@@ -5784,6 +5825,96 @@ _ORCHESTRATOR_DISPATCH = {
     "status": _orchestrator_status,
 }
 
+def _board_sync(args) -> int:
+    from .forge.board_sync import BoardSyncError, load_desired_state, sync_board
+
+    state_file = Path(getattr(args, "state_file", ".ce/board/board-state.yaml"))
+    execute = bool(getattr(args, "execute", False))
+    json_output = bool(getattr(args, "json_output", False))
+
+    try:
+        ref, desired = load_desired_state(state_file)
+    except BoardSyncError as exc:
+        print(f"ERROR: ce board sync: {exc}", file=sys.stderr)
+        return 1
+
+    result = sync_board(ref, desired, apply=execute)
+
+    if json_output:
+        def _item_dict(d):
+            return {"issue": f"{d.issue.repo}#{d.issue.number}", "status": d.status}
+
+        def _board_item_dict(b):
+            return {
+                "item_id": b.item_id,
+                "repo": b.issue_repo,
+                "number": b.issue_number,
+                "status": b.status,
+            }
+
+        payload = {
+            "applied": result.applied,
+            "drift": {
+                "has_drift": result.drift.has_drift,
+                "fail_closed": result.drift.fail_closed,
+                "missing": [_item_dict(d) for d in result.drift.missing],
+                "stale_status": [
+                    {"desired": _item_dict(d), "observed": _board_item_dict(b)}
+                    for d, b in result.drift.stale_status
+                ],
+                "orphans": [_board_item_dict(b) for b in result.drift.orphans],
+                "unknown_status_options": list(result.drift.unknown_status_options),
+            },
+            "added": [_item_dict(d) for d in result.added],
+            "status_updated": [_item_dict(d) for d in result.status_updated],
+            "errors": list(result.errors),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 1 if result.errors else 0
+
+    # Human-readable output
+    if result.drift.fail_closed:
+        for s in result.drift.unknown_status_options:
+            print(f"FAIL unknown status option: {s!r}")
+        print("ce board sync: fail-closed; no mutations applied", file=sys.stderr)
+        return 1
+
+    mode = "execute" if execute else "dry-run"
+    if not result.drift.has_drift and not result.drift.orphans:
+        print(f"ce board sync [{mode}]: board is in sync (no drift)")
+        return 0
+
+    for d in result.drift.missing:
+        action = "ADD" if execute else "PLAN:ADD"
+        print(f"{action} {d.issue.repo}#{d.issue.number} → status={d.status!r}")
+    for d, b in result.drift.stale_status:
+        action = "UPDATE" if execute else "PLAN:UPDATE"
+        print(f"{action} {d.issue.repo}#{d.issue.number}: status={b.status!r} → {d.status!r}")
+    for b in result.drift.orphans:
+        label = (
+            f"{b.issue_repo}#{b.issue_number}"
+            if b.issue_repo else f"<draft {b.item_id[:8]}>"
+        )
+        print(f"ORPHAN {label} status={b.status!r} (not in desired set; never deleted)")
+
+    if result.errors:
+        for e in result.errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+
+    if execute and not result.errors:
+        print(
+            f"ce board sync [execute]: applied "
+            f"{len(result.added)} add(s), "
+            f"{len(result.status_updated)} status update(s)"
+        )
+
+    return 1 if result.errors else 0
+
+
+_BOARD_DISPATCH = {
+    "sync": _board_sync,
+}
+
 _CONNECTOR_DISPATCH = {
     "verify": _connector_verify,
     "plan": _connector_plan,
@@ -6107,6 +6238,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         handler = _CONNECTOR_DISPATCH.get(connector_cmd)
         if handler is None:
             parser.parse_args(["connector", "--help"])  # prints connector help, exits
+            return 2
+        return handler(args)
+    if args.group == "board":
+        board_cmd = getattr(args, "board_cmd", None)
+        handler = _BOARD_DISPATCH.get(board_cmd)
+        if handler is None:
+            parser.parse_args(["board", "--help"])  # prints board help, exits
             return 2
         return handler(args)
     if args.group == "playbook":
