@@ -222,6 +222,12 @@ class LaunchRuntimeWorkerLauncher:
     """Default live seam: call v1 ``launch_runtime.launch`` with scrubbed env."""
 
     def launch(self, plan: WorkerSpawnPlan) -> WorkerLaunchOutcome:
+        launch_worktree = plan.worktree_path
+        if plan.managed_config_receipt is not None:
+            try:
+                launch_worktree = codex_worker_config.pinned_worktree_launch_path(plan.managed_config_receipt)
+            except codex_worker_config.WorkerConfigRefused as exc:
+                raise WorkerManagedConfigRefused(f"managed Codex worker config refused: {exc}") from exc
         old_environ = dict(os.environ)
         os.environ.clear()
         os.environ.update(plan.child_env)
@@ -232,10 +238,10 @@ class LaunchRuntimeWorkerLauncher:
                 window=f"worker-{plan.role}",
                 invoked_as="worker-spawn",
                 dry_run=False,
-                repo_root=plan.worktree_path,
+                repo_root=launch_worktree,
                 owner_controller_id=plan.parent_id,
                 purpose=f"worker:{plan.role}:{plan.scope_id}",
-                launch_cwd=plan.worktree_path,
+                launch_cwd=launch_worktree,
                 launch_env=plan.child_env,
             )
         finally:
@@ -653,6 +659,8 @@ def spawn_worker(
         raise WorkerLaunchFailed(f"launch_runtime refused worker spawn [{exc.code}]: {exc}") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkerLaunchFailed(f"worker launcher failed before record write: {exc}") from exc
+    finally:
+        codex_worker_config.release_worker_config_receipt(plan.managed_config_receipt)
     record["seat_refs"] = {
         "events_ref": outcome.events_ref,
         "seat_record_ref": outcome.seat_record_ref,

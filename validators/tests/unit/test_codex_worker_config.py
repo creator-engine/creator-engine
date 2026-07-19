@@ -51,8 +51,9 @@ def test_materializer_writes_reloads_and_receipts_a_mode_checked_config(tmp_path
     assert receipt.sha256 == template.sha256
     assert config.load_worker_config(path, template.attestation) == template
     assert config.revalidate_worker_config_receipt(receipt) == template
+    config.release_worker_config_receipt(receipt)
     with pytest.raises(OSError):
-        os.fstat(template.attestation.directory_fd)
+        template.attestation.directory_pin.fstat()
     path.chmod(0o644)
     with pytest.raises(config.WorkerConfigRefused):
         config.load_worker_config(path, template.attestation)
@@ -93,7 +94,7 @@ def test_receipt_revalidation_pins_and_refuses_a_recreated_worktree(tmp_path):
     home = tmp_path / "home"
     worktree.mkdir()
     attestation = config.attest_allocated_worktree(worktree)
-    original = os.fstat(attestation.directory_fd)
+    original = attestation.directory_pin.fstat()
     template = config.render_worker_config(worktree, attestation)
     fd = _home_fd(home)
     try:
@@ -105,14 +106,46 @@ def test_receipt_revalidation_pins_and_refuses_a_recreated_worktree(tmp_path):
         worktree.rmdir()
         worktree.mkdir()
 
-        pinned = os.fstat(attestation.directory_fd)
+        pinned = attestation.directory_pin.fstat()
         assert (pinned.st_dev, pinned.st_ino) == (original.st_dev, original.st_ino)
         with pytest.raises(config.WorkerConfigRefused, match="stale or tampered allocated worktree attestation"):
             config.revalidate_worker_config_receipt(receipt)
         with pytest.raises(OSError):
-            os.fstat(attestation.directory_fd)
+            attestation.directory_pin.fstat()
     finally:
         config._close_attestation(attestation)
+
+
+def test_attestation_pin_is_single_owner_and_idempotent_after_fd_number_reuse(tmp_path):
+    worktree = tmp_path / "worktree"
+    home = tmp_path / "home"
+    unrelated = tmp_path / "unrelated"
+    worktree.mkdir()
+    unrelated.mkdir()
+    attestation = config.attest_allocated_worktree(worktree)
+    template = config.render_worker_config(worktree, attestation)
+    home_fd = _home_fd(home)
+    try:
+        receipt = config.materialize_worker_config(home_fd, template, attestation)
+    finally:
+        os.close(home_fd)
+    pin = receipt.attestation.directory_pin
+    original_fd = pin._fd
+    assert original_fd is not None
+
+    config.release_worker_config_receipt(receipt)
+    replacement_fd = os.open(unrelated, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    if replacement_fd != original_fd:
+        os.dup2(replacement_fd, original_fd)
+        os.close(replacement_fd)
+    try:
+        config._close_attestation(attestation)
+        assert os.fstat(original_fd).st_ino == unrelated.stat().st_ino
+        with pytest.raises(config.WorkerConfigRefused):
+            config.revalidate_worker_config_receipt(receipt)
+        assert os.fstat(original_fd).st_ino == unrelated.stat().st_ino
+    finally:
+        os.close(original_fd)
 
 
 def test_materializer_refuses_symlinked_config_and_tampered_template(tmp_path):

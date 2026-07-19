@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from pathlib import Path
 
 import pytest
 import yaml
 
-from creator_engine_validator import worker_spawn
+from creator_engine_validator import codex_worker_config as config, worker_spawn
 
 
 class FakeLauncher:
@@ -466,3 +467,49 @@ def test_codex_spawn_revalidates_receipt_before_fake_launcher(tmp_path, monkeypa
         )
 
     assert launcher.calls == []
+
+
+def test_codex_spawn_uses_the_live_attestation_pin_at_the_launch_primitive(tmp_path, monkeypatch):
+    parent, worker = _worktrees(tmp_path)
+    captured = {}
+
+    class FakeLaunchPlan:
+        def to_dict(self):
+            return {"harness": "codex"}
+
+    class FakeLaunchResult:
+        spawned = True
+        attached = False
+        plan = FakeLaunchPlan()
+        terminal = {"kind": "tmux"}
+        events_ref = "events.jsonl"
+        seat_record_ref = "seat.yaml"
+        seat_lifecycle_state = "active"
+
+    def fake_launch(**kwargs):
+        launch_root = Path(kwargs["repo_root"])
+        pinned = launch_root.stat()
+        replacement = tmp_path / "replaced-worker"
+        worker.rename(replacement)
+        worker.mkdir()
+        captured["launch_root"] = launch_root
+        captured["pinned_identity"] = (pinned.st_dev, pinned.st_ino)
+        assert (launch_root.stat().st_dev, launch_root.stat().st_ino) == captured["pinned_identity"]
+        assert (worker.stat().st_dev, worker.stat().st_ino) != captured["pinned_identity"]
+        return FakeLaunchResult()
+
+    monkeypatch.setattr(worker_spawn.launch_runtime, "launch", fake_launch)
+    result = worker_spawn.spawn_worker(
+        role="implementer",
+        harness="codex",
+        worktree=worker,
+        scope_id="ce-ops#607",
+        brief="launch through the pinned worktree",
+        parent_worktree=parent,
+        environ={},
+    )
+
+    assert str(captured["launch_root"]).startswith("/proc/self/fd/")
+    assert result.plan.managed_config_receipt is not None
+    with pytest.raises(OSError):
+        result.plan.managed_config_receipt.attestation.directory_pin.fstat()

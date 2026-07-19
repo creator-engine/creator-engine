@@ -19,6 +19,32 @@ class WorkerConfigRefused(ValueError):
     """The managed worker configuration boundary failed closed."""
 
 
+@dataclass
+class _AttestedDirectoryPin:
+    """A single-owner directory descriptor retained through worker launch."""
+
+    _fd: int | None
+
+    def fstat(self) -> os.stat_result:
+        if self._fd is None:
+            raise OSError("allocated worktree attestation has been released")
+        return os.fstat(self._fd)
+
+    def proc_path(self) -> Path:
+        if self._fd is None:
+            raise OSError("allocated worktree attestation has been released")
+        return Path(f"/proc/self/fd/{self._fd}")
+
+    def close(self) -> None:
+        fd, self._fd = self._fd, None
+        if fd is None:
+            return
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 @dataclass(frozen=True)
 class AllocatedWorktreeAttestation:
     path: Path
@@ -26,7 +52,7 @@ class AllocatedWorktreeAttestation:
     owner_uid: int
     device: int
     inode: int
-    directory_fd: int
+    directory_pin: _AttestedDirectoryPin
 
 
 @dataclass(frozen=True)
@@ -88,7 +114,7 @@ def attest_allocated_worktree(worktree: Path | str) -> AllocatedWorktreeAttestat
             owner_uid=os.geteuid(),
             device=details.st_dev,
             inode=details.st_ino,
-            directory_fd=directory_fd,
+            directory_pin=_AttestedDirectoryPin(directory_fd),
         )
     except OSError as exc:
         if directory_fd is not None:
@@ -99,10 +125,7 @@ def attest_allocated_worktree(worktree: Path | str) -> AllocatedWorktreeAttestat
 def _close_attestation(attestation: object) -> None:
     if not isinstance(attestation, AllocatedWorktreeAttestation):
         return
-    try:
-        os.close(attestation.directory_fd)
-    except OSError:
-        pass
+    attestation.directory_pin.close()
 
 
 def _validate_attestation(attestation: AllocatedWorktreeAttestation) -> Path:
@@ -111,7 +134,7 @@ def _validate_attestation(attestation: AllocatedWorktreeAttestation) -> Path:
     path = _canonical_directory(attestation.path, label="attested worktree")
     try:
         details = path.stat(follow_symlinks=False)
-        pinned_details = os.fstat(attestation.directory_fd)
+        pinned_details = attestation.directory_pin.fstat()
     except OSError as exc:
         raise WorkerConfigRefused("cannot revalidate allocated worktree attestation") from exc
     if (
@@ -251,10 +274,33 @@ def revalidate_worker_config_receipt(receipt: WorkerConfigReceipt) -> WorkerConf
         if loaded.sha256 != receipt.sha256 or loaded.attestation != attestation:
             raise WorkerConfigRefused("managed config receipt does not match config")
         return loaded
-    except OSError as exc:
-        raise WorkerConfigRefused("cannot stat managed config receipt") from exc
-    finally:
+    except WorkerConfigRefused:
         _close_attestation(attestation)
+        raise
+    except OSError as exc:
+        _close_attestation(attestation)
+        raise WorkerConfigRefused("cannot stat managed config receipt") from exc
+
+
+def pinned_worktree_launch_path(receipt: WorkerConfigReceipt) -> Path:
+    """Revalidate and expose the still-live directory pin to the launch primitive."""
+    if not isinstance(receipt, WorkerConfigReceipt):
+        raise WorkerConfigRefused("missing managed config receipt")
+    try:
+        _validate_attestation(receipt.attestation)
+        return receipt.attestation.directory_pin.proc_path()
+    except WorkerConfigRefused:
+        _close_attestation(receipt.attestation)
+        raise
+    except OSError as exc:
+        _close_attestation(receipt.attestation)
+        raise WorkerConfigRefused("cannot retain allocated worktree identity for launch") from exc
+
+
+def release_worker_config_receipt(receipt: WorkerConfigReceipt | None) -> None:
+    """Release the receipt's single-owner directory pin exactly once."""
+    if isinstance(receipt, WorkerConfigReceipt):
+        _close_attestation(receipt.attestation)
 
 
 def materialize_worker_config(
