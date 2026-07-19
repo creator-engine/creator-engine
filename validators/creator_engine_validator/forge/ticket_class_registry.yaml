@@ -46,8 +46,10 @@ classes:
     description: >-
       Documentation-only implementation ticket. The entire implementation diff
       must touch only docs/**, root *.md files, .ce/changelog/**, or
-      .ce/pr-manifests/**. No executable, schema, deploy, governance, identity,
-      security, attestation, or redaction surface is permitted.
+      .ce/pr-manifests/**. Governance surfaces within the docs tree are
+      explicitly denied by path_glob_denylist (evaluated before allowlist).
+      No executable, schema, deploy, governance, identity, security, attestation,
+      or redaction surface is permitted.
     selectors:
       required_labels:
         - "approved-for-implementation"
@@ -65,6 +67,20 @@ classes:
         - "*.md"
         - ".ce/changelog/**"
         - ".ce/pr-manifests/**"
+      # Governance sub-trees are denied even though docs/** is broad.
+      # Mirror the governance predicates from automerge_mutation_policy.yaml
+      # exactly so both surfaces stay in sync (denylist evaluated first).
+      path_glob_denylist:
+        - ".ce/contracts/**"
+        - "docs/contracts/**"
+        - "contracts/**"
+        - "playbooks/**"
+        - "governance/**"
+        - "GOVERNANCE.md"
+        - "CODEOWNERS"
+        - "docs/decisions/**"
+        - "docs/adr/**"
+        - "docs/governance/**"
       collision_policy: refuse
     role: implementer
     lane_kind: implementation

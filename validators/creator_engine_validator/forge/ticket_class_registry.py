@@ -11,10 +11,23 @@ Design invariants:
     TicketClassRegistryError with a field-level message (mirror automerge_policy.py
     error style).
   - v1 activation rule: any class entry with auto_pickup: true MUST carry a
-    non-empty enabling_decision_ref. Violation raises TicketClassRegistryError.
+    non-empty, non-whitespace enabling_decision_ref. Violation raises
+    TicketClassRegistryError.
   - Approver sets are named references only; no usernames are stored or resolved
     here. Resolution against the identity registry happens at live-recheck time
     inside the belt.
+  - Territory denylist takes precedence over allowlist: path_in_territory checks
+    the denylist first; a denylist match returns False regardless of allowlist.
+  - Path normalization refusal: path_in_territory refuses (returns False) any
+    path that is absolute, contains '..', contains a backslash, or starts with
+    './'. No silent normalization is performed.
+  - Load-time governance cross-check: any class whose allowed_mutation_classes
+    does not include 'governance' must not admit any canonical governance probe
+    path through its territory (allowlist minus denylist). Violation is refused
+    at load time.
+  - Load-time selector ambiguity check: registry refuses load if any two class
+    entries' required_labels sets are in a subset relation (one is a subset of
+    the other), which would make class_for_labels() produce ambiguous results.
   - Imports: stdlib + yaml only (mirrors mutation_classifier.py import posture).
   - NOT wired into pickup.py. That bridge is CE618-1 territory (dev-3).
 """
@@ -70,6 +83,18 @@ VALID_LIVE_RECHECKS: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: Canonical governance probe paths used for load-time territory safety checks.
+#: These correspond to the governance predicates in automerge_mutation_policy.yaml.
+#: Any class whose allowed_mutation_classes does not include 'governance' must
+#: not admit any of these paths through its territory (allowlist minus denylist).
+GOVERNANCE_PROBE_PATHS: Final[tuple[str, ...]] = (
+    "docs/decisions/PROBE.md",
+    "docs/adr/PROBE.md",
+    "docs/governance/PROBE.md",
+    "GOVERNANCE.md",
+    ".ce/contracts/PROBE.yaml",
+)
+
 # Top-level YAML keys allowed in the registry document.
 _REGISTRY_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
     {"registry_version", "activation_posture", "approver_sets", "classes"}
@@ -106,7 +131,7 @@ _SELECTORS_KEYS: Final[frozenset[str]] = frozenset(
 
 # Keys allowed inside a territory block.
 _TERRITORY_KEYS: Final[frozenset[str]] = frozenset(
-    {"path_glob_allowlist", "collision_policy"}
+    {"path_glob_allowlist", "path_glob_denylist", "collision_policy"}
 )
 
 # Keys allowed inside a retry block.
@@ -149,9 +174,18 @@ class ApproverSet:
 
 @dataclass(frozen=True)
 class TerritoryPolicy:
-    """Path-glob allowlist and collision treatment for a ticket class."""
+    """Path-glob allowlist + optional denylist and collision treatment.
+
+    Evaluation order (enforced by path_in_territory):
+    1. Denylist checked first — any denylist match returns False immediately.
+    2. Allowlist checked second — at least one allowlist match required for True.
+
+    The denylist enables a class to use a broad allowlist glob (e.g. ``docs/**``)
+    while explicitly excluding governance or other privileged sub-trees.
+    """
 
     path_glob_allowlist: tuple[str, ...]
+    path_glob_denylist: tuple[str, ...]  # empty tuple when not set
     collision_policy: str  # "refuse" | "queue"
 
 
@@ -278,6 +312,36 @@ def _require_str_list(value: Any, field: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Path safety validation
+# ---------------------------------------------------------------------------
+
+
+def _is_safe_path(path: str) -> bool:
+    """Return True iff path is safe for territory evaluation.
+
+    Unsafe forms (all return False — fail-closed):
+      - Absolute path: starts with '/'
+      - Traversal: contains '..' anywhere in the string
+      - Windows separator: contains '\\'
+      - Explicit dot-prefix: starts with './'
+
+    No silent normalization is performed. Any unsafe form is treated as
+    not-in-territory by path_in_territory.
+    """
+    if not path:
+        return False
+    if path.startswith("/"):
+        return False
+    if ".." in path:
+        return False
+    if "\\" in path:
+        return False
+    if path.startswith("./"):
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Per-block parsers
 # ---------------------------------------------------------------------------
 
@@ -313,6 +377,13 @@ def _parse_territory(raw: Any, class_id: str) -> TerritoryPolicy:
             field=f"{ctx}.path_glob_allowlist",
         )
 
+    # path_glob_denylist is optional; defaults to empty.
+    raw_denylist = raw.get("path_glob_denylist")
+    if raw_denylist is None:
+        deny_list: list[str] = []
+    else:
+        deny_list = _require_str_list(raw_denylist, f"{ctx}.path_glob_denylist")
+
     collision_policy = _require_str(
         raw.get("collision_policy"), f"{ctx}.collision_policy"
     )
@@ -325,6 +396,7 @@ def _parse_territory(raw: Any, class_id: str) -> TerritoryPolicy:
 
     return TerritoryPolicy(
         path_glob_allowlist=tuple(glob_list),
+        path_glob_denylist=tuple(deny_list),
         collision_policy=collision_policy,
     )
 
@@ -460,7 +532,8 @@ def _parse_class_entry(
     # auto_pickup
     auto_pickup = _require_bool(raw.get("auto_pickup"), f"{ctx}.auto_pickup")
 
-    # enabling_decision_ref (optional; required when auto_pickup is True)
+    # enabling_decision_ref (optional; required non-empty+non-whitespace when
+    # auto_pickup is True — _require_str semantics enforced below)
     enabling_decision_ref_raw = raw.get("enabling_decision_ref")
     if enabling_decision_ref_raw is not None and not isinstance(
         enabling_decision_ref_raw, str
@@ -475,13 +548,16 @@ def _parse_class_entry(
     )
 
     # v1 activation rule: auto_pickup true requires enabling_decision_ref
-    if auto_pickup and not enabling_decision_ref:
-        raise TicketClassRegistryError(
-            f"{ctx}: auto_pickup is true but enabling_decision_ref is absent or "
-            f"empty; registry v1 requires an enabling_decision_ref before any "
-            f"class may be armed for autonomous pickup",
-            field=f"{ctx}.enabling_decision_ref",
-        )
+    # that is non-empty AND non-whitespace (mirrors _require_str semantics).
+    if auto_pickup:
+        if not enabling_decision_ref or not enabling_decision_ref.strip():
+            raise TicketClassRegistryError(
+                f"{ctx}: auto_pickup is true but enabling_decision_ref is absent, "
+                f"empty, or whitespace-only; registry v1 requires a non-empty "
+                f"enabling_decision_ref before any class may be armed for "
+                f"autonomous pickup",
+                field=f"{ctx}.enabling_decision_ref",
+            )
 
     # live_rechecks
     raw_lr = raw.get("live_rechecks")
@@ -521,6 +597,74 @@ def _parse_class_entry(
 
 
 # ---------------------------------------------------------------------------
+# Load-time cross-checks (run after all entries are parsed)
+# ---------------------------------------------------------------------------
+
+
+def _check_governance_territory_safety(
+    entries: list[TicketClassEntry],
+) -> None:
+    """Refuse if any class without governance in allowed_mutation_classes
+    admits a canonical governance probe path through its territory.
+
+    This is a structural safety check: it verifies that broad allowlist globs
+    (e.g. ``docs/**``) cannot inadvertently capture governance surfaces
+    (``docs/decisions/**``, ``docs/adr/**``, ``docs/governance/**``,
+    ``GOVERNANCE.md``, ``.ce/contracts/**``) for classes that are not
+    permitted to touch governance paths.
+
+    The check uses the same path_in_territory logic (denylist first, then
+    allowlist) so a correctly set denylist will cause the class to pass.
+    """
+    for entry in entries:
+        if "governance" in entry.allowed_mutation_classes:
+            continue  # governance-capable class may touch governance paths
+        for probe in GOVERNANCE_PROBE_PATHS:
+            if path_in_territory(entry, probe):
+                raise TicketClassRegistryError(
+                    f"classes[{entry.id!r}]: territory admits governance probe "
+                    f"path {probe!r} but allowed_mutation_classes does not "
+                    f"include 'governance'; add a path_glob_denylist entry "
+                    f"to exclude governance surfaces from this class territory",
+                    field=f"classes[{entry.id!r}].territory",
+                )
+
+
+def _check_selector_ambiguity(entries: list[TicketClassEntry]) -> None:
+    """Refuse if any two class entries' required_labels sets are in a subset
+    relation, which would make class_for_labels() produce ambiguous results.
+
+    The registry refuses load when selector sets are ambiguous (i.e. when one
+    class's required_labels is a subset of another's). This replaces the
+    'first match wins' ordering with a 'registry refuses ambiguous selectors
+    at load' guarantee: if the registry loads, class_for_labels() is unambiguous
+    for any label set.
+
+    Practical rule: for every pair (A, B) where A.id != B.id, refuse if
+    A.required_labels <= B.required_labels or B.required_labels <= A.required_labels.
+
+    This covers both the direct subset case and the equal-sets case. Each class
+    should carry a unique 'class:<id>' label so that its required_labels set is
+    incomparable (neither a subset nor a superset) to any other class's set.
+    """
+    for i, a in enumerate(entries):
+        for j, b in enumerate(entries):
+            if i >= j:
+                continue  # each pair checked once
+            a_labels = a.selectors_required_labels
+            b_labels = b.selectors_required_labels
+            if a_labels <= b_labels or b_labels <= a_labels:
+                raise TicketClassRegistryError(
+                    f"ambiguous selector sets: classes[{a.id!r}] and "
+                    f"classes[{b.id!r}] have required_labels in a subset "
+                    f"relation ({sorted(a_labels)!r} vs {sorted(b_labels)!r}); "
+                    f"each class must carry a unique 'class:<id>' label so that "
+                    f"selector sets are pairwise non-comparable",
+                    field="classes",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Public loader
 # ---------------------------------------------------------------------------
 
@@ -546,7 +690,8 @@ def load_ticket_class_registry(
     TicketClassRegistryError
         On any validation failure: unknown key, wrong type, unknown enum
         value, constraint violation (e.g. auto_pickup without
-        enabling_decision_ref), or malformed YAML.
+        enabling_decision_ref), governance territory leak, selector
+        ambiguity, or malformed YAML.
     OSError
         If the file cannot be read.
     """
@@ -605,7 +750,6 @@ def load_ticket_class_registry(
             field="approver_sets",
         )
     approver_set_pairs: list[tuple[str, ApproverSet]] = []
-    known_approver_set_names: frozenset[str] = frozenset()
     for set_name, set_raw in raw_sets.items():
         parsed = _parse_approver_set(str(set_name), set_raw)
         approver_set_pairs.append((str(set_name), parsed))
@@ -623,10 +767,16 @@ def load_ticket_class_registry(
         entry = _parse_class_entry(raw_entry, i, known_approver_set_names)
         if entry.id in seen_ids:
             raise TicketClassRegistryError(
-                f"duplicate class id {entry.id!r}", field=f"classes[{entry.id!r}].id"
+                f"duplicate class id {entry.id!r}",
+                field=f"classes[{entry.id!r}].id",
             )
         seen_ids.add(entry.id)
         class_entries.append(entry)
+
+    # Cross-checks (run after all entries are parsed so checks can access
+    # the full entry set).
+    _check_governance_territory_safety(class_entries)
+    _check_selector_ambiguity(class_entries)
 
     return TicketClassRegistry(
         registry_version=registry_version_raw,
@@ -648,9 +798,10 @@ def class_for_labels(
     """Return the first registry entry whose required_labels are all present
     in ``labels``, or None if no entry matches.
 
-    The lookup is subset-based: an entry matches when every label in
-    ``entry.selectors_required_labels`` appears in ``labels``. Order of
-    definition in the registry determines priority when multiple entries match.
+    The registry guarantees at load time that no two entries' required_labels
+    sets are in a subset relation (see _check_selector_ambiguity). This means
+    for any well-formed issue label set, at most one entry will match. The
+    first-match scan is therefore deterministic and unambiguous.
 
     Parameters
     ----------
@@ -676,29 +827,51 @@ def is_pickup_permitted(entry: TicketClassEntry) -> bool:
 
     In registry v1 this is always False (activation_posture: advisory).
     The function is provided for forward compatibility: when a class is armed
-    (auto_pickup: true + enabling_decision_ref present), this returns True.
+    (auto_pickup: true + enabling_decision_ref present and non-empty), this
+    returns True.
 
     Note: the caller must also verify the live-recheck list passes before
     acting on a True return. This function only reflects the static policy.
     """
-    return bool(entry.auto_pickup) and bool(entry.enabling_decision_ref)
+    return bool(entry.auto_pickup) and bool(
+        entry.enabling_decision_ref and entry.enabling_decision_ref.strip()
+    )
 
 
 def path_in_territory(entry: TicketClassEntry, path: str) -> bool:
-    """Return True iff ``path`` matches at least one glob in the entry's
-    territory path_glob_allowlist.
+    """Return True iff ``path`` is admitted by the entry's territory policy.
+
+    Evaluation order:
+    1. Path safety check — any unsafe path form returns False immediately
+       (fail-closed). Unsafe forms: absolute path (starts with '/'), traversal
+       (contains '..'), backslash (contains '\\'), dot-slash prefix (starts
+       with './'). No silent normalization is performed.
+    2. Denylist — if any denylist glob matches, returns False immediately
+       (denylist takes precedence over allowlist).
+    3. Allowlist — returns True iff at least one allowlist glob matches.
 
     Uses ``fnmatch.fnmatch`` for glob evaluation (consistent with
     mutation_classifier.py).
     """
+    if not _is_safe_path(path):
+        return False  # fail-closed: unsafe path forms are not in territory
+
+    # Denylist takes precedence over allowlist.
+    for pattern in entry.territory.path_glob_denylist:
+        if fnmatch.fnmatch(path, pattern):
+            return False
+
+    # Allowlist.
     for pattern in entry.territory.path_glob_allowlist:
         if fnmatch.fnmatch(path, pattern):
             return True
+
     return False
 
 
 def all_paths_in_territory(
     entry: TicketClassEntry, paths: Sequence[str]
 ) -> bool:
-    """Return True iff every path in ``paths`` matches the entry's territory."""
+    """Return True iff every path in ``paths`` is admitted by the entry's
+    territory (denylist-first, then allowlist; unsafe paths fail-closed)."""
     return all(path_in_territory(entry, p) for p in paths)

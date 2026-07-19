@@ -6,9 +6,14 @@ Coverage:
      unknown work class, unknown mutation class, missing approver set
      (empty approver_sets dict), undeclared approver_allowlist_ref,
      auto_pickup true without enabling_decision_ref (v1 activation rule),
+     auto_pickup true WITH whitespace-only enabling_decision_ref (L1),
      auto_pickup true WITH enabling_decision_ref (should pass).
   3. Territory glob matching (path_in_territory, all_paths_in_territory).
+     B1: denylist-first evaluation; governance probe paths denied on docs-only.
+     M2: path normalization refusal (absolute, .., backslash, ./prefix).
+     Load-time governance territory cross-check (B1).
   4. Selector matching (class_for_labels).
+     M1: load-time selector ambiguity refusal.
   5. is_pickup_permitted semantics.
 """
 from __future__ import annotations
@@ -21,6 +26,7 @@ import yaml
 
 from creator_engine_validator.forge.ticket_class_registry import (
     DEFAULT_REGISTRY_PATH,
+    GOVERNANCE_PROBE_PATHS,
     TicketClassEntry,
     TicketClassRegistry,
     TicketClassRegistryError,
@@ -291,11 +297,50 @@ def test_refuses_auto_pickup_true_without_enabling_decision_ref(tmp_path):
 
 
 def test_accepts_auto_pickup_true_with_enabling_decision_ref(tmp_path):
-    """auto_pickup true WITH enabling_decision_ref is accepted (armed class)."""
-    content = _minimal_valid_yaml(
-        auto_pickup=True,
-        enabling_decision_ref="docs/decisions/ADR-0018-ticket-class-registry.md",
-    )
+    """auto_pickup true WITH enabling_decision_ref is accepted (armed class).
+
+    Uses *.md as territory so the governance cross-check passes (GOVERNANCE.md
+    is denied by the denylist added for that scenario — but we use a territory
+    that doesn't touch docs/** so no cross-check issue arises).
+    Actually uses .ce/changelog/** which matches no governance probe path.
+    """
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          test-controllers:
+            description: "test set"
+            resolution_ref: "ce-ops:infra/identity-registry.yaml#role=controller"
+        classes:
+          - id: test-class
+            description: "An armed test class."
+            selectors:
+              required_labels:
+                - "approved-for-implementation"
+                - "class:test-class"
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: "test-controllers"
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist:
+                - ".ce/changelog/**"
+                - ".ce/pr-manifests/**"
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: true
+            enabling_decision_ref: "docs/decisions/ADR-0018-ticket-class-registry.md"
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 3
+              on_exhaust: manual-exception
+    """)
     p = _write_yaml(tmp_path, content)
     registry = load_ticket_class_registry(p)
     assert len(registry.classes) == 1
@@ -305,8 +350,47 @@ def test_accepts_auto_pickup_true_with_enabling_decision_ref(tmp_path):
 
 
 def test_accepts_auto_pickup_false_without_enabling_decision_ref(tmp_path):
-    """Normal advisory case: auto_pickup false, no enabling_decision_ref. Should load."""
-    content = _minimal_valid_yaml(auto_pickup=False, enabling_decision_ref=None)
+    """Normal advisory case: auto_pickup false, no enabling_decision_ref. Should load.
+
+    Uses a narrow territory (.ce/changelog/**) to avoid triggering the
+    governance cross-check that applies to docs/** territory.
+    """
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          test-controllers:
+            description: "test set"
+            resolution_ref: "ce-ops:infra/identity-registry.yaml#role=controller"
+        classes:
+          - id: test-class
+            description: "Advisory class."
+            selectors:
+              required_labels:
+                - "approved-for-implementation"
+                - "class:test-class"
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: "test-controllers"
+            allowed_work_classes: ["XS", "S"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist:
+                - ".ce/changelog/**"
+                - ".ce/pr-manifests/**"
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 3
+              on_exhaust: manual-exception
+    """)
     p = _write_yaml(tmp_path, content)
     registry = load_ticket_class_registry(p)
     assert registry.classes[0].auto_pickup is False
@@ -457,10 +541,12 @@ def test_path_in_territory_docs_glob():
     registry = load_ticket_class_registry()
     entry = next(e for e in registry.classes if e.id == "docs-only")
     assert path_in_territory(entry, "docs/guide/index.md")
-    assert path_in_territory(entry, "docs/decisions/ADR-0018.md")
+    assert path_in_territory(entry, "docs/reference/cli.md")
     assert path_in_territory(entry, "README.md")
     assert path_in_territory(entry, ".ce/changelog/my-change.md")
     assert path_in_territory(entry, ".ce/pr-manifests/my-change.md")
+    # Governance sub-tree must be denied even though docs/** is in allowlist
+    assert not path_in_territory(entry, "docs/decisions/ADR-0018.md")
 
 
 def test_path_in_territory_docs_glob_rejects_code():
@@ -600,11 +686,48 @@ def test_is_pickup_permitted_false_for_advisory_entry():
 
 
 def test_is_pickup_permitted_true_when_armed(tmp_path):
-    """An armed class (auto_pickup true + enabling_decision_ref) returns True."""
-    content = _minimal_valid_yaml(
-        auto_pickup=True,
-        enabling_decision_ref="docs/decisions/ADR-0018-ticket-class-registry.md",
-    )
+    """An armed class (auto_pickup true + enabling_decision_ref) returns True.
+
+    Uses .ce/changelog/** territory to avoid the governance cross-check that
+    fires on docs/** territory without a denylist.
+    """
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          test-controllers:
+            description: "test set"
+            resolution_ref: "ce-ops:infra/identity-registry.yaml#role=controller"
+        classes:
+          - id: test-class
+            description: "Armed test class."
+            selectors:
+              required_labels:
+                - "approved-for-implementation"
+                - "class:test-class"
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: "test-controllers"
+            allowed_work_classes: ["XS", "S"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist:
+                - ".ce/changelog/**"
+                - ".ce/pr-manifests/**"
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: true
+            enabling_decision_ref: "docs/decisions/ADR-0018-ticket-class-registry.md"
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 3
+              on_exhaust: manual-exception
+    """)
     p = _write_yaml(tmp_path, content)
     registry = load_ticket_class_registry(p)
     entry = registry.classes[0]
@@ -624,13 +747,13 @@ def test_is_pickup_permitted_false_when_auto_pickup_false_and_ref_present(tmp_pa
           - id: c
             description: d
             selectors:
-              required_labels: ["approved-for-implementation"]
+              required_labels: ["approved-for-implementation", "class:c"]
               issue_repo_scope: "creator-engine/ce-ops"
             approver_allowlist_ref: s
             allowed_work_classes: ["XS"]
             allowed_mutation_classes: ["docs"]
             territory:
-              path_glob_allowlist: ["docs/**"]
+              path_glob_allowlist: [".ce/changelog/**"]
               collision_policy: refuse
             role: implementer
             lane_kind: implementation
@@ -652,3 +775,396 @@ def test_is_pickup_permitted_false_when_auto_pickup_false_and_ref_present(tmp_pa
     entry = registry.classes[0]
     assert entry.auto_pickup is False
     assert not is_pickup_permitted(entry)
+
+
+# ---------------------------------------------------------------------------
+# L1: enabling_decision_ref whitespace-only refusal
+# ---------------------------------------------------------------------------
+
+
+def test_refuses_auto_pickup_true_with_whitespace_only_enabling_decision_ref(tmp_path):
+    """L1: whitespace-only enabling_decision_ref with auto_pickup true is refused."""
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          s:
+            description: d
+            resolution_ref: ref
+        classes:
+          - id: c
+            description: d
+            selectors:
+              required_labels: ["approved-for-implementation", "class:c"]
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist: [".ce/changelog/**"]
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: true
+            enabling_decision_ref: "   "
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+    """)
+    p = tmp_path / "r.yaml"
+    p.write_text(content, encoding="utf-8")
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(p)
+    err = str(exc_info.value)
+    assert "auto_pickup" in err or "enabling_decision_ref" in err
+
+
+# ---------------------------------------------------------------------------
+# B1: denylist-first evaluation; governance probe path denial; load-time check
+# ---------------------------------------------------------------------------
+
+
+def test_docs_only_denylist_denies_all_governance_probe_paths():
+    """B1: All 5 governance probe paths are denied for docs-only."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    for probe in GOVERNANCE_PROBE_PATHS:
+        assert not path_in_territory(entry, probe), (
+            f"docs-only territory should deny governance probe {probe!r} "
+            f"but path_in_territory returned True"
+        )
+
+
+def test_docs_only_denylist_items_present():
+    """B1: docs-only carries the expected governance denylist entries."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    denylist = entry.territory.path_glob_denylist
+    assert "docs/decisions/**" in denylist
+    assert "docs/adr/**" in denylist
+    assert "docs/governance/**" in denylist
+    assert "GOVERNANCE.md" in denylist
+
+
+def test_docs_only_denylist_does_not_block_plain_docs():
+    """B1: non-governance docs paths are still admitted after denylist check."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    assert path_in_territory(entry, "docs/guide/getting-started.md")
+    assert path_in_territory(entry, "docs/reference/cli.md")
+
+
+def test_load_time_refuses_governance_path_in_docs_territory(tmp_path):
+    """B1: a class with docs/** allowlist and no denylist is refused at load
+    because the governance cross-check detects probe path leakage."""
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          s:
+            description: d
+            resolution_ref: ref
+        classes:
+          - id: leaky-docs
+            description: "Docs class without governance denylist."
+            selectors:
+              required_labels: ["approved-for-implementation", "class:leaky-docs"]
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist:
+                - "docs/**"
+                - "*.md"
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+    """)
+    p = tmp_path / "r.yaml"
+    p.write_text(content, encoding="utf-8")
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(p)
+    err = str(exc_info.value)
+    assert "governance" in err.lower()
+
+
+def test_load_time_accepts_docs_class_with_correct_denylist():
+    """B1: The shipped registry loads without governance territory error
+    because docs-only carries the full governance denylist."""
+    registry = load_ticket_class_registry()
+    assert any(e.id == "docs-only" for e in registry.classes)
+
+
+def test_denylist_has_precedence_over_allowlist(tmp_path):
+    """B1: a path that matches both allowlist and denylist is denied."""
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          s:
+            description: d
+            resolution_ref: ref
+        classes:
+          - id: with-denylist
+            description: "Class with overlapping allow/deny."
+            selectors:
+              required_labels: ["approved-for-implementation", "class:with-denylist"]
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist:
+                - ".ce/changelog/**"
+                - "docs/**"
+              path_glob_denylist:
+                - "docs/decisions/**"
+                - "docs/adr/**"
+                - "docs/governance/**"
+                - "GOVERNANCE.md"
+                - ".ce/contracts/**"
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+    """)
+    p = tmp_path / "r.yaml"
+    p.write_text(content, encoding="utf-8")
+    registry = load_ticket_class_registry(p)
+    entry = registry.classes[0]
+    # docs/guide is allowed (allowlist matches, not in denylist)
+    assert path_in_territory(entry, "docs/guide/index.md")
+    # docs/decisions is denied (denylist wins even though docs/** matches)
+    assert not path_in_territory(entry, "docs/decisions/ADR-0018.md")
+    # .ce/changelog is allowed
+    assert path_in_territory(entry, ".ce/changelog/ce-624.md")
+
+
+# ---------------------------------------------------------------------------
+# M1: load-time selector ambiguity refusal
+# ---------------------------------------------------------------------------
+
+
+def test_shipped_registry_selectors_are_unambiguous():
+    """M1: The shipped 3-class registry has pairwise non-comparable selector sets."""
+    registry = load_ticket_class_registry()
+    entries = list(registry.classes)
+    for i, a in enumerate(entries):
+        for j, b in enumerate(entries):
+            if i >= j:
+                continue
+            a_lbs = a.selectors_required_labels
+            b_lbs = b.selectors_required_labels
+            assert not (a_lbs <= b_lbs or b_lbs <= a_lbs), (
+                f"classes {a.id!r} and {b.id!r} have ambiguous selector sets"
+            )
+
+
+def test_load_time_refuses_ambiguous_selectors_subset(tmp_path):
+    """M1: class A labels ⊆ class B labels → refused at load."""
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          s:
+            description: d
+            resolution_ref: ref
+        classes:
+          - id: broad
+            description: "Only approved-for-implementation."
+            selectors:
+              required_labels:
+                - "approved-for-implementation"
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist: [".ce/changelog/**"]
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+          - id: narrow
+            description: "Superset of broad — ambiguous."
+            selectors:
+              required_labels:
+                - "approved-for-implementation"
+                - "class:narrow"
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist: [".ce/changelog/**"]
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+    """)
+    p = tmp_path / "r.yaml"
+    p.write_text(content, encoding="utf-8")
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(p)
+    err = str(exc_info.value)
+    assert "ambiguous" in err.lower() or "subset" in err.lower()
+
+
+def test_load_time_refuses_equal_selector_sets(tmp_path):
+    """M1: two classes with identical required_labels are refused (equal ⊆ equal)."""
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          s:
+            description: d
+            resolution_ref: ref
+        classes:
+          - id: alpha
+            description: "Class alpha."
+            selectors:
+              required_labels:
+                - "approved-for-implementation"
+                - "class:shared"
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist: [".ce/changelog/**"]
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+          - id: beta
+            description: "Class beta — same labels as alpha."
+            selectors:
+              required_labels:
+                - "approved-for-implementation"
+                - "class:shared"
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist: [".ce/changelog/**"]
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+    """)
+    p = tmp_path / "r.yaml"
+    p.write_text(content, encoding="utf-8")
+    with pytest.raises(TicketClassRegistryError):
+        load_ticket_class_registry(p)
+
+
+# ---------------------------------------------------------------------------
+# M2: path normalization refusal
+# ---------------------------------------------------------------------------
+
+
+def test_path_in_territory_rejects_absolute_path():
+    """M2: absolute path (starts with /) returns False fail-closed."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    assert not path_in_territory(entry, "/docs/guide/index.md")
+    assert not path_in_territory(entry, "/README.md")
+
+
+def test_path_in_territory_rejects_dotdot_traversal():
+    """M2: traversal form (contains ..) returns False fail-closed."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    assert not path_in_territory(entry, "docs/../validators/forge/x.py")
+    assert not path_in_territory(entry, "../README.md")
+    assert not path_in_territory(entry, "docs/../../etc/passwd")
+
+
+def test_path_in_territory_rejects_backslash():
+    """M2: backslash in path returns False fail-closed."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    assert not path_in_territory(entry, "docs\\guide\\index.md")
+    assert not path_in_territory(entry, "docs/guide\\index.md")
+
+
+def test_path_in_territory_rejects_dotslash_prefix():
+    """M2: path starting with ./ returns False fail-closed."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    assert not path_in_territory(entry, "./docs/guide/index.md")
+    assert not path_in_territory(entry, "./README.md")
+
+
+def test_all_paths_in_territory_rejects_dotdot():
+    """M2: all_paths_in_territory returns False if any path has traversal."""
+    registry = load_ticket_class_registry()
+    entry = next(e for e in registry.classes if e.id == "docs-only")
+    paths = [
+        "docs/guide/index.md",          # safe
+        "docs/../validators/forge/x.py", # traversal — safe path fails closed
+    ]
+    assert not all_paths_in_territory(entry, paths)

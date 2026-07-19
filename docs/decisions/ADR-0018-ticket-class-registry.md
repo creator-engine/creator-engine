@@ -153,8 +153,16 @@ identity registry through the governed forge seam.
 
 | Field | Type | Required | Semantics |
 |---|---|---|---|
-| `territory.path_glob_allowlist` | list of strings | yes | fnmatch glob patterns. Every path in an implementation diff must match at least one pattern before the lane proceeds. Non-empty. |
+| `territory.path_glob_allowlist` | list of strings | yes | fnmatch glob patterns. Every path in an implementation diff must match at least one allowlist pattern (and no denylist pattern) before the lane proceeds. Non-empty. |
+| `territory.path_glob_denylist` | list of strings | no | fnmatch glob patterns that are evaluated **before** the allowlist. A denylist match immediately disqualifies the path regardless of allowlist coverage. Defaults to empty. Use this to exclude privileged sub-trees from broad allowlist globs (e.g. exclude `docs/decisions/**` from `docs/**`). |
 | `territory.collision_policy` | string | yes | `"refuse"` (default, conservative) — stop and leave for manual intervention. `"queue"` — wait for the conflicting claim to clear. |
+
+**Denylist precedence (enforced by `path_in_territory`):** the evaluation order is:
+1. Path safety validation — any path that is absolute (starts with `/`), contains `..`, contains a backslash, or starts with `./` is immediately treated as not-in-territory (fail-closed; no silent normalization).
+2. Denylist — if any denylist glob matches, the path is outside territory regardless of allowlist.
+3. Allowlist — the path must match at least one allowlist glob to be in territory.
+
+**Load-time governance cross-check (enforced by loader):** for every class whose `allowed_mutation_classes` does not include `"governance"`, the loader probes the territory with the canonical governance probe paths (`docs/decisions/PROBE.md`, `docs/adr/PROBE.md`, `docs/governance/PROBE.md`, `GOVERNANCE.md`, `.ce/contracts/PROBE.yaml`). If any probe path passes the territory check, the registry is refused at load time with a field-level error naming the class and the probe path. Classes must use a `path_glob_denylist` that mirrors the governance predicates of `automerge_mutation_policy.yaml` whenever their allowlist would otherwise capture governance surfaces.
 
 **Requirement 3 — role/lane kind and pickup permission:**
 
@@ -166,9 +174,11 @@ identity registry through the governed forge seam.
 | `enabling_decision_ref` | string | no | Required when `auto_pickup: true`; must reference the ADR or governance record that ratified arming. Absent/null is permitted only when `auto_pickup: false`. |
 
 **v1 arming rule (enforced by loader):** if `auto_pickup: true` and
-`enabling_decision_ref` is absent or empty, the loader raises
-`TicketClassRegistryError`. This mirrors the `enabling_decision_ref` pattern
-in `automerge_policy.py`. Violation is a hard refusal, not a warning.
+`enabling_decision_ref` is absent, empty, or whitespace-only, the loader raises
+`TicketClassRegistryError`. The check applies `_require_str` semantics: after
+stripping whitespace the string must be non-empty. This mirrors the
+`enabling_decision_ref` pattern in `automerge_policy.py`. Violation is a hard
+refusal, not a warning.
 
 **Requirement 4 — live-read checks, retry/manual-exception:**
 
@@ -207,11 +217,72 @@ reference; the belt enforces it at runtime.
 
 ### 3.5 Selector matching
 
-`class_for_labels(registry, labels)` returns the **first** class entry whose
-`selectors.required_labels` is a subset of the provided label set. Order of
-definition in the registry determines priority. Returns `None` if no match.
+**Ambiguity refusal at load time:** the loader refuses to load a registry where
+any two class entries have `required_labels` sets in a subset relation (one set
+is a subset of or equal to the other). This is enforced by `_check_selector_ambiguity`
+after all entries are parsed. The refusal guarantees that `class_for_labels()`
+produces an unambiguous result for any well-formed issue label set: if the registry
+loads, the scan is deterministic. Each class must carry a unique `class:<id>` label
+in its `required_labels` so that selector sets are pairwise non-comparable.
+
+**Lookup:** `class_for_labels(registry, labels)` scans class entries in definition
+order and returns the first entry whose `required_labels` is a subset of the
+provided label set. Because the registry guarantees non-comparable selector sets,
+at most one entry matches any given label set. Returns `None` if no entry matches.
 
 This is a pure, deterministic predicate; it does not read the forge API.
+
+### 3.6 Pipeline of record
+
+The ratified production pipeline for autonomous ticket work is:
+
+**belt → seat → gate**
+
+This is a single loop with a single binding checkpoint. The registry and belt
+MUST NOT assume or require a conveyor stage between belt and gate. Each stage
+is defined precisely:
+
+**Belt** reads the registry, polls the forge for issues, runs live-rechecks per
+the class policy, arbitrates the forge claim, and spawns the seat via
+`ce lane launch`. The belt is a per-host singleton; no global belt exists.
+
+**Seat** performs the full unit lifecycle autonomously once launched:
+- Works in its fenced worktree (allocated by the belt before spawn).
+- Runs a fresh-context AutoReview agent before PR-open (policy-fired, not
+  controller-dispatched); the AutoReview is the pre-PR self-review gate.
+- Self-pushes via the credential-free egress broker configured in the seat's
+  runtime envelope.
+- Opens its own PR through the governed forge seam.
+- The seat never waits for an external harvester; it closes its own loop.
+
+**Gate** is the merge-class ladder (ADR-0016) plus the two-key checkpoint
+(Key 1: controller byte-verify + non-author exact-head approval; Key 2:
+independent reviewer or machine predicate per MC0/MC1). The gate is the single
+binding checkpoint where human authority is exercised on the diff. The gate
+does not know or care whether the PR arrived from a belt-launched seat or a
+controller-dispatched one.
+
+**Recovery on exception:** if a seat dies before self-pushing, the board
+detects the orphan condition and fires a bounded salvage agent. Recovery is
+exception-path; the happy path is seat self-completion.
+
+**Conveyor/harvest demotion:** the conveyor daemon is not a stage of this
+pipeline. It is demoted to an event-triggered recovery tool with exactly three
+residual scopes:
+
+1. **Orphan salvage** — when a seat commits but fails to push (board-detected
+   orphan condition), a bounded salvage agent retrieves and pushes the work.
+   This is triggered by a condition, not a standing daemon scan.
+2. **Broker-less containment transport** — if a deployment tier ever runs seats
+   without the egress broker (none today), the conveyor can act as the transport
+   layer for that tier only.
+3. **Multi-seat batch fan-in** — optional integration of parallel seat outputs
+   into a single batch PR for review efficiency, if a future governance decision
+   authorises it.
+
+No standing conveyor daemon is part of the per-host runtime. Per-host standing
+daemons are the belt and the triage sweeper only. Any design that requires the
+conveyor for the happy-path loop is inconsistent with this ADR.
 
 ---
 
@@ -271,8 +342,8 @@ For each class to be armed:
 2. The PR follows the full two-key gate (Key 1 + Key 2 + merge class).
 3. The governance mutation class (privileged) applies; no auto-merge of
    registry arming PRs.
-4. The MC1 zero-gesture merge drill and the actuator hardening
-   (ce-ops#622) must complete before arming any class.
+4. The MC1 zero-gesture merge drill and actuator hardening must complete
+   before arming any class.
 5. The narrowest class (`carrier-mechanical`) is the first candidate; broader
    classes (`docs-only`, `test-hygiene`) follow after demonstrated stability.
 
@@ -292,8 +363,11 @@ The following are explicitly out of scope for v1 of this registry:
    §4) requires a territory registry and policy-fired reviewer-dispatch that
    are not wired in this ADR. The pickup registry and the merge-class territory
    registry may share design patterns but are separate artifacts.
-3. **Conveyor/harvest unchanged.** The harvest/dispatch mechanics, conveyor
-   daemon deployment, and seed-file lifecycle are unaffected by this ADR.
+3. **No standing conveyor in the happy-path pipeline.** The conveyor daemon is
+   demoted to an exception-path recovery tool (see §3.6). The registry and belt
+   MUST NOT assume or require a conveyor stage. The seed-file lifecycle written
+   by the belt before spawn is unaffected; it is consumed by the seat's lane
+   runtime, not the conveyor.
 4. **No new `ce` CLI command group.** The loader is a pure Python module; it
    exposes no CLI surface and adds no `ce` command group.
 5. **No embedding of usernames.** The registry must never contain login
