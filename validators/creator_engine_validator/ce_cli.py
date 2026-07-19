@@ -67,6 +67,7 @@ ce automerge-status     # read dry-run automerge decision logs (read-only; no me
 ce automerge-kill-switch # read or toggle durable live-policy automerge kill-switch
 ce takeover             # read-only controller continuity takeover evidence packet
 ce continuity-drill     # scheduled benign Controller continuity drill proof
+ce seat-scratch reap    # scratch-space reaper: per-ticket worktrees, sandboxes, pytest temps (ce-ops#564)
 ```
 
 This kernel also wires ``ce launch`` / ``ce hud`` (Gate 6, RV1-063) — the
@@ -290,6 +291,7 @@ V3_FORWARDING_SHIMS: dict[str, tuple[str, str]] = {
     "escalation": ("manage local AWAITING-OPERATOR escalation records", "escalation"),
     "notify": ("Operator-notify feed for AWAITING-OPERATOR entry/exit", "notify"),
     "reap": ("seat/venue retirement reaper for terminal sentinel events", "reap"),
+    "seat-scratch": ("scratch-space reaper — per-ticket worktrees, sandboxes, and pytest temps (ce-ops#564)", "seat-scratch"),
     "status": ("list Scopes by projected stage", "status"),
     "show": ("show one Scope (canon labels + projection)", "show"),
     "artifacts": ("enumerate a Scope's (and a run's) artifacts", "artifacts"),

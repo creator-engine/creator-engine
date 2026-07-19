@@ -82,6 +82,7 @@ from . import (
     playbook_runtime,
     runtime_evidence_spine,
     seat_reaper,
+    seat_scratch_reaper,
     secret_identity,
     v3_forge_join,
     v3_installer,
@@ -1786,6 +1787,110 @@ def _cmd_reap(args: argparse.Namespace) -> int:
         return _cmd_reap_watch(args)
     if args.reap_command == "status":
         return _cmd_reap_status(args)
+    return 2
+
+
+# seat-scratch reap — scratch-space reaper (ce-ops#564)
+# Distinct from `ce reap` (seat/venue retirement) — this reaps the *scratch* surface:
+# per-ticket worktrees, validation sandboxes, pytest temps, preflight workspaces, and
+# validate-pr base caches. --dry-run is the DEFAULT; --execute is required for deletion.
+
+
+def _cmd_seat_scratch_reap(args: argparse.Namespace) -> int:
+    """Handle ``ce seat-scratch reap`` — plan or execute the scratch-space reap."""
+    epoch_dir = Path(args.epoch_dir)
+    repo_root = Path(args.repo_root) if getattr(args, "repo_root", None) else Path.cwd()
+    claims_dir = Path(args.claims_dir) if getattr(args, "claims_dir", None) else None
+    briefs_dir = Path(args.briefs_dir) if getattr(args, "briefs_dir", None) else None
+    evidence_root = Path(args.evidence_root) if getattr(args, "evidence_root", None) else None
+    dry_run = not getattr(args, "execute", False)
+
+    freshness_hours = int(getattr(args, "freshness_hours", seat_scratch_reaper.DEFAULT_FRESHNESS_HOURS))
+    reap_age_days = int(getattr(args, "reap_age_days", seat_scratch_reaper.DEFAULT_REAP_AGE_DAYS))
+    bundle_retain_days = int(getattr(args, "bundle_retain_days", seat_scratch_reaper.DEFAULT_BUNDLE_RETAIN_DAYS))
+    claims_window_hours = float(
+        getattr(args, "claims_window_hours", seat_scratch_reaper.DEFAULT_CLAIMS_WINDOW_HOURS)
+    )
+
+    try:
+        plan = seat_scratch_reaper.scan_epoch_dir(
+            epoch_dir,
+            repo_root=repo_root,
+            claims_dir=claims_dir,
+            briefs_dir=briefs_dir,
+            freshness_hours=freshness_hours,
+            reap_age_days=reap_age_days,
+            bundle_retain_days=bundle_retain_days,
+            claims_window_hours=claims_window_hours,
+        )
+    except OSError as exc:
+        msg = f"{_BRAND} · seat-scratch reap REFUSED: cannot scan epoch dir {epoch_dir}: {exc}"
+        payload: dict[str, Any] = {
+            "error": "epoch_dir_unreadable",
+            "epoch_dir": str(epoch_dir),
+            "detail": str(exc),
+        }
+        return _emit(args, 2, [msg], payload)
+
+    tsv = plan.tsv()
+
+    if dry_run:
+        # Plan-only mode: emit TSV and summary
+        lines = [
+            f"{_BRAND} · seat-scratch reap [DRY-RUN] — epoch {epoch_dir}",
+            f"  planned: {len(plan.entries)} entries "
+            f"({len(plan.to_reap)} to reap, {len(plan.to_retain)} to retain)",
+            f"  pass --execute to apply",
+            "",
+            tsv,
+        ]
+        payload = {
+            "action": "seat_scratch_reap_plan",
+            "epoch_dir": str(epoch_dir),
+            "dry_run": True,
+            "planned": len(plan.entries),
+            "to_reap": len(plan.to_reap),
+            "to_retain": len(plan.to_retain),
+            "tsv": tsv,
+        }
+        return _emit(args, 0, lines, payload)
+
+    # Execute mode
+    try:
+        result = seat_scratch_reaper.execute_reap(
+            plan,
+            evidence_root=evidence_root,
+            dry_run=False,
+        )
+    except seat_scratch_reaper.ScratchReaperLockHeld as exc:
+        msg = f"{_BRAND} · seat-scratch reap REFUSED: {exc}"
+        payload = {"error": "lock_held", "detail": str(exc)}
+        return _emit(args, 1, [msg], payload)
+
+    lines = [
+        f"{_BRAND} · seat-scratch reap — epoch {epoch_dir}",
+        f"  reaped {result.reaped} · retained {result.retained} · "
+        f"aborted {result.aborted} · errors {len(result.errors)}",
+    ]
+    if result.manifest_path:
+        lines.append(f"  evidence manifest: {result.manifest_path}")
+    for err in result.errors:
+        lines.append(f"  [error] {err}")
+
+    payload = {
+        "action": "seat_scratch_reap",
+        "epoch_dir": str(epoch_dir),
+        "dry_run": False,
+        **result.to_dict(),
+        "tsv": tsv,
+    }
+    code = 0 if not result.errors or result.reaped > 0 else 1
+    return _emit(args, code, lines, payload)
+
+
+def _cmd_seat_scratch(args: argparse.Namespace) -> int:
+    if getattr(args, "seat_scratch_command", None) == "reap":
+        return _cmd_seat_scratch_reap(args)
     return 2
 
 
@@ -4832,6 +4937,91 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_reap_args(p_reap_status)
 
+    # seat-scratch reap — scratch-space reaper (ce-ops#564)
+    p_seat_scratch = sub.add_parser(
+        "seat-scratch",
+        help="scratch-space reaper — per-ticket worktrees, sandboxes, and pytest temps (ce-ops#564)",
+    )
+    seat_scratch_sub = p_seat_scratch.add_subparsers(dest="seat_scratch_command", required=True)
+
+    p_scratch_reap = seat_scratch_sub.add_parser(
+        "reap",
+        help="plan (--dry-run, default) or execute the scratch-space reap for one epoch dir",
+    )
+    p_scratch_reap.add_argument(
+        "epoch_dir",
+        metavar="EPOCH_DIR",
+        help="directory whose top-level entries are scanned and classified",
+    )
+    p_scratch_reap.add_argument(
+        "--repo-root",
+        default=None,
+        dest="repo_root",
+        help="local main checkout for merged-ticket detection via changelog/pr-manifest "
+             "(default: cwd)",
+    )
+    p_scratch_reap.add_argument(
+        "--claims-dir",
+        default=None,
+        dest="claims_dir",
+        help="claims directory to consult for the reference guard (e.g. .ce/claims)",
+    )
+    p_scratch_reap.add_argument(
+        "--briefs-dir",
+        default=None,
+        dest="briefs_dir",
+        help="briefs directory to consult for the reference guard (e.g. .ce/briefs)",
+    )
+    p_scratch_reap.add_argument(
+        "--evidence-root",
+        default=None,
+        dest="evidence_root",
+        help="directory to export small evidence files before deletion",
+    )
+    p_scratch_reap.add_argument(
+        "--execute",
+        action="store_true",
+        default=False,
+        help="apply deletions (default: dry-run — print plan only, no deletions)",
+    )
+    p_scratch_reap.add_argument(
+        "--freshness-hours",
+        type=int,
+        default=seat_scratch_reaper.DEFAULT_FRESHNESS_HOURS,
+        dest="freshness_hours",
+        help=f"entries modified within this many hours are never reaped "
+             f"(default: {seat_scratch_reaper.DEFAULT_FRESHNESS_HOURS})",
+    )
+    p_scratch_reap.add_argument(
+        "--reap-age-days",
+        type=int,
+        default=seat_scratch_reaper.DEFAULT_REAP_AGE_DAYS,
+        dest="reap_age_days",
+        help=f"reap worktrees/sandboxes/temps older than this many days "
+             f"(default: {seat_scratch_reaper.DEFAULT_REAP_AGE_DAYS})",
+    )
+    p_scratch_reap.add_argument(
+        "--bundle-retain-days",
+        type=int,
+        default=seat_scratch_reaper.DEFAULT_BUNDLE_RETAIN_DAYS,
+        dest="bundle_retain_days",
+        help=f"retain bundles for this many days (default: {seat_scratch_reaper.DEFAULT_BUNDLE_RETAIN_DAYS})",
+    )
+    p_scratch_reap.add_argument(
+        "--claims-window-hours",
+        type=float,
+        default=seat_scratch_reaper.DEFAULT_CLAIMS_WINDOW_HOURS,
+        dest="claims_window_hours",
+        help=f"look at claim/brief files modified within this many hours for the reference guard "
+             f"(default: {seat_scratch_reaper.DEFAULT_CLAIMS_WINDOW_HOURS})",
+    )
+    p_scratch_reap.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable JSON instead of human-readable lines",
+    )
+
     p_status = sub.add_parser("status", help="list Scopes by projected stage")
     _add_root(p_status)
 
@@ -6692,6 +6882,7 @@ _DISPATCH = {
     "escalation": _cmd_escalation,
     "notify": _cmd_notify,
     "reap": _cmd_reap,
+    "seat-scratch": _cmd_seat_scratch,
     "status": _cmd_status,
     "show": _cmd_show,
     "artifacts": _cmd_artifacts,
