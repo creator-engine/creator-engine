@@ -201,6 +201,7 @@ def _write_live_policy(
     run_mode: str = "ceo",
     kill_switch: bool = False,
     docs_class: bool = False,
+    docs_envelope_tier: bool = False,
     carrier_changelog_tier: bool = False,
     brain_supersede_tier: bool = False,
 ) -> Path:
@@ -212,6 +213,9 @@ def _write_live_policy(
         "kill_switch": kill_switch,
         "classes": {"docs": {"auto_merge": docs_class}},
         "tiers": {
+            AUTOMERGE_TIER_DOCS_ENVELOPE: {
+                "auto_merge": docs_envelope_tier,
+            },
             AUTOMERGE_TIER_CARRIER_CHANGELOG: {
                 "auto_merge": carrier_changelog_tier,
             },
@@ -384,7 +388,7 @@ def test_actuates_docs_envelope_tier_with_live_docs_class_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_live_policy(tmp_path, monkeypatch, docs_class=True)
+    _write_live_policy(tmp_path, monkeypatch, docs_class=True, docs_envelope_tier=True)
     gh = FakeActuatorGh()
 
     result = actuate_if_ready(
@@ -754,5 +758,32 @@ def test_refuses_policy_sha_malformed(tmp_path: Path) -> None:
 
     assert result.refused is True
     assert result.reason == "policy_sha_invalid"
+    assert result.acted is False
+    assert gh.mutation_calls() == []
+
+
+def test_refuses_docs_envelope_tier_when_live_tier_flag_is_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """docs class armed in live policy but docs_envelope tier disarmed → refuses live_tier_flag_not_true."""
+    _write_live_policy(tmp_path, monkeypatch, docs_class=True, docs_envelope_tier=False)
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_DOCS_ENVELOPE,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
+                changed_paths=DOCS_ENVELOPE_PATHS,
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.refused is True
+    assert result.reason == "live_tier_flag_not_true"
     assert result.acted is False
     assert gh.mutation_calls() == []

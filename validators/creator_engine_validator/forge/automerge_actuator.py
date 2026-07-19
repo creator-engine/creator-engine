@@ -121,6 +121,12 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
             payload,
             live_run_mode=live_policy.run_mode,
         )
+    if tier == AUTOMERGE_TIER_DOCS_ENVELOPE and not live_policy.tier_flag(AUTOMERGE_TIER_DOCS_ENVELOPE):
+        return _refuse(
+            "live_tier_flag_not_true",
+            payload,
+            live_run_mode=live_policy.run_mode,
+        )
     if tier in {AUTOMERGE_TIER_CARRIER_CHANGELOG, AUTOMERGE_TIER_BRAIN_SUPERSEDE} and not live_policy.tier_flag(tier):
         return _refuse(
             "live_tier_flag_not_true",

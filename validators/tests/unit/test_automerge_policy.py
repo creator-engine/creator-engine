@@ -717,6 +717,41 @@ def test_docs_envelope_tier_771_path_set_auto_when_docs_class_armed() -> None:
     assert payload["changed_paths"] == DOCS_ENVELOPE_PATHS
 
 
+def test_docs_envelope_tier_flag_off_blocks_when_docs_class_armed() -> None:
+    """ADR-0016 §2.b P12: docs class armed but docs_envelope tier disarmed → GESTURE."""
+    state = AutoMergePolicyState(
+        run_mode="ceo",
+        kill_switch=False,
+        classes={
+            class_name: AutoMergeClassPolicy(auto_merge=class_name == "docs")
+            for class_name in ALL_CLASSES
+        },
+        tiers={
+            AUTOMERGE_TIER_CARRIER_CHANGELOG: AutoMergeTierPolicy(auto_merge=False),
+            AUTOMERGE_TIER_DOCS_ENVELOPE: AutoMergeTierPolicy(auto_merge=False),
+            AUTOMERGE_TIER_BRAIN_SUPERSEDE: AutoMergeTierPolicy(auto_merge=False),
+        },
+        enabling_decision_ref="ce-ops#291-test-enable",
+    )
+
+    decision = decide_automerge(
+        numstat=numstat_for(DOCS_ENVELOPE_PATHS),
+        paths=DOCS_ENVELOPE_PATHS,
+        declared_work_class="tiny",
+        policy_state=state,
+        checks=GREEN_CHECKS,
+        repo="creator-engine/creator-engine",
+        branch="ce-a3-docs-envelope-automerge",
+        base="main",
+        **canary_identity(),
+    )
+
+    assert decision.decision == AUTOMERGE_DECISION_GESTURE
+    assert decision.tier == AUTOMERGE_TIER_DOCS_ENVELOPE
+    assert decision.tier_flag is False
+    assert "tier_docs_envelope_false" in decision.rationale
+
+
 def test_docs_envelope_tier_771_path_set_plus_code_file_is_not_auto() -> None:
     paths = [
         *DOCS_ENVELOPE_PATHS,
