@@ -15,16 +15,17 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 import subprocess
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from . import brain_bootstrap, codex_launch_spec, lane_runtime, launch_runtime
+from . import brain_bootstrap, codex_launch_spec, codex_worker_config, lane_runtime, launch_runtime
 
 
 WORKER_ROLES: dict[str, str] = {
@@ -122,6 +123,10 @@ class WorkerLaunchFailed(WorkerSpawnError):
     code = "CE163-WORKER-LAUNCH-FAILED"
 
 
+class WorkerManagedConfigRefused(WorkerSpawnError):
+    code = "CE607-MANAGED-CONFIG-REFUSED"
+
+
 class WorkerForemanContractRefused(WorkerSpawnError):
     code = "CE163-WORKER-FOREMAN-CONTRACT-REFUSED"
 
@@ -153,6 +158,7 @@ class WorkerSpawnPlan:
     child_env: dict[str, str]
     scrubbed_env_names: tuple[str, ...]
     dry_run: bool
+    managed_config_receipt: codex_worker_config.WorkerConfigReceipt | None = None
 
     def to_record(self) -> dict[str, Any]:
         command = list(self.launch_command)
@@ -216,6 +222,12 @@ class LaunchRuntimeWorkerLauncher:
     """Default live seam: call v1 ``launch_runtime.launch`` with scrubbed env."""
 
     def launch(self, plan: WorkerSpawnPlan) -> WorkerLaunchOutcome:
+        launch_worktree = plan.worktree_path
+        if plan.managed_config_receipt is not None:
+            try:
+                launch_worktree = codex_worker_config.pinned_worktree_launch_path(plan.managed_config_receipt)
+            except codex_worker_config.WorkerConfigRefused as exc:
+                raise WorkerManagedConfigRefused(f"managed Codex worker config refused: {exc}") from exc
         old_environ = dict(os.environ)
         os.environ.clear()
         os.environ.update(plan.child_env)
@@ -226,10 +238,10 @@ class LaunchRuntimeWorkerLauncher:
                 window=f"worker-{plan.role}",
                 invoked_as="worker-spawn",
                 dry_run=False,
-                repo_root=plan.worktree_path,
+                repo_root=launch_worktree,
                 owner_controller_id=plan.parent_id,
                 purpose=f"worker:{plan.role}:{plan.scope_id}",
-                launch_cwd=plan.worktree_path,
+                launch_cwd=launch_worktree,
                 launch_env=plan.child_env,
             )
         finally:
@@ -397,18 +409,31 @@ def _resolve_prompt(prompt_file: Path | str | None, brief: str | None) -> Worker
 
 
 def _resolve_worktree(worktree: Path | str, parent_worktree: Path | str | None) -> Path:
-    path = Path(worktree).expanduser()
+    supplied_path = os.fspath(worktree)
+    if (
+        not os.path.isabs(supplied_path)
+        or supplied_path.startswith("//")
+        or supplied_path != os.path.normpath(supplied_path)
+    ):
+        raise InvalidWorkerWorktree("worker worktree must be an absolute, lexically canonical path")
+    path = Path(supplied_path)
     try:
-        resolved = path.resolve(strict=False)
+        component_path = Path(path.anchor)
+        details = os.lstat(component_path)
+        for component in path.parts[1:]:
+            component_path /= component
+            details = os.lstat(component_path)
+            if stat.S_ISLNK(details.st_mode):
+                raise InvalidWorkerWorktree("worker worktree must not contain symlink components")
     except OSError as exc:
-        raise InvalidWorkerWorktree(f"cannot resolve worker worktree {str(path)!r}: {exc}") from exc
-    if not resolved.is_dir():
-        raise InvalidWorkerWorktree(f"worker worktree {str(resolved)!r} must be an existing directory")
+        raise InvalidWorkerWorktree(f"cannot inspect worker worktree {str(path)!r}: {exc}") from exc
+    if not stat.S_ISDIR(details.st_mode):
+        raise InvalidWorkerWorktree(f"worker worktree {str(path)!r} must be an existing directory")
     if parent_worktree is not None:
         parent = Path(parent_worktree).expanduser().resolve(strict=False)
-        if resolved == parent:
+        if path == parent:
             raise InvalidWorkerWorktree("worker worktree must be distinct from the spawning seat worktree")
-    return resolved
+    return path
 
 
 def _worker_id(
@@ -557,6 +582,36 @@ def _prepare_worker_home(plan: WorkerSpawnPlan) -> None:
         raise WorkerRecordReservationFailed(f"could not create isolated worker HOME {home}: {exc}") from exc
 
 
+def _materialize_codex_worker_config(plan: WorkerSpawnPlan) -> codex_worker_config.WorkerConfigReceipt | None:
+    """Install the attested CDX-D-6 config before the injectable prompt seam."""
+    if plan.harness != "codex":
+        return None
+    home = Path(plan.child_env["HOME"])
+    try:
+        home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            attestation = codex_worker_config.attest_allocated_worktree(plan.worktree_path)
+            template = codex_worker_config.render_worker_config(plan.worktree_path, attestation)
+            return codex_worker_config.materialize_worker_config(home_fd, template, attestation)
+        finally:
+            os.close(home_fd)
+    except (OSError, codex_worker_config.WorkerConfigRefused) as exc:
+        raise WorkerManagedConfigRefused(f"managed Codex worker config refused: {exc}") from exc
+
+
+def _revalidate_codex_worker_config(plan: WorkerSpawnPlan) -> None:
+    """Refuse any changed, stale, or missing managed config at the launch seam."""
+    if plan.harness != "codex":
+        return
+    try:
+        receipt = plan.managed_config_receipt
+        if receipt is None:
+            raise codex_worker_config.WorkerConfigRefused("missing managed config receipt")
+        codex_worker_config.revalidate_worker_config_receipt(receipt)
+    except codex_worker_config.WorkerConfigRefused as exc:
+        raise WorkerManagedConfigRefused(f"managed Codex worker config refused: {exc}") from exc
+
+
 def spawn_worker(
     *,
     role: str,
@@ -595,13 +650,17 @@ def spawn_worker(
     record["launch_state"] = "reserved"
     _prepare_worker_home(plan)
     _reserve_worker_record(plan.record_path, record)
+    plan = replace(plan, managed_config_receipt=_materialize_codex_worker_config(plan))
     live_launcher = launcher or LaunchRuntimeWorkerLauncher()
     try:
+        _revalidate_codex_worker_config(plan)
         outcome = live_launcher.launch(plan)
     except launch_runtime.LaunchError as exc:
         raise WorkerLaunchFailed(f"launch_runtime refused worker spawn [{exc.code}]: {exc}") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkerLaunchFailed(f"worker launcher failed before record write: {exc}") from exc
+    finally:
+        codex_worker_config.release_worker_config_receipt(plan.managed_config_receipt)
     record["seat_refs"] = {
         "events_ref": outcome.events_ref,
         "seat_record_ref": outcome.seat_record_ref,

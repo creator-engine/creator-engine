@@ -6,7 +6,11 @@ exercised by the integration suite.
 """
 from __future__ import annotations
 
+import array
+import os
+import socket
 import subprocess
+import sys
 
 import pytest
 
@@ -14,9 +18,11 @@ from creator_engine_validator.tmux_adapter import (
     TmuxAdapter,
     TmuxCwdMismatch,
     TmuxError,
+    TmuxFdHandoffRefused,
     TmuxPane,
     TmuxUnavailable,
 )
+import creator_engine_validator.tmux_adapter as tmux_adapter
 
 
 class FakeTmux:
@@ -146,6 +152,82 @@ def test_ensure_pane_parses_underscore_sanitized_identity():
 _NOOP_SLEEP = lambda *_: None
 
 
+class _FragmentedSocket:
+    """Small socket double for bounded token-frame receive tests."""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+
+    def recv(self, size, flags=0):
+        del flags
+        if not self._chunks:
+            return b""
+        chunk = self._chunks.pop(0)
+        assert len(chunk) <= size
+        return chunk
+
+
+def test_fd_handoff_reads_expected_token_across_stream_fragmentation():
+    expected = b"a" * 64
+    conn = _FragmentedSocket([expected[:7], expected[7:31], expected[31:]])
+    tmux_adapter._receive_handoff_token(conn, expected)
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        [b"a" * 63],
+        [b"b" * 64],
+        [b"a" * 64 + b"!"],
+        [b"a" * 63 + b"\x00"],
+    ],
+    ids=["eof", "wrong", "overlong", "malformed"],
+)
+def test_fd_handoff_refuses_invalid_token_frames(chunks):
+    with pytest.raises(TmuxFdHandoffRefused):
+        tmux_adapter._receive_handoff_token(_FragmentedSocket(chunks), b"a" * 64)
+
+
+class _AncillarySocket:
+    """Socket double returning a prebuilt recvmsg result."""
+
+    def __init__(self, result):
+        self.result = result
+
+    def recvmsg(self, data_size, control_size):
+        assert data_size == 1
+        assert control_size == socket.CMSG_SPACE(array.array("i").itemsize)
+        return self.result
+
+
+def _rights(*fds, suffix=b""):
+    payload = array.array("i", fds).tobytes() + suffix
+    return (socket.SOL_SOCKET, socket.SCM_RIGHTS, payload)
+
+
+@pytest.mark.parametrize(
+    "result, expected_closed",
+    [
+        ((b"X", [_rights(41)], 0, None), [41]),
+        ((b"F", [_rights(42)], socket.MSG_CTRUNC, None), [42]),
+        ((b"F", [_rights(43, 44)], 0, None), [43, 44]),
+        ((b"F", [_rights(45, suffix=b"x")], 0, None), [45]),
+        ((b"F", [_rights(46), (socket.SOL_SOCKET, 999, b"unexpected")], 0, None), [46]),
+    ],
+    ids=["wrong-data-byte", "truncated-control", "multiple-fds", "malformed-rights", "extra-control"],
+)
+def test_fd_receiver_refuses_invalid_messages_and_closes_received_fds(
+    monkeypatch, result, expected_closed
+):
+    closed = []
+    monkeypatch.setattr(tmux_adapter.os, "close", closed.append)
+
+    with pytest.raises(TmuxFdHandoffRefused):
+        tmux_adapter._receive_handoff_fd(_AncillarySocket(result))
+
+    assert closed == expected_closed
+
+
 class FakeTmuxCwd:
     """Fake runner modelling tmux honoring ``-c`` with a *delayed* cwd settle.
 
@@ -228,3 +310,72 @@ def test_ensure_pane_without_cwd_omits_dash_c_and_does_not_poll():
     flags = create[: create.index("true")]
     assert "-c" not in flags
     assert not any(c[1] == "display-message" for c in fake.calls)
+
+
+def test_ensure_pane_hands_proc_self_fd_to_pane_without_crossing_tmux(tmp_path):
+    """The pane owns an SCM_RIGHTS copy and fchdirs before its command runs."""
+    original = tmp_path / "original"
+    original.mkdir()
+    (original / "marker").write_text("original", encoding="utf-8")
+    replacement = tmp_path / "replacement"
+    output = tmp_path / "result"
+    directory_fd = os.open(original, os.O_RDONLY | os.O_DIRECTORY)
+    children = []
+
+    def runner(argv, check=True):
+        argv = list(argv)
+        sub = argv[1] if len(argv) > 1 else ""
+        if sub == "-V":
+            return subprocess.CompletedProcess(argv, 0, "tmux 3.6\n", "")
+        if sub == "has-session":
+            return subprocess.CompletedProcess(argv, 1, "", "")
+        if sub in ("new-session", "new-window"):
+            original.rename(tmp_path / "moved-original")
+            replacement.mkdir()
+            (replacement / "marker").write_text("replacement", encoding="utf-8")
+            command = argv[argv.index("-F") + 2 :]
+            assert all("/proc/self/fd/" not in token for token in command)
+            children.append(subprocess.Popen(command))
+            return subprocess.CompletedProcess(argv, 0, "$1\t@2\t%3\t/dev/pts/0\t1234\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    try:
+        adapter = TmuxAdapter(runner=runner, fd_handoff_timeout=1)
+        adapter.ensure_pane(
+            session="ce-lane",
+            window="lane-x",
+            command=[
+                sys.executable,
+                "-c",
+                "from pathlib import Path; Path(__import__('sys').argv[1]).write_text(Path('marker').read_text())",
+                str(output),
+            ],
+            cwd=f"/proc/self/fd/{directory_fd}",
+        )
+        assert children[0].wait(timeout=1) == 0
+        assert output.read_text(encoding="utf-8") == "original"
+        os.fstat(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def test_ensure_pane_refuses_and_cleans_up_when_fd_is_not_inherited(tmp_path):
+    fake = FakeTmuxCwd()
+    directory_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        adapter = TmuxAdapter(
+            runner=fake,
+            sleeper=_NOOP_SLEEP,
+            fd_handoff_timeout=0.01,
+        )
+        with pytest.raises(TmuxFdHandoffRefused):
+            adapter.ensure_pane(
+                session="ce-lane",
+                window="lane-x",
+                command=["true"],
+                cwd=f"/proc/self/fd/{directory_fd}",
+            )
+        assert any(c[1] == "kill-pane" for c in fake.calls)
+        os.fstat(directory_fd)
+    finally:
+        os.close(directory_fd)

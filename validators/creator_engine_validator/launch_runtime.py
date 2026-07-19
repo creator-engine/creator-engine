@@ -52,7 +52,7 @@ from . import (
 )
 from .checks import ce_runtime_policy
 from .loader import LoaderError, load_yaml
-from .tmux_adapter import TmuxUnavailable
+from .tmux_adapter import TmuxUnavailable, is_proc_self_fd_path
 from .visibility_backend import TmuxVisibilityBackend, VisibilityBackendError
 
 DEFAULT_HARNESS = "claude"
@@ -2114,7 +2114,7 @@ def launch(
             ) from exc
         raise
     pane = surface.native
-    if launch_cwd is not None:
+    if launch_cwd is not None and not is_proc_self_fd_path(launch_cwd):
         observed = getattr(pane, "pane_cwd", None)
         if observed is None or os.path.realpath(str(observed)) != os.path.realpath(str(launch_cwd)):
             raise TmuxPanePinningRefused(
