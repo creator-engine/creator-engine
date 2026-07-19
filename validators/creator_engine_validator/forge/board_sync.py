@@ -33,16 +33,96 @@ inject a fake runner and perform **zero** live network or subprocess calls.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+import re
+import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ._redact import redact_gh_stderr
-from .backlog import _STATUS_MUTATION, _default_gh_runner, _run_json
-from .github_repo_config import ForgeConfigError, GhRunner
+#: ``board_sync`` is classified **shared** in the CE version-line taxonomy
+#: (``_versions.py``): it is driven by the v1 ``ce_cli`` and must not import
+#: from v3 ``forge.*`` modules.  The transport helpers and type aliases that
+#: ``forge.backlog`` / ``forge.github_repo_config`` / ``forge._redact`` carry
+#: are inlined here so the module stays import-free of v3 forge infrastructure.
+__ce_version_line__ = "shared"
 
-__ce_version_line__ = "v3"
+
+# ---------------------------------------------------------------------------
+# Transport types and helpers (standalone; no forge.* import)
+# ---------------------------------------------------------------------------
+
+#: Injectable GitHub runner: callable[argv, optional-stdin] -> CompletedProcess.
+#: Default: :func:`_default_gh_runner` (plain subprocess).  Tests inject a fake
+#: runner and perform **zero** live network or subprocess calls.
+GhRunner = Callable[[Sequence[str], "str | None"], "subprocess.CompletedProcess"]
+
+# Credential-shape patterns for error-message redaction (defense-in-depth).
+# Kept in sync with ``forge._redact`` — inlined here so this module stays
+# import-free of v3 forge modules (see ``__ce_version_line__`` note above).
+_REDACT_GH_TOKEN = re.compile(r"\b(?:gh[opusr]_|github_pat_)[A-Za-z0-9_.\-]+")
+_REDACT_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}")
+_REDACT_AUTH_HEADER = re.compile(r"(?i)\bauthorization\s*:\s*[^\r\n]+")
+_REDACT_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=\-]{16,}")
+
+
+def _redact_stderr(text: str) -> str:
+    """Mask credential-shaped material from a ``gh`` subprocess stderr string.
+
+    Inline equivalent of ``forge._redact.redact_gh_stderr`` — see the
+    ``__ce_version_line__`` module-level note for why it is copied rather than
+    imported.
+    """
+    if not text:
+        return ""
+    masked = text.strip()
+    masked = _REDACT_AUTH_HEADER.sub("Authorization: <redacted>", masked)
+    masked = _REDACT_GH_TOKEN.sub("<redacted>", masked)
+    masked = _REDACT_JWT.sub("<redacted>", masked)
+    masked = _REDACT_BEARER.sub("<redacted>", masked)
+    return masked
+
+
+def _default_gh_runner(
+    argv: Sequence[str], input_text: str | None = None
+) -> subprocess.CompletedProcess:
+    """Default subprocess runner: invoke ``argv`` as a child process."""
+    return subprocess.run(
+        list(argv), check=False, capture_output=True, text=True,
+        input=input_text, timeout=60,
+    )
+
+
+def _run_json(runner: GhRunner, argv: list[str], context: str) -> object:
+    """Run *argv* via *runner*, parse stdout as JSON, raise on non-zero exit.
+
+    Raises :exc:`BoardSyncError` (not ``ForgeConfigError``) so callers do not
+    need to import v3 forge exceptions.
+    """
+    proc = runner(argv, None)
+    if proc.returncode != 0:
+        raise BoardSyncError(
+            f"{context} failed: {_redact_stderr(proc.stderr or '') or 'unknown error'}"
+        )
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    try:
+        return json.loads(out)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+# Status single-select field mutation (same GraphQL text as ``forge.backlog.
+# _STATUS_MUTATION``; duplicated here to keep this module import-free of v3).
+_STATUS_MUTATION = """
+mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+  updateProjectV2ItemFieldValue(
+    input: {projectId: $project, itemId: $item, fieldId: $field,
+            value: {singleSelectOptionId: $option}}
+  ) { projectV2Item { id } }
+}
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +295,7 @@ def read_board_items(
     """Read all items from the board, paginating until exhausted.
 
     Returns a :class:`list` of :class:`BoardItem` (both issues and drafts).
-    Raises :exc:`~.github_repo_config.ForgeConfigError` on transport failure.
+    Raises :exc:`BoardSyncError` on transport failure.
     """
     runner = gh_runner or _default_gh_runner
     items: list = []
@@ -300,7 +380,7 @@ def _get_issue_node_id(
     """Resolve a GitHub issue's Projects-v2-compatible node id via the REST API.
 
     Returns the opaque ``I_...`` node id.
-    Raises :exc:`~.github_repo_config.ForgeConfigError` on failure.
+    Raises :exc:`BoardSyncError` on failure.
     """
     runner = gh_runner or _default_gh_runner
     payload = _run_json(
@@ -309,13 +389,13 @@ def _get_issue_node_id(
         f"resolve node id for {repo}#{number}",
     )
     if not isinstance(payload, dict):
-        raise ForgeConfigError(
+        raise BoardSyncError(
             f"could not resolve issue node id for {repo}#{number}: "
             "API response was not a JSON object"
         )
     node_id = payload.get("node_id")
     if not isinstance(node_id, str) or not node_id:
-        raise ForgeConfigError(
+        raise BoardSyncError(
             f"issue {repo}#{number} API response has no 'node_id' field"
         )
     return node_id
@@ -331,7 +411,7 @@ def _add_issue_to_board(
 
     First resolves the issue's ``node_id`` via the REST API, then calls the
     ``addProjectV2ItemById`` mutation. Returns the new ``PVTI_...`` item id.
-    Raises :exc:`~.github_repo_config.ForgeConfigError` on any failure.
+    Raises :exc:`BoardSyncError` on any failure.
     """
     runner = gh_runner or _default_gh_runner
     content_id = _get_issue_node_id(coord.repo, coord.number, gh_runner=runner)
@@ -355,7 +435,7 @@ def _add_issue_to_board(
             .get("id", "")
         ) or ""
     if not item_id:
-        raise ForgeConfigError(
+        raise BoardSyncError(
             f"addProjectV2ItemById for {coord.repo}#{coord.number} "
             "returned no item id"
         )
@@ -371,10 +451,10 @@ def _update_item_status(
 ) -> None:
     """Set the Status single-select field on *item_id* to *status_name*.
 
-    Reuses :data:`backlog._STATUS_MUTATION` (no GraphQL duplication).
+    Uses the module-local ``_STATUS_MUTATION`` constant (same GraphQL text as
+    ``forge.backlog._STATUS_MUTATION``; duplicated to stay import-free).
     Raises :exc:`BoardSyncError` for unknown status names (fail-closed before
-    the network call) or :exc:`~.github_repo_config.ForgeConfigError` on
-    transport failure.
+    the network call) or on transport failure.
     """
     option_id = ref.option_id(status_name)  # raises BoardSyncError if unknown
     runner = gh_runner or _default_gh_runner
@@ -524,11 +604,11 @@ def sync_board(
             try:
                 _update_item_status(ref, item_id, d.status, gh_runner=runner)
                 status_updated.append(d)
-            except (ForgeConfigError, BoardSyncError) as exc:
+            except BoardSyncError as exc:
                 errors.append(
                     f"update status after add {d.issue.repo}#{d.issue.number}: {exc}"
                 )
-        except ForgeConfigError as exc:
+        except BoardSyncError as exc:
             errors.append(f"add {d.issue.repo}#{d.issue.number}: {exc}")
 
     # Update status on existing stale items
@@ -536,7 +616,7 @@ def sync_board(
         try:
             _update_item_status(ref, b.item_id, d.status, gh_runner=runner)
             status_updated.append(d)
-        except (ForgeConfigError, BoardSyncError) as exc:
+        except BoardSyncError as exc:
             errors.append(
                 f"update status {d.issue.repo}#{d.issue.number}: {exc}"
             )

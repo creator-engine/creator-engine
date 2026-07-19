@@ -66,6 +66,21 @@ Options:
 | `--state-dir` | no |  | state dir containing automerge/decisions (default: .ce/state relative to --repo-root) |
 | `--json` | no |  | emit machine-readable JSON decision records |
 
+### `board`
+
+org project board desired-state sync (Projects-v2; ce-ops#617)
+
+### `board sync`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--state-file` | no |  | path to the board desired-state YAML (default: .ce/board/board-state.yaml) |
+| `--dry-run` | no |  | print the drift report without applying changes (default) |
+| `--execute` | no |  | apply drift: add missing items and update stale status fields |
+| `--json` | no |  | emit machine-readable JSON drift report and sync result |
+
 ### `bootstrap`
 
 Options:

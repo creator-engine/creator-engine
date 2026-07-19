@@ -25,7 +25,6 @@ from creator_engine_validator.forge.board_sync import (
     read_board_items,
     sync_board,
 )
-from creator_engine_validator.forge.github_repo_config import ForgeConfigError
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -290,7 +289,7 @@ def test_read_board_items_handles_pagination():
 def test_read_board_items_transport_failure_raises():
     def runner(argv, input_text=None):
         return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="network error")
-    with pytest.raises(ForgeConfigError):
+    with pytest.raises(BoardSyncError):
         read_board_items(REF, gh_runner=runner)
 
 
