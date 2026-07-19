@@ -26,6 +26,7 @@ class AllocatedWorktreeAttestation:
     owner_uid: int
     device: int
     inode: int
+    directory_fd: int
 
 
 @dataclass(frozen=True)
@@ -77,26 +78,49 @@ def _canonical_directory(path: Path | str, *, label: str) -> Path:
 def attest_allocated_worktree(worktree: Path | str) -> AllocatedWorktreeAttestation:
     """Create the narrow, value-free trust token for a canonical worktree."""
     path = _canonical_directory(worktree, label="allocated worktree")
-    details = path.stat(follow_symlinks=False)
-    return AllocatedWorktreeAttestation(
-        path=path,
-        path_sha256=_sha256(str(path)),
-        owner_uid=os.geteuid(),
-        device=details.st_dev,
-        inode=details.st_ino,
-    )
+    directory_fd: int | None = None
+    try:
+        directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        details = os.fstat(directory_fd)
+        return AllocatedWorktreeAttestation(
+            path=path,
+            path_sha256=_sha256(str(path)),
+            owner_uid=os.geteuid(),
+            device=details.st_dev,
+            inode=details.st_ino,
+            directory_fd=directory_fd,
+        )
+    except OSError as exc:
+        if directory_fd is not None:
+            os.close(directory_fd)
+        raise WorkerConfigRefused("cannot open allocated worktree without following links") from exc
+
+
+def _close_attestation(attestation: object) -> None:
+    if not isinstance(attestation, AllocatedWorktreeAttestation):
+        return
+    try:
+        os.close(attestation.directory_fd)
+    except OSError:
+        pass
 
 
 def _validate_attestation(attestation: AllocatedWorktreeAttestation) -> Path:
     if not isinstance(attestation, AllocatedWorktreeAttestation):
         raise WorkerConfigRefused("missing allocated worktree attestation")
     path = _canonical_directory(attestation.path, label="attested worktree")
-    details = path.stat(follow_symlinks=False)
+    try:
+        details = path.stat(follow_symlinks=False)
+        pinned_details = os.fstat(attestation.directory_fd)
+    except OSError as exc:
+        raise WorkerConfigRefused("cannot revalidate allocated worktree attestation") from exc
     if (
         attestation.owner_uid != os.geteuid()
         or attestation.path_sha256 != _sha256(str(path))
         or attestation.device != details.st_dev
         or attestation.inode != details.st_ino
+        or (pinned_details.st_dev, pinned_details.st_ino) != (attestation.device, attestation.inode)
+        or (details.st_dev, details.st_ino) != (pinned_details.st_dev, pinned_details.st_ino)
     ):
         raise WorkerConfigRefused("stale or tampered allocated worktree attestation")
     return path
@@ -115,27 +139,36 @@ def render_worker_config(
     worktree: Path | str, attestation: AllocatedWorktreeAttestation
 ) -> WorkerConfigTemplate:
     """Render exactly one trusted project entry from verified worktree trust."""
-    attested_path = _validate_attestation(attestation)
-    supplied_path = _canonical_directory(worktree, label="worktree")
-    if supplied_path != attested_path:
-        raise WorkerConfigRefused("worktree does not match allocated worktree attestation")
-    text = _expected_text(attested_path)
-    return WorkerConfigTemplate(text=text, sha256=_sha256(text), attestation=attestation)
+    try:
+        attested_path = _validate_attestation(attestation)
+        supplied_path = _canonical_directory(worktree, label="worktree")
+        if supplied_path != attested_path:
+            raise WorkerConfigRefused("worktree does not match allocated worktree attestation")
+        text = _expected_text(attested_path)
+        return WorkerConfigTemplate(text=text, sha256=_sha256(text), attestation=attestation)
+    except WorkerConfigRefused:
+        _close_attestation(attestation)
+        raise
 
 
 def parse_worker_config(text: str, attestation: AllocatedWorktreeAttestation) -> WorkerConfigTemplate:
     """Parse and require the sole canonical managed config representation."""
-    path = _validate_attestation(attestation)
     try:
+        path = _validate_attestation(attestation)
         parsed = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
+        _close_attestation(attestation)
         raise WorkerConfigRefused("managed config is not valid TOML") from exc
+    except WorkerConfigRefused:
+        _close_attestation(attestation)
+        raise
     expected = _expected_text(path)
     if text != expected or parsed != {
         "approval_policy": "never",
         "sandbox_mode": "danger-full-access",
         "projects": {str(path): {"trust_level": "trusted"}},
     }:
+        _close_attestation(attestation)
         raise WorkerConfigRefused("managed config is noncanonical or tampered")
     return WorkerConfigTemplate(text=text, sha256=_sha256(text), attestation=attestation)
 
@@ -208,17 +241,20 @@ def revalidate_worker_config_receipt(receipt: WorkerConfigReceipt) -> WorkerConf
     """Require the materialized config to still be the exact received file."""
     if not isinstance(receipt, WorkerConfigReceipt):
         raise WorkerConfigRefused("missing managed config receipt")
+    attestation = receipt.attestation
     try:
         details = os.stat(receipt.path, follow_symlinks=False)
+        _check_owned_mode(details, mode=0o600, label="managed config receipt", regular=True)
+        if details.st_dev != receipt.device or details.st_ino != receipt.inode:
+            raise WorkerConfigRefused("stale or tampered managed config receipt")
+        loaded = load_worker_config(receipt.path, attestation)
+        if loaded.sha256 != receipt.sha256 or loaded.attestation != attestation:
+            raise WorkerConfigRefused("managed config receipt does not match config")
+        return loaded
     except OSError as exc:
         raise WorkerConfigRefused("cannot stat managed config receipt") from exc
-    _check_owned_mode(details, mode=0o600, label="managed config receipt", regular=True)
-    if details.st_dev != receipt.device or details.st_ino != receipt.inode:
-        raise WorkerConfigRefused("stale or tampered managed config receipt")
-    loaded = load_worker_config(receipt.path, receipt.attestation)
-    if loaded.sha256 != receipt.sha256 or loaded.attestation != receipt.attestation:
-        raise WorkerConfigRefused("managed config receipt does not match config")
-    return loaded
+    finally:
+        _close_attestation(attestation)
 
 
 def materialize_worker_config(
@@ -226,13 +262,15 @@ def materialize_worker_config(
 ) -> WorkerConfigReceipt:
     """Atomically install, fsync, and reload a descriptor-relative config file."""
     if not isinstance(template, WorkerConfigTemplate) or template.attestation != attestation:
+        _close_attestation(attestation)
         raise WorkerConfigRefused("template is not bound to the supplied worktree attestation")
-    parsed = parse_worker_config(template.text, attestation)
-    if template.sha256 != parsed.sha256:
-        raise WorkerConfigRefused("managed config template digest mismatch")
-    codex_fd = _ensure_codex_dir(home_fd)
+    codex_fd: int | None = None
     temp_name = f".config.toml.tmp.{os.getpid()}.{os.urandom(16).hex()}"
     try:
+        parsed = parse_worker_config(template.text, attestation)
+        if template.sha256 != parsed.sha256:
+            raise WorkerConfigRefused("managed config template digest mismatch")
+        codex_fd = _ensure_codex_dir(home_fd)
         _existing_config_is_safe(codex_fd)
         temp_fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=codex_fd)
         try:
@@ -256,12 +294,14 @@ def materialize_worker_config(
             device=details.st_dev,
             inode=details.st_ino,
         )
-    except OSError as exc:
+    except (OSError, WorkerConfigRefused) as exc:
+        _close_attestation(attestation)
         raise WorkerConfigRefused("cannot atomically materialize managed config") from exc
     finally:
-        try:
-            os.unlink(temp_name, dir_fd=codex_fd)
-        except FileNotFoundError:
-            pass
-        finally:
-            os.close(codex_fd)
+        if codex_fd is not None:
+            try:
+                os.unlink(temp_name, dir_fd=codex_fd)
+            except FileNotFoundError:
+                pass
+            finally:
+                os.close(codex_fd)

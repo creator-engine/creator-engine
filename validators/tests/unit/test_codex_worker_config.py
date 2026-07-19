@@ -51,6 +51,8 @@ def test_materializer_writes_reloads_and_receipts_a_mode_checked_config(tmp_path
     assert receipt.sha256 == template.sha256
     assert config.load_worker_config(path, template.attestation) == template
     assert config.revalidate_worker_config_receipt(receipt) == template
+    with pytest.raises(OSError):
+        os.fstat(template.attestation.directory_fd)
     path.chmod(0o644)
     with pytest.raises(config.WorkerConfigRefused):
         config.load_worker_config(path, template.attestation)
@@ -84,6 +86,33 @@ def test_attestation_refuses_a_recreated_stale_worktree(tmp_path):
 
     with pytest.raises(config.WorkerConfigRefused):
         config.render_worker_config(worktree, attestation)
+
+
+def test_receipt_revalidation_pins_and_refuses_a_recreated_worktree(tmp_path):
+    worktree = tmp_path / "worktree"
+    home = tmp_path / "home"
+    worktree.mkdir()
+    attestation = config.attest_allocated_worktree(worktree)
+    original = os.fstat(attestation.directory_fd)
+    template = config.render_worker_config(worktree, attestation)
+    fd = _home_fd(home)
+    try:
+        receipt = config.materialize_worker_config(fd, template, attestation)
+    finally:
+        os.close(fd)
+
+    try:
+        worktree.rmdir()
+        worktree.mkdir()
+
+        pinned = os.fstat(attestation.directory_fd)
+        assert (pinned.st_dev, pinned.st_ino) == (original.st_dev, original.st_ino)
+        with pytest.raises(config.WorkerConfigRefused, match="stale or tampered allocated worktree attestation"):
+            config.revalidate_worker_config_receipt(receipt)
+        with pytest.raises(OSError):
+            os.fstat(attestation.directory_fd)
+    finally:
+        config._close_attestation(attestation)
 
 
 def test_materializer_refuses_symlinked_config_and_tampered_template(tmp_path):
