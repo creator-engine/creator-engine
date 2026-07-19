@@ -50,18 +50,27 @@ _IDENTITY_FORMAT = "#{session_id}\t#{window_id}\t#{pane_id}\t#{pane_tty}\t#{pane
 _CWD_POLL_ATTEMPTS = 20
 _CWD_POLL_INTERVAL = 0.25  # seconds; ~5s worst case
 _FD_HANDOFF_TIMEOUT = 5.0
-_FD_RECEIVER = (
-    "import array, os, socket, sys; "
-    "sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); "
-    "sock.connect(sys.argv[1]); sock.sendall(sys.argv[2].encode('ascii')); "
-    "_data, ancdata, _flags, _addr=sock.recvmsg(1, socket.CMSG_SPACE(array.array('i').itemsize)); "
-    "fds=[fd for level, kind, data in ancdata if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS "
-    "for fd in array.array('i', data)]; "
-    "fd=fds.pop() if len(fds) == 1 else None; "
-    "fd is not None or (_ for _ in ()).throw(RuntimeError('missing directory descriptor')); "
-    "os.fchdir(fd); os.close(fd); sock.sendall(b'R'); sock.close(); "
-    "os.execvp(sys.argv[3], sys.argv[3:])"
-)
+_FD_RECEIVER = """
+import os
+import socket
+import sys
+
+from creator_engine_validator.tmux_adapter import _receive_handoff_fd
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+    sock.sendall(sys.argv[2].encode("ascii"))
+    fd = _receive_handoff_fd(sock)
+    try:
+        os.fchdir(fd)
+    finally:
+        os.close(fd)
+    sock.sendall(b"R")
+finally:
+    sock.close()
+os.execvp(sys.argv[3], sys.argv[3:])
+"""
 
 
 class TmuxError(Exception):
@@ -78,6 +87,79 @@ class TmuxCwdMismatch(TmuxError):
 
 class TmuxFdHandoffRefused(TmuxError):
     """The pane did not acknowledge descriptor ownership before execution."""
+
+
+def _receive_handoff_token(conn: socket.socket, expected: bytes) -> None:
+    """Read one bounded token frame, rejecting EOF and immediately queued excess."""
+    frame = bytearray()
+    limit = len(expected)
+    while len(frame) < limit:
+        chunk = conn.recv(limit + 1 - len(frame))
+        if not chunk:
+            raise TmuxFdHandoffRefused("pane descriptor handoff authentication was incomplete")
+        frame.extend(chunk)
+        if len(frame) > limit:
+            raise TmuxFdHandoffRefused("pane descriptor handoff authentication was overlong")
+
+    try:
+        old_timeout = conn.gettimeout()
+        conn.setblocking(False)
+    except AttributeError:  # Small test doubles need no mode restoration.
+        old_timeout = None
+    try:
+        extra = conn.recv(1, socket.MSG_PEEK)
+    except (BlockingIOError, TimeoutError):
+        extra = b""
+    finally:
+        if hasattr(conn, "settimeout"):
+            conn.settimeout(old_timeout)
+    if extra:
+        raise TmuxFdHandoffRefused("pane descriptor handoff authentication had extra data")
+    if bytes(frame) != expected:
+        raise TmuxFdHandoffRefused("pane descriptor handoff authentication failed")
+
+
+def _close_received_fds(fds: Sequence[int]) -> None:
+    """Best-effort close each received descriptor once, preserving refusal safety."""
+    for fd in fds:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _receive_handoff_fd(conn: socket.socket) -> int:
+    """Receive exactly one untruncated SCM_RIGHTS directory descriptor."""
+    received: list[int] = []
+    item_size = array.array("i").itemsize
+    try:
+        data, ancdata, flags, _addr = conn.recvmsg(1, socket.CMSG_SPACE(item_size))
+        for level, kind, payload in ancdata:
+            if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                complete_bytes = len(payload) - (len(payload) % item_size)
+                if complete_bytes:
+                    parsed = array.array("i")
+                    parsed.frombytes(payload[:complete_bytes])
+                    received.extend(parsed)
+
+        if flags:
+            raise TmuxFdHandoffRefused("pane descriptor handoff ancillary data was truncated")
+        if data != b"F":
+            raise TmuxFdHandoffRefused("pane descriptor handoff payload was invalid")
+        if len(ancdata) != 1:
+            raise TmuxFdHandoffRefused("pane descriptor handoff included unexpected control data")
+        level, kind, payload = ancdata[0]
+        if level != socket.SOL_SOCKET or kind != socket.SCM_RIGHTS:
+            raise TmuxFdHandoffRefused("pane descriptor handoff omitted SCM_RIGHTS")
+        if len(payload) != item_size or len(received) != 1:
+            raise TmuxFdHandoffRefused("pane descriptor handoff did not contain exactly one descriptor")
+        return received.pop()
+    except TmuxFdHandoffRefused:
+        _close_received_fds(received)
+        raise
+    except (OSError, ValueError) as exc:
+        _close_received_fds(received)
+        raise TmuxFdHandoffRefused("pane descriptor handoff receive failed") from exc
 
 
 @dataclass(frozen=True)
@@ -139,8 +221,10 @@ class _FdHandoff:
             conn, _ = self._socket.accept()
             with conn:
                 conn.settimeout(self._timeout)
-                if conn.recv(128) != self._token.encode("ascii"):
-                    self._error = "pane descriptor handoff authentication failed"
+                try:
+                    _receive_handoff_token(conn, self._token.encode("ascii"))
+                except TmuxFdHandoffRefused as exc:
+                    self._error = str(exc)
                     return
                 rights = array.array("i", [self._fd]).tobytes()
                 conn.sendmsg(

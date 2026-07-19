@@ -6,7 +6,9 @@ exercised by the integration suite.
 """
 from __future__ import annotations
 
+import array
 import os
+import socket
 import subprocess
 import sys
 
@@ -20,6 +22,7 @@ from creator_engine_validator.tmux_adapter import (
     TmuxPane,
     TmuxUnavailable,
 )
+import creator_engine_validator.tmux_adapter as tmux_adapter
 
 
 class FakeTmux:
@@ -147,6 +150,82 @@ def test_ensure_pane_parses_underscore_sanitized_identity():
 
 
 _NOOP_SLEEP = lambda *_: None
+
+
+class _FragmentedSocket:
+    """Small socket double for bounded token-frame receive tests."""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+
+    def recv(self, size, flags=0):
+        del flags
+        if not self._chunks:
+            return b""
+        chunk = self._chunks.pop(0)
+        assert len(chunk) <= size
+        return chunk
+
+
+def test_fd_handoff_reads_expected_token_across_stream_fragmentation():
+    expected = b"a" * 64
+    conn = _FragmentedSocket([expected[:7], expected[7:31], expected[31:]])
+    tmux_adapter._receive_handoff_token(conn, expected)
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        [b"a" * 63],
+        [b"b" * 64],
+        [b"a" * 64 + b"!"],
+        [b"a" * 63 + b"\x00"],
+    ],
+    ids=["eof", "wrong", "overlong", "malformed"],
+)
+def test_fd_handoff_refuses_invalid_token_frames(chunks):
+    with pytest.raises(TmuxFdHandoffRefused):
+        tmux_adapter._receive_handoff_token(_FragmentedSocket(chunks), b"a" * 64)
+
+
+class _AncillarySocket:
+    """Socket double returning a prebuilt recvmsg result."""
+
+    def __init__(self, result):
+        self.result = result
+
+    def recvmsg(self, data_size, control_size):
+        assert data_size == 1
+        assert control_size == socket.CMSG_SPACE(array.array("i").itemsize)
+        return self.result
+
+
+def _rights(*fds, suffix=b""):
+    payload = array.array("i", fds).tobytes() + suffix
+    return (socket.SOL_SOCKET, socket.SCM_RIGHTS, payload)
+
+
+@pytest.mark.parametrize(
+    "result, expected_closed",
+    [
+        ((b"X", [_rights(41)], 0, None), [41]),
+        ((b"F", [_rights(42)], socket.MSG_CTRUNC, None), [42]),
+        ((b"F", [_rights(43, 44)], 0, None), [43, 44]),
+        ((b"F", [_rights(45, suffix=b"x")], 0, None), [45]),
+        ((b"F", [_rights(46), (socket.SOL_SOCKET, 999, b"unexpected")], 0, None), [46]),
+    ],
+    ids=["wrong-data-byte", "truncated-control", "multiple-fds", "malformed-rights", "extra-control"],
+)
+def test_fd_receiver_refuses_invalid_messages_and_closes_received_fds(
+    monkeypatch, result, expected_closed
+):
+    closed = []
+    monkeypatch.setattr(tmux_adapter.os, "close", closed.append)
+
+    with pytest.raises(TmuxFdHandoffRefused):
+        tmux_adapter._receive_handoff_fd(_AncillarySocket(result))
+
+    assert closed == expected_closed
 
 
 class FakeTmuxCwd:
