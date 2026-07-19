@@ -1,0 +1,214 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/dispatch-receipt.v1.schema.yaml"
+title: "Creator Engine Dispatch Receipt v1"
+description: |
+  Machine-readable schema for a single dispatch-activation receipt — the
+  on-disk artifact the dispatcher emits AFTER a brief is sent to a seat,
+  capturing enough evidence for a watcher to assert activation rather than
+  infer it from scrollback.
+
+  Background (ce-ops#615): CE fleet dispatch suffers three activation-gap
+  classes:
+    * grant-without-wake      — claim granted, seat never woken
+    * dispatch-without-transport — pointer sent, transport not verified
+    * receipt-without-activation — receipt written, seat never truly active
+                                   (e.g. tmux `send-keys -l` without a
+                                   SEPARATE `C-m`; the combined form drops
+                                   the Enter)
+
+  The schema is transport-agnostic (tmux and herdr both covered).
+
+  Boundary statement: a receipt records SHAPE-ONLY evidence — paths,
+  digests, timestamps, a transport target slug, and a post-check kind. It
+  MUST NOT carry credential values, raw tokens, private key material,
+  source-host account names, or installation ids.
+
+  Value-free: brief_sha256 / claim_sha256 are content addresses; they carry
+  no secret material. model_effort_line is the observable status-line text
+  the dispatcher saw at send time (per the 2026-07-19 Operator floor ruling
+  that the seat's model/effort must be recorded at dispatch).
+
+  Storage convention: receipts live under the gitignored path
+  `.ce/state/dispatch-receipts/<slug>-<utcstamp>.json` (append-safe; one
+  file per dispatch act).
+
+type: object
+required:
+  - kind
+  - schema_version
+  - emitted_at
+  - brief_path
+  - brief_sha256
+  - transport
+  - activation
+  - model_effort_line
+  - dispatcher
+  - work_unit
+unevaluatedProperties: false
+properties:
+  kind:
+    type: string
+    const: ce.dispatch-receipt
+    description: |
+      Discriminator constant. Records that do not carry this exact value are
+      not governed dispatch receipts.
+  schema_version:
+    type: string
+    const: "1"
+    description: |
+      Integer-as-string schema version. Bumped only on a breaking shape
+      change; readers MUST tolerate-skip an unknown major.
+  emitted_at:
+    $ref: "#/$defs/timestamp"
+    description: |
+      UTC RFC3339 stamp the receipt was written (`%Y-%m-%dT%H:%M:%SZ`).
+  brief_path:
+    type: string
+    minLength: 1
+    description: |
+      Shape-only path ref to the materialized brief the dispatcher sent to
+      the seat. A path ref only — NEVER the brief body.
+  brief_sha256:
+    $ref: "#/$defs/sha256"
+    description: |
+      SHA256 of the brief file at dispatch time. The in-seat verifier checks
+      this digest to confirm the brief was not mutated in transit.
+  claim_path:
+    type: string
+    minLength: 1
+    description: |
+      Shape-only path ref to the active work claim bound to this dispatch.
+      Optional: a manual or ad-hoc dispatch may not have a formal claim
+      artifact at emit time.
+  claim_sha256:
+    $ref: "#/$defs/sha256"
+    description: |
+      SHA256 of the claim file at dispatch time. Present only alongside
+      `claim_path`. NEVER a token or credential value.
+  transport:
+    $ref: "#/$defs/transport"
+    description: |
+      The transport mechanism used to send the brief pointer to the seat.
+  transport_verified_at:
+    $ref: "#/$defs/timestamp"
+    description: |
+      UTC stamp the dispatcher (or its watcher) confirmed the brief pointer
+      arrived inside the seat (e.g. sha256 re-read from seat filesystem).
+      ABSENT = `dispatch-without-transport` gap class: the pointer was
+      issued but arrival is not confirmed.
+  activation:
+    $ref: "#/$defs/activation"
+    description: |
+      Evidence block for the Enter-delivery step. The `separate_enter` field
+      is the load-bearing bit: a `false` or absent value means the combined
+      send-keys form was used, which silently drops the Enter on many tmux
+      builds — the `receipt-without-activation` gap class.
+  post_check:
+    $ref: "#/$defs/post_check"
+    description: |
+      Optional post-dispatch probe result. When absent the watcher cannot
+      assert the seat is in Working state — the `receipt-without-activation`
+      gap class. When present, the `result` field captures the observed
+      seat state.
+  model_effort_line:
+    type: string
+    minLength: 1
+    description: |
+      The seat's observable model/effort status-line text as seen by the
+      dispatcher at the moment of send (per the 2026-07-19 Operator floor
+      ruling). Example: "claude-sonnet-4-5 / effort:normal". Value-free:
+      this is an observable UI string, not a credential or account id.
+  dispatcher:
+    type: string
+    minLength: 1
+    description: |
+      Identity of the controller or operator that performed the dispatch
+      (e.g. "ce-dev-2", "operator"). Value-free controller slug; NEVER a
+      credential, token, or raw account.
+  work_unit:
+    type: string
+    minLength: 1
+    description: |
+      The ticket / work unit this dispatch is bound to (e.g. "ce-ops#615").
+      Informational; used by watchers and dashboards to join receipts to
+      open claims.
+$defs:
+  sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: A lowercase hex SHA256 digest (64 characters).
+  timestamp:
+    type: string
+    pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    description: UTC RFC3339 stamp (`%Y-%m-%dT%H:%M:%SZ`).
+  transport:
+    type: object
+    required: [kind, target]
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        enum: [tmux, herdr]
+        description: |
+          Transport mechanism. `tmux` = direct `send-keys` into a named
+          session/window/pane. `herdr` = herdr agent-send pointer delivery.
+      target:
+        type: string
+        minLength: 1
+        description: |
+          Value-free transport target slug. For `tmux`: the pane address
+          (`<session>:<window>.<pane>`, e.g. `ce-dev1-orchestrator:0.0`).
+          For `herdr`: the worker pane id (e.g. `w1:p1`). NEVER a
+          credential, token, or raw account.
+  activation:
+    type: object
+    required: [method, issued_at, separate_enter]
+    unevaluatedProperties: false
+    properties:
+      method:
+        type: string
+        enum: [send-keys, herdr-send-keys]
+        description: |
+          The shell/API primitive used to deliver the Enter keystroke.
+          `send-keys` = `tmux send-keys`; `herdr-send-keys` = herdr pane
+          send-keys. Additional methods may be added in later schema
+          versions.
+      issued_at:
+        $ref: "#/$defs/timestamp"
+        description: |
+          UTC stamp the activation (Enter delivery) was issued.
+      separate_enter:
+        type: boolean
+        description: |
+          Whether the Enter keystroke was delivered as a SEPARATE,
+          independent `send-keys` call AFTER the text was sent (the proven
+          safe pattern). `false` means the Enter was combined in the same
+          call as the text payload — this silently drops the Enter on many
+          tmux builds and MUST trigger the `receipt-without-activation` gap
+          class in `verify_receipt`.
+  post_check:
+    type: object
+    required: [kind, verified_at, result]
+    unevaluatedProperties: false
+    properties:
+      kind:
+        type: string
+        enum: [working-state, scrollback-match]
+        description: |
+          The probe method used to confirm seat activation.
+          `working-state` = the seat's lifecycle file or pane status was
+          observed as "Working" (the stronger assertion). `scrollback-match`
+          = a known activation string was found in the seat's pane scrollback
+          (weaker; susceptible to stale scrollback).
+      verified_at:
+        $ref: "#/$defs/timestamp"
+        description: |
+          UTC stamp the post-dispatch probe was executed.
+      result:
+        type: string
+        minLength: 1
+        description: |
+          The observed result string from the probe (e.g. "working",
+          "idle", "not-found", or a matched scrollback excerpt). Value-free
+          — the dispatcher's read-only observation; NEVER a credential or
+          secret material.
