@@ -2,7 +2,7 @@
 kind: decision-record
 record_type: adr
 schema_version: "1"
-id: ADR-0015
+id: ADR-0016
 title: "Pre-delegated merge classes: MC0, MC1, and MC2 — zero-gesture merge tiers for qualifying PR subsets"
 status: accepted
 date: "2026-07-19"
@@ -31,7 +31,7 @@ evidence_refs:
     ref: "validators/creator_engine_validator/checks/path_manifest_fidelity.py — branch_slug(), CarrierIdentity, _run_with_base_per_pr(), scan_document(), _normalize_manifest()"
     tag: path-manifest
   - kind: code
-    ref: "validators/creator_engine_validator/ce_cli.py:1944-1983 — ce automerge-kill-switch status|on|off"
+    ref: "validators/creator_engine_validator/ce_cli.py:4932-4983 — ce automerge-kill-switch status|on|off (implementation; parser registration at 1944-1975)"
     tag: kill-switch-cli
   - kind: doc
     ref: "docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md — two-key doctrine, author/approver separation (FR-007), privileged classes (FR-008), CI-verifies-not-ratifies (FR-013)"
@@ -46,13 +46,13 @@ evidence_refs:
     ref: "docs/delivery/REVIEW_GATE.md — review-not-ratification invariant, reviewer identity requirements, author/approver separation"
     tag: review-gate
   - kind: memory
-    ref: "controller memory record (2026-07-17): MC0 ratified as amended — machine predicate replaces Key-2 for carrier-only diffs; non-author exact-head approval stays mandatory"
+    ref: "controller memory record, 2026-07-17 (internal, not in-repo): MC0 ratified as amended — machine predicate replaces Key-2 for carrier-only diffs; non-author exact-head approval stays mandatory"
     tag: mc0-ratification
   - kind: session
-    ref: "tmp/17jul2026.md lines 235–253 — Operator ratification of MC0 amended predicate; MC1/MC2 still proposed"
+    ref: "controller session record, 2026-07-17 (internal, not in-repo) — Operator ratification of MC0 amended predicate; MC1/MC2 still proposed"
     tag: operator-session-20260717
   - kind: session
-    ref: "tmp/18jul2026.md line 9 — MC0 predicate ratified, candidate in all-findings correction, L3 DF-4"
+    ref: "controller session record, 2026-07-18 (internal, not in-repo) — MC0 predicate ratified; follow-on correction round in progress"
     tag: operator-session-20260718
   - kind: doc
     ref: "deploy/queue-daemon/launch-queue-daemon.sh — queue daemon singleton, approval settle seconds, authorized reviewer env"
@@ -619,7 +619,7 @@ separate governance ratification covers them:
 | `docs/delivery/REVIEW_GATE.md` §m.1 | Review evidence is not ratification — still holds. For MC0 the machine predicate IS the Key-2 evidence; for MC1/MC2 the fresh-context reviewer verdict is the Key-2 evidence. Neither substitutes for the Operator ratification of this ADR. |
 | `docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md` §d | Review-vs-ratification distinction maintained. |
 | `docs/governance/MUTATION_CLASS_MODEL.md` | Non-privileged classes (`docs`, `code`) are eligible for merge-class delegation; privileged classes (`deploy`, `governance`, `identity`, `security`, `attestation`, `redaction`) are not and remain in §8 non-goals. |
-| `ce-mc0-active-merge-class.md` (2026-07-17 ratification) | This ADR formalizes that ratification as a governance document. The session record (`tmp/17jul2026.md` lines 235-253) is the evidence of Operator consent; this ADR is the policy text that gives that consent a machine-checkable form. |
+| `ce-mc0-active-merge-class.md` (2026-07-17 ratification) | This ADR formalizes that ratification as a governance document. The controller session record of 2026-07-17 (internal, evidence tag operator-session-20260717) is the evidence of Operator consent; this ADR is the policy text that gives that consent a machine-checkable form. |
 
 ---
 
