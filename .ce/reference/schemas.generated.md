@@ -31,6 +31,7 @@ Schema files: 79
 | `schemas/daemon-heartbeat.schema.yaml` | Creator Engine daemon heartbeat | `object` |
 | `schemas/decision-record.schema.yaml` | Creator Engine Decision Record front-matter | `object` |
 | `schemas/devops-privileged-action-broker.schema.yaml` | Creator Engine DevOps privileged-action broker envelope | `object` |
+| `schemas/dispatch-receipt.v1.schema.yaml` | Creator Engine Dispatch Receipt v1 | `object` |
 | `schemas/dispatch-record.schema.yaml` | Creator Engine Dispatch Record | `object` |
 | `schemas/distributed-claim.schema.yaml` | Creator Engine distributed claim record substrate | `object` |
 | `schemas/escalation-record.schema.yaml` | Creator Engine Escalation Record | `object` |
@@ -821,6 +822,49 @@ Definitions:
 | `lease` | object | no | additionalProperties `false` |  |
 | `metadata` | object | no | additionalProperties `false` | Optional non-authority descriptive notes. Closed to a fixed allow-list of non-secret descriptive keys so the value-free claim is structurally enforced: an envelope cannot carry an arbitrary key such as `password`, `to... |
 | `privileged_action_envelope` | object | no | additionalProperties `false` |  |
+
+### `schemas/dispatch-receipt.v1.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Dispatch Receipt v1 |
+| `$id` | `https://creator-engine.local/schemas/dispatch-receipt.v1.schema.yaml` |
+| Root type | `object` |
+
+Machine-readable schema for a single dispatch-activation receipt — the on-disk artifact the dispatcher emits AFTER a brief is sent to a seat, capturing enough evidence for a watcher to assert activation rather than in...
+
+Required fields:
+
+`kind`, `schema_version`, `emitted_at`, `brief_path`, `brief_sha256`, `transport`, `activation`, `model_effort_line`, `dispatcher`, `work_unit`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | string | yes | const `ce.dispatch-receipt` | Discriminator constant. Records that do not carry this exact value are not governed dispatch receipts. |
+| `schema_version` | string | yes | const `1` | Integer-as-string schema version. Bumped only on a breaking shape change; readers MUST tolerate-skip an unknown major. |
+| `emitted_at` | $ref #/$defs/timestamp | yes |  | UTC RFC3339 stamp the receipt was written (`%Y-%m-%dT%H:%M:%SZ`). |
+| `brief_path` | string | yes | minLength `1` | Shape-only path ref to the materialized brief the dispatcher sent to the seat. A path ref only — NEVER the brief body. |
+| `brief_sha256` | $ref #/$defs/sha256 | yes |  | SHA256 of the brief file at dispatch time. The in-seat verifier checks this digest to confirm the brief was not mutated in transit. |
+| `claim_path` | string | no | minLength `1` | Shape-only path ref to the active work claim bound to this dispatch. Optional: a manual or ad-hoc dispatch may not have a formal claim artifact at emit time. |
+| `claim_sha256` | $ref #/$defs/sha256 | no |  | SHA256 of the claim file at dispatch time. Present only alongside `claim_path`. NEVER a token or credential value. |
+| `transport` | $ref #/$defs/transport | yes |  | The transport mechanism used to send the brief pointer to the seat. |
+| `transport_verified_at` | $ref #/$defs/timestamp | no |  | UTC stamp the dispatcher (or its watcher) confirmed the brief pointer arrived inside the seat (e.g. sha256 re-read from seat filesystem). ABSENT = `dispatch-without-transport` gap class: the pointer was issued but arr... |
+| `activation` | $ref #/$defs/activation | yes |  | Evidence block for the Enter-delivery step. The `separate_enter` field is the load-bearing bit: a `false` or absent value means the combined send-keys form was used, which silently drops the Enter on many tmux builds... |
+| `post_check` | $ref #/$defs/post_check | no |  | Optional post-dispatch probe result. When absent the watcher cannot assert the seat is in Working state — the `receipt-without-activation` gap class. When present, the `result` field captures the observed seat state. |
+| `model_effort_line` | string | yes | minLength `1` | The seat's observable model/effort status-line text as seen by the dispatcher at the moment of send (per the 2026-07-19 Operator floor ruling). Example: "claude-sonnet-4-5 / effort:normal". Value-free: this is an obse... |
+| `dispatcher` | string | yes | minLength `1` | Identity of the controller or operator that performed the dispatch (e.g. "ce-dev-2", "operator"). Value-free controller slug; NEVER a credential, token, or raw account. |
+| `work_unit` | string | yes | minLength `1` | The ticket / work unit this dispatch is bound to (e.g. "ce-ops#615"). Informational; used by watchers and dashboards to join receipts to open claims. |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `sha256` | string | no | pattern `^[0-9a-f]{64}$` | A lowercase hex SHA256 digest (64 characters). |
+| `timestamp` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` | UTC RFC3339 stamp (`%Y-%m-%dT%H:%M:%SZ`). |
+| `transport` | object | no | unevaluatedProperties `false` |  |
+| `activation` | object | no | unevaluatedProperties `false` |  |
+| `post_check` | object | no | unevaluatedProperties `false` |  |
 
 ### `schemas/dispatch-record.schema.yaml`
 

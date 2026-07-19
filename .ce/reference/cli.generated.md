@@ -530,6 +530,45 @@ Positional arguments:
 | --- | --- | --- |
 | `v3_args` |  |  |
 
+### `dispatch-receipt`
+
+dispatch-activation receipt: emit + verify (ce-ops#615)
+
+### `dispatch-receipt emit`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--brief-path` | yes |  | path to the materialized brief sent to the seat |
+| `--brief-sha256` | no |  | SHA256 of the brief (default: computed from --brief-path) |
+| `--transport-kind` | yes | `herdr, tmux` | transport mechanism used to deliver the brief pointer |
+| `--transport-target` | yes |  | transport target slug (pane address or herdr worker pane id) |
+| `--activation-method` | yes | `herdr-send-keys, send-keys` | primitive used to deliver the Enter keystroke |
+| `--separate-enter` | no |  | Enter was delivered as a SEPARATE send-keys call (safe pattern) |
+| `--model-effort-line` | yes |  | seat status-line model/effort text at dispatch time |
+| `--dispatcher` | yes |  | controller/operator identity performing the dispatch |
+| `--work-unit` | yes |  | ticket / work unit (e.g. ce-ops#615) |
+| `--claim-path` | no |  | optional: path to the active work claim file |
+| `--claim-sha256` | no |  | optional: SHA256 of the claim file |
+| `--transport-verified-at` | no |  | optional: UTC stamp in-seat arrival was confirmed |
+| `--state-root` | no |  | CE state root (default: .ce/state) |
+| `--json` | no |  | emit machine-readable JSON result |
+
+### `dispatch-receipt verify`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `FILE` |  | path to a dispatch receipt JSON file |
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--json` | no |  | emit machine-readable JSON result |
+
 ### `doctor`
 
 Options:
