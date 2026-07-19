@@ -437,6 +437,36 @@ def test_refuses_docs_envelope_tier_when_live_docs_class_flag_is_off(
     assert gh.mutation_calls() == []
 
 
+def test_refuses_docs_envelope_tier_when_live_mutation_class_is_governance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch, docs_class=True)
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_DOCS_ENVELOPE,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
+                changed_paths=[
+                    *DOCS_ENVELOPE_PATHS,
+                    "docs/decisions/actuator-governance.md",
+                ],
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.refused is True
+    assert result.reason == "tier_mutation_class_not_auto"
+    assert result.acted is False
+    assert gh.calls == []
+    assert gh.mutation_calls() == []
+
+
 def test_refuses_docs_envelope_tier_when_path_predicate_fails(tmp_path: Path) -> None:
     gh = FakeActuatorGh()
 
