@@ -162,7 +162,7 @@ resolves as failed (fail-closed):
 | P9 | `author_login != approver_login` (case-insensitive). Re-verified at actuation time against live GH API. | `automerge_actuator.py:_live_author_approver_independent()` |
 | P10 | `policy_state.kill_switch == False` (both decision-level and live-policy-level). | `automerge_policy.py:585-586`; `automerge_actuator.py:_live_policy_state()` |
 | P11 | Run mode ∈ `{"ceo", "strangeLoop"}` (AUTOMERGE_ARMING_RUN_MODES). | `automerge_policy.py:36-38` |
-| P12 | `policy_state.class_flag("docs") == True` AND `policy_state.tier_flag("docs_envelope") == True`. Both must be explicitly armed. | `automerge_policy.py:205-211`; `automerge_actuator.py:118-129` |
+| P12 | `policy_state.class_flag("docs") == True` AND `policy_state.tier_flag("docs_envelope") == True`. Both must be explicitly armed. | `automerge_policy.py:208-214`; `automerge_actuator.py:119-130` |
 | P13 | `enabling_decision_ref` is a non-empty string. Must reference this ADR's ratification record. | `automerge_policy.py:593-594` |
 | P14 | PR carrier (`<branch-slug>.md`) is ADDED (status A) in the diff, slug matches `branch_slug(head_ref)`, and the carrier's declared path-set is consistent with the diff (path_manifest_fidelity check green). | `path_manifest_fidelity.py:_run_with_base_per_pr()` |
 | P15 | `changed_paths` is non-empty. | `mutation_classifier.py:148-149` |

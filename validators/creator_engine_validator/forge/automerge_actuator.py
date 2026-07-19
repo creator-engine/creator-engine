@@ -23,6 +23,7 @@ from .automerge_policy import (
     automerge_policy_state_path,
     load_automerge_policy_state,
 )
+from .mutation_classifier import AUTO_CLASSES, mutation_class_for_paths
 
 _AUTO_DECISION = "AUTO"
 _ARMING_RUN_MODES = AUTOMERGE_ARMING_RUN_MODES
@@ -367,6 +368,11 @@ def _tier_reverification(payload: Mapping[str, Any]) -> str | None | ActuationRe
         return _refuse("tier_carrier_changelog_path_predicate_failed", payload)
     if raw_tier == AUTOMERGE_TIER_DOCS_ENVELOPE and not docs_envelope_tier_matches(paths):
         return _refuse("tier_docs_envelope_path_predicate_failed", payload)
+    if (
+        raw_tier != AUTOMERGE_TIER_BRAIN_SUPERSEDE
+        and mutation_class_for_paths(paths) not in AUTO_CLASSES
+    ):
+        return _refuse("tier_mutation_class_not_auto", payload)
     if raw_tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
         raw_inputs = payload.get("ledger_inputs")
         if not isinstance(raw_inputs, Mapping):
