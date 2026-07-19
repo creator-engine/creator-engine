@@ -3,7 +3,7 @@ slug: ce-615-dispatch-receipts
 date: 2026-07-19
 kind: feat
 scope: dispatch tooling / validator kernel / ce CLI
-ticket: ce-ops#615
+issue: ce-ops#615
 ---
 
 **Slice 1: machine-readable dispatch-activation receipts — schema, library, and CLI.**
