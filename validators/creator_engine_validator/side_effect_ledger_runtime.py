@@ -339,12 +339,13 @@ def record_work_unit_reservation(*, receipt: dict[str, Any], **record_kwargs: An
     """Atomically append one CE603 reservation through the sole record writer."""
     if not isinstance(receipt, dict):
         raise DetailsNotObject("work-unit receipt must be a JSON object")
-    if work_unit_ledger.validate_receipts((receipt,)):
-        raise InvalidRecord("work-unit receipt must satisfy the neutral receipt contract")
     root = Path(record_kwargs["side_effect_ledger_root"])
     controller_id = str(record_kwargs["controller_id"])
     lane_id = str(record_kwargs["lane_id"])
     with _lane_lock(root, controller_id, lane_id):
+        history = _durable_work_unit_receipts(root, controller_id, lane_id)
+        if work_unit_ledger.validate_receipts((*history, receipt)):
+            raise InvalidRecord("work-unit receipt must satisfy the neutral receipt contract")
         return _record_work_unit_reservation(receipt=receipt, record_kwargs=record_kwargs)
 
 
@@ -370,6 +371,16 @@ def _record_work_unit_reservation(*, receipt: dict[str, Any], record_kwargs: dic
 def _durable_work_unit_receipts(root: Path, controller_id: str, lane_id: str) -> tuple[dict[str, Any], ...]:
     """Read the complete CE603 receipt stream or refuse before reservation mutation."""
     lane_root = _lane_root(root, controller_id, lane_id)
+    if lane_root.exists():
+        verification = verify(
+            side_effect_ledger_root=root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+        )
+        if not verification.ok:
+            raise WorkUnitReceiptHistoryError(
+                "durable Side-Effect Ledger history is invalid: " + "; ".join(verification.errors)
+            )
     receipts: list[dict[str, Any]] = []
     for path in sorted(lane_root.rglob("*.json")) if lane_root.exists() else ():
         if path.name == HEAD_FILENAME:
