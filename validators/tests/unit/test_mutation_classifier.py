@@ -27,6 +27,12 @@ from creator_engine_validator.forge.mutation_classifier import (
         (".ce/contracts/operator-wall.md", "governance"),
         ("docs/contracts/ratification-flow.md", "governance"),
         ("playbooks/review.md", "governance"),
+        # ce-621: ADR / ratification records must be governance class (ADR-0016 §8 non-goal 8)
+        ("docs/decisions/ADR-9999-x.md", "governance"),
+        ("docs/decisions/ADR-0016-pre-delegated-merge-classes.md", "governance"),
+        ("docs/adr/ADR-0001-v1-baseline.md", "governance"),
+        ("docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md", "governance"),
+        ("docs/governance/MUTATION_CLASS_MODEL.md", "governance"),
         ("validators/creator_engine_validator/secret_identity.py", "identity"),
         ("schemas/identity-registry.schema.yaml", "identity"),
         ("validators/creator_engine_validator/forge/cred_injection_proxy.py", "security"),
@@ -97,3 +103,43 @@ def test_gesture_classes_cover_every_non_auto_class() -> None:
             "redaction",
         }
     )
+
+
+# ce-621: ADR-0016 §8 non-goal 8 — governance predicate escalation tests
+
+
+def test_decisions_adr_classifies_governance_not_docs() -> None:
+    """docs/decisions/** must be governance class even though docs/** predicate also matches.
+
+    ADR-0016 §8 non-goal 8: 'ADR or ratification records: governance class; always two-key.'
+    Rank-based precedence: governance (rank 5) > docs (rank 1) in class_order.
+    """
+    assert mutation_class_for_paths(["docs/decisions/ADR-9999-x.md"]) == "governance"
+    assert mutation_class_for_paths(["docs/decisions/ADR-0016-pre-delegated-merge-classes.md"]) == "governance"
+    assert mutation_class_for_paths(["docs/decisions/README.md"]) == "governance"
+
+
+def test_adr_dir_classifies_governance_not_docs() -> None:
+    """docs/adr/** contains ADR records; must be governance class (ADR-0016 §8 non-goal 8)."""
+    assert mutation_class_for_paths(["docs/adr/ADR-0001-v1-baseline.md"]) == "governance"
+    assert mutation_class_for_paths(["docs/adr/ADR-0005-mediated-brain-ledger-append.md"]) == "governance"
+
+
+def test_docs_governance_dir_classifies_governance_not_docs() -> None:
+    """docs/governance/** contains governance authority documents; must be governance class."""
+    assert mutation_class_for_paths(["docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md"]) == "governance"
+    assert mutation_class_for_paths(["docs/governance/MUTATION_CLASS_MODEL.md"]) == "governance"
+
+
+def test_plain_docs_path_still_classifies_docs() -> None:
+    """Paths outside docs/decisions/, docs/adr/, docs/governance/ remain docs class."""
+    assert mutation_class_for_paths(["docs/guide.md"]) == "docs"
+    assert mutation_class_for_paths(["docs/architecture/overview.md"]) == "docs"
+    assert mutation_class_for_paths(["docs/reference/api.md"]) == "docs"
+
+
+def test_decisions_path_does_not_escalate_to_fail_closed() -> None:
+    """governance class is below fail_closed_class (redaction); classifier must return governance, not redaction."""
+    result = mutation_class_for_paths(["docs/decisions/ADR-9999-x.md"])
+    assert result == "governance"
+    assert result != "redaction"
