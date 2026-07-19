@@ -31,7 +31,7 @@ evidence_refs:
     ref: "validators/creator_engine_validator/checks/path_manifest_fidelity.py — branch_slug(), CarrierIdentity, _run_with_base_per_pr(), scan_document(), _normalize_manifest()"
     tag: path-manifest
   - kind: code
-    ref: "validators/creator_engine_validator/ce_cli.py:4932-4983 — ce automerge-kill-switch status|on|off (implementation; parser registration at 1944-1975)"
+    ref: "validators/creator_engine_validator/ce_cli.py:5144 (_automerge_kill_switch implementation; parser registration at 2021) — ce automerge-kill-switch status|on|off"
     tag: kill-switch-cli
   - kind: doc
     ref: "docs/governance/AUTHORITY_AND_RATIFICATION_MODEL.md — two-key doctrine, author/approver separation (FR-007), privileged classes (FR-008), CI-verifies-not-ratifies (FR-013)"
@@ -224,7 +224,7 @@ ce automerge-kill-switch on   # arms global kill switch immediately
 ce automerge-kill-switch off  # clears kill switch
 ce automerge-kill-switch status  # reads current state
 ```
-(Implemented in `ce_cli.py:4932-4983`, reads/writes `.ce/state/automerge/policy.json`.)
+(Implemented in `_automerge_kill_switch`, `ce_cli.py:5144`; reads/writes `.ce/state/automerge/policy.json`.)
 
 **Fail-closed rules:**
 - Live policy unreadable → `Dormant` (no actuation)
