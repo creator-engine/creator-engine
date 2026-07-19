@@ -7,7 +7,7 @@ title: "Pre-delegated merge classes: MC0, MC1, and MC2 — zero-gesture merge ti
 status: accepted
 date: "2026-07-19"
 decision_makers: ["chmod735 (Operator)"]
-consulted: ["ce-dev-2 (controller)", "ce-architect-research (draft author)"]
+consulted: ["delegated-operator controller", "architect-research draft worker"]
 informed: []
 review_by: "2026-10-19"
 mutation_class: governance
@@ -46,7 +46,7 @@ evidence_refs:
     ref: "docs/delivery/REVIEW_GATE.md — review-not-ratification invariant, reviewer identity requirements, author/approver separation"
     tag: review-gate
   - kind: memory
-    ref: "/home/ce-dev-2/.claude/projects/-home-ce-dev-2-creator-engine/memory/ce-mc0-active-merge-class.md — MC0 RATIFIED 2026-07-17 as amended; machine predicate replaces Key-2 for carrier-only diffs; non-author exact-head approval stays mandatory"
+    ref: "controller memory record (2026-07-17): MC0 ratified as amended — machine predicate replaces Key-2 for carrier-only diffs; non-author exact-head approval stays mandatory"
     tag: mc0-ratification
   - kind: session
     ref: "tmp/17jul2026.md lines 235–253 — Operator ratification of MC0 amended predicate; MC1/MC2 still proposed"
