@@ -84,15 +84,30 @@ VALID_LIVE_RECHECKS: Final[frozenset[str]] = frozenset(
 )
 
 #: Canonical governance probe paths used for load-time territory safety checks.
-#: These correspond to the governance predicates in automerge_mutation_policy.yaml.
+#: One probe per governance predicate in automerge_mutation_policy.yaml (all 10):
+#:   .ce/contracts/**       → .ce/contracts/PROBE.yaml
+#:   docs/contracts/**      → docs/contracts/PROBE.yaml  (reachable via docs/**)
+#:   contracts/**           → contracts/PROBE.yaml
+#:   playbooks/**           → playbooks/PROBE.md
+#:   governance/**          → governance/PROBE.md
+#:   GOVERNANCE.md          → GOVERNANCE.md
+#:   CODEOWNERS             → CODEOWNERS
+#:   docs/decisions/**      → docs/decisions/PROBE.md
+#:   docs/adr/**            → docs/adr/PROBE.md
+#:   docs/governance/**     → docs/governance/PROBE.md
 #: Any class whose allowed_mutation_classes does not include 'governance' must
 #: not admit any of these paths through its territory (allowlist minus denylist).
 GOVERNANCE_PROBE_PATHS: Final[tuple[str, ...]] = (
+    ".ce/contracts/PROBE.yaml",
+    "docs/contracts/PROBE.yaml",
+    "contracts/PROBE.yaml",
+    "playbooks/PROBE.md",
+    "governance/PROBE.md",
+    "GOVERNANCE.md",
+    "CODEOWNERS",
     "docs/decisions/PROBE.md",
     "docs/adr/PROBE.md",
     "docs/governance/PROBE.md",
-    "GOVERNANCE.md",
-    ".ce/contracts/PROBE.yaml",
 )
 
 # Top-level YAML keys allowed in the registry document.
@@ -607,14 +622,21 @@ def _check_governance_territory_safety(
     """Refuse if any class without governance in allowed_mutation_classes
     admits a canonical governance probe path through its territory.
 
-    This is a structural safety check: it verifies that broad allowlist globs
-    (e.g. ``docs/**``) cannot inadvertently capture governance surfaces
-    (``docs/decisions/**``, ``docs/adr/**``, ``docs/governance/**``,
-    ``GOVERNANCE.md``, ``.ce/contracts/**``) for classes that are not
-    permitted to touch governance paths.
+    This is a structural safety check covering all 10 governance predicates
+    from automerge_mutation_policy.yaml: ``.ce/contracts/**``,
+    ``docs/contracts/**``, ``contracts/**``, ``playbooks/**``,
+    ``governance/**``, ``GOVERNANCE.md``, ``CODEOWNERS``,
+    ``docs/decisions/**``, ``docs/adr/**``, ``docs/governance/**``.
+
+    It verifies that broad allowlist globs (e.g. ``docs/**``) cannot
+    inadvertently capture any of these governance surfaces for classes that
+    are not permitted to touch governance paths. Notable: ``docs/**`` admits
+    ``docs/contracts/PROBE.yaml`` — a denylist entry for ``docs/contracts/**``
+    is required for any class using a ``docs/**`` allowlist.
 
     The check uses the same path_in_territory logic (denylist first, then
     allowlist) so a correctly set denylist will cause the class to pass.
+    ``GOVERNANCE_PROBE_PATHS`` holds one representative path per predicate.
     """
     for entry in entries:
         if "governance" in entry.allowed_mutation_classes:

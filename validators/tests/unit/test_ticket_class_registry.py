@@ -842,14 +842,22 @@ def test_docs_only_denylist_denies_all_governance_probe_paths():
 
 
 def test_docs_only_denylist_items_present():
-    """B1: docs-only carries the expected governance denylist entries."""
+    """B1: docs-only carries all 10 governance denylist entries (one per
+    predicate in automerge_mutation_policy.yaml governance section)."""
     registry = load_ticket_class_registry()
     entry = next(e for e in registry.classes if e.id == "docs-only")
     denylist = entry.territory.path_glob_denylist
+    # All 10 governance predicates must appear in the denylist
+    assert ".ce/contracts/**" in denylist
+    assert "docs/contracts/**" in denylist
+    assert "contracts/**" in denylist
+    assert "playbooks/**" in denylist
+    assert "governance/**" in denylist
+    assert "GOVERNANCE.md" in denylist
+    assert "CODEOWNERS" in denylist
     assert "docs/decisions/**" in denylist
     assert "docs/adr/**" in denylist
     assert "docs/governance/**" in denylist
-    assert "GOVERNANCE.md" in denylist
 
 
 def test_docs_only_denylist_does_not_block_plain_docs():
@@ -912,6 +920,62 @@ def test_load_time_accepts_docs_class_with_correct_denylist():
     assert any(e.id == "docs-only" for e in registry.classes)
 
 
+def test_load_time_refuses_docs_class_missing_docs_contracts_denylist(tmp_path):
+    """B1: docs/** allowlist with all governance denylisted EXCEPT docs/contracts/**
+    is refused — docs/contracts/PROBE.yaml leaks through docs/**."""
+    content = textwrap.dedent("""\
+        registry_version: 1
+        activation_posture: advisory
+        approver_sets:
+          s:
+            description: d
+            resolution_ref: ref
+        classes:
+          - id: leaky-docs
+            description: "Missing docs/contracts/** in denylist."
+            selectors:
+              required_labels: ["approved-for-implementation", "class:leaky-docs"]
+              issue_repo_scope: "creator-engine/ce-ops"
+            approver_allowlist_ref: s
+            allowed_work_classes: ["XS"]
+            allowed_mutation_classes: ["docs"]
+            territory:
+              path_glob_allowlist:
+                - "docs/**"
+                - "*.md"
+              path_glob_denylist:
+                - ".ce/contracts/**"
+                - "contracts/**"
+                - "playbooks/**"
+                - "governance/**"
+                - "GOVERNANCE.md"
+                - "CODEOWNERS"
+                - "docs/decisions/**"
+                - "docs/adr/**"
+                - "docs/governance/**"
+              collision_policy: refuse
+            role: implementer
+            lane_kind: implementation
+            auto_pickup: false
+            live_rechecks:
+              - approval_label_present
+              - applier_in_approver_set
+              - no_open_claim
+              - no_linked_open_pr
+              - base_branch_head_fetched
+            retry:
+              max_attempts: 1
+              on_exhaust: manual-exception
+    """)
+    p = tmp_path / "r.yaml"
+    p.write_text(content, encoding="utf-8")
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(p)
+    err = str(exc_info.value)
+    # The probe that escapes is docs/contracts/PROBE.yaml
+    assert "docs/contracts" in err or "governance" in err.lower()
+
+
 def test_denylist_has_precedence_over_allowlist(tmp_path):
     """B1: a path that matches both allowlist and denylist is denied."""
     content = textwrap.dedent("""\
@@ -935,11 +999,16 @@ def test_denylist_has_precedence_over_allowlist(tmp_path):
                 - ".ce/changelog/**"
                 - "docs/**"
               path_glob_denylist:
+                - ".ce/contracts/**"
+                - "docs/contracts/**"
+                - "contracts/**"
+                - "playbooks/**"
+                - "governance/**"
+                - "GOVERNANCE.md"
+                - "CODEOWNERS"
                 - "docs/decisions/**"
                 - "docs/adr/**"
                 - "docs/governance/**"
-                - "GOVERNANCE.md"
-                - ".ce/contracts/**"
               collision_policy: refuse
             role: implementer
             lane_kind: implementation
