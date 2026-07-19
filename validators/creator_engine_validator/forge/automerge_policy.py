@@ -62,6 +62,9 @@ _DOCS_ENVELOPE_PREFIXES: Final[tuple[str, str, str]] = (
     ".ce/changelog/",
     ".ce/pr-manifests/",
 )
+_DOCS_ENVELOPE_ALLOWED_EXTENSIONS: Final[frozenset[str]] = frozenset(
+    {".md", ".txt", ".html", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+)
 _BRAIN_LEDGER_PATH: Final[str] = ".ce/brain/assertions.yaml"
 _AUTOMERGE_TIERS: Final[frozenset[str]] = frozenset(
     {
@@ -919,8 +922,7 @@ def carrier_changelog_tier_matches(paths: Sequence[str]) -> bool:
 def docs_envelope_tier_matches(paths: Sequence[str]) -> bool:
     resolved_paths = tuple(str(path).strip() for path in paths if str(path).strip())
     return bool(resolved_paths) and len(resolved_paths) == len(paths) and all(
-        path.startswith(_DOCS_ENVELOPE_PREFIXES) or _root_markdown(path)
-        for path in resolved_paths
+        _docs_envelope_path_permitted(path) for path in resolved_paths
     )
 
 
@@ -1042,6 +1044,24 @@ def _tier_flag_for_decision(
 
 def _root_markdown(path: str) -> bool:
     return "/" not in path and path.endswith(".md")
+
+
+def _docs_envelope_path_permitted(path: str) -> bool:
+    """Return True iff *path* is permitted inside the docs_envelope tier.
+
+    Paths under .ce/changelog/ and .ce/pr-manifests/ pass by prefix rule
+    (existing behaviour preserved).  Root-level .md files pass via the
+    _root_markdown guard.  Paths under docs/** must carry an extension from
+    _DOCS_ENVELOPE_ALLOWED_EXTENSIONS (case-insensitive); any other extension
+    or no extension fails closed to GESTURE.  All other paths fail closed.
+    """
+    if path.startswith((".ce/changelog/", ".ce/pr-manifests/")):
+        return True
+    if _root_markdown(path):
+        return True
+    if path.startswith("docs/"):
+        return Path(path).suffix.lower() in _DOCS_ENVELOPE_ALLOWED_EXTENSIONS
+    return False
 
 
 def _single_child_md(path: str, parent: str) -> bool:
