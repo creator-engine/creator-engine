@@ -1,0 +1,53 @@
+# Governed source for .ce/state/automerge/policy.json
+#
+# This file is the SINGLE governed source for the automerge policy state
+# materialized to .ce/state/automerge/policy.json.  Direct edits to
+# policy.json are NOT authoritative; this declaration is.
+#
+# Changes to this file are governance-class two-key PRs and must include
+# the enabling_decision_ref updated to reference the ratifying decision
+# record.  Run deploy/automerge/materialize-automerge-policy.py after
+# merge to apply the declaration to the live policy state.
+
+run_mode: "ceo"
+kill_switch: false
+
+# Per-mutation-class automerge flags.
+# Enumerated from MUTATION_CLASSES in
+# validators/creator_engine_validator/work_sizing.py.
+classes:
+  none:
+    auto_merge: false
+  docs:
+    auto_merge: true
+  code:
+    auto_merge: false
+  schema:
+    auto_merge: false
+  deploy:
+    auto_merge: false
+  governance:
+    auto_merge: false
+  identity:
+    auto_merge: false
+  security:
+    auto_merge: false
+  attestation:
+    auto_merge: false
+  redaction:
+    auto_merge: false
+
+# Per-tier automerge flags.
+# Enumerated from _AUTOMERGE_TIERS in
+# validators/creator_engine_validator/forge/automerge_policy.py.
+tiers:
+  carrier_changelog_mechanical:
+    auto_merge: false
+  docs_envelope:
+    auto_merge: true
+  brain_ledger_supersede:
+    auto_merge: false
+
+# References the ratification event that authorizes this arming.
+# Must be a non-empty string when run_mode is in AUTOMERGE_ARMING_RUN_MODES.
+enabling_decision_ref: "ADR-0016 ratification 2026-07-19 (ratification_prompt_sha d99b5dea8268df79e9c95e8a550b20fabae73a1c7ffe68299b43a1eeff5bb0f8)"
