@@ -300,6 +300,18 @@ def _record_unlocked(
     if record_path.exists():
         raise RecordCollision(f"record already exists, refusing to overwrite: {record_path}")
 
+    # A persisted head must name a complete valid chain before it can advance.
+    if head is not None:
+        verification = verify(
+            side_effect_ledger_root=side_effect_ledger_root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+        )
+        if not verification.ok:
+            raise LedgerRecordError(
+                "existing Side-Effect Ledger lane is invalid: " + "; ".join(verification.errors)
+            )
+
     # --- Side effects begin here (record file, then head manifest) ---
     text = _canonical_bytes(payload)
     record_sha256 = _sha256_text(text)
@@ -492,10 +504,11 @@ def verify(
         key = (str(item.record.get("controller_id")), str(item.record.get("lane_id")))
         groups.setdefault(key, []).append(item)
 
+    head_lanes = _head_lanes(side_effect_ledger_root, controller_id, lane_id)
     chains: list[dict[str, Any]] = []
-    for key in sorted(groups):
+    for key in sorted(set(groups) | head_lanes):
         chain_summary, chain_errors = _verify_chain(
-            side_effect_ledger_root, key[0], key[1], groups[key], awl_root
+            side_effect_ledger_root, key[0], key[1], groups.get(key, []), awl_root
         )
         chains.append(chain_summary)
         errors.extend(chain_errors)
@@ -534,6 +547,26 @@ def _load_records(
     return loaded, errors
 
 
+def _head_lanes(
+    side_effect_ledger_root: Path, controller_id: str | None, lane_id: str | None
+) -> set[tuple[str, str]]:
+    """Return lane keys with a persisted head, including lanes without records."""
+    if not side_effect_ledger_root.exists():
+        return set()
+    lanes: set[tuple[str, str]] = set()
+    for head_path in sorted(side_effect_ledger_root.rglob(HEAD_FILENAME)):
+        parts = head_path.parent.relative_to(side_effect_ledger_root).parts
+        if len(parts) != 2:
+            continue
+        key = (parts[0], parts[1])
+        if controller_id is not None and key[0] != controller_id:
+            continue
+        if lane_id is not None and key[1] != lane_id:
+            continue
+        lanes.add(key)
+    return lanes
+
+
 def _verify_chain(
     side_effect_ledger_root: Path,
     controller_id: str,
@@ -569,19 +602,33 @@ def _verify_chain(
         for item in ordered:
             errors.extend(_claim_binding_error(awl_root, item))
 
-    # Head / manifest must match the last record.
+    # Head / manifest must match the last record. A head with no records is
+    # never genesis: it is an interrupted or corrupted append and must refuse.
     head_path = _head_path(side_effect_ledger_root, controller_id, lane_id)
-    if ordered:
-        last = ordered[-1]
-        head = None
-        if head_path.is_file():
-            try:
-                head = json.loads(head_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
-                errors.append(f"{controller_id}/{lane_id}: head manifest unreadable: {exc}")
-        if not isinstance(head, dict):
+    head = None
+    if head_path.is_file():
+        try:
+            head = json.loads(head_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            errors.append(f"{controller_id}/{lane_id}: head manifest unreadable: {exc}")
+    if not isinstance(head, dict):
+        if ordered or head_path.is_file():
             errors.append(f"{controller_id}/{lane_id}: missing or invalid head manifest at {head_path}")
+    else:
+        expected_head = {
+            "kind": HEAD_KIND,
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+        }
+        for field, expected in expected_head.items():
+            if head.get(field) != expected:
+                errors.append(
+                    f"{controller_id}/{lane_id}: head {field} {head.get(field)!r} != {expected!r}"
+                )
+        if not ordered:
+            errors.append(f"{controller_id}/{lane_id}: head manifest exists without a record chain")
         else:
+            last = ordered[-1]
             if head.get("head_sha256") != last.file_sha256:
                 errors.append(
                     f"{controller_id}/{lane_id}: head_sha256 {head.get('head_sha256')} "
@@ -591,6 +638,16 @@ def _verify_chain(
                 errors.append(
                     f"{controller_id}/{lane_id}: head sequence {head.get('sequence')} "
                     f"does not match last record sequence {last.record.get('sequence')}"
+                )
+            if head.get("record_count") != len(ordered):
+                errors.append(
+                    f"{controller_id}/{lane_id}: head record_count {head.get('record_count')} "
+                    f"does not match record count {len(ordered)}"
+                )
+            if head.get("last_record_ref") != last.rel:
+                errors.append(
+                    f"{controller_id}/{lane_id}: head last_record_ref {head.get('last_record_ref')!r} "
+                    f"does not match last record {last.rel!r}"
                 )
 
     return _chain_summary(controller_id, lane_id, ordered), errors
