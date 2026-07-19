@@ -191,6 +191,53 @@ def test_corrupt_durable_ce603_history_refuses_successor_without_ledger_write(tm
     assert after == before
 
 
+def test_head_without_records_refuses_successor_without_ledger_mutation(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first_receipt = _work_unit_receipt()
+    first = runtime.record_work_unit_reservation(receipt=first_receipt, **_kwargs(tmp_path))
+    lane_root = tmp_path / "side-effect-ledger" / CONTROLLER / LANE
+    before = {
+        path.relative_to(lane_root).as_posix(): path.read_bytes()
+        for path in lane_root.rglob("*.json")
+    }
+    first.record_path.unlink()
+
+    with pytest.raises(runtime.WorkUnitReceiptHistoryError):
+        runtime.record_work_unit_reservation(receipt=_successor_receipt(first_receipt), **_kwargs(tmp_path))
+
+    after = {
+        path.relative_to(lane_root).as_posix(): path.read_bytes()
+        for path in lane_root.rglob("*.json")
+    }
+    assert after == {runtime.HEAD_FILENAME: before[runtime.HEAD_FILENAME]}
+
+
+@pytest.mark.parametrize("head_bytes", (b"not json\n", b"[\"not an object\"]\n"))
+def test_unreadable_or_malformed_head_refuses_before_reservation_mutation(
+    tmp_path: Path, head_bytes: bytes
+):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first_receipt = _work_unit_receipt()
+    first = runtime.record_work_unit_reservation(receipt=first_receipt, **_kwargs(tmp_path))
+    first.head_path.write_bytes(head_bytes)
+    lane_root = tmp_path / "side-effect-ledger" / CONTROLLER / LANE
+    before = {
+        path.relative_to(lane_root).as_posix(): path.read_bytes()
+        for path in lane_root.rglob("*.json")
+    }
+
+    with pytest.raises(runtime.LedgerRecordError):
+        runtime.record_work_unit_reservation(receipt=_successor_receipt(first_receipt), **_kwargs(tmp_path))
+
+    after = {
+        path.relative_to(lane_root).as_posix(): path.read_bytes()
+        for path in lane_root.rglob("*.json")
+    }
+    assert after == before
+
+
 def test_generic_record_and_reservation_share_one_lane_lock(tmp_path: Path, monkeypatch):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
