@@ -26,6 +26,21 @@ def reserve(receipts=(), *, requested=10, reservation_id="reservation-1"):
     )
 
 
+def _receipt_schema_path() -> Path:
+    return Path(__file__).parents[2] / "creator_engine_validator" / "schemas" / "work-unit-cap.schema.yaml"
+
+
+def _reidentify_receipt(receipt, **updates):
+    changed = dict(receipt, **updates)
+    identity = {
+        name: changed[name]
+        for name in ("run_id", "attempt_id", "reservation_id", "phase", "sample_sequence", "previous_receipt_sha256")
+    }
+    changed["receipt_id"] = cap._receipt_id(identity)
+    changed["receipt_sha256"] = cap.receipt_sha256(changed)
+    return changed
+
+
 def test_reservation_at_exact_cap_is_allowed_and_over_cap_is_denied():
     exact = reserve(requested=100)
     assert exact.allowed
@@ -190,6 +205,78 @@ def test_live_identity_is_required_and_preserved_for_successors(operation, field
     assert successor.receipt["policy_sha256"] == reservation.receipt["policy_sha256"]
 
 
+@pytest.mark.parametrize(
+    ("updates", "case"),
+    [
+        ({"attempt_id": "attempt-2"}, "wrong_attempt"),
+        ({"policy_sha256": "b" * 64}, "wrong_policy"),
+        ({"attempt_id": "attempt-2", "policy_sha256": "b" * 64}, "wrong_both"),
+    ],
+    ids=lambda value: value if isinstance(value, str) else None,
+)
+def test_durable_successor_identity_is_anchored_to_the_reservation(updates, case):
+    reservation = reserve()
+    successor = cap.reconcile(
+        (reservation.receipt,),
+        cap=100,
+        run_id="run-1",
+        attempt_id="attempt-1",
+        reservation_id="reservation-1",
+        sample_sequence=1,
+        observed=8,
+        policy_sha256=POLICY_SHA,
+        recorded_at=NOW,
+    )
+    assert successor.allowed
+
+    corrupted = _reidentify_receipt(successor.receipt, **updates)
+    assert corrupted["previous_receipt_sha256"] == reservation.receipt["receipt_sha256"]
+    assert validate_with_schema(corrupted, _receipt_schema_path(), "receipt", code="CE603", contract=_receipt_schema_path()) == []
+
+    stream = (reservation.receipt, corrupted)
+    assert cap.validate_receipts(stream) == ("receipt_reservation_identity_mismatch",)
+    assert not cap.project(stream, cap=100, run_id="run-1").safe
+
+    retry = cap.reserve(
+        stream,
+        cap=100,
+        run_id="run-1",
+        attempt_id=corrupted["attempt_id"],
+        reservation_id="reservation-1",
+        requested=10,
+        policy_sha256=corrupted["policy_sha256"],
+        recorded_at=NOW,
+    )
+    reconcile = cap.reconcile(
+        stream,
+        cap=100,
+        run_id="run-1",
+        attempt_id=corrupted["attempt_id"],
+        reservation_id="reservation-1",
+        sample_sequence=2,
+        observed=9,
+        policy_sha256=corrupted["policy_sha256"],
+        recorded_at=NOW,
+    )
+    terminal = cap.complete(
+        stream,
+        cap=100,
+        run_id="run-1",
+        attempt_id=corrupted["attempt_id"],
+        reservation_id="reservation-1",
+        observed=9,
+        policy_sha256=corrupted["policy_sha256"],
+        recorded_at=NOW,
+    )
+
+    assert case
+    assert retry.reason == "work_unit_receipts_invalid"
+    assert reconcile.reason == "work_unit_receipts_invalid"
+    assert terminal.reason == "work_unit_receipts_invalid"
+    assert retry.persist is reconcile.persist is terminal.persist is False
+    assert retry.receipt == reconcile.receipt == terminal.receipt == corrupted
+
+
 def test_receipt_digests_are_canonical_and_tampering_is_rejected():
     reservation = reserve()
     sample = cap.reconcile(
@@ -210,7 +297,7 @@ def test_receipt_digests_are_canonical_and_tampering_is_rejected():
 
 def test_closed_receipt_schema_accepts_only_the_ce603_contract():
     receipt = reserve().receipt
-    schema = Path(__file__).parents[2] / "creator_engine_validator" / "schemas" / "work-unit-cap.schema.yaml"
+    schema = _receipt_schema_path()
     assert validate_with_schema(receipt, schema, "receipt", code="CE603", contract=schema) == []
     assert validate_with_schema(dict(receipt, extra=True), schema, "receipt", code="CE603", contract=schema)
 

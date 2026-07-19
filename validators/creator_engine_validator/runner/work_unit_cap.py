@@ -153,7 +153,7 @@ def validate_receipts(receipts: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
         if run["cap"] != receipt["cap"]:
             errors.append("receipt_cap_invalid")
             continue
-        reservations: dict[str, dict[str, int]] = run["reservations"]
+        reservations: dict[str, dict[str, Any]] = run["reservations"]
         reservation_id = receipt["reservation_id"]
         phase = receipt["phase"]
         expected_remaining: int | None = None
@@ -163,13 +163,16 @@ def validate_receipts(receipts: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
                 continue
             reservations[reservation_id] = {
                 "reserved": receipt["reserved"], "observed": 0, "sequence": 0,
-                "attempt_id": receipt["attempt_id"],
+                "attempt_id": receipt["attempt_id"], "policy_sha256": receipt["policy_sha256"],
             }
             expected_remaining = run["cap"] - run["committed"] - sum(item["reserved"] for item in reservations.values())
         else:
             current = reservations.get(reservation_id)
             if current is None:
                 errors.append("receipt_reservation_missing")
+                continue
+            if receipt["attempt_id"] != current["attempt_id"] or receipt["policy_sha256"] != current["policy_sha256"]:
+                errors.append("receipt_reservation_identity_mismatch")
                 continue
             if receipt["reserved"] != current["reserved"]:
                 errors.append("receipt_reserved_invalid")
@@ -308,6 +311,7 @@ def reconcile(
         raise ValueError("sample sequence and observed units must be non-negative integers")
     stream = tuple(receipts)
     projection = project(stream, cap=cap, run_id=run_id)
+    receipt_errors = validate_receipts(stream)
     reservation_history = [receipt for receipt in stream if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id and receipt.get("reservation_id") == reservation_id]
     prior = reservation_history[-1] if reservation_history else None
     if prior is None or prior.get("phase") not in {"pre_dispatch", "mid_run"}:
@@ -315,6 +319,8 @@ def reconcile(
         return WorkUnitDecision(False, "work_unit_reservation_missing", receipt, persist=False)
     if prior.get("attempt_id") != attempt_id or prior.get("policy_sha256") != policy_sha256:
         return WorkUnitDecision(False, "work_unit_reservation_identity_mismatch", dict(prior), persist=False)
+    if receipt_errors:
+        return WorkUnitDecision(False, "work_unit_receipts_invalid", dict(prior), persist=False)
     prior_sequence = int(prior["sample_sequence"])
     prior_observed = int(prior["observed"])
     if sample_sequence == prior_sequence and observed == prior_observed:
@@ -341,6 +347,7 @@ def _terminal(
 ) -> WorkUnitDecision:
     stream = tuple(receipts)
     projection = project(stream, cap=cap, run_id=run_id)
+    receipt_errors = validate_receipts(stream)
     history = [receipt for receipt in stream if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id and receipt.get("reservation_id") == reservation_id]
     prior = history[-1] if history else None
     if prior is None or prior.get("phase") not in {"pre_dispatch", "mid_run"}:
@@ -348,6 +355,8 @@ def _terminal(
         return WorkUnitDecision(False, "work_unit_reservation_missing", receipt, persist=False)
     if prior.get("attempt_id") != attempt_id or prior.get("policy_sha256") != policy_sha256:
         return WorkUnitDecision(False, "work_unit_reservation_identity_mismatch", dict(prior), persist=False)
+    if receipt_errors:
+        return WorkUnitDecision(False, "work_unit_receipts_invalid", dict(prior), persist=False)
     reserved = int(prior["reserved"])
     successor_attempt_id = str(prior["attempt_id"])
     successor_policy_sha256 = str(prior["policy_sha256"])
