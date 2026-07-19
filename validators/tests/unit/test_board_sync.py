@@ -211,8 +211,8 @@ class _Runner:
 # ---------------------------------------------------------------------------
 
 def test_issue_coord_parse_valid():
-    coord = IssueCoord.parse("creator-engine/ce-ops#617")
-    assert coord.repo == "creator-engine/ce-ops"
+    coord = IssueCoord.parse("creator-engine/creator-engine#617")
+    assert coord.repo == "creator-engine/creator-engine"
     assert coord.number == 617
 
 
@@ -496,10 +496,10 @@ def test_load_desired_state_valid_yaml(tmp_path):
           "In flight": "opt_inf"
           "Done": "opt_done"
         items:
-          - issue: creator-engine/ce-ops#617
+          - issue: creator-engine/creator-engine#617
             status: "In flight"
             label: "optional label"
-          - issue: creator-engine/ce-ops#618
+          - issue: creator-engine/creator-engine#618
             status: "Done"
     """)
     f = tmp_path / "board-state.yaml"
@@ -558,7 +558,7 @@ def test_load_desired_state_missing_status_on_item_raises(tmp_path):
     f.write_text(
         "project_id: x\nstatus_field_id: y\n"
         "status_options:\n  Done: opt\n"
-        "items:\n  - issue: creator-engine/ce-ops#617\n",
+        "items:\n  - issue: creator-engine/creator-engine#617\n",
         encoding="utf-8",
     )
     with pytest.raises(BoardSyncError, match="status"):

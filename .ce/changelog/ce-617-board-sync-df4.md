@@ -33,7 +33,7 @@ Adds the Projects-v2 board desired-state sync slice (arc DF-4, lane L4).
   `github.com/orgs/creator-engine/projects/1`.  Covers arcs A0–A8
   (A0/A1-style entries superseded by the DF arc series), DF-1 through
   DF-3-N (Done), and the current DF-4 arc with its L4 implementation
-  tickets ce-ops#616/#617/#618 (In flight).  Contains a SETUP comment
+  the in-flight L4 implementation tickets.  Contains a SETUP comment
   block with the GraphQL discovery commands to populate the placeholder
   node IDs from the live project.
 

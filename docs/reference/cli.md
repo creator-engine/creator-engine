@@ -120,6 +120,7 @@ Environment variables recognized by this install/update surface:
 | --- | --- |
 | `ce seats` | List governed seat liveness from CE state. |
 | `ce fleet` | Show aggregated fleet status. |
+| `ce board` | Sync the org Projects-v2 board to a declarative desired-state YAML. Use `ce board sync --dry-run` to preview drift and `ce board sync --execute` to apply it. |
 | `ce orchestrator` | Inspect orchestrator runtime records in read-only mode. |
 | `ce playbook` | Discover, inspect, and run governed CE playbooks. |
 | `ce automerge-decide` | Classify a pull request's mutation class and emit a dry-run auto-merge decision. |

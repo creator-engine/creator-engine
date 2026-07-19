@@ -48,78 +48,78 @@ status_options:
 # ---------------------------------------------------------------------------
 items:
   # --- Superseded A0/A1-style early roadmap entries (pre-DF era; now Done) ---
-  # Replace issue numbers with the actual ce-ops arc-level tracker issues.
+  # Replace issue numbers with the actual tracker issues for your project.
 
-  - issue: creator-engine/ce-ops#100
+  - issue: your-org/your-repo#100
     status: "Done"
     label: "A0 bootstrap substrate (example placeholder — replace with actual issue)"
 
-  - issue: creator-engine/ce-ops#101
+  - issue: your-org/your-repo#101
     status: "Done"
     label: "A1 governance substrate (example placeholder — replace with actual issue)"
 
-  # A2-A8 roadmap stages (Dark Factory IaC; ce-ops#560 tracker)
-  - issue: creator-engine/ce-ops#102
+  # A2-A8 roadmap stages (Dark Factory IaC)
+  - issue: your-org/your-repo#102
     status: "Planned"
     label: "A2 seat-image IaC"
 
-  - issue: creator-engine/ce-ops#103
+  - issue: your-org/your-repo#103
     status: "Planned"
     label: "A3 worker isolation runtime"
 
-  - issue: creator-engine/ce-ops#104
+  - issue: your-org/your-repo#104
     status: "Planned"
     label: "A4 conveyor + fan-in"
 
-  - issue: creator-engine/ce-ops#105
+  - issue: your-org/your-repo#105
     status: "Planned"
     label: "A5 multi-seat orchestration"
 
-  - issue: creator-engine/ce-ops#106
+  - issue: your-org/your-repo#106
     status: "Planned"
     label: "A6 tenant onboard"
 
-  - issue: creator-engine/ce-ops#107
+  - issue: your-org/your-repo#107
     status: "Planned"
     label: "A7 dark-factory point (deployable)"
 
-  - issue: creator-engine/ce-ops#108
+  - issue: your-org/your-repo#108
     status: "Planned"
     label: "A8 first external tenant"
 
   # --- DF arcs (Development Factory arcs, each a project-level tracker issue) ---
 
-  - issue: creator-engine/ce-ops#200
+  - issue: your-org/your-repo#200
     status: "Done"
     label: "DF-1 first live driver arc (closed 20260717)"
 
-  - issue: creator-engine/ce-ops#300
+  - issue: your-org/your-repo#300
     status: "Done"
     label: "DF-2 kill the single-driver ceiling (ratified 20260717)"
 
-  - issue: creator-engine/ce-ops#400
+  - issue: your-org/your-repo#400
     status: "Done"
     label: "DF-3 contain the gate (ratified 20260718)"
 
-  - issue: creator-engine/ce-ops#401
+  - issue: your-org/your-repo#401
     status: "Done"
     label: "DF-3-N night mandate (R21-R26, ratified 20260718 night)"
 
   # --- DF-4 arc (current — In flight as of 20260719) ---
 
-  - issue: creator-engine/ce-ops#500
+  - issue: your-org/your-repo#500
     status: "In flight"
     label: "DF-4 arc (current)"
 
   # DF-4 lane L4 implementation tickets
-  - issue: creator-engine/ce-ops#616
+  - issue: your-org/your-repo#616
     status: "In flight"
-    label: "DF-4 L4 prereq (ce-ops#616)"
+    label: "DF-4 L4 prereq"
 
-  - issue: creator-engine/ce-ops#617
+  - issue: your-org/your-repo#617
     status: "In flight"
     label: "DF-4 L4 board-sync adapter (this ticket)"
 
-  - issue: creator-engine/ce-ops#618
+  - issue: your-org/your-repo#618
     status: "In flight"
-    label: "DF-4 L4 followup (ce-ops#618)"
+    label: "DF-4 L4 followup"
