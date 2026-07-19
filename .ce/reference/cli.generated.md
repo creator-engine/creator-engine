@@ -1343,6 +1343,14 @@ Positional arguments:
 | --- | --- | --- |
 | `v3_args` |  |  |
 
+### `seat-scratch`
+
+Positional arguments:
+
+| Argument | Choices | Description |
+| --- | --- | --- |
+| `v3_args` |  |  |
+
 ### `seats`
 
 Positional arguments:
