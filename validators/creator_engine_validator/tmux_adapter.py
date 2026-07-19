@@ -14,8 +14,14 @@ Prose contract: ``docs/operations/GOVERNED_LANE_LAUNCH_PROTOCOL.md``.
 """
 from __future__ import annotations
 
+import array
 import os
+import secrets
+import socket
 import subprocess
+import sys
+import tempfile
+import threading
 import time
 from dataclasses import dataclass, replace
 from typing import Callable, Mapping, Sequence
@@ -43,6 +49,19 @@ _IDENTITY_FORMAT = "#{session_id}\t#{window_id}\t#{pane_id}\t#{pane_tty}\t#{pane
 # Bounded poll for the pane to settle into its ``-c`` start directory.
 _CWD_POLL_ATTEMPTS = 20
 _CWD_POLL_INTERVAL = 0.25  # seconds; ~5s worst case
+_FD_HANDOFF_TIMEOUT = 5.0
+_FD_RECEIVER = (
+    "import array, os, socket, sys; "
+    "sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); "
+    "sock.connect(sys.argv[1]); sock.sendall(sys.argv[2].encode('ascii')); "
+    "_data, ancdata, _flags, _addr=sock.recvmsg(1, socket.CMSG_SPACE(array.array('i').itemsize)); "
+    "fds=[fd for level, kind, data in ancdata if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS "
+    "for fd in array.array('i', data)]; "
+    "fd=fds.pop() if len(fds) == 1 else None; "
+    "fd is not None or (_ for _ in ()).throw(RuntimeError('missing directory descriptor')); "
+    "os.fchdir(fd); os.close(fd); sock.sendall(b'R'); sock.close(); "
+    "os.execvp(sys.argv[3], sys.argv[3:])"
+)
 
 
 class TmuxError(Exception):
@@ -55,6 +74,10 @@ class TmuxUnavailable(TmuxError):
 
 class TmuxCwdMismatch(TmuxError):
     """The spawned pane did not start in the requested working directory."""
+
+
+class TmuxFdHandoffRefused(TmuxError):
+    """The pane did not acknowledge descriptor ownership before execution."""
 
 
 @dataclass(frozen=True)
@@ -76,6 +99,82 @@ def _default_runner(argv: Sequence[str], check: bool = True) -> subprocess.Compl
     return subprocess.run(list(argv), check=check, capture_output=True, text=True)
 
 
+def is_proc_self_fd_path(cwd: str | os.PathLike[str] | None) -> bool:
+    """Return whether ``cwd`` is the parent-process descriptor capability form."""
+    if cwd is None:
+        return False
+    value = os.fspath(cwd)
+    prefix = "/proc/self/fd/"
+    suffix = value[len(prefix) :] if value.startswith(prefix) else ""
+    return bool(suffix) and suffix.isdecimal() and str(int(suffix)) == suffix
+
+
+class _FdHandoff:
+    """One-shot SCM_RIGHTS handoff from launcher to the pane bootstrap."""
+
+    def __init__(self, cwd: str | os.PathLike[str], timeout: float):
+        try:
+            self._fd = os.open(os.fspath(cwd), os.O_RDONLY | os.O_DIRECTORY)
+        except OSError as exc:
+            raise TmuxFdHandoffRefused("cannot duplicate pinned launch directory") from exc
+        self._timeout = timeout
+        self._token = secrets.token_hex(32)
+        self._directory = tempfile.mkdtemp(prefix="ce-tmux-fd-", dir="/tmp")
+        self.path = os.path.join(self._directory, "handoff.sock")
+        self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._socket.bind(self.path)
+        os.chmod(self.path, 0o600)
+        self._socket.listen(1)
+        self._done = threading.Event()
+        self._error: str | None = None
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def wrapped_command(self, command: Sequence[str]) -> list[str]:
+        return [sys.executable, "-c", _FD_RECEIVER, self.path, self._token, *command]
+
+    def _serve(self) -> None:
+        try:
+            self._socket.settimeout(self._timeout)
+            conn, _ = self._socket.accept()
+            with conn:
+                conn.settimeout(self._timeout)
+                if conn.recv(128) != self._token.encode("ascii"):
+                    self._error = "pane descriptor handoff authentication failed"
+                    return
+                rights = array.array("i", [self._fd]).tobytes()
+                conn.sendmsg(
+                    [b"F"],
+                    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, rights)],
+                )
+                if conn.recv(1) != b"R":
+                    self._error = "pane did not acknowledge fchdir"
+        except (OSError, ValueError) as exc:
+            self._error = f"pane descriptor handoff failed: {exc}"
+        finally:
+            self._done.set()
+
+    def require_completion(self) -> None:
+        if not self._done.wait(self._timeout):
+            raise TmuxFdHandoffRefused(
+                "pane did not inherit the pinned directory descriptor before execution"
+            )
+        if self._error is not None:
+            raise TmuxFdHandoffRefused(self._error)
+
+    def close(self) -> None:
+        try:
+            self._socket.close()
+        finally:
+            self._thread.join(timeout=self._timeout)
+            os.close(self._fd)
+            try:
+                os.unlink(self.path)
+            except FileNotFoundError:
+                pass
+            os.rmdir(self._directory)
+
+
 class TmuxAdapter:
     """Adapter over the tmux binary with an injectable subprocess runner."""
 
@@ -88,12 +187,14 @@ class TmuxAdapter:
         tmux_bin: str = TMUX_BIN,
         cwd_poll_attempts: int = _CWD_POLL_ATTEMPTS,
         cwd_poll_interval: float = _CWD_POLL_INTERVAL,
+        fd_handoff_timeout: float = _FD_HANDOFF_TIMEOUT,
         sleeper: Callable[[float], None] | None = None,
     ):
         self._runner = runner or _default_runner
         self._tmux_bin = tmux_bin
         self._cwd_poll_attempts = max(1, int(cwd_poll_attempts))
         self._cwd_poll_interval = cwd_poll_interval
+        self._fd_handoff_timeout = max(0.01, float(fd_handoff_timeout))
         self._sleeper = sleeper or time.sleep
 
     def is_available(self) -> bool:
@@ -139,7 +240,10 @@ class TmuxAdapter:
             )
 
         command = list(command)
-        cwd_args = ["-c", str(cwd)] if cwd is not None else []
+        handoff = _FdHandoff(cwd, self._fd_handoff_timeout) if is_proc_self_fd_path(cwd) else None
+        if handoff is not None:
+            command = handoff.wrapped_command(command)
+        cwd_args = ["-c", str(cwd)] if cwd is not None and handoff is None else []
         env_args: list[str] = []
         if env:
             for key, value in env.items():
@@ -162,29 +266,40 @@ class TmuxAdapter:
                 "-P", "-F", _IDENTITY_FORMAT,
                 *command,
             ]
-        proc = self._runner(argv)
-        pane = self._parse_identity(proc.stdout)
+        pane: TmuxPane | None = None
+        try:
+            proc = self._runner(argv)
+            pane = self._parse_identity(proc.stdout)
+            if handoff is not None:
+                try:
+                    handoff.require_completion()
+                except TmuxFdHandoffRefused:
+                    self._kill_pane(pane.pane_id)
+                    raise
 
-        # When a cwd is requested, tmux enforces it via ``-c`` but the pane's
+            # When a cwd is requested, tmux enforces it via ``-c`` but the pane's
         # ``pane_current_path`` settles a moment after creation. Poll
         # ``display-message`` (bounded) until it reports the requested cwd; refuse
         # with :class:`TmuxCwdMismatch` if it never does — BEFORE the caller writes
         # any Pane Registry record or injects a prompt — so a lane can never run
         # outside its allocated worktree. The just-spawned pane is killed on
         # refusal to avoid an orphaned pane in the wrong directory.
-        if cwd is not None:
-            want = os.path.realpath(str(cwd))
-            observed = self._poll_pane_cwd(pane.pane_id, want)
-            if observed is None:
-                self._kill_pane(pane.pane_id)
-                raise TmuxCwdMismatch(
-                    f"pane {pane.pane_id} never reported the requested cwd {str(cwd)!r} "
-                    f"(resolved {want!r}) within "
-                    f"{self._cwd_poll_attempts} polls; refusing before pane-registry "
-                    "write / prompt injection"
-                )
-            pane = replace(pane, pane_cwd=observed)
-        return pane
+            if cwd is not None and handoff is None:
+                want = os.path.realpath(str(cwd))
+                observed = self._poll_pane_cwd(pane.pane_id, want)
+                if observed is None:
+                    self._kill_pane(pane.pane_id)
+                    raise TmuxCwdMismatch(
+                        f"pane {pane.pane_id} never reported the requested cwd {str(cwd)!r} "
+                        f"(resolved {want!r}) within "
+                        f"{self._cwd_poll_attempts} polls; refusing before pane-registry "
+                        "write / prompt injection"
+                    )
+                pane = replace(pane, pane_cwd=observed)
+            return pane
+        finally:
+            if handoff is not None:
+                handoff.close()
 
     def _poll_pane_cwd(self, pane_id: str, want_realpath: str) -> str | None:
         """Poll ``display-message`` for the pane's settled cwd; return it on match.

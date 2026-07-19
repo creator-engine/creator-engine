@@ -1058,6 +1058,27 @@ def test_launch_refuses_when_pinned_cwd_is_not_verified(tmp_path):
         )
 
 
+def test_launch_accepts_a_live_proc_fd_cwd_without_parent_path_verification(tmp_path):
+    """The tmux adapter owns the descriptor handoff; the raw proc path is not a cwd."""
+    adapter = PinningAdapter(pane_cwd=None)
+    directory_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        result = launch_runtime.launch(
+            harness="claude",
+            backend="host",
+            session="fd-pinned-seat",
+            repo_root=tmp_path,
+            tmux_adapter=adapter,
+            launch_cwd=f"/proc/self/fd/{directory_fd}",
+            launch_env={"HOME": str(tmp_path / ".ce/state/workers/w/home")},
+        )
+        assert result.spawned is True
+        assert adapter.pinned is not None
+        assert adapter.pinned["cwd"] == f"/proc/self/fd/{directory_fd}"
+    finally:
+        os.close(directory_fd)
+
+
 def test_launch_refuses_missing_brain_ledger_before_spawn(tmp_path):
     repo = tmp_path / "missing-brain-repo"
     repo.mkdir()

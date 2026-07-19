@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=11
 
-AUTHORIZED_PATHS_SHA256=701c76fcd3a4b39d7ccce69c0d7df38d545381c8eaf5bf09ac0454d81e71cccf
+AUTHORIZED_PATHS_SHA256=02986bb44493260e8959690cdf62079019c45ec5ae58432b76567b228e69412b
 
 ```text
 .ce/changelog/ce-607-managed-config-bootstrap-s1.md
@@ -18,4 +18,8 @@ validators/creator_engine_validator/codex_worker_config.py
 validators/creator_engine_validator/worker_run.py
 validators/tests/unit/test_worker_spawn.py
 validators/tests/unit/test_codex_worker_config.py
+validators/creator_engine_validator/launch_runtime.py
+validators/creator_engine_validator/tmux_adapter.py
+validators/tests/unit/test_launch_runtime.py
+validators/tests/unit/test_tmux_adapter.py
 ```
