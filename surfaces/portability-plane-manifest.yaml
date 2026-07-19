@@ -8,6 +8,7 @@ portability_plane:
     - validators/creator_engine_validator/resource_bound_spec.py
     - validators/creator_engine_validator/runner/herdr_containment.py
     - validators/creator_engine_validator/seat_sentinel.py
+    - validators/creator_engine_validator/tmux_adapter.py
     - validators/creator_engine_validator/v3_seat_bridge.py
     - validators/creator_engine_validator/worker_runtime.py
   baseline_exemptions:
