@@ -831,7 +831,7 @@ def test_refuses_auto_pickup_true_with_whitespace_only_enabling_decision_ref(tmp
 
 
 def test_docs_only_denylist_denies_all_governance_probe_paths():
-    """B1: All 5 governance probe paths are denied for docs-only."""
+    """B1: All 10 governance probe paths are denied for docs-only."""
     registry = load_ticket_class_registry()
     entry = next(e for e in registry.classes if e.id == "docs-only")
     for probe in GOVERNANCE_PROBE_PATHS:
