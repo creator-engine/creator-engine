@@ -1,0 +1,41 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://creator-engine.local/schemas/work-unit-cap.schema.yaml"
+title: Creator Engine CE603 Work-Unit Receipt
+type: object
+additionalProperties: false
+required:
+  - receipt_id
+  - run_id
+  - attempt_id
+  - reservation_id
+  - phase
+  - unit
+  - unit_version
+  - cap
+  - reserved
+  - observed
+  - remaining
+  - sample_sequence
+  - source_state
+  - policy_sha256
+  - previous_receipt_sha256
+  - receipt_sha256
+  - recorded_at
+properties:
+  receipt_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+  run_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+  attempt_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+  reservation_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+  phase: {type: string, enum: [pre_dispatch, mid_run, completion, rollback, reconcile]}
+  unit: {type: string, const: ce.raw_tokens.v1}
+  unit_version: {type: integer, const: 1}
+  cap: {type: integer, minimum: 0}
+  reserved: {type: integer, minimum: 0}
+  observed: {type: integer, minimum: 0}
+  remaining: {type: integer, minimum: 0}
+  sample_sequence: {type: integer, minimum: 0}
+  source_state: {type: string, enum: [measured, unknown, late, replayed]}
+  policy_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+  previous_receipt_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+  receipt_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+  recorded_at: {type: string, minLength: 1}

@@ -72,6 +72,8 @@ properties:
         - $ref: "#/$defs/runtime_agent_action_record"
         - $ref: "#/$defs/runtime_spend_ledger_record"
         - $ref: "#/$defs/runtime_spend_breach_record"
+        - $ref: "#/$defs/runtime_work_unit_cap_record"
+        - $ref: "#/$defs/runtime_work_unit_reconcile_record"
         - $ref: "#/$defs/runtime_change_restamp_record"
         - $ref: "#/$defs/runtime_merge_audit_record"
     description: |
@@ -705,6 +707,62 @@ $defs:
         description: |
           Optional: an OPAQUE, deterministic digest correlating a `hard`
           pause + escalate. NEVER a raw identifier.
+  runtime_work_unit_cap_record: &work_unit_record
+    type: object
+    unevaluatedProperties: false
+    required: [kind, record_type, schema_version, policy_sha, run_id, sequence, prev_hash, content_hash, recorded_at, receipt_id, attempt_id, reservation_id, phase, unit, unit_version, cap, reserved, observed, remaining, sample_sequence, source_state, policy_sha256, previous_receipt_sha256, receipt_sha256]
+    properties:
+      kind: {type: string, const: runtime-work-unit-cap}
+      record_type: {type: string, const: runtime_work_unit_cap}
+      schema_version: {type: string, enum: ["1"]}
+      policy_sha: {type: string, pattern: "^[0-9a-f]{64}$"}
+      run_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+      sequence: {type: integer, minimum: 0}
+      prev_hash: {type: string, pattern: "^[0-9a-f]{64}$"}
+      content_hash: {type: string, pattern: "^[0-9a-f]{64}$"}
+      recorded_at: {type: string, minLength: 1}
+      receipt_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+      attempt_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+      reservation_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+      phase: {type: string, enum: [pre_dispatch, retry_reentry]}
+      unit: {type: string, const: ce.raw_tokens.v1}
+      unit_version: {type: integer, const: 1}
+      cap: {type: integer, minimum: 0}
+      reserved: {type: integer, minimum: 0}
+      observed: {type: integer, minimum: 0}
+      remaining: {type: integer, minimum: 0}
+      sample_sequence: {type: integer, minimum: 0}
+      source_state: {type: string, enum: [measured, unknown, late, replayed]}
+      policy_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+      previous_receipt_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+      receipt_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+  runtime_work_unit_reconcile_record:
+    <<: *work_unit_record
+    properties:
+      kind: {type: string, const: runtime-work-unit-reconcile}
+      record_type: {type: string, const: runtime_work_unit_reconcile}
+      schema_version: {type: string, enum: ["1"]}
+      policy_sha: {type: string, pattern: "^[0-9a-f]{64}$"}
+      run_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+      sequence: {type: integer, minimum: 0}
+      prev_hash: {type: string, pattern: "^[0-9a-f]{64}$"}
+      content_hash: {type: string, pattern: "^[0-9a-f]{64}$"}
+      recorded_at: {type: string, minLength: 1}
+      receipt_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+      attempt_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+      reservation_id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"}
+      phase: {type: string, enum: [mid_run, completion, rollback, reconcile]}
+      unit: {type: string, const: ce.raw_tokens.v1}
+      unit_version: {type: integer, const: 1}
+      cap: {type: integer, minimum: 0}
+      reserved: {type: integer, minimum: 0}
+      observed: {type: integer, minimum: 0}
+      remaining: {type: integer, minimum: 0}
+      sample_sequence: {type: integer, minimum: 0}
+      source_state: {type: string, enum: [measured, unknown, late, replayed]}
+      policy_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+      previous_receipt_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+      receipt_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
   runtime_change_restamp_record:
     type: object
     description: |

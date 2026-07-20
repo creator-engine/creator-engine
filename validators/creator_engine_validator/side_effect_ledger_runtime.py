@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +40,7 @@ from .checks.side_effect_ledger import (
     validate_side_effect_ledger_record,
 )
 from .loader import LoaderError, load_yaml
+from . import work_unit_ledger
 
 # Genesis sentinel: the first record in a (controller_id, lane_id) chain has no
 # predecessor, so its ``previous_record_sha256`` is the all-zero SHA256.
@@ -85,6 +87,12 @@ class InvalidRecord(LedgerRecordError):
 
 class LedgerVerifyError(LedgerRuntimeError):
     code = "G4-VERIFY-ERROR"
+
+
+class WorkUnitReceiptHistoryError(LedgerRecordError):
+    """A durable CE603 receipt stream cannot be read without ambiguity."""
+
+    code = "CE603-RECEIPT-HISTORY"
 
 
 # ---------------------------------------------------------------------------
@@ -173,12 +181,27 @@ def _read_head(head_path: Path) -> dict[str, Any] | None:
     return data
 
 
+@contextmanager
+def _lane_lock(root: Path, controller_id: str, lane_id: str):
+    """Serialize every read-validate-append-head mutation for one ledger lane."""
+    import fcntl
+
+    lock_path = _lane_root(root, controller_id, lane_id) / ".lane-record.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 # ---------------------------------------------------------------------------
 # ce ledger record
 # ---------------------------------------------------------------------------
 
 
-def record(
+def _record_unlocked(
     *,
     controller_id: str,
     lane_id: str,
@@ -219,6 +242,13 @@ def record(
     # 3. Read the current chain head for this (controller_id, lane_id).
     head_path = _head_path(side_effect_ledger_root, controller_id, lane_id)
     head = _read_head(head_path)
+    lane_root = _lane_root(side_effect_ledger_root, controller_id, lane_id)
+    if head is None and lane_root.exists() and any(
+        path.name != ".lane-record.lock" for path in lane_root.iterdir()
+    ):
+        raise LedgerRecordError(
+            f"Side-Effect Ledger lane at {lane_root} is populated without a head manifest"
+        )
     if head is None:
         sequence = 1
         previous_sha = GENESIS_SHA
@@ -277,6 +307,18 @@ def record(
     if record_path.exists():
         raise RecordCollision(f"record already exists, refusing to overwrite: {record_path}")
 
+    # A persisted head must name a complete valid chain before it can advance.
+    if head is not None:
+        verification = verify(
+            side_effect_ledger_root=side_effect_ledger_root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+        )
+        if not verification.ok:
+            raise LedgerRecordError(
+                "existing Side-Effect Ledger lane is invalid: " + "; ".join(verification.errors)
+            )
+
     # --- Side effects begin here (record file, then head manifest) ---
     text = _canonical_bytes(payload)
     record_sha256 = _sha256_text(text)
@@ -301,6 +343,103 @@ def record(
         record_sha256=record_sha256,
         previous_record_sha256=previous_sha,
     )
+
+
+def record(**record_kwargs: Any) -> RecordResult:
+    """Append one record while holding the shared lane lock exactly once."""
+    root = Path(record_kwargs["side_effect_ledger_root"])
+    controller_id = str(record_kwargs["controller_id"])
+    lane_id = str(record_kwargs["lane_id"])
+    with _lane_lock(root, controller_id, lane_id):
+        return _record_unlocked(**record_kwargs)
+
+
+def record_work_unit_reservation(*, receipt: dict[str, Any], **record_kwargs: Any) -> RecordResult:
+    """Atomically append one CE603 reservation through the sole record writer."""
+    if not isinstance(receipt, dict):
+        raise DetailsNotObject("work-unit receipt must be a JSON object")
+    root = Path(record_kwargs["side_effect_ledger_root"])
+    controller_id = str(record_kwargs["controller_id"])
+    lane_id = str(record_kwargs["lane_id"])
+    with _lane_lock(root, controller_id, lane_id):
+        history = _durable_work_unit_receipts(root, controller_id, lane_id)
+        if work_unit_ledger.validate_receipts((*history, receipt)):
+            raise InvalidRecord("work-unit receipt must satisfy the neutral receipt contract")
+        return _record_work_unit_reservation(receipt=receipt, record_kwargs=record_kwargs)
+
+
+def _record_work_unit_reservation(*, receipt: dict[str, Any], record_kwargs: dict[str, Any]) -> RecordResult:
+    """Build and append the ledger record; caller owns the lane lock."""
+    details = dict(record_kwargs.pop("details", {}) or {})
+    # Ledger details allow scalar values and reject token-shaped strings. Store
+    # canonical receipt bytes as bounded hex fragments; recovery reassembles it.
+    encoded = work_unit_ledger.canonical_json_text(receipt).rstrip("\n").encode("utf-8").hex()
+    for index in range(0, len(encoded), 30):
+        details[f"work_unit_receipt_part_{index // 30:03d}"] = encoded[index:index + 30]
+    receipt_id = str(receipt.get("receipt_id") or "unknown")
+    record_kwargs.update(
+        effect_id=f"work-unit-reservation-{receipt_id[:32]}",
+        effect_kind="tracked_file_change",
+        effect_status="succeeded",
+        summary="Recorded CE603 work-unit reservation.",
+        details=details,
+    )
+    return _record_unlocked(**record_kwargs)
+
+
+def _durable_work_unit_receipts(root: Path, controller_id: str, lane_id: str) -> tuple[dict[str, Any], ...]:
+    """Read the complete CE603 receipt stream or refuse before reservation mutation."""
+    lane_root = _lane_root(root, controller_id, lane_id)
+    if lane_root.exists():
+        verification = verify(
+            side_effect_ledger_root=root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+        )
+        if not verification.ok:
+            raise WorkUnitReceiptHistoryError(
+                "durable Side-Effect Ledger history is invalid: " + "; ".join(verification.errors)
+            )
+    receipts: list[dict[str, Any]] = []
+    for path in sorted(lane_root.rglob("*.json")) if lane_root.exists() else ():
+        if path.name == HEAD_FILENAME:
+            continue
+        try:
+            record_data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} is unreadable") from exc
+        if not isinstance(record_data, dict):
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} is not an object")
+        if validate_side_effect_ledger_record(record_data, path):
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} is not a well-formed unrelated record")
+        effect_id = record_data.get("effect_id")
+        is_ce603_effect = isinstance(effect_id, str) and effect_id.startswith("work-unit-reservation-")
+        details = record_data.get("details")
+        if details is not None and not isinstance(details, dict):
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has ambiguous details")
+        details = details or {}
+        fragment_keys = sorted(key for key in details if key.startswith("work_unit_receipt_part_"))
+        if is_ce603_effect and not fragment_keys:
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has no CE603 receipt fragments")
+        if fragment_keys and not is_ce603_effect:
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has ambiguous CE603 receipt fragments")
+        if not is_ce603_effect:
+            continue
+        expected_keys = [f"work_unit_receipt_part_{index:03d}" for index in range(len(fragment_keys))]
+        if fragment_keys != expected_keys or any(not isinstance(details[key], str) for key in fragment_keys):
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has malformed CE603 receipt fragments")
+        try:
+            serialized = bytes.fromhex("".join(details[key] for key in fragment_keys)).decode("utf-8")
+            receipt = json.loads(serialized)
+        except (UnicodeError, ValueError, TypeError) as exc:
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has undecodable CE603 receipt") from exc
+        if not isinstance(receipt, dict):
+            raise WorkUnitReceiptHistoryError(f"ledger record {path} has non-object CE603 receipt")
+        receipts.append(receipt)
+    errors = work_unit_ledger.validate_receipts(tuple(receipts))
+    if errors:
+        raise WorkUnitReceiptHistoryError("durable CE603 receipt stream is invalid: " + "; ".join(errors))
+    return tuple(receipts)
 
 
 def _require_live_claim(
@@ -372,10 +511,11 @@ def verify(
         key = (str(item.record.get("controller_id")), str(item.record.get("lane_id")))
         groups.setdefault(key, []).append(item)
 
+    head_lanes = _head_lanes(side_effect_ledger_root, controller_id, lane_id)
     chains: list[dict[str, Any]] = []
-    for key in sorted(groups):
+    for key in sorted(set(groups) | head_lanes):
         chain_summary, chain_errors = _verify_chain(
-            side_effect_ledger_root, key[0], key[1], groups[key], awl_root
+            side_effect_ledger_root, key[0], key[1], groups.get(key, []), awl_root
         )
         chains.append(chain_summary)
         errors.extend(chain_errors)
@@ -414,6 +554,26 @@ def _load_records(
     return loaded, errors
 
 
+def _head_lanes(
+    side_effect_ledger_root: Path, controller_id: str | None, lane_id: str | None
+) -> set[tuple[str, str]]:
+    """Return lane keys with a persisted head, including lanes without records."""
+    if not side_effect_ledger_root.exists():
+        return set()
+    lanes: set[tuple[str, str]] = set()
+    for head_path in sorted(side_effect_ledger_root.rglob(HEAD_FILENAME)):
+        parts = head_path.parent.relative_to(side_effect_ledger_root).parts
+        if len(parts) != 2:
+            continue
+        key = (parts[0], parts[1])
+        if controller_id is not None and key[0] != controller_id:
+            continue
+        if lane_id is not None and key[1] != lane_id:
+            continue
+        lanes.add(key)
+    return lanes
+
+
 def _verify_chain(
     side_effect_ledger_root: Path,
     controller_id: str,
@@ -449,19 +609,33 @@ def _verify_chain(
         for item in ordered:
             errors.extend(_claim_binding_error(awl_root, item))
 
-    # Head / manifest must match the last record.
+    # Head / manifest must match the last record. A head with no records is
+    # never genesis: it is an interrupted or corrupted append and must refuse.
     head_path = _head_path(side_effect_ledger_root, controller_id, lane_id)
-    if ordered:
-        last = ordered[-1]
-        head = None
-        if head_path.is_file():
-            try:
-                head = json.loads(head_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
-                errors.append(f"{controller_id}/{lane_id}: head manifest unreadable: {exc}")
-        if not isinstance(head, dict):
+    head = None
+    if head_path.is_file():
+        try:
+            head = json.loads(head_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            errors.append(f"{controller_id}/{lane_id}: head manifest unreadable: {exc}")
+    if not isinstance(head, dict):
+        if ordered or head_path.is_file():
             errors.append(f"{controller_id}/{lane_id}: missing or invalid head manifest at {head_path}")
+    else:
+        expected_head = {
+            "kind": HEAD_KIND,
+            "controller_id": controller_id,
+            "lane_id": lane_id,
+        }
+        for field, expected in expected_head.items():
+            if head.get(field) != expected:
+                errors.append(
+                    f"{controller_id}/{lane_id}: head {field} {head.get(field)!r} != {expected!r}"
+                )
+        if not ordered:
+            errors.append(f"{controller_id}/{lane_id}: head manifest exists without a record chain")
         else:
+            last = ordered[-1]
             if head.get("head_sha256") != last.file_sha256:
                 errors.append(
                     f"{controller_id}/{lane_id}: head_sha256 {head.get('head_sha256')} "
@@ -471,6 +645,16 @@ def _verify_chain(
                 errors.append(
                     f"{controller_id}/{lane_id}: head sequence {head.get('sequence')} "
                     f"does not match last record sequence {last.record.get('sequence')}"
+                )
+            if head.get("record_count") != len(ordered):
+                errors.append(
+                    f"{controller_id}/{lane_id}: head record_count {head.get('record_count')} "
+                    f"does not match record count {len(ordered)}"
+                )
+            if head.get("last_record_ref") != last.rel:
+                errors.append(
+                    f"{controller_id}/{lane_id}: head last_record_ref {head.get('last_record_ref')!r} "
+                    f"does not match last record {last.rel!r}"
                 )
 
     return _chain_summary(controller_id, lane_id, ordered), errors

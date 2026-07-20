@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 
+import pytest
+
 from creator_engine_validator import runtime_evidence_spine as spine
 from creator_engine_validator.runner import spend_gate as sg
 from creator_engine_validator.runner import usage_tap as ut
@@ -126,6 +128,14 @@ def test_parse_skips_assistant_without_model_or_without_usage():
 
 def test_parse_is_idempotent():
     assert ut.parse_transcript_usage(TRANSCRIPT_LINES) == ut.parse_transcript_usage(TRANSCRIPT_LINES)
+
+
+def test_canonical_raw_tokens_excludes_cache_and_rejects_malformed_counts():
+    assert ut.canonical_raw_tokens(OPUS_USAGE) == 2800
+    assert ut.canonical_raw_tokens({"input_tokens": 0, "output_tokens": 7}) == 7
+    for malformed in ({"input_tokens": -1, "output_tokens": 1}, {"input_tokens": "1", "output_tokens": 1}):
+        with pytest.raises(ValueError):
+            ut.canonical_raw_tokens(malformed)
 
 
 # --- usage_turns_to_ledger: PURE projection, reusing spend_gate --------------
