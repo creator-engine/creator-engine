@@ -10,5 +10,7 @@ scope: release-signing trust-root operations
 - Documents public consumer re-anchoring, normal succession, historical release
   reissue, compromise revocation, fail-closed behavior, and unrecoverable
   limits.
+- Makes the installer-facing DNS TXT anchor and the revocation-to-re-anchoring
+  fail-closed user experience explicit.
 - Keeps signing and release actions controller-only and excludes private-key
   material and passphrases from the procedure.
