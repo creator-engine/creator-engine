@@ -83,3 +83,71 @@ This document does not install Podman, does not allocate workers, does not chang
 `ce worker allocate` behavior (which already fails closed correctly), and does not
 ratify any policy. It is a readiness vocabulary and a preflight rule. Provisioning
 and live-worker proofs are separate, Operator-ratified gates.
+
+## 6. DGX JOB-1: validation receipt tree-identity refusal
+
+### 6.1 Recognize the refusal
+
+Before Podman starts,
+`validators/creator_engine_validator/validation_sandbox_runner.py::_derive_mounted_tree_sha()`
+runs:
+
+```text
+git status --porcelain=v1 --untracked-files=all
+```
+
+Any output causes the runner to refuse receipt minting with:
+
+```text
+validation sandbox mounted tree must be clean before receipt minting
+```
+
+Treat this as a receipt tree-identity control, not as lint. The runner verifies
+the mounted tree is clean before execution and includes the resulting `tree_sha`
+in the signed receipt. A receipt is valid only when it names the exact tree that
+was validated.
+
+### 6.2 Refuse apparent bypasses
+
+- Do not use `--allow-dirty` to work around this refusal. That option applies
+  only to `pr_preflight._assert_clean_tree()`; it neither bypasses nor weakens
+  the validation sandbox's L2 clean-tree requirement.
+- Do not treat generated carriers as justification for weakening the control.
+  Armed conveyor policy sets `allow_dirty_validation=False` and commits
+  generated carriers before container validation. Carrier generation therefore
+  cannot explain away a dirty mounted tree at receipt-minting time.
+
+Do not blindly stash, reset, delete, or clean the worktree. Such actions can
+erase an intended or safety-significant change and break the receipt chain they
+are supposed to repair.
+
+### 6.3 Resolve with seat-local evidence
+
+This refusal remains unresolved when the diagnosing seats cannot reach the
+allocated DGX worktree, its exact porcelain status, daemon and seat logs, or the
+Podman/runsc/gvproxy substrate. Without that evidence, a dirty path cannot be
+classified as stale generated output versus an intended or safety-significant
+change.
+
+Resolution requires DGX seat-local read and execute authority. The authorized
+operator must:
+
+1. Identify the exact allocated worktree and container mount.
+2. Capture `git status --porcelain=v1 --untracked-files=all`, `HEAD`, and
+   `HEAD^{tree}` before changing anything.
+3. Capture the relevant daemon and seat logs and the Podman/runsc/gvproxy
+   runtime state.
+4. Classify every dirty path. Preserve and commit intended changes; remove only
+   stale output supported by the captured evidence.
+5. Rerun validation from the clean, classified tree and retain the resulting
+   receipt evidence.
+
+Under the ratified no-single-point-of-failure operating consequence, an
+unexercised fallback is not a fallback. Until this procedure is completed and
+the lane is exercised, DGX reduces nothing in host-loss risk despite eight
+repair units.
+
+That consequence does not make the lane needless. Current CI, static checks,
+and dry runs do not prove live DGX arm64/runsc/gvproxy behavior. A narrowly
+scoped, Operator-authorized DGX canary may therefore remain a genuine standing
+need rather than sunk cost.
