@@ -39,3 +39,15 @@ disable-model-invocation: false
 
 This skill carries no authority and grants no gate. Any forge mutation still
 rides on CE's `PreToolUse` hook-check seam. Do not embed forge commands here.
+
+## Resume side
+
+Writing a checkpoint is only half of this skill's lifecycle. Resuming from
+one — after a fresh boot, `/clear`, relaunch, or handoff — carries a
+symmetric obligation: re-derive every pin the resume-state record claims
+against a live, durable source before any binding act, per
+`docs/operations/BOOT_TIME_PIN_REDERIVATION_PROTOCOL.md`. Do not treat the
+checkpoint's `probed`/`asserted`/`unknown` labels, or the checkpoint step 5
+resume procedure in `playbooks/controller/briefs/checkpoint.md`, as a
+substitute for that live re-derivation — a mismatch between the record and
+the live derivation is a STOP, not a note-to-self.

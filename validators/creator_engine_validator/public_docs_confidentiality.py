@@ -132,6 +132,7 @@ KNOWN_OPERATIONS_EXCEPTIONS: frozenset[str] = frozenset(
         "docs/operations/ACTIVE_WORK_LEDGER_PROTOCOL.md",
         "docs/operations/AGENT_NATIVE_BOOTSTRAP.md",
         "docs/operations/AUTHOR_A_CE_VALID_PR.md",
+        "docs/operations/BOOT_TIME_PIN_REDERIVATION_PROTOCOL.md",
         "docs/operations/CE_EVENT_PROTOCOL.md",
         "docs/operations/CLAUDE_CODE_CONTROLLER_SEAT_CONTRACT.md",
         "docs/operations/CLAUDE_CODE_HOOK_PACK.md",
