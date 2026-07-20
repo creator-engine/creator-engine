@@ -13,6 +13,7 @@ Type=simple
 EnvironmentFile=%h/.config/creator-engine/ce-egress-broker.env
 WorkingDirectory=/workspace/creator-engine
 Sockets=ce-egress-broker.socket
+ExecStartPre=/usr/bin/env deploy/egress-broker/v1/preflight-peer-identity.sh --env-file %h/.config/creator-engine/ce-egress-broker.env --target-container "$CE_EGRESS_BROKER_TARGET_CONTAINER" --container-runtime "$CE_EGRESS_BROKER_CONTAINER_RUNTIME"
 ExecStart=/usr/bin/env python3 tools/egress-broker/ce_egress_self_push_broker.py \
   --socket "$CE_EGRESS_BROKER_SOCKET" \
   --seat "$CE_EGRESS_BROKER_SEAT" \

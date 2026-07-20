@@ -15,17 +15,18 @@ configured expected `SO_PEERCRED` UID/GID `1008`/`1008`. Dev-3 deliberately
 uses the host-local `<set-at-deployment>` UID/GID placeholder, so no private
 identity is duplicated in checked-in metadata.
 
-`deploy/egress-broker/v1/preflight-peer-identity.sh` is the deployment-time
-boundary: before installation, it reads `id -u` and `id -g` from the named
-target container and refuses a configured peer identity mismatch. Its focused
-test uses a controlled container-runtime fixture only; it neither inspects a
-live container nor proves a host deployment.
+`deploy/egress-broker/v1/preflight-peer-identity.sh` is the activation-time
+boundary: both broker services run it before the broker starts. It requires the
+target's `io.creator-engine.seat` label to equal the configured broker seat,
+then reads `id -u` and `id -g` and refuses any mismatch or malformed/missing
+identity input. Its focused test uses a controlled container-runtime fixture
+only; it neither inspects a live container nor proves a host deployment.
 
 The dev-3 and dev-4 services route terminal failures to their shared liveness
-service/timer pattern. Each check runs `systemctl is-active`, records the
-observed state through `systemd-cat`, and fails unless the broker unit is
-active. This makes missing deployed units and start-limit crash loops observable
-through the journal and timer result.
+service/timer pattern. Each check records a healthy active state at info
+priority; inactive or error states remain error-priority records and fail the
+timer invocation. This makes missing deployed units and start-limit crash loops
+observable through the journal and timer result.
 
 These metadata and fixture checks do not deploy, enable, start, inspect, or
 restart any host service. Operators remain responsible for running preflight and
