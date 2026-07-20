@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 import yaml
 
-from creator_engine_validator import container_launcher
+from creator_engine_validator import container_launcher, side_effect_ledger_runtime
 from creator_engine_validator.forge.authority_contexts import ValidationSandboxContext
 from creator_engine_validator.validation_sandbox import ValidationSandboxSpec
 from creator_engine_validator.validation_sandbox_receipt import (
@@ -348,9 +348,18 @@ def test_side_effect_ledger_record_is_appended_with_validation_sandbox_kind(tmp_
     assert run.side_effect_record["effect_status"] == "succeeded"
     assert run.side_effect_record["actor_role"] == "verification"
     assert run.side_effect_record["subject_git_sha"] == TREE_SHA
-    assert run.side_effect_record["details"] == {
+    expected_caller_details = {
         "returncode": 0,
         "mount_count": 1,
         "egress_count": 0,
         "grant_count": 0,
     }
+    reserved_detail_keys = {
+        side_effect_ledger_runtime.PREV_SEAL_SHA256,
+        side_effect_ledger_runtime.SEAL_SCHEME,
+    }
+    details = run.side_effect_record["details"]
+    assert {key: value for key, value in details.items() if key not in reserved_detail_keys} == expected_caller_details
+    assert details[side_effect_ledger_runtime.PREV_SEAL_SHA256] == side_effect_ledger_runtime.GENESIS_SHA
+    assert details[side_effect_ledger_runtime.SEAL_SCHEME] == side_effect_ledger_runtime.SEAL_SCHEME_VALUE
+    assert set(details) == set(expected_caller_details) | reserved_detail_keys

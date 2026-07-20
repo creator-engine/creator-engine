@@ -45,6 +45,9 @@ from . import work_unit_ledger
 # Genesis sentinel: the first record in a (controller_id, lane_id) chain has no
 # predecessor, so its ``previous_record_sha256`` is the all-zero SHA256.
 GENESIS_SHA = "0" * 64
+PREV_SEAL_SHA256 = "prev_seal_sha256"
+SEAL_SCHEME = "_ce627_seal_scheme"
+SEAL_SCHEME_VALUE = "ce627-v1"
 
 HEAD_FILENAME = "_head.json"
 HEAD_KIND = "side-effect-ledger-head"
@@ -140,6 +143,21 @@ def _sha256_text(text: str) -> str:
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _validate_runtime_record(record: dict[str, Any], path: Path) -> list[Any]:
+    """Validate a runtime record while admitting its writer-owned seal field.
+
+    The substrate's generic secret heuristic quite properly flags a bare
+    64-hex string in free-form details.  The runtime overwrites this one
+    reserved detail with a computed record digest before validation, so it is
+    neither caller-controlled nor secret material.
+    """
+    return [
+        error
+        for error in validate_side_effect_ledger_record(record, path)
+        if not (error.code == CODE_REDACTION_SAFE and error.path.endswith(f"details.{PREV_SEAL_SHA256}"))
+    ]
 
 
 def _utc_now_str(now: datetime | None) -> str:
@@ -252,9 +270,44 @@ def _record_unlocked(
     if head is None:
         sequence = 1
         previous_sha = GENESIS_SHA
+        previous_seal_sha = GENESIS_SHA
     else:
         sequence = int(head.get("sequence", 0)) + 1
         previous_sha = str(head.get("head_sha256", GENESIS_SHA))
+
+    # Resolve the deterministic target path and retain the existing
+    # collision refusal precedence before checking a prior lane's integrity.
+    day = _utc_day(occurred_at, now or datetime.now(UTC))
+    record_path = _lane_root(side_effect_ledger_root, controller_id, lane_id) / day / f"{sequence:06d}-{effect_id}.json"
+    if record_path.exists():
+        raise RecordCollision(f"record already exists, refusing to overwrite: {record_path}")
+
+    if head is not None:
+        # Existing lanes must be sound before they can advance.  This also
+        # preserves unsealed legacy lanes: their first newly sealed record
+        # begins at explicit seal genesis rather than retroactively claiming
+        # that older records carried seals.
+        verification = verify(
+            side_effect_ledger_root=side_effect_ledger_root,
+            controller_id=controller_id,
+            lane_id=lane_id,
+        )
+        if not verification.ok:
+            raise LedgerRecordError(
+                "existing Side-Effect Ledger lane is invalid: " + "; ".join(verification.errors)
+            )
+        last_record_ref = head.get("last_record_ref")
+        last_record_path = side_effect_ledger_root / str(last_record_ref)
+        try:
+            last_record = json.loads(last_record_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise LedgerRecordError(f"last ledger record at {last_record_path} is unreadable") from exc
+        last_details = last_record.get("details") if isinstance(last_record, dict) else None
+        previous_seal_sha = (
+            previous_sha
+            if isinstance(last_details, dict) and last_details.get(SEAL_SCHEME) == SEAL_SCHEME_VALUE
+            else GENESIS_SHA
+        )
 
     # 4. Build the record (deterministic field set).
     record_timestamp = _utc_now_str(now)
@@ -286,11 +339,13 @@ def _record_unlocked(
         payload["evidence_refs"] = list(evidence_refs)
     if redactions:
         payload["redactions"] = list(redactions)
-    if details is not None:
-        payload["details"] = details
+    payload_details = dict(details or {})
+    payload_details[PREV_SEAL_SHA256] = previous_seal_sha
+    payload_details[SEAL_SCHEME] = SEAL_SCHEME_VALUE
+    payload["details"] = payload_details
 
     # 5. Validate via the landed substrate; refuse secret material / invalid shape.
-    errors = validate_side_effect_ledger_record(payload, head_path)
+    errors = _validate_runtime_record(payload, head_path)
     if any(error.code == CODE_REDACTION_SAFE for error in errors):
         raise SecretMaterialRefused(
             "record contains secret-shaped material; refusing before write: "
@@ -300,24 +355,6 @@ def _record_unlocked(
         raise InvalidRecord(
             "record fails Side-Effect Ledger validation: " + "; ".join(e.format() for e in errors)
         )
-
-    # 6. Resolve the deterministic target path; never overwrite.
-    day = _utc_day(occurred_at, now or datetime.now(UTC))
-    record_path = _lane_root(side_effect_ledger_root, controller_id, lane_id) / day / f"{sequence:06d}-{effect_id}.json"
-    if record_path.exists():
-        raise RecordCollision(f"record already exists, refusing to overwrite: {record_path}")
-
-    # A persisted head must name a complete valid chain before it can advance.
-    if head is not None:
-        verification = verify(
-            side_effect_ledger_root=side_effect_ledger_root,
-            controller_id=controller_id,
-            lane_id=lane_id,
-        )
-        if not verification.ok:
-            raise LedgerRecordError(
-                "existing Side-Effect Ledger lane is invalid: " + "; ".join(verification.errors)
-            )
 
     # --- Side effects begin here (record file, then head manifest) ---
     text = _canonical_bytes(payload)
@@ -410,7 +447,7 @@ def _durable_work_unit_receipts(root: Path, controller_id: str, lane_id: str) ->
             raise WorkUnitReceiptHistoryError(f"ledger record {path} is unreadable") from exc
         if not isinstance(record_data, dict):
             raise WorkUnitReceiptHistoryError(f"ledger record {path} is not an object")
-        if validate_side_effect_ledger_record(record_data, path):
+        if _validate_runtime_record(record_data, path):
             raise WorkUnitReceiptHistoryError(f"ledger record {path} is not a well-formed unrelated record")
         effect_id = record_data.get("effect_id")
         is_ce603_effect = isinstance(effect_id, str) and effect_id.startswith("work-unit-reservation-")
@@ -547,7 +584,7 @@ def _load_records(
             continue
         if lane_id is not None and data.get("lane_id") != lane_id:
             continue
-        record_errors = validate_side_effect_ledger_record(data, path)
+        record_errors = _validate_runtime_record(data, path)
         for err in record_errors:
             errors.append(f"{rel}: {err.format()}")
         loaded.append(_LoadedRecord(path=path, rel=rel, record=data, file_sha256=_sha256_file(path)))
@@ -603,6 +640,29 @@ def _verify_chain(
                 f"{controller_id}/{lane_id}: hash-chain link broken at {item.rel}: "
                 f"previous_record_sha256={previous} != {expected}"
             )
+
+    # Explicit seals are additive to the legacy record-byte chain.  A lane
+    # with no seal fields remains a valid legacy lane.  Once a seal appears,
+    # every later record must be sealed and link to the prior sealed record.
+    previous_sealed: _LoadedRecord | None = None
+    for item in ordered:
+        details = item.record.get("details")
+        seal = details.get(PREV_SEAL_SHA256) if isinstance(details, dict) else None
+        has_seal = isinstance(details, dict) and details.get(SEAL_SCHEME) == SEAL_SCHEME_VALUE
+        if not has_seal:
+            if previous_sealed is not None:
+                errors.append(
+                    f"{controller_id}/{lane_id}: seal-chain gap at {item.rel}: "
+                    f"unsealed record follows sealed record {previous_sealed.rel}"
+                )
+            continue
+        expected = GENESIS_SHA if previous_sealed is None else previous_sealed.file_sha256
+        if not isinstance(seal, str) or seal != expected:
+            errors.append(
+                f"{controller_id}/{lane_id}: seal-chain link broken at {item.rel}: "
+                f"{PREV_SEAL_SHA256}={seal!r} != {expected}"
+            )
+        previous_sealed = item
 
     # Claim binding when an Active-Work Ledger root is provided.
     if awl_root is not None:
