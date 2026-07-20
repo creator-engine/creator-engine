@@ -14,3 +14,6 @@ scope: release-signing trust-root operations
   fail-closed user experience explicit.
 - Keeps signing and release actions controller-only and excludes private-key
   material and passphrases from the procedure.
+- Records `docs/contracts/installer.md` as a deferred public consumer-contract
+  update, with successor endpoint, DNS-anchor, and verification wording to be
+  changed outside this documentation-only carrier.

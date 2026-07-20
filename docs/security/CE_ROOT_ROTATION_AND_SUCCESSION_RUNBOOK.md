@@ -24,10 +24,19 @@ command transcript, or a release artifact.
 
 ## Public Consumer Inventory
 
-The following are the actual tracked public consumers and root-pin surfaces at
-the time this runbook was written. Update every applicable surface in one
-authorized rotation change; do not infer additional consumers from historical
-mentions alone.
+This is a bounded discovery record, not a claim that every future or
+untracked consumer has been found. For this runbook correction, discovery
+enumerated the current tracked tree with `git ls-files`, scanned tracked paths
+whose names contain `root`, `anchor`, `trust`, or `install`, and searched
+tracked content for `trust root`, `root of trust`, `DNS anchor`, and `anchor
+DNS`. The resulting direct public endpoint, root-pin, and verification-contract
+surfaces were then manually classified. Historical release snapshots, generated
+site copies, changelog and manifest records, tests, and release-staging evidence
+are outside this inventory boundary unless they themselves impose a distinct
+current consumer contract.
+
+Update every applicable surface in one authorized rotation change; do not infer
+additional current consumers from historical mentions alone.
 
 | Consumer or surface | Current binding | Rotation responsibility |
 |---|---|---|
@@ -35,6 +44,7 @@ mentions alone.
 | `docs/security/trust-anchors.md` | Public fingerprint record | Publish the successor fingerprint and explicit transition or revocation status that matches the DNS TXT anchor. |
 | `docs/llms-install.md` | Embedded key ID, SSHSIG metadata, canonical bytes, and public verification recipe | Reissue its canonical form and detached signature under the successor key; change the recipe and default identity to the successor. |
 | `docs/install.sh` | Fetches the root and the out-of-band DNS TXT fingerprint anchor; refuses missing, mismatched, or same-origin anchors before installation | Point the bootstrap at the successor root and the matching DNS TXT record, while preserving an intentional legacy path only when it remains trusted. |
+| `docs/contracts/installer.md` | Canonical public installer trust-root contract for the served root, DNS anchor, and verify-before-execute procedure | In the eventual consumer-contract update, replace its stale “no rotation machinery” statement with the successor served endpoint and key identity, the successor DNS-anchor wording, and verification-contract text that requires the successor binding before execution. This documentation-only carrier records that responsibility but does not edit the consumer contract. |
 | `docs/downloads/0.2.0/install.sh` through `docs/downloads/0.3.6/install.sh` | Versioned public bootstrap snapshots | Treat as historical consumers. Preserve their old verification behavior or publish a clearly versioned successor bootstrap; do not silently rewrite a released snapshot. |
 | `docs/llms.txt` | Public entry point that names the root, fingerprint, and anchor model | Update the public discovery text and successor fingerprint only after the DNS TXT anchor is available. |
 | `validators/creator_engine_validator/v3_installer.py` and `v3_cli.py` | Distributed validator pin set plus verify-before-execute and out-of-band-anchor checks | Add the successor pin, choose the current default key, and keep old-key acceptance only for the approved transition window. |

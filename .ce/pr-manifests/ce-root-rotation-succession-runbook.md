@@ -7,6 +7,9 @@ authorized path-set for this change. It is self-inclusive.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
+This documentation-only correction records an eventual installer-contract
+update without changing the consumer contract itself.
+
 AUTHORIZED_PATHS_COUNT=3
 
 AUTHORIZED_PATHS_SHA256=40be29319c02518b1fe3096c06851a795234cf249c8b2691282f58c88af4f240
