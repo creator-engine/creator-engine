@@ -824,7 +824,13 @@ def correct_claim(
     normalized_scope = _normalize_scope(scope if scope is not None else old.get("scope"))
     if not isinstance(evidence_ref, str) or not evidence_ref or "://" in evidence_ref:
         raise BrainAssertionRefused("evidence_ref must be a non-empty local or opaque reference")
-    normalized_statement = _normalize_statement(statement, normalized_claim)
+    # A correction without an explicit statement changes the structured claim,
+    # not the doctrine wording of the active assertion.  Preserve the active
+    # predecessor verbatim instead of deriving a generic claim template.
+    normalized_statement = _normalize_statement(
+        statement if statement is not None else str(old["statement"]),
+        normalized_claim,
+    )
     normalized_type = _normalize_assertion_type(assertion_type or old.get("type"))
     normalized_verification = _normalize_verification_method(verification_method, evidence_ref)
     new_id = new_assertion_id or _assertion_id(

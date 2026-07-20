@@ -120,6 +120,8 @@ def test_ce_brain_assert_check_correct_verify_roundtrip(tmp_path: Path, capsys):
             "brain-assertion-cli-0001",
             "--scope",
             "integration",
+            "--statement",
+            "The brain assertion ledger is the doctrine-preserving SSOT for corrections.",
             "--claim-json",
             _claim("ssot"),
             "--evidence-ref",
@@ -195,7 +197,9 @@ def test_ce_brain_assert_check_correct_verify_roundtrip(tmp_path: Path, capsys):
             "--json",
         ]
     ) == 0
-    assert json.loads(capsys.readouterr().out)["record"]["id"] == "brain-assertion-cli-0002"
+    active = json.loads(capsys.readouterr().out)["record"]
+    assert active["id"] == "brain-assertion-cli-0002"
+    assert active["statement"] == "The brain assertion ledger is the doctrine-preserving SSOT for corrections."
 
     assert ce_cli.main(["brain", "verify", "--state-root", str(state_root), "--json"]) == 0
     verified = json.loads(capsys.readouterr().out)
