@@ -11,4 +11,6 @@ work_class: XS
 
 - Require reportable carrier-slug matching, base re-derivation, explicit staging,
   committed readiness, and work-class-floor evidence.
+- Supersede the stale carrier-discipline assertion with the current committed
+  `docs/contracts/authoring-a-governed-pr.md` SHA-256.
 - Keep the change limited to canonical author guidance and its PR carriers.
