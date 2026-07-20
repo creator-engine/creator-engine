@@ -4,6 +4,9 @@ Documentation=https://github.com/creator-engine/creator-engine/tree/main/tools/e
 Requires=ce-egress-broker.socket
 After=network-online.target ce-egress-broker.socket
 Wants=network-online.target
+OnFailure=ce-egress-broker-liveness.service
+StartLimitIntervalSec=5m
+StartLimitBurst=3
 
 [Service]
 Type=simple
