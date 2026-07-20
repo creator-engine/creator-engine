@@ -1,0 +1,177 @@
+# Ticket-class policy registry — Creator Engine autonomous pickup authority.
+#
+# registry_version: 1 activation posture is "advisory": auto_pickup is false for
+# every class in this version. Arming a class for autonomous pickup requires a
+# separate governance PR adding enabling_decision_ref and setting auto_pickup: true.
+# The loader enforces: any entry with auto_pickup: true MUST carry enabling_decision_ref.
+#
+# Approver sets name authority groups. Members are NEVER embedded here;
+# they are resolved at live-recheck time against the ops identity registry
+# (ce-ops:infra/identity-registry.yaml). This file must not contain usernames,
+# login handles, email addresses, or seat identifiers.
+#
+# Reference: ADR-0018-ticket-class-registry.md
+# Ratification: Operator (chmod735), 2026-07-19, intake-shift session.
+
+registry_version: 1
+activation_posture: advisory
+
+# ---------------------------------------------------------------------------
+# Named approver sets.
+# Each set is a REFERENCE to an external identity source; no members listed.
+# ---------------------------------------------------------------------------
+approver_sets:
+  persistent-controllers:
+    description: >-
+      Persistent seat controller identities authorised to approve tickets for
+      autonomous pickup. Resolved at live-recheck time against the role=controller
+      entries in ce-ops:infra/identity-registry.yaml. This set must NOT be
+      resolved from in-repo data.
+    resolution_ref: "ce-ops:infra/identity-registry.yaml#role=controller"
+
+# ---------------------------------------------------------------------------
+# Class definitions.
+# Each entry is a complete, self-contained policy unit. The belt reads these
+# to decide whether it may autonomously pick up a ticket and what constraints
+# apply throughout the implementation lane.
+# ---------------------------------------------------------------------------
+classes:
+  # -------------------------------------------------------------------------
+  # docs-only: documentation-only implementation ticket.
+  # Eligible mutation class: docs only.
+  # Territory: docs/**, *.md, .ce/changelog/**, .ce/pr-manifests/**.
+  # Size: XS or S.
+  # -------------------------------------------------------------------------
+  - id: docs-only
+    description: >-
+      Documentation-only implementation ticket. The entire implementation diff
+      must touch only docs/**, root *.md files, .ce/changelog/**, or
+      .ce/pr-manifests/**. Governance surfaces within the docs tree are
+      explicitly denied by path_glob_denylist (evaluated before allowlist).
+      No executable, schema, deploy, governance, identity, security, attestation,
+      or redaction surface is permitted.
+    selectors:
+      required_labels:
+        - "approved-for-implementation"
+        - "class:docs-only"
+      issue_repo_scope: "creator-engine/ce-ops"
+    approver_allowlist_ref: "persistent-controllers"
+    allowed_work_classes:
+      - XS
+      - S
+    allowed_mutation_classes:
+      - docs
+    territory:
+      path_glob_allowlist:
+        - "docs/**"
+        - "*.md"
+        - ".ce/changelog/**"
+        - ".ce/pr-manifests/**"
+      # Governance sub-trees are denied even though docs/** is broad.
+      # Mirror the governance predicates from automerge_mutation_policy.yaml
+      # exactly so both surfaces stay in sync (denylist evaluated first).
+      path_glob_denylist:
+        - ".ce/contracts/**"
+        - "docs/contracts/**"
+        - "contracts/**"
+        - "playbooks/**"
+        - "governance/**"
+        - "GOVERNANCE.md"
+        - "CODEOWNERS"
+        - "docs/decisions/**"
+        - "docs/adr/**"
+        - "docs/governance/**"
+      collision_policy: refuse
+    role: implementer
+    lane_kind: implementation
+    auto_pickup: false
+    live_rechecks:
+      - approval_label_present
+      - applier_in_approver_set
+      - no_open_claim
+      - no_linked_open_pr
+      - base_branch_head_fetched
+    retry:
+      max_attempts: 3
+      on_exhaust: manual-exception
+
+  # -------------------------------------------------------------------------
+  # test-hygiene: validator/test infrastructure improvement ticket.
+  # Eligible mutation class: code (restricted to test paths only).
+  # Territory: validators/tests/**, validators/creator_engine_validator/checks/**.
+  # Size: XS or S.
+  # -------------------------------------------------------------------------
+  - id: test-hygiene
+    description: >-
+      Test hygiene improvement ticket. The entire implementation diff must touch
+      only test infrastructure paths under validators/tests/** or the checks
+      sub-package (validators/creator_engine_validator/checks/**). No forge/,
+      deploy/, governance, schema, or privileged surface is permitted.
+    selectors:
+      required_labels:
+        - "approved-for-implementation"
+        - "class:test-hygiene"
+      issue_repo_scope: "creator-engine/ce-ops"
+    approver_allowlist_ref: "persistent-controllers"
+    allowed_work_classes:
+      - XS
+      - S
+    allowed_mutation_classes:
+      - code
+    territory:
+      path_glob_allowlist:
+        - "validators/tests/**"
+        - "validators/creator_engine_validator/checks/**"
+      collision_policy: refuse
+    role: implementer
+    lane_kind: implementation
+    auto_pickup: false
+    live_rechecks:
+      - approval_label_present
+      - applier_in_approver_set
+      - no_open_claim
+      - no_linked_open_pr
+      - base_branch_head_fetched
+    retry:
+      max_attempts: 3
+      on_exhaust: manual-exception
+
+  # -------------------------------------------------------------------------
+  # carrier-mechanical: per-PR carrier + changelog pair only.
+  # Eligible mutation class: docs only.
+  # Territory: .ce/changelog/**, .ce/pr-manifests/** only.
+  # Size: XS only.
+  # -------------------------------------------------------------------------
+  - id: carrier-mechanical
+    description: >-
+      Mechanical carrier ticket: the implementation diff consists of exactly the
+      .ce/changelog/ fragment and the .ce/pr-manifests/ carrier for the same
+      branch slug. No other path is permitted. This is the narrowest class and
+      the first candidate for future auto_pickup arming.
+    selectors:
+      required_labels:
+        - "approved-for-implementation"
+        - "class:carrier-mechanical"
+      issue_repo_scope: "creator-engine/ce-ops"
+    approver_allowlist_ref: "persistent-controllers"
+    allowed_work_classes:
+      - XS
+    allowed_mutation_classes:
+      - docs
+    territory:
+      path_glob_allowlist:
+        - ".ce/changelog/**"
+        - ".ce/pr-manifests/**"
+      collision_policy: refuse
+    role: implementer
+    lane_kind: implementation
+    auto_pickup: false
+    live_rechecks:
+      - approval_label_present
+      - applier_in_approver_set
+      - no_open_claim
+      - no_linked_open_pr
+      - base_branch_head_fetched
+    retry:
+      max_attempts: 2
+      on_exhaust: manual-exception
