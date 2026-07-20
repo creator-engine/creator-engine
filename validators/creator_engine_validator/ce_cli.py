@@ -1194,7 +1194,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_optional_scope(bco)
     bco.add_argument("--id", dest="assertion_id", required=True, help="active brain-assertion-* id to supersede")
     bco.add_argument("--new-id", dest="new_assertion_id", default=None, help="optional corrected brain-assertion-* id")
-    bco.add_argument("--statement", default=None, help="corrected SSOT statement (derived from claim when omitted)")
+    bco.add_argument("--statement", default=None, help="corrected SSOT statement (preserves predecessor when omitted)")
     bco.add_argument(
         "--type",
         dest="assertion_type",

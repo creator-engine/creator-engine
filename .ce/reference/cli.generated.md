@@ -134,7 +134,7 @@ Options:
 | `--scope-json` | no |  | override corrected assertion scope as a JSON object |
 | `--id` | yes |  | active brain-assertion-* id to supersede |
 | `--new-id` | no |  | optional corrected brain-assertion-* id |
-| `--statement` | no |  | corrected SSOT statement (derived from claim when omitted) |
+| `--statement` | no |  | corrected SSOT statement (preserves predecessor when omitted) |
 | `--type` | no | `capability, convention, decision, gotcha` | corrected assertion type (default: previous assertion type) |
 | `--verification-method` | no | `manual-attested, probe, static` | corrected verification method (derived from evidence-ref when omitted) |
 | `--claim-json` | yes |  | corrected structured claim mapping as JSON |
