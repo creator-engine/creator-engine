@@ -16,3 +16,5 @@ issue: ce-ops#636
   SSOT doctrine.
 - CLI coverage proves the active successor retains a deliberately non-template
   predecessor statement and fails when the preservation guard is removed.
+- Regenerated the canonical internal CLI reference from the supported generator
+  so the changed `ce brain correct --statement` help remains byte-synchronized.
