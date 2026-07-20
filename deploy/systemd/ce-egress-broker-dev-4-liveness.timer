@@ -1,0 +1,11 @@
+[Unit]
+Description=Creator Engine egress broker liveness schedule (dev-4)
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=5m
+Persistent=true
+Unit=ce-egress-broker-dev-4-liveness.service
+
+[Install]
+WantedBy=timers.target
