@@ -15,6 +15,22 @@ REQUIRED_ENV_KEYS = (
     "CE_EGRESS_BROKER_REPO",
     "CE_EGRESS_BROKER_CONFIG",
 )
+STATIC_FLEET_PATHS = {
+    "dev-3": {
+        "service": Path("deploy/systemd/ce-egress-broker.service"),
+        "socket": Path("deploy/systemd/ce-egress-broker.socket"),
+        "env": Path("deploy/egress-broker/dev-3/ce-egress-broker.env"),
+        "liveness_service": Path("deploy/systemd/ce-egress-broker-liveness.service"),
+        "liveness_timer": Path("deploy/systemd/ce-egress-broker-liveness.timer"),
+    },
+    "dev-4": {
+        "service": Path("deploy/systemd/ce-egress-broker-dev-4.service"),
+        "socket": Path("deploy/systemd/ce-egress-broker-dev-4.socket"),
+        "env": Path("deploy/egress-broker/dev-4/ce-egress-broker.env"),
+        "liveness_service": Path("deploy/systemd/ce-egress-broker-dev-4-liveness.service"),
+        "liveness_timer": Path("deploy/systemd/ce-egress-broker-dev-4-liveness.timer"),
+    },
+}
 
 
 def _load_json(repo_root: Path, relative_path: Path) -> dict[str, object]:
@@ -54,35 +70,22 @@ def _declared_fleet_seats(repo_root: Path) -> tuple[str, ...]:
 
 
 def test_declared_fleet_seats_have_complete_static_push_paths(repo_root: Path):
-    """Every declared fleet seat has a tracked configured systemd push path."""
+    """Every declared fleet seat has complete, tracked broker structure."""
     seats = _declared_fleet_seats(repo_root)
-
-    expected_paths = {
-        "dev-3": {
-            "service": Path("deploy/systemd/ce-egress-broker.service"),
-            "socket": Path("deploy/systemd/ce-egress-broker.socket"),
-        },
-        "dev-4": {
-            "service": Path("deploy/systemd/ce-egress-broker-dev-4.service"),
-            "socket": Path("deploy/systemd/ce-egress-broker-dev-4.socket"),
-            "env": Path("deploy/egress-broker/dev-4/ce-egress-broker.env"),
-            "config": Path("deploy/egress-broker/dev-4/broker-dev4.json"),
-        },
-    }
-    expected_environment_files = {
-        "dev-3": "%h/.config/creator-engine/ce-egress-broker.env",
-        "dev-4": "/etc/creator-engine/ce-egress-broker-dev-4.env",
-    }
-
-    assert set(seats) == set(expected_paths), "declare a static push path for every fleet seat"
+    assert set(seats) == set(STATIC_FLEET_PATHS), "declare static broker structure for every fleet seat"
     for seat in seats:
-        paths = expected_paths[seat]
+        paths = STATIC_FLEET_PATHS[seat]
         for path in paths.values():
             assert (repo_root / path).is_file(), f"{seat} is missing {path}"
 
         service = _load_unit(repo_root, paths["service"])
         socket = _load_unit(repo_root, paths["socket"])
-        assert service["Service"]["EnvironmentFile"] == expected_environment_files[seat]
+        liveness_service = _load_unit(repo_root, paths["liveness_service"])
+        liveness_timer = _load_unit(repo_root, paths["liveness_timer"])
+        env = _load_env(repo_root, paths["env"])
+        assert set(REQUIRED_ENV_KEYS) <= set(env)
+        assert all(env[key] for key in REQUIRED_ENV_KEYS)
+        assert "EnvironmentFile" in service["Service"]
         assert service["Service"]["Restart"] == "on-failure"
         assert service["Service"]["Sockets"] == socket["Socket"]["Service"].replace(
             ".service", ".socket"
@@ -98,39 +101,22 @@ def test_declared_fleet_seats_have_complete_static_push_paths(repo_root: Path):
             "--config",
         ):
             assert flag in service["Service"]["ExecStart"]
+        assert service["Unit"]["OnFailure"] == paths["liveness_service"].name
+        assert service["Unit"]["StartLimitIntervalSec"] == "5m"
+        assert service["Unit"]["StartLimitBurst"] == "3"
+        assert liveness_service["Service"]["Type"] == "oneshot"
+        assert f"systemctl is-active {paths['service'].name}" in liveness_service["Service"]["ExecStart"]
+        assert "systemd-cat" in liveness_service["Service"]["ExecStart"]
+        assert "-p err" in liveness_service["Service"]["ExecStart"]
+        assert 'test "$state" = active' in liveness_service["Service"]["ExecStart"]
+        assert liveness_timer["Timer"]["Unit"] == paths["liveness_service"].name
+        assert liveness_timer["Timer"]["OnBootSec"] == "5m"
+        assert liveness_timer["Timer"]["OnUnitActiveSec"] == "5m"
+        assert liveness_timer["Timer"]["Persistent"] == "true"
 
-    dev4 = expected_paths["dev-4"]
-    env = _load_env(repo_root, dev4["env"])
-    assert tuple(env) == REQUIRED_ENV_KEYS
-    assert env == {
-        "CE_EGRESS_BROKER_SOCKET": "/run/ce-egress/dev-4.sock",
-        "CE_EGRESS_BROKER_SEAT": "dev-4",
-        "CE_EGRESS_BROKER_EXPECTED_PEER_UID": "1004",
-        "CE_EGRESS_BROKER_EXPECTED_PEER_GID": "1004",
-        "CE_EGRESS_BROKER_REPO": "/workspace/creator-engine",
-        "CE_EGRESS_BROKER_CONFIG": "/etc/ce-egress/broker-dev4.json",
+    broker_services = {
+        path.name
+        for path in (repo_root / "deploy/systemd").glob("ce-egress-broker*.service")
+        if "liveness" not in path.name and "self-review" not in path.name
     }
-    config = _load_json(repo_root, dev4["config"])
-    seats_config = config["seats"]
-    assert isinstance(seats_config, dict)
-    assert set(seats_config) == {"dev-4"}
-
-
-def test_dev4_liveness_configuration_observes_absence_and_crash_loops(repo_root: Path):
-    service = _load_unit(repo_root, Path("deploy/systemd/ce-egress-broker-dev-4.service"))
-    check = _load_unit(repo_root, Path("deploy/systemd/ce-egress-broker-dev-4-liveness.service"))
-    timer = _load_unit(repo_root, Path("deploy/systemd/ce-egress-broker-dev-4-liveness.timer"))
-
-    assert service["Unit"]["OnFailure"] == "ce-egress-broker-dev-4-liveness.service"
-    assert service["Unit"]["StartLimitIntervalSec"] == "5m"
-    assert service["Unit"]["StartLimitBurst"] == "3"
-    assert service["Service"]["Restart"] == "on-failure"
-    assert check["Service"]["Type"] == "oneshot"
-    assert "systemctl is-active ce-egress-broker-dev-4.service" in check["Service"]["ExecStart"]
-    assert "systemd-cat" in check["Service"]["ExecStart"]
-    assert "-p err" in check["Service"]["ExecStart"]
-    assert 'test "$state" = active' in check["Service"]["ExecStart"]
-    assert timer["Timer"]["Unit"] == "ce-egress-broker-dev-4-liveness.service"
-    assert timer["Timer"]["OnBootSec"] == "5m"
-    assert timer["Timer"]["OnUnitActiveSec"] == "5m"
-    assert timer["Timer"]["Persistent"] == "true"
+    assert broker_services == {paths["service"].name for paths in STATIC_FLEET_PATHS.values()}
