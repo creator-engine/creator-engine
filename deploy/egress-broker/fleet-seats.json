@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "seat_source": "tools/egress-broker/apps.example.json",
+  "seats": ["dev-3", "dev-4"]
+}
