@@ -5,7 +5,7 @@ Documentation=https://github.com/creator-engine/creator-engine/tree/main/tools/e
 [Socket]
 ListenStream=/run/ce-egress/dev-4.sock
 SocketMode=0660
-SocketGroup=ce-dev-4
+SocketGroup=ce-egress-4
 DirectoryMode=0755
 RemoveOnStop=no
 Service=ce-egress-broker-dev-4.service

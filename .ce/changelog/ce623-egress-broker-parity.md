@@ -10,8 +10,9 @@ work_class: story
 **Add versioned fleet egress-broker deployment parity.**
 
 The shipped deployment metadata covers the dev-3/dev-4 rollout set. Dev-4 is
-pinned to `/run/ce-egress/dev-4.sock`, the `ce-dev-4` socket group, and
-configured expected `SO_PEERCRED` UID/GID `1008`/`1008`. Dev-3 deliberately
+pinned to `/run/ce-egress/dev-4.sock`, the literal `ce-egress-4` purpose socket
+group (deployment must add the seat user to that group), and configured expected
+`SO_PEERCRED` UID/GID `1008`/`1008`. Dev-3 deliberately
 uses the host-local `<set-at-deployment>` UID/GID placeholder, so no private
 identity is duplicated in checked-in metadata.
 
