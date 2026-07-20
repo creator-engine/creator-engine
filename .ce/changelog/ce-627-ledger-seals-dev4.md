@@ -1,5 +1,5 @@
 ---
-slug: ce-627-ledger-seals
+slug: ce-627-ledger-seals-dev4
 date: 2026-07-20
 kind: changed
 scope: side-effect ledger runtime

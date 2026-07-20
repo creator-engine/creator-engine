@@ -8,11 +8,11 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=5
 
-AUTHORIZED_PATHS_SHA256=434d0793f74aa6998c5adeb119e10842745c2eece198cf584cdc99bbadff4abd
+AUTHORIZED_PATHS_SHA256=a442237996dee0969371b46f75463ecd36d58a4c87dc7dc42fff676dd90951f3
 
 ```text
-.ce/changelog/ce-627-ledger-seals.md
-.ce/pr-manifests/ce-627-ledger-seals.md
+.ce/changelog/ce-627-ledger-seals-dev4.md
+.ce/pr-manifests/ce-627-ledger-seals-dev4.md
 validators/creator_engine_validator/side_effect_ledger_runtime.py
 validators/tests/unit/test_side_effect_ledger_runtime.py
 validators/tests/unit/test_validation_sandbox_runner.py
