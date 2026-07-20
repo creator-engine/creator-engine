@@ -59,6 +59,21 @@ SUPPORTED_REGISTRY_VERSIONS: Final[frozenset[int]] = frozenset({1})
 #: explicitly armed via enabling_decision_ref.
 REGISTRY_V1_ACTIVATION_POSTURE: Final[str] = "advisory"
 
+#: Activation postures admitted by the supported registry versions.
+VALID_ACTIVATION_POSTURES: Final[frozenset[str]] = frozenset(
+    {REGISTRY_V1_ACTIVATION_POSTURE}
+)
+
+#: v1 retry disposition after the configured number of attempts is exhausted.
+VALID_RETRY_ON_EXHAUST_VALUES: Final[frozenset[str]] = frozenset(
+    {"manual-exception"}
+)
+
+#: Mutation classes reserved from v1 ticket classes by ADR-0018.
+PRIVILEGED_V1_MUTATION_CLASSES: Final[frozenset[str]] = frozenset(
+    {"governance", "identity", "security", "attestation", "redaction"}
+)
+
 #: Valid collision policy values for a territory entry.
 VALID_COLLISION_POLICIES: Final[frozenset[str]] = frozenset({"refuse", "queue"})
 
@@ -426,6 +441,12 @@ def _parse_retry(raw: Any, class_id: str) -> RetryPolicy:
         raw.get("max_attempts"), f"{ctx}.max_attempts", minimum=1
     )
     on_exhaust = _require_str(raw.get("on_exhaust"), f"{ctx}.on_exhaust")
+    if on_exhaust not in VALID_RETRY_ON_EXHAUST_VALUES:
+        raise TicketClassRegistryError(
+            f"{ctx}.on_exhaust must be one of "
+            f"{sorted(VALID_RETRY_ON_EXHAUST_VALUES)}; got {on_exhaust!r}",
+            field=f"{ctx}.on_exhaust",
+        )
 
     return RetryPolicy(max_attempts=max_attempts, on_exhaust=on_exhaust)
 
@@ -521,6 +542,16 @@ def _parse_class_entry(
                 f"{mc!r}; valid values: {list(MUTATION_CLASSES)}",
                 field=f"{ctx}.allowed_mutation_classes",
             )
+    privileged_classes = sorted(
+        set(mutation_class_list) & PRIVILEGED_V1_MUTATION_CLASSES
+    )
+    if privileged_classes:
+        raise TicketClassRegistryError(
+            f"{ctx}.allowed_mutation_classes contains privileged v1 mutation "
+            f"class(es) {privileged_classes}; v1 forbids "
+            f"{sorted(PRIVILEGED_V1_MUTATION_CLASSES)}",
+            field=f"{ctx}.allowed_mutation_classes",
+        )
     allowed_mutation_classes = frozenset(mutation_class_list)
 
     # territory
@@ -759,6 +790,12 @@ def load_ticket_class_registry(
     activation_posture = _require_str(
         payload.get("activation_posture"), "activation_posture"
     )
+    if activation_posture not in VALID_ACTIVATION_POSTURES:
+        raise TicketClassRegistryError(
+            "activation_posture must be one of "
+            f"{sorted(VALID_ACTIVATION_POSTURES)}; got {activation_posture!r}",
+            field="activation_posture",
+        )
 
     # approver_sets
     raw_sets = payload.get("approver_sets")

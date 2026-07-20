@@ -94,8 +94,7 @@ classes:
     allowed_mutation_classes: {mutation_classes}
     territory:
       path_glob_allowlist:
-        - "docs/**"
-        - "*.md"
+        - ".ce/changelog/**"
       collision_policy: refuse
     role: implementer
     lane_kind: implementation
@@ -233,6 +232,59 @@ def test_refuses_unknown_mutation_class(tmp_path):
     with pytest.raises(TicketClassRegistryError) as exc_info:
         load_ticket_class_registry(p)
     assert "nonexistent" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "privileged_class",
+    ["governance", "identity", "security", "attestation", "redaction"],
+)
+def test_refuses_privileged_v1_mutation_class(tmp_path, privileged_class):
+    """v1 classes must not admit a privileged mutation class."""
+    content = _minimal_valid_yaml(mutation_classes=f'["docs", "{privileged_class}"]')
+    p = _write_yaml(tmp_path, content)
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(p)
+    assert privileged_class in str(exc_info.value)
+
+
+def test_refuses_invalid_retry_on_exhaust(tmp_path):
+    """retry.on_exhaust must use the v1 manual-exception disposition."""
+    content = _minimal_valid_yaml().replace(
+        "on_exhaust: manual-exception", "on_exhaust: retry-forever"
+    )
+    p = _write_yaml(tmp_path, content)
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(p)
+    assert "on_exhaust" in str(exc_info.value)
+
+
+def test_refuses_invalid_activation_posture(tmp_path):
+    """activation_posture must use the v1 advisory posture."""
+    content = _minimal_valid_yaml().replace(
+        "activation_posture: advisory", "activation_posture: armed"
+    )
+    p = _write_yaml(tmp_path, content)
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(p)
+    assert "activation_posture" in str(exc_info.value)
+
+
+def test_refuses_malformed_yaml_and_invalid_activation_posture_type(tmp_path):
+    """Syntax and type-invalid registry documents are refused at load time."""
+    malformed = _write_yaml(tmp_path, "registry_version: [\n")
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(malformed)
+    assert exc_info.value.field == "yaml"
+
+    invalid_type = _write_yaml(
+        tmp_path,
+        _minimal_valid_yaml().replace(
+            "activation_posture: advisory", "activation_posture: [advisory]"
+        ),
+    )
+    with pytest.raises(TicketClassRegistryError) as exc_info:
+        load_ticket_class_registry(invalid_type)
+    assert exc_info.value.field == "activation_posture"
 
 
 def test_refuses_empty_approver_sets(tmp_path):
