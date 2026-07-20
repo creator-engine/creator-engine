@@ -27,31 +27,43 @@ Use this playbook before handing a branch to a controller for commit, push, or r
 > them — is tracked on the internal roadmap under the autonomous-release work
 > (W2 release-bump).
 
-1. Start from current main.
+1. Before every diff, re-derive and record the comparison base. Do this before
+   creating the branch and again before each commit-for-harvest or PR-ready
+   diff; a previously observed `origin/main` is not evidence for a later diff.
 
    ```sh
-   git fetch origin
+   git fetch --prune origin
+   BASE_SHA="$(git rev-parse origin/main)"
+   printf 'derived base: %s\n' "$BASE_SHA"
    git switch -c <branch-slug> origin/main
    ```
 
-2. Make the scoped change and keep the tree focused on the ticket.
+   The handoff report names this derived base SHA.
+
+2. Make the scoped change and keep the tree focused on the ticket. Stage only
+   the named, authorized paths: never use `git add -A`. Before committing,
+   record and verify the exact staged set with `git diff --cached --name-only`.
 
 3. Add the PR carriers for the same branch slug:
 
    - `.ce/changelog/<branch-slug>.md`
    - `.ce/pr-manifests/<branch-slug>.md`
 
-   The PR manifest must list the closed `origin/main..HEAD` path set, include itself, and include exactly one current PR-body work-class line:
+   `branch_slug()` is the canonical carrier-stem projection (in particular, it
+   converts `/` to `-` as part of normalization). Before commit and before PR,
+   report the exact branch slug and verify that each carrier filename is exactly
+   that slug. The PR manifest must list the closed `origin/main..HEAD` path set,
+   include itself, and include exactly one current PR-body work-class line:
 
    ```md
    - **Declared work class:** <XS|S|M|L>
    ```
 
    Use only `XS`, `S`, `M`, or `L`. These are CE ceremony tiers, not Agile work
-   item types. The declaration states the PR's minimum governance ceremony, not
-   whether the change is a Scrum story, product feature, or roadmap epic. The
-   work-sizing gate derives a minimum tier from the diff and rejects declarations
-   below that floor.
+   item types. Before PR, compute and report the diff's floor and the declared
+   class. Legacy inputs normalize as `tiny` → `XS`, `story` → `S`, `feature` →
+   `M`, and `epic` → `L`; a declared class above the computed floor clears the
+   floor, while one below it does not.
 
 4. Run the local preflight before push:
 
@@ -64,5 +76,8 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    For uncommitted worker handoff checks, add `--allow-dirty` only to inspect deterministic gates before the foreman commit. The authoritative carrier and diff gates validate committed `base..HEAD` state.
 
 5. Fix every failed per-check line until the final summary is `PASS: PR preflight`.
+   A result is ready for handoff only after a commit exists: report the committed
+   `HEAD` and a clean worktree. A clean worktree alone never substitutes for a
+   committed head.
 
 6. Hand off the branch evidence to the foreman/controller. Do not self-merge.

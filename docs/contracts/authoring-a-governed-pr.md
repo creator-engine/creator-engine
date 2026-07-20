@@ -3,6 +3,18 @@
 This contract defines the local author loop for a Creator Engine governed PR.
 The source of truth is the committed PR diff, not the working tree.
 
+## Reportable mechanical preconditions
+
+Before every diff used for commit-for-harvest or PR readiness, run `git fetch
+--prune origin`, re-derive the base with `git rev-parse origin/main`, and report
+that exact base SHA. Do not reuse a previously observed base for a later diff.
+
+Stage only explicit, authorized paths; `git add -A` is prohibited. Before each
+commit, report the exact staged set from `git diff --cached --name-only` and
+verify it is the intended closed set. A handoff is ready only when the change is
+committed: report the committed `HEAD` and a clean worktree. Cleanliness alone
+never substitutes for a committed head.
+
 ## Required declaration
 
 Every PR body must contain exactly one declared work class line:
@@ -11,9 +23,11 @@ Every PR body must contain exactly one declared work class line:
 - **Declared work class:** <XS|S|M|L>
 ```
 
-Use the smallest honest class that satisfies the work-sizing floor. If the
-local preflight reports a higher minimum class, update the PR body or split the
-work.
+Before PR readiness, compute and report the work-sizing floor from the committed
+diff and report the declared class alongside it. Legacy inputs normalize as
+`tiny` → `XS`, `story` → `S`, `feature` → `M`, and `epic` → `L`. A declared
+class at or above the computed floor clears this check; a lower declaration must
+be raised or the work split.
 
 ## Local preflight
 
@@ -29,7 +43,8 @@ exist, pass `--allow-dirty`; the diff gates still use `git diff <base>..HEAD`,
 never working-tree content.
 
 The preflight resolves the comparison base by fetching the base branch and
-using `git merge-base <base> HEAD`, then runs the same gate families as
+using `git merge-base <base> HEAD`; record its derived base SHA. It then runs
+the same gate families as
 `.github/workflows/validate.yml`:
 
 1. Pytest suite: `python -m pytest -p no:cacheprovider validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup`.
@@ -80,8 +95,10 @@ its branch slug:
 ```
 
 The branch slug is produced by
-`creator_engine_validator.checks.path_manifest_fidelity.branch_slug(head_ref)`.
-For implementation PRs like this lane, the declared work class is normally
+`creator_engine_validator.checks.path_manifest_fidelity.branch_slug(head_ref)`;
+it converts `/` to `-` as part of canonical normalization. Before commit and
+before PR readiness, report the exact branch slug and verify both carrier
+filenames exactly match it. For implementation PRs like this lane, the declared work class is normally
 `M` unless the committed diff proves a smaller or larger class.
 
 ## Manifest-fidelity recipe
