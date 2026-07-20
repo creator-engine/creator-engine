@@ -1,0 +1,14 @@
+---
+slug: arc-full-output-t2-mechanics-preconditions
+date: 2026-07-20
+kind: changed
+scope: governed author mechanics
+issue: DF4-N
+work_class: XS
+---
+
+**Document reportable governed-author mechanics preconditions.**
+
+- Require reportable carrier-slug matching, base re-derivation, explicit staging,
+  committed readiness, and work-class-floor evidence.
+- Keep the change limited to canonical author guidance and its PR carriers.
