@@ -1,0 +1,24 @@
+{
+  "_comment": "Versioned dev-4 broker configuration template. Deploy this as /etc/ce-egress/broker-dev4.json; the PEM path is a host-local reference only and no key material is committed.",
+  "repo": "creator-engine/creator-engine",
+  "installation_owner": "creator-engine",
+  "audit_log": "/var/log/creator-engine/egress-dev-4-audit.jsonl",
+  "policy": {
+    "base_branch": "main",
+    "allowed_branch_namespaces": ["ce", "ce-ops-", "v3-", "v35-", "feat/", "fix/", "bugfix-", "chore/", "docs/"],
+    "forbidden_branches": ["main", "master", "develop", "gh-pages", "release"],
+    "authorized_emails": [],
+    "authorized_logins": ["cedev4vps-coder"],
+    "max_pushes_per_window": 30,
+    "window_seconds": 3600,
+    "require_signed_commits": true
+  },
+  "seats": {
+    "dev-4": {
+      "app_id": "4085526",
+      "app_owner": "cedev4vps-coder",
+      "pem_path": "/dev/shm/ce-dev4/ce-forge-dev4.pem",
+      "installation_id": null
+    }
+  }
+}
