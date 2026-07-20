@@ -1,6 +1,7 @@
 $schema: "https://json-schema.org/draft/2020-12/schema"
 $id: "https://creator-engine.local/schemas/work-unit-cap.schema.yaml"
 title: Creator Engine CE603 Work-Unit Receipt
+description: Advisory CE603 receipt contract; this slice does not wire production dispatch enforcement.
 type: object
 additionalProperties: false
 required:

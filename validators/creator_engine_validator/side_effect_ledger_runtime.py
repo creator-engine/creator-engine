@@ -236,6 +236,11 @@ def record(
     head_path = _head_path(side_effect_ledger_root, controller_id, lane_id)
     head = _read_head(head_path)
     if head is None:
+        lane_root = _lane_root(side_effect_ledger_root, controller_id, lane_id)
+        if any(lane_root.rglob("*.json")):
+            raise LedgerRecordError(
+                f"headless populated lane at {lane_root}; refusing ambiguous append"
+            )
         sequence = 1
         previous_sha = GENESIS_SHA
     else:

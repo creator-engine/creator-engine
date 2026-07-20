@@ -1,4 +1,9 @@
-"""Pure CE603 raw-token work-unit-cap policy and receipt projection."""
+"""Pure CE603 advisory raw-token work-unit-cap primitives and receipt projection.
+
+This slice exposes policy, receipt, and optional composition-seam helpers only.
+No production admission, conveyor, or provider caller invokes these primitives, so
+they do not independently enforce production dispatch.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -200,8 +205,9 @@ def validate_receipts(receipts: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
 
 def project(receipts: Iterable[Mapping[str, Any]], *, cap: int, run_id: str) -> WorkUnitProjection:
     """Fold a verified receipt stream; invalid or unknown evidence is unsafe."""
-    stream = [dict(receipt) for receipt in receipts if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id]
-    errors = validate_receipts(stream)
+    supplied_stream = tuple(receipts)
+    errors = validate_receipts(supplied_stream)
+    stream = [dict(receipt) for receipt in supplied_stream if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id]
     if not _is_count(cap):
         raise ValueError("cap must be a non-negative integer")
     committed = 0
@@ -244,7 +250,7 @@ def reserve(
     policy_sha256: str,
     recorded_at: str,
 ) -> WorkUnitDecision:
-    """Reserve raw-token units exactly once for a run, before dispatch."""
+    """Prepare a raw-token reservation exactly once for a run (advisory seam)."""
     if not _is_count(requested):
         raise ValueError("requested must be a non-negative integer")
     stream = tuple(receipts)
@@ -343,7 +349,7 @@ def rollback(receipts: Iterable[Mapping[str, Any]], *, cap: int, run_id: str, at
 
 
 def dispatch_receipt_allowed(receipt: Mapping[str, Any] | None, *, policy_sha256: str | None = None) -> bool:
-    """True only for a current, measured CE603 pre-dispatch reservation."""
+    """Pure predicate for a current, measured receipt; production callers are unwired."""
     if not isinstance(receipt, Mapping) or validate_receipts((receipt,)):
         return False
     if receipt.get("phase") not in {"pre_dispatch", "retry_reentry"} or receipt.get("source_state") != "measured":

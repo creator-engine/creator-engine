@@ -34,7 +34,8 @@ ENV = [
 ]
 
 
-def test_work_unit_cap_precedes_usd_spend_without_changing_usd_behavior():
+def test_injected_work_unit_denial_precedes_usd_spend_without_changing_usd_behavior():
+    """This covers only the optional composition seam; production wiring is absent."""
     event = AgentActionEvent(op="read", fidelity="faithful", timing="pre")
     denied = sg.decide_with_spend(
         event,

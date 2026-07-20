@@ -42,6 +42,15 @@ def test_two_competing_reservations_use_the_projection_not_a_second_envelope():
     assert not second.allowed
 
 
+def test_reservation_refuses_non_mapping_receipt_before_run_projection():
+    first = reserve(requested=10)
+    denied = reserve((first.receipt, "malformed receipt"), reservation_id="reservation-2")
+
+    assert not denied.allowed
+    assert denied.reason == "work_unit_receipts_invalid"
+    assert denied.persist is False
+
+
 def test_retry_reuses_a_live_reservation_without_reserving_again():
     first = reserve(requested=60)
     retry = cap.reserve(

@@ -185,6 +185,21 @@ def test_collision_with_existing_record_is_refused(tmp_path: Path):
     assert head["sequence"] == 1
 
 
+def test_populated_headless_lane_is_refused_without_writing_a_new_head(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first = _append(tmp_path, effect_id="effect-a")
+    record_bytes = first.record_path.read_bytes()
+    first.head_path.unlink()
+
+    with pytest.raises(runtime.LedgerRecordError, match="headless populated lane"):
+        _append(tmp_path, effect_id="effect-b")
+
+    assert first.record_path.read_bytes() == record_bytes
+    assert not first.head_path.exists()
+    assert sorted(path.name for path in first.record_path.parent.glob("*.json")) == [first.record_path.name]
+
+
 def test_secret_in_details_is_refused_and_writes_nothing(tmp_path: Path):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
