@@ -207,8 +207,9 @@ def validate_receipts(receipts: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
 
 def project(receipts: Iterable[Mapping[str, Any]], *, cap: int, run_id: str) -> WorkUnitProjection:
     """Fold a verified receipt stream; invalid or unknown evidence is unsafe."""
-    stream = [dict(receipt) for receipt in receipts if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id]
-    errors = validate_receipts(stream)
+    receipt_stream = tuple(receipts)
+    errors = validate_receipts(receipt_stream)
+    stream = [dict(receipt) for receipt in receipt_stream if isinstance(receipt, Mapping) and receipt.get("run_id") == run_id]
     if not is_count(cap):
         raise ValueError("cap must be a non-negative integer")
     committed = 0

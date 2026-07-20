@@ -213,6 +213,27 @@ def test_head_without_records_refuses_successor_without_ledger_mutation(tmp_path
     assert after == {runtime.HEAD_FILENAME: before[runtime.HEAD_FILENAME]}
 
 
+def test_populated_headless_lane_refuses_without_writing_record_or_head(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first = _append(tmp_path, effect_id="effect-a")
+    first.head_path.unlink()
+    lane_root = tmp_path / "side-effect-ledger" / CONTROLLER / LANE
+    before = {
+        path.relative_to(lane_root).as_posix(): path.read_bytes()
+        for path in lane_root.rglob("*.json")
+    }
+
+    with pytest.raises(runtime.LedgerRecordError):
+        _append(tmp_path, effect_id="effect-b")
+
+    after = {
+        path.relative_to(lane_root).as_posix(): path.read_bytes()
+        for path in lane_root.rglob("*.json")
+    }
+    assert after == before
+
+
 @pytest.mark.parametrize("head_bytes", (b"not json\n", b"[\"not an object\"]\n"))
 def test_unreadable_or_malformed_head_refuses_before_reservation_mutation(
     tmp_path: Path, head_bytes: bytes

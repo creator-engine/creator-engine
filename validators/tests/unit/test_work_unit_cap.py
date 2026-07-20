@@ -1,6 +1,7 @@
 """Focused CE603 work-unit-cap policy tests (pure and deterministic)."""
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -343,7 +344,14 @@ def test_reconcile_rejects_decreasing_observed_but_accepts_exact_replay():
     assert decreasing.reason == "work_unit_observed_decreased"
 
 
-def test_same_interpreter_can_forge_advisory_binding_without_act_authority():
+def test_advisory_binding_contract_is_explicitly_unwired_from_production_dispatch():
+    contract = inspect.getdoc(cap.VerifiedCurrentWorkUnitBinding) or ""
+    assert "advisory" in contract
+    assert "unwired" in contract
+    assert "does not enforce production dispatch" in contract
+
+
+def test_same_interpreter_can_forge_advisory_binding_without_dispatch_authority():
     context = ("run-1", "attempt-1", "reservation-1")
     issued = cap.issue_advisory_binding(context)
     forged = object.__new__(cap.VerifiedCurrentWorkUnitBinding)

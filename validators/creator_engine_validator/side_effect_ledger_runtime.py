@@ -242,6 +242,13 @@ def _record_unlocked(
     # 3. Read the current chain head for this (controller_id, lane_id).
     head_path = _head_path(side_effect_ledger_root, controller_id, lane_id)
     head = _read_head(head_path)
+    lane_root = _lane_root(side_effect_ledger_root, controller_id, lane_id)
+    if head is None and lane_root.exists() and any(
+        path.name != ".lane-record.lock" for path in lane_root.iterdir()
+    ):
+        raise LedgerRecordError(
+            f"Side-Effect Ledger lane at {lane_root} is populated without a head manifest"
+        )
     if head is None:
         sequence = 1
         previous_sha = GENESIS_SHA

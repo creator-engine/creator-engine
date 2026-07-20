@@ -39,12 +39,13 @@ class WorkUnitDecision:
 
 
 class VerifiedCurrentWorkUnitBinding:
-    """Advisory in-process binding, not a security capability or act authority.
+    """An advisory, unwired in-process binding, not a security capability or act authority.
 
     The DEV2 2026-07-19 ruling records that same-interpreter code may forge
     this object through ``object.__getattribute__`` and
     ``object.__setattr__``.  It only guards against accidental copying and
-    misuse; durable act predicates must verify their own evidence.
+    misuse; durable act predicates must verify their own evidence. This seam
+    does not enforce production dispatch.
     """
 
     __slots__ = ("__ce603_issuance",)
