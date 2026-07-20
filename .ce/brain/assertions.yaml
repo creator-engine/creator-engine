@@ -5291,20 +5291,20 @@ records:
 - claim:
     object: per-pr-carrier-discipline
     predicate: verified-by-sha256
-    sha256: e551c16181f63220104371f6614dd46d733806fe6a12089bee47c3d4a862ae33
+    sha256: d3ccfd3131b07f97f25c7b8ab6b1c86a214937584277d4209142a9d56662cf21
     subject: convention
-  content_hash: ef71d0dfa770284d9fdacfca9c04aa7d642cb9654e31ebc0199b6749dcd5855d
+  content_hash: 2098d506ee3f9e6fbb9ca9f1a06ef9478bd04ecff3664e08c94399f489d134de
   evidence_ref: docs/contracts/authoring-a-governed-pr.md
-  id: brain-assertion-c520c64c31216b3abf3152a7
+  id: brain-assertion-fleet-carrier-discipline
   kind: brain-assertion
-  prev_hash: a3976179e2291a1930aa8e4122c71a11b23f1fa4c604d339b734b5b427d5b36f
+  prev_hash: e980ecf39084e56845070cc2537da15dcdbf715770e370ca872d69eb194b1927
   record_type: brain_assertion
   schema_version: '1'
   scope: global
-  sequence: 200
+  sequence: 202
   statement: convention verified-by-sha256 per-pr-carrier-discipline
   status: superseded
-  superseded_by: brain-assertion-eaf814f1e1983441d47cdb3e
+  superseded_by: brain-assertion-7e4a2f24c5ad0b27aa589265
   type: convention
   verification_method:
     evidence_ref: docs/contracts/authoring-a-governed-pr.md
@@ -5314,15 +5314,15 @@ records:
     predicate: verified-by-sha256
     sha256: f64b953ab27dcfc66406d646075ae22d1458dcb8691f857b85dc95fd6ed12bb9
     subject: convention
-  content_hash: 3281220ed44ae598043efc79e945bb54f060cd67588a5a25225a6ff2638434d0
+  content_hash: f7c463fd905d3fb90c0c12cacca22b26e9dd3b2a0b195a62b4b3b23c9dacb3fb
   evidence_ref: docs/contracts/authoring-a-governed-pr.md
-  id: brain-assertion-eaf814f1e1983441d47cdb3e
+  id: brain-assertion-7e4a2f24c5ad0b27aa589265
   kind: brain-assertion
-  prev_hash: ef71d0dfa770284d9fdacfca9c04aa7d642cb9654e31ebc0199b6749dcd5855d
+  prev_hash: 2098d506ee3f9e6fbb9ca9f1a06ef9478bd04ecff3664e08c94399f489d134de
   record_type: brain_assertion
   schema_version: '1'
   scope: global
-  sequence: 201
+  sequence: 203
   statement: convention verified-by-sha256 per-pr-carrier-discipline
   status: active
   superseded_by: null
