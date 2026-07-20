@@ -56,3 +56,10 @@ validators/build/
 
 # ce-369: generated from private ce-ops identity registry where available.
 /validators/creator_engine_validator/data/identity_denylist.generated.yaml
+
+# Repo-root scratch and operator drop zone. Local-only working material that
+# must never enter the canonical tree; without this rule `git add -A` would
+# stage whatever is left there. Anchored to the repo root so nested, legitimate
+# `tmp/` directories elsewhere in the tree are unaffected.
+# Additive instance-zone line only.
+/tmp/
