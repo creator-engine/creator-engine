@@ -3,6 +3,18 @@
 This contract defines the local author loop for a Creator Engine governed PR.
 The source of truth is the committed PR diff, not the working tree.
 
+## Reportable mechanical preconditions
+
+Before every diff used for commit-for-harvest or PR readiness, run `git fetch
+--prune origin`, re-derive the base with `git rev-parse origin/main`, and report
+that exact base SHA. Do not reuse a previously observed base for a later diff.
+
+Stage only explicit, authorized paths; `git add -A` is prohibited. Before each
+commit, report the exact staged set from `git diff --cached --name-only` and
+verify it is the intended closed set. A handoff is ready only when the change is
+committed: report the committed `HEAD` and a clean worktree. Cleanliness alone
+never substitutes for a committed head.
+
 ## Required declaration
 
 Every PR body must contain exactly one declared work class line:
@@ -11,9 +23,11 @@ Every PR body must contain exactly one declared work class line:
 - **Declared work class:** <XS|S|M|L>
 ```
 
-Use the smallest honest class that satisfies the work-sizing floor. If the
-local preflight reports a higher minimum class, update the PR body or split the
-work.
+Before PR readiness, compute and report the work-sizing floor from the committed
+diff and report the declared class alongside it. Legacy inputs normalize as
+`tiny` → `XS`, `story` → `S`, `feature` → `M`, and `epic` → `L`. A declared
+class at or above the computed floor clears this check; a lower declaration must
+be raised or the work split.
 
 ## Local preflight
 
@@ -29,7 +43,8 @@ exist, pass `--allow-dirty`; the diff gates still use `git diff <base>..HEAD`,
 never working-tree content.
 
 The preflight resolves the comparison base by fetching the base branch and
-using `git merge-base <base> HEAD`, then runs the same gate families as
+using `git merge-base <base> HEAD`; record its derived base SHA. It then runs
+the same gate families as
 `.github/workflows/validate.yml`:
 
 1. Pytest suite: `python -m pytest -p no:cacheprovider validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup`.
@@ -80,9 +95,25 @@ its branch slug:
 ```
 
 The branch slug is produced by
-`creator_engine_validator.checks.path_manifest_fidelity.branch_slug(head_ref)`.
-For implementation PRs like this lane, the declared work class is normally
+`creator_engine_validator.checks.path_manifest_fidelity.branch_slug(head_ref)`;
+invoke that function with the actual `head_ref` (or use `write_carriers`) every
+time and never hand-predict the result. This primary rule subsumes slash
+collapse, long-slug truncate/hash disambiguation, short-slug hash padding, and
+future normalization changes. Before commit and before PR readiness, report the
+head ref, its derived slug, and both matching carrier filenames. For
+implementation PRs like this lane, the declared work class is normally
 `M` unless the committed diff proves a smaller or larger class.
+
+## Pinned-document assertion discipline
+
+If an edited document is the `evidence_ref` of an active brain assertion, the
+same carrier must include an append-only correction. Identify the pinned
+document and its active predecessor, invoke `ce brain correct` with the
+predecessor `--statement` supplied verbatim, and report the predecessor and
+successor ids, preserved statement, and asserted SHA-256 of the shipped
+document. Never mutate an existing assertion's `claim.sha256` in place; the
+canonical correction appends a supersession marker and active successor while
+preserving the hash chain.
 
 ## Manifest-fidelity recipe
 
