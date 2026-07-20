@@ -138,6 +138,139 @@ def test_second_record_chains_to_previous_record_sha(tmp_path: Path):
     assert head["head_sha256"] == second.record_sha256
 
 
+def test_first_sealed_record_has_explicit_genesis_seal(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    result = _append(tmp_path)
+
+    assert result.record["details"]["prev_seal_sha256"] == runtime.GENESIS_SHA
+
+
+def test_verify_passes_for_a_valid_explicit_seal_chain(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first = _append(tmp_path, effect_id="effect-sealed-a")
+    second = _append(tmp_path, effect_id="effect-sealed-b")
+
+    result = runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger")
+
+    assert result.ok, result.errors
+    assert second.record["details"]["prev_seal_sha256"] == first.record_sha256
+
+
+def test_verify_refuses_altered_middle_explicit_seal(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    _append(tmp_path, effect_id="effect-sealed-a")
+    middle = _append(tmp_path, effect_id="effect-sealed-b")
+    _append(tmp_path, effect_id="effect-sealed-c")
+    record = json.loads(middle.record_path.read_text(encoding="utf-8"))
+    record["details"]["prev_seal_sha256"] = runtime.GENESIS_SHA
+    middle.record_path.write_text(runtime._canonical_bytes(record), encoding="utf-8")
+
+    result = runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger")
+
+    assert not result.ok
+    assert any("seal-chain link broken" in error for error in result.errors)
+
+
+def test_verify_refuses_deleted_explicit_seal_record(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    _append(tmp_path, effect_id="effect-sealed-a")
+    middle = _append(tmp_path, effect_id="effect-sealed-b")
+    _append(tmp_path, effect_id="effect-sealed-c")
+    middle.record_path.unlink()
+
+    result = runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger")
+
+    assert not result.ok
+    assert any("seal-chain link broken" in error for error in result.errors)
+
+
+def test_verify_refuses_reordered_explicit_seal_records(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    first = _append(tmp_path, effect_id="effect-sealed-a")
+    second = _append(tmp_path, effect_id="effect-sealed-b")
+    first_record = json.loads(first.record_path.read_text(encoding="utf-8"))
+    second_record = json.loads(second.record_path.read_text(encoding="utf-8"))
+    first_record["sequence"], second_record["sequence"] = second_record["sequence"], first_record["sequence"]
+    first.record_path.write_text(runtime._canonical_bytes(first_record), encoding="utf-8")
+    second.record_path.write_text(runtime._canonical_bytes(second_record), encoding="utf-8")
+
+    result = runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger")
+
+    assert not result.ok
+    assert any("seal-chain link broken" in error for error in result.errors)
+
+
+def test_legacy_prev_seal_detail_is_ignored_and_first_new_seal_is_genesis(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    legacy = _append(tmp_path, effect_id="effect-legacy")
+    legacy_record = json.loads(legacy.record_path.read_text(encoding="utf-8"))
+    legacy_record["details"]["prev_seal_sha256"] = "legacy-note"
+    del legacy_record["details"][runtime.SEAL_SCHEME]
+    legacy.record_path.write_text(runtime._canonical_bytes(legacy_record), encoding="utf-8")
+    head = json.loads(legacy.head_path.read_text(encoding="utf-8"))
+    head["head_sha256"] = hashlib.sha256(legacy.record_path.read_bytes()).hexdigest()
+    legacy.head_path.write_text(json.dumps(head, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    assert runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger").ok
+    sealed = _append(tmp_path, effect_id="effect-first-sealed")
+
+    assert sealed.record["details"][runtime.PREV_SEAL_SHA256] == runtime.GENESIS_SHA
+    assert sealed.record["details"][runtime.SEAL_SCHEME] == runtime.SEAL_SCHEME_VALUE
+
+
+def test_verify_refuses_missing_prev_seal_after_sealed_record(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    _append(tmp_path, effect_id="effect-sealed-a")
+    sealed = _append(tmp_path, effect_id="effect-sealed-b")
+    record = json.loads(sealed.record_path.read_text(encoding="utf-8"))
+    assert record["details"][runtime.SEAL_SCHEME] == runtime.SEAL_SCHEME_VALUE
+    del record["details"][runtime.PREV_SEAL_SHA256]
+    sealed.record_path.write_text(runtime._canonical_bytes(record), encoding="utf-8")
+
+    result = runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger")
+
+    assert not result.ok
+    assert any("seal-chain link broken" in error for error in result.errors)
+
+
+def test_verify_refuses_missing_seal_marker_after_sealed_predecessor(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+    _append(tmp_path, effect_id="effect-sealed-a")
+    sealed = _append(tmp_path, effect_id="effect-sealed-b")
+    record = json.loads(sealed.record_path.read_text(encoding="utf-8"))
+    del record["details"][runtime.SEAL_SCHEME]
+    sealed.record_path.write_text(runtime._canonical_bytes(record), encoding="utf-8")
+
+    result = runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger")
+
+    assert not result.ok
+    assert any("seal-chain gap" in error for error in result.errors)
+
+
+def test_writer_overwrites_attacker_controlled_prev_seal_detail(tmp_path: Path):
+    awl = tmp_path / ".hermes" / "active-work-ledger"
+    _claim(awl)
+
+    result = _append(
+        tmp_path,
+        details={
+            runtime.PREV_SEAL_SHA256: "attacker-controlled",
+            runtime.SEAL_SCHEME: "attacker-controlled",
+        },
+    )
+
+    assert result.record["details"][runtime.PREV_SEAL_SHA256] == runtime.GENESIS_SHA
+    assert result.record["details"][runtime.SEAL_SCHEME] == runtime.SEAL_SCHEME_VALUE
+
+
 def test_work_unit_reservation_uses_the_single_record_writer(tmp_path: Path):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
@@ -337,7 +470,9 @@ def test_record_is_valid_under_existing_side_effect_ledger_substrate(tmp_path: P
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
     result = _append(tmp_path)
-    assert validate_side_effect_ledger_record(result.record, result.record_path) == []
+    errors = validate_side_effect_ledger_record(result.record, result.record_path)
+    assert [error.code for error in errors] == ["PCO-059"]
+    assert errors[0].path.endswith("details.prev_seal_sha256")
 
 
 # ---------------------------------------------------------------------------
@@ -417,8 +552,22 @@ def test_claim_controller_lane_mismatch_is_refused(tmp_path: Path):
 def test_verify_passes_for_a_valid_chain(tmp_path: Path):
     awl = tmp_path / ".hermes" / "active-work-ledger"
     _claim(awl)
-    _append(tmp_path, effect_id="effect-a", effect_kind="tracked_file_change")
+    first = _append(tmp_path, effect_id="effect-a", effect_kind="tracked_file_change")
     last = _append(tmp_path, effect_id="effect-b", effect_kind="git_mutation")
+    # Model an existing valid unsealed lane.  Its original byte-chain and head
+    # remain valid, but its records predate explicit seals.
+    first_record = json.loads(first.record_path.read_text(encoding="utf-8"))
+    last_record = json.loads(last.record_path.read_text(encoding="utf-8"))
+    del first_record["details"]["prev_seal_sha256"]
+    del last_record["details"]["prev_seal_sha256"]
+    del first_record["details"][runtime.SEAL_SCHEME]
+    del last_record["details"][runtime.SEAL_SCHEME]
+    first.record_path.write_text(runtime._canonical_bytes(first_record), encoding="utf-8")
+    last_record["previous_record_sha256"] = hashlib.sha256(first.record_path.read_bytes()).hexdigest()
+    last.record_path.write_text(runtime._canonical_bytes(last_record), encoding="utf-8")
+    head = json.loads(last.head_path.read_text(encoding="utf-8"))
+    head["head_sha256"] = hashlib.sha256(last.record_path.read_bytes()).hexdigest()
+    last.head_path.write_text(json.dumps(head, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     result = runtime.verify(
         side_effect_ledger_root=str(tmp_path / "side-effect-ledger"),
         active_work_ledger_root=str(awl),
@@ -428,8 +577,12 @@ def test_verify_passes_for_a_valid_chain(tmp_path: Path):
     assert result.summary["effect_kind_counts"]["tracked_file_change"] == 1
     assert result.summary["effect_kind_counts"]["git_mutation"] == 1
     chain = result.summary["chains"][0]
-    assert chain["head_sha256"] == last.record_sha256
+    assert chain["head_sha256"] == head["head_sha256"]
     assert chain["last_record_ref"].endswith("000002-effect-b.json")
+
+    sealed = _append(tmp_path, effect_id="effect-c")
+    assert sealed.record["details"]["prev_seal_sha256"] == runtime.GENESIS_SHA
+    assert runtime.verify(side_effect_ledger_root=tmp_path / "side-effect-ledger").ok
 
 
 def test_verify_detects_a_tampered_earlier_record(tmp_path: Path):
