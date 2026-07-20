@@ -164,6 +164,7 @@ KNOWN_OPERATIONS_EXCEPTIONS: frozenset[str] = frozenset(
         "docs/operations/PATH_MANIFEST_FIDELITY_PROTOCOL.md",
         "docs/operations/PCL_PROTOCOL.md",
         "docs/operations/PCO_FANIN_PROTOCOL.md",
+        "docs/operations/PROOF_TAG_DISCIPLINE.md",
         "docs/operations/REVIEWER_TRIAGE.md",
         "docs/operations/REVIEWER_VENUE_AUTHORITY.md",
         "docs/operations/REVIEW_GATE_REVIEWER_VENUE_DESIGN.md",
