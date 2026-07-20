@@ -49,11 +49,14 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    - `.ce/changelog/<branch-slug>.md`
    - `.ce/pr-manifests/<branch-slug>.md`
 
-   `branch_slug()` is the canonical carrier-stem projection (in particular, it
-   converts `/` to `-` as part of normalization). Before commit and before PR,
-   report the exact branch slug and verify that each carrier filename is exactly
-   that slug. The PR manifest must list the closed `origin/main..HEAD` path set,
-   include itself, and include exactly one current PR-body work-class line:
+   Derive the slug programmatically by invoking `branch_slug(head_ref)` (or the
+   existing `write_carriers` recipe); never hand-predict a carrier slug. That
+   canonical invocation owns slash collapse, long-slug truncation with hash
+   disambiguation, short-slug hash padding, and future normalization changes.
+   Before commit and before PR, report the supplied head ref, the derived slug,
+   and the matching carrier filenames. The PR manifest must list the closed
+   `origin/main..HEAD` path set, include itself, and include exactly one current
+   PR-body work-class line:
 
    ```md
    - **Declared work class:** <XS|S|M|L>
@@ -64,6 +67,12 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    class. Legacy inputs normalize as `tiny` → `XS`, `story` → `S`, `feature` →
    `M`, and `epic` → `L`; a declared class above the computed floor clears the
    floor, while one below it does not.
+
+   When an edited document is the evidence reference of an active brain
+   assertion, identify that pinned document in the carrier result and append its
+   same-carrier correction through `ce brain correct`. Pass the predecessor
+   `--statement` explicitly, report the predecessor and successor ids, preserved
+   statement, and asserted shipped hash, and never edit `claim.sha256` in place.
 
 4. Run the local preflight before push:
 

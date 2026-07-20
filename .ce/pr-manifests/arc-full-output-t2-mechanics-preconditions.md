@@ -10,6 +10,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** XS
 
+This carrier preserves its five-path set while adding programmatic slug and
+pinned-document assertion preconditions to the canonical author guidance.
+
 AUTHORIZED_PATHS_COUNT=5
 
 AUTHORIZED_PATHS_SHA256=b3d8ee085bb200cd88e5c4d98b5190f4cc9c14a276c6938eebbcbb425c89d376

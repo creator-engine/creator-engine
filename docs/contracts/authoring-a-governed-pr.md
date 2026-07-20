@@ -96,10 +96,24 @@ its branch slug:
 
 The branch slug is produced by
 `creator_engine_validator.checks.path_manifest_fidelity.branch_slug(head_ref)`;
-it converts `/` to `-` as part of canonical normalization. Before commit and
-before PR readiness, report the exact branch slug and verify both carrier
-filenames exactly match it. For implementation PRs like this lane, the declared work class is normally
+invoke that function with the actual `head_ref` (or use `write_carriers`) every
+time and never hand-predict the result. This primary rule subsumes slash
+collapse, long-slug truncate/hash disambiguation, short-slug hash padding, and
+future normalization changes. Before commit and before PR readiness, report the
+head ref, its derived slug, and both matching carrier filenames. For
+implementation PRs like this lane, the declared work class is normally
 `M` unless the committed diff proves a smaller or larger class.
+
+## Pinned-document assertion discipline
+
+If an edited document is the `evidence_ref` of an active brain assertion, the
+same carrier must include an append-only correction. Identify the pinned
+document and its active predecessor, invoke `ce brain correct` with the
+predecessor `--statement` supplied verbatim, and report the predecessor and
+successor ids, preserved statement, and asserted SHA-256 of the shipped
+document. Never mutate an existing assertion's `claim.sha256` in place; the
+canonical correction appends a supersession marker and active successor while
+preserving the hash chain.
 
 ## Manifest-fidelity recipe
 
