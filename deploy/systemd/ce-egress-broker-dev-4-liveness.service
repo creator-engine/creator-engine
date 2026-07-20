@@ -1,0 +1,7 @@
+[Unit]
+Description=Creator Engine egress broker liveness check (dev-4)
+After=ce-egress-broker-dev-4.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env sh -ec 'state=$(/usr/bin/systemctl is-active ce-egress-broker-dev-4.service || true); if test "$state" = active; then printf "ce-egress-broker-dev-4 state=%s\\n" "$state" | /usr/bin/systemd-cat -t ce-egress-broker-dev-4-liveness -p info; else printf "ce-egress-broker-dev-4 state=%s\\n" "$state" | /usr/bin/systemd-cat -t ce-egress-broker-dev-4-liveness -p err; exit 1; fi'
