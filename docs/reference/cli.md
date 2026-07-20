@@ -79,6 +79,7 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce claim` | Manage visible work-claim locks. |
 | `ce pickup` | Poll for autonomous forge work pickup in read-only mode. |
 | `ce dispatch` | Dispatch governed work to an execution venue. |
+| `ce dispatch-receipt` | Emit and verify machine-readable dispatch-activation receipts so watchers can assert seat activation rather than infer it from scrollback. |
 | `ce queue` | Preview or inspect Integration Queue state, or run the bounded integrator poll belt. |
 | `ce queue-poll` | Run a bounded, witnessable merge-queue repair poll. |
 | `ce queue-daemon` | Run the autonomous merge-queue daemon. |

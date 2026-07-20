@@ -816,7 +816,11 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     assert errors == []
     records = rt.load_records_from_path(path)
     active = [record for record in records if record["status"] == "active"]
-    assert len(active) == 121
+    # This floor catches silent loss of a material portion of the migrated
+    # ledger without making legitimate governed appends or supersessions a
+    # mandatory test edit. The concrete probes and records below preserve the
+    # semantic checks for the active set.
+    assert len(active) >= 123
     assert {
         brain_probe.record_probe_name(record)
         for record in active

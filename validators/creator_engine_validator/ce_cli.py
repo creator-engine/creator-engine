@@ -61,6 +61,8 @@ ce surfaces fleet-rollout # seat-by-seat fleet rollout of updated surface versio
 ce init              # scaffold a CE-governed project with local templates
 ce containment-status   # probe fleet seat containment from live pids and runtime evidence
 ce posture          # print a deterministic read-only Controller posture banner
+ce dispatch-receipt emit   # build + persist a dispatch-activation receipt (ce-ops#615)
+ce dispatch-receipt verify # verify a receipt for activation-gap classes (read-only)
 ce validate-pr          # run local PR preflight against committed base..HEAD state
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
 ce automerge-status     # read dry-run automerge decision logs (read-only; no merge)
@@ -122,6 +124,7 @@ from . import (
     controller_posture,
     dependency_unlock,
     dispatch_plan,
+    dispatch_receipt,
     doctor_runtime,
     fanin_runtime,
     forge_triage,
@@ -2121,6 +2124,64 @@ def _build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--state", choices=CLAIM_LIFECYCLE_STATES, default=None, help="filter by lifecycle state")
     cl.add_argument("--seat", default=None, help="filter by seat id")
     cl.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
+
+    # ce dispatch-receipt — ce-ops#615 slice 1: machine-readable dispatch-activation
+    # receipts.  Transport-agnostic; emit records a receipt at send time; verify
+    # checks for the three activation-gap classes (grant-without-wake /
+    # dispatch-without-transport / receipt-without-activation).
+    dr = groups.add_parser(
+        "dispatch-receipt",
+        help="dispatch-activation receipt: emit + verify (ce-ops#615)",
+    )
+    dr_sub = dr.add_subparsers(dest="dispatch_receipt_cmd")
+
+    dr_emit = dr_sub.add_parser(
+        "emit",
+        help="build and persist a dispatch receipt to .ce/state/dispatch-receipts/",
+    )
+    dr_emit.add_argument("--brief-path", required=True, dest="brief_path",
+                         help="path to the materialized brief sent to the seat")
+    dr_emit.add_argument("--brief-sha256", required=False, default=None,
+                         dest="brief_sha256",
+                         help="SHA256 of the brief (default: computed from --brief-path)")
+    dr_emit.add_argument("--transport-kind", required=True,
+                         choices=["tmux", "herdr"], dest="transport_kind",
+                         help="transport mechanism used to deliver the brief pointer")
+    dr_emit.add_argument("--transport-target", required=True, dest="transport_target",
+                         help="transport target slug (pane address or herdr worker pane id)")
+    dr_emit.add_argument("--activation-method", required=True,
+                         choices=["send-keys", "herdr-send-keys"],
+                         dest="activation_method",
+                         help="primitive used to deliver the Enter keystroke")
+    dr_emit.add_argument("--separate-enter", action="store_true", default=False,
+                         dest="separate_enter",
+                         help="Enter was delivered as a SEPARATE send-keys call (safe pattern)")
+    dr_emit.add_argument("--model-effort-line", required=True, dest="model_effort_line",
+                         help="seat status-line model/effort text at dispatch time")
+    dr_emit.add_argument("--dispatcher", required=True,
+                         help="controller/operator identity performing the dispatch")
+    dr_emit.add_argument("--work-unit", required=True, dest="work_unit",
+                         help="ticket / work unit (e.g. ce-ops#615)")
+    dr_emit.add_argument("--claim-path", default=None, dest="claim_path",
+                         help="optional: path to the active work claim file")
+    dr_emit.add_argument("--claim-sha256", default=None, dest="claim_sha256",
+                         help="optional: SHA256 of the claim file")
+    dr_emit.add_argument("--transport-verified-at", default=None,
+                         dest="transport_verified_at",
+                         help="optional: UTC stamp in-seat arrival was confirmed")
+    dr_emit.add_argument("--state-root", default=".ce/state", dest="state_root",
+                         help="CE state root (default: .ce/state)")
+    dr_emit.add_argument("--json", action="store_true", dest="json_output",
+                         help="emit machine-readable JSON result")
+
+    dr_verify = dr_sub.add_parser(
+        "verify",
+        help="verify a receipt file for activation-gap classes (read-only)",
+    )
+    dr_verify.add_argument("receipt_file", metavar="FILE",
+                           help="path to a dispatch receipt JSON file")
+    dr_verify.add_argument("--json", action="store_true", dest="json_output",
+                           help="emit machine-readable JSON result")
 
     # ce pickup poll — the ce-ops#55/#182 autonomous forge work-pickup "conveyor belt".
     # A per-seat READ-ONLY poller over the GitHub Search API; observe-only by
@@ -4383,6 +4444,135 @@ def _dispatch_plan(args) -> int:
     return 0
 
 
+def _dispatch_receipt_emit(args) -> int:
+    """Implement ``ce dispatch-receipt emit``."""
+    from pathlib import Path as _Path
+
+    # Compute brief sha256 from file if not supplied
+    brief_sha256 = getattr(args, "brief_sha256", None)
+    if not brief_sha256:
+        try:
+            brief_sha256 = dispatch_receipt.sha256_file(_Path(args.brief_path))
+        except OSError as exc:
+            print(f"ERROR: ce dispatch-receipt emit: cannot read brief: {exc}", file=sys.stderr)
+            return 1
+
+    try:
+        receipt = dispatch_receipt.build_receipt(
+            brief_path=args.brief_path,
+            brief_sha256=brief_sha256,
+            transport_kind=args.transport_kind,
+            transport_target=args.transport_target,
+            activation_method=args.activation_method,
+            separate_enter=args.separate_enter,
+            model_effort_line=args.model_effort_line,
+            dispatcher=args.dispatcher,
+            work_unit=args.work_unit,
+            claim_path=getattr(args, "claim_path", None),
+            claim_sha256=getattr(args, "claim_sha256", None),
+            transport_verified_at=getattr(args, "transport_verified_at", None),
+        )
+        dest = dispatch_receipt.write_receipt(
+            receipt,
+            state_root=args.state_root,
+        )
+    except dispatch_receipt.DispatchReceiptError as exc:
+        payload = {"ok": False, "error": str(exc), "code": exc.code}
+        if getattr(args, "json_output", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: ce dispatch-receipt emit [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+
+    failures = dispatch_receipt.verify_receipt(receipt)
+    gap_classes = sorted({f.gap_class for f in failures})
+
+    if getattr(args, "json_output", False):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "receipt_path": str(dest),
+                    "gap_classes": gap_classes,
+                    "failures": [
+                        {"gap_class": f.gap_class, "field": f.field, "message": f.message}
+                        for f in failures
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print(f"ce dispatch-receipt emit: written to {dest}")
+        if failures:
+            print(f"  activation gaps detected: {', '.join(gap_classes)}")
+            for failure in failures:
+                print(f"    [{failure.gap_class}] {failure.field}: {failure.message}")
+        else:
+            print("  no activation gaps")
+    return 0
+
+
+def _dispatch_receipt_verify(args) -> int:
+    """Implement ``ce dispatch-receipt verify``."""
+    try:
+        receipt = dispatch_receipt.read_receipt(args.receipt_file)
+    except FileNotFoundError:
+        payload = {"ok": False, "error": f"not found: {args.receipt_file}"}
+        if getattr(args, "json_output", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: ce dispatch-receipt verify: {args.receipt_file} not found", file=sys.stderr)
+        return 1
+    except dispatch_receipt.ReceiptSchemaError as exc:
+        payload = {"ok": False, "error": str(exc), "code": exc.code}
+        if getattr(args, "json_output", False):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: ce dispatch-receipt verify [{exc.code}]: {exc}", file=sys.stderr)
+        return 1
+
+    failures = dispatch_receipt.verify_receipt(receipt)
+    gap_classes = sorted({f.gap_class for f in failures})
+    ok = len(failures) == 0
+
+    if getattr(args, "json_output", False):
+        print(
+            json.dumps(
+                {
+                    "ok": ok,
+                    "receipt_path": str(args.receipt_file),
+                    "work_unit": receipt.get("work_unit"),
+                    "dispatcher": receipt.get("dispatcher"),
+                    "gap_classes": gap_classes,
+                    "failures": [
+                        {"gap_class": f.gap_class, "field": f.field, "message": f.message}
+                        for f in failures
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        status = "PASS" if ok else "FAIL"
+        print(f"ce dispatch-receipt verify [{status}]: {args.receipt_file}")
+        if failures:
+            print(f"  activation gaps: {', '.join(gap_classes)}")
+            for failure in failures:
+                print(f"    [{failure.gap_class}] {failure.field}: {failure.message}")
+        else:
+            print("  no activation gaps — seat activation asserted")
+    return 0 if ok else 1
+
+
+_DISPATCH_RECEIPT_DISPATCH = {
+    "emit": _dispatch_receipt_emit,
+    "verify": _dispatch_receipt_verify,
+}
+
+
 def _check(args) -> int:
     """Wrap the retained creator-engine-validator conformance checks."""
     from . import cli as validator_cli
@@ -6034,6 +6224,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.group == "dequeue":
         return _dequeue(args)
+    if args.group == "dispatch-receipt":
+        dr_cmd = getattr(args, "dispatch_receipt_cmd", None)
+        handler = _DISPATCH_RECEIPT_DISPATCH.get(dr_cmd)
+        if handler is None:
+            parser.parse_args(["dispatch-receipt", "--help"])  # prints group help, exits
+            return 2
+        return handler(args)
     if args.group == "heartbeat":
         if getattr(args, "heartbeat_cmd", None) != "check":
             parser.parse_args(["heartbeat", "--help"])
