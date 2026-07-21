@@ -34,8 +34,6 @@ BASELINE_OFFENSES: frozenset[tuple[str, int, str]] = frozenset(
         ("docs/adr/ADR-0001-v1-baseline-and-product-form.md", 83, "dev"),
         ("docs/architecture/seat-sentinel-contract.md", 108, "seat"),
         ("docs/architecture/v3-spec.md", 295, "spike"),
-        ("docs/design/seat-side-preflight.md", 173, "preflight"),
-        ("docs/design/seat-side-preflight.md", 173, "seat-preflight"),
         ("docs/design/worktree-debt-classified-sweep.md", 228, "worktree"),
         ("docs/design/worktree-debt-classified-sweep.md", 273, "worktree"),
         ("docs/design/worktree-debt-classified-sweep.md", 274, "worktree"),

@@ -58,6 +58,12 @@ def test_committed_doc_in_repo_is_current():
     assert result.ok, [e.format() for e in result.errors]
 
 
+def test_validate_pr_is_described_as_optional_diagnostic():
+    rendered = _load_generator().render()
+
+    assert "optional local PR diagnostic" in rendered
+
+
 def test_passes_when_doc_matches_generator(tmp_path: Path):
     fresh = _load_generator().render()
     _seed_repo(tmp_path, doc_text=fresh)

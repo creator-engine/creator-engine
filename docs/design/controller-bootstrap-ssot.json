@@ -207,9 +207,10 @@
     ],
     "harvest_sequence": [
       "Check seat output for READY-FOR-HARVEST.",
-      "Verify ce validate-pr or preflight is GREEN on the branch.",
       "Harvest to a staging worktree under .ce/wt-<slug>-harvest/.",
-      "Controller holds the merge gate; enqueue only after independent review and green required checks."
+      "Generate and commit the changelog and path-manifest carriers before transport.",
+      "Push the final committed head and open or update the delivery PR, then record the required Validate run URL/status bound to that exact head (or required synthetic merge-group head).",
+      "Controller holds the merge gate; enqueue only after independent review, green required checks, and ratification."
     ],
     "subagent_model_routing": {
       "controller": "claude-code effort:high",
@@ -225,11 +226,10 @@
       "policy": "codex handles all work seats by default; effort:xhigh is reserved for hardest codex work only; Claude controllers use effort:high, not xhigh."
     },
     "preflight_discipline": [
-      "Run scripts/ce-preflight.sh --base origin/main --head-ref <branch> --declared-work-class <class> or ce validate-pr on a clean committed tree before any push.",
-      "Two-strikes rule: the same gate failing twice stops the slice.",
-      "Never treat raw pytest only as sufficient preflight evidence.",
-      "Preflight runs the same gates as CI.",
-      "ce validate-pr is canonical."
+      "Do not run full local ce validate-pr as a standing pre-push, harvest, controller, or merge-gate prerequisite; push the committed current head and wait for required Validate checks.",
+      "Required gate evidence is the pushed current-head SHA plus the required Validate run URL/status for that exact head (or required synthetic merge-group head), independent review, and ratification.",
+      "Local full-suite transcripts are not gate evidence; targeted author tests remain optional iteration evidence and cannot substitute for required CI.",
+      "ce validate-pr remains an optional diagnostic."
     ],
     "g5_body_line_rule": [
       "Every PR body has exactly one line: - **Declared work class:** <XS|S|M|L>.",

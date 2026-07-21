@@ -5478,4 +5478,154 @@ records:
   verification_method:
     evidence_ref: docs/contracts/authoring-a-governed-pr.md
     type: static
+- claim:
+    details: Published install scripts and versioned download artifacts are release
+      surfaces; changing them requires release-policy handling and refreshed signature
+      evidence.
+    evidence_sha256: 7f4f62ec2741f472911c6d7902fb3821c2022ad61a6de3f57c39ab745d0c04fe
+    item: 7
+    object: signed-release-artifact-freeze
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    subject: doctrine-item
+  content_hash: cd948762e13a2c1df0f5dd198b317170eb80f7a9fdbdc080ce0e641887e8164e
+  evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+  id: brain-assertion-d1b-07-signed-release-artifact-freeze-v2
+  kind: brain-assertion
+  prev_hash: e2e56f0f2de0ba735cc45a00fc351d1411a9a1de6638d8b472e1b6b06c0de471
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 210
+  statement: Published install scripts and versioned download artifacts are release
+    surfaces; changing them requires release-policy handling and refreshed signature
+    evidence.
+  status: superseded
+  superseded_by: brain-assertion-c3ef88dfffd785d08d191a50
+  type: convention
+  verification_method:
+    evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+    type: static
+- claim:
+    details: Published install scripts and versioned download artifacts are release
+      surfaces; changing them requires release-policy handling and refreshed signature
+      evidence.
+    evidence_sha256: e892264c2a594bf316548942b19e164358913c28fdec512ff2253c4e693bef93
+    item: 7
+    object: signed-release-artifact-freeze
+    predicate: asserts
+    refs:
+    - validators/creator_engine_validator/checks/install_spec_signature_guard.py
+    subject: doctrine-item
+  content_hash: ab0e3c4d0e16b8c9591d545e9fb4f00dc31f6940dff9f54dc2c9264aa36be28e
+  evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+  id: brain-assertion-c3ef88dfffd785d08d191a50
+  kind: brain-assertion
+  prev_hash: cd948762e13a2c1df0f5dd198b317170eb80f7a9fdbdc080ce0e641887e8164e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 211
+  statement: Published install scripts and versioned download artifacts are release
+    surfaces; changing them requires release-policy handling and refreshed signature
+    evidence.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/delivery/VERSIONING_AND_RELEASE_POLICY.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and green preflight evidence for the branch.
+    evidence_sha256: 1e8c2051d8356fd7282b07f8b666008696f5e850fd288d56a3dabdf419a1b94d
+    item: 25
+    object: harvest-requires-commit-sha
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 8ef1fd29024a71229a6eaec45905203ba83b9dce58c96515e4fb70a079449a05
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-d1b-25-harvest-requires-commit-sha-v2
+  kind: brain-assertion
+  prev_hash: ab0e3c4d0e16b8c9591d545e9fb4f00dc31f6940dff9f54dc2c9264aa36be28e
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 212
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and green preflight evidence for the branch.
+  status: superseded
+  superseded_by: brain-assertion-70634d0c993e4c4028915758
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and required Validate run URL/status bound to the exact pushed head.
+    evidence_sha256: 01da6e84e41fc3f8156f10c87addbee13ab1e3ca14a6123f161933cca42d5ae2
+    item: 25
+    object: harvest-requires-current-head-validate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 6ec549e038b930b4ac1183228309cce1fed527dfda4f8d9cfd3b3700e7ff6384
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-70634d0c993e4c4028915758
+  kind: brain-assertion
+  prev_hash: 8ef1fd29024a71229a6eaec45905203ba83b9dce58c96515e4fb70a079449a05
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 213
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and required Validate run URL/status bound to the exact pushed head.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    object: per-pr-carrier-discipline
+    predicate: verified-by-sha256
+    sha256: 9cdb0f734ca70a0f4c4ca148101159f05abf2b85e1b5e848c405e9c49c36efaa
+    subject: convention
+  content_hash: 3719fb6a198d8b4608f65e375041e6c869091b24961354055713b794472001d8
+  evidence_ref: docs/contracts/authoring-a-governed-pr.md
+  id: brain-assertion-9da0098987b67f21b3700171
+  kind: brain-assertion
+  prev_hash: 6ec549e038b930b4ac1183228309cce1fed527dfda4f8d9cfd3b3700e7ff6384
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 214
+  statement: convention verified-by-sha256 per-pr-carrier-discipline
+  status: superseded
+  superseded_by: brain-assertion-cb3ed846d3f33118c1f205c8
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/authoring-a-governed-pr.md
+    type: static
+- claim:
+    object: per-pr-carrier-discipline
+    predicate: verified-by-sha256
+    sha256: 6d9d9c2516771bc54d4354b56f645f23cf103df990700a595f53b0931331f654
+    subject: convention
+  content_hash: 13981a39d1d4c48d3ea763327cf1c7dd1bdf8609fdf77dd0c8a4a8b6d0c734ea
+  evidence_ref: docs/contracts/authoring-a-governed-pr.md
+  id: brain-assertion-cb3ed846d3f33118c1f205c8
+  kind: brain-assertion
+  prev_hash: 3719fb6a198d8b4608f65e375041e6c869091b24961354055713b794472001d8
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 215
+  statement: convention verified-by-sha256 per-pr-carrier-discipline
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/authoring-a-governed-pr.md
+    type: static
 schema_version: '1'

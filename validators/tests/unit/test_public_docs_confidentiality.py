@@ -5,8 +5,8 @@ The rule itself — which paths count as public, the forbidden patterns, the
 ONE place: :mod:`creator_engine_validator.public_docs_confidentiality`. This
 test is a THIN caller of that module so there is no second copy of the rule to
 drift. The same module also backs the fast ``scan-public-docs-confidentiality``
-CLI check that runs in ``ce validate-pr``, so a leak is caught BEFORE push, not
-only here at CI.
+CLI check that also runs in the optional ``ce validate-pr`` diagnostic; this
+test remains the authoritative required-CI caller.
 
 The repository is public (it is the source of record for ``creator-engine.dev``),
 so the README and the served ``docs/`` tree must never leak confidential

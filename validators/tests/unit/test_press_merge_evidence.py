@@ -150,7 +150,7 @@ def test_missing_optional_validate_pr_evidence_marks_gap():
     validate_pr = bundle["validation"]["validate_pr"]
     assert validate_pr["available"] is False
     assert validate_pr["command"] is None
-    assert "not durably captured" in validate_pr["source_gap"]
+    assert "not accepted as gate evidence" in validate_pr["source_gap"]
 
 
 def test_canonical_json_digest_stability():

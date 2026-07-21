@@ -1508,6 +1508,8 @@ Options:
 
 ### `validate-pr`
 
+Run an optional local PR diagnostic against committed base..HEAD state. Its transcript is not gate evidence and does not substitute for required CI.
+
 Options:
 
 | Option | Required | Choices | Description |

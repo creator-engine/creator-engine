@@ -61,10 +61,11 @@ explicitly out of scope per the batch envelope (e.g., "no `.github/`,
 
 ### b.3 Validation evidence
 
-Cite the commands and checks that ran (locally and / or in CI),
-their exit status, and any check that was skipped along with a
-rationale. If CI is not yet wired (Feature 003 deferral), state that
-explicitly and name the local-validation evidence relied upon.
+Name the pushed current-head SHA and required Validate run URL/status
+for that exact head (or required synthetic merge-group head), plus any
+optional targeted author checks. Local full-suite transcripts are not
+accepted as gate evidence; independent review and ratification are
+recorded under §b.4.
 
 ### b.4 Governance evidence
 

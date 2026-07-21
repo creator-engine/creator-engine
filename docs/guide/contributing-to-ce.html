@@ -164,13 +164,13 @@ git rev-parse --short=7 HEAD</code></pre>
 <pre><code class="language-bash">uv venv --python 3.14 .venv
 CE_VALIDATOR_PYTHON=&quot;${CE_VALIDATOR_PYTHON:-.venv/bin/python}&quot;
 UV_PYTHON_DOWNLOADS=never uv pip install --python &quot;$CE_VALIDATOR_PYTHON&quot; --no-index --find-links validators/wheelhouse -r validators/requirements.txt</code></pre>
-<p>If you need the full pytest gate, add dev/test dependencies to the same interpreter (<code>validators/README.md:41-55</code>):</p>
+<p>If you choose to run optional full-suite diagnostics, add dev/test dependencies to the same interpreter (<code>validators/README.md:41-55</code>):</p>
 <pre><code class="language-bash">UV_PYTHON_DOWNLOADS=never uv pip install --python &quot;$CE_VALIDATOR_PYTHON&quot; --no-index \
   --find-links validators/wheelhouse \
   --find-links validators/wheelhouse-dev \
   -r validators/requirements.txt \
   -r validators/requirements-dev.txt</code></pre>
-<p>Run these three named CI checks locally before asking for review:</p>
+<p>You may run any of these checks locally as optional iteration diagnostics. They cannot substitute for the required Validate result on the pushed current head:</p>
 <pre><code class="language-bash"># Creator Engine validator - pytest suite (offline)
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=validators \
   &quot;$CE_VALIDATOR_PYTHON&quot; -m pytest -p no:cacheprovider validators/tests/ -q -n auto --dist loadgroup
@@ -186,9 +186,9 @@ else
   echo &quot;OK: malformed examples correctly rejected&quot;
 fi</code></pre>
 <p>Those names and commands mirror the workflow steps in <code>.github/workflows/validate.yml:43-46</code>, <code>.github/workflows/validate.yml:83-94</code>. For smaller documentation PRs, the existing <code>CONTRIBUTING.md</code> also asks contributors to run <code>git diff --check</code>, <code>check-examples</code>, and <code>scan-no-limitless</code> locally (<code>CONTRIBUTING.md:108-125</code>).</p>
-<p>Before you push, run the full PR gate set once and keep going until it is green:</p>
+<p>Full local validation is optional diagnostic evidence while iterating:</p>
 <pre><code class="language-bash">TMPDIR=/var/tmp ce validate-pr</code></pre>
-<p><code>ce validate-pr</code> is the canonical local preflight. It is a superset of the individual pytest and validator commands above, resolves the committed comparison base, and prints one final <code>GREEN</code> or <code>FAIL</code> summary (<code>docs/contracts/authoring-a-governed-pr.md:18-61</code>, <code>validators/creator_engine_validator/pr_preflight.py:175-180</code>). Use the single preflight as the final local evidence pass before push.</p>
+<p>Do not run full local <code>ce validate-pr</code> as a standing pre-push, harvest, controller, or merge-gate prerequisite. Push the committed current head; wait for required Validate checks; require independent review and ratification. PR gate evidence is the pushed current-head SHA plus the required Validate run URL/status for that exact head (or required synthetic merge-group head), independent review, and ratification. Local full-suite transcripts are not gate evidence; targeted author tests remain optional iteration evidence and cannot substitute for required CI.</p>
 <blockquote>
 <p><strong>Running from an isolated worktree?</strong> Set <code>CE_VALIDATOR_PYTHON</code> to the dependency interpreter. See <a href="https://github.com/creator-engine/creator-engine/blob/main/docs/../validators/README.md"><code>../../validators/README.md</code></a>.</p>
 </blockquote>
@@ -208,7 +208,7 @@ fi</code></pre>
 <p>For a contributor, the practical loop is:</p>
 <ol>
 <li>Compose: frame the request, scope it, and name the mutation class.</li>
-<li>Verify: run the local validator/pytest checks and collect evidence.</li>
+<li>Verify: run optional targeted author checks, push the committed head, and collect the required Validate run URL/status for that exact head.</li>
 <li>Ratify: obtain the required human ratification for governed or privileged scope.</li>
 <li>Implement: produce the bounded diff and PR.</li>
 <li>Review/Ship: obtain independent review, then a maintainer/Operator lands what is authorized.</li>
@@ -227,7 +227,7 @@ fi</code></pre>
 <li>Keep the changed-file boundary tight.</li>
 <li>Add the per-PR changelog fragment at <code>.ce/changelog/&lt;branch-slug&gt;.md</code>.</li>
 <li>Add the path-manifest carrier at <code>.ce/pr-manifests/&lt;branch-slug&gt;.md</code> when the PR is governed by a manifest (<code>docs/contracts/authoring-a-governed-pr.md:72-90</code>).</li>
-<li>Paste validation evidence, including <code>ce validate-pr</code> and the focused local checks above when they apply.</li>
+<li>Record the pushed head SHA and required Validate run URL/status for that exact head; focused local checks may be cited as optional iteration evidence only.</li>
 <li>Do not include secrets, local session state, generated logs, or machine-local paths. <code>CONTRIBUTING.md</code> explicitly excludes instance-local state and credentials (<code>CONTRIBUTING.md:91-106</code>).</li>
 </ul>
 <h2 id="6-review-and-independence">6. Review And Independence</h2>

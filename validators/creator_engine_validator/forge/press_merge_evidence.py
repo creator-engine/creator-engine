@@ -303,8 +303,8 @@ def _validation_payload(validation_capture: Mapping[str, Any] | None) -> dict[st
             "stderr_sha256": None,
             "summary": None,
             "source_gap": (
-                "ce validate-pr is real per-PR evidence but is not durably captured "
-                "by the decide workflow today; this bundle does not fake it."
+                "ce validate-pr is an optional local diagnostic whose transcript "
+                "is not accepted as gate evidence; this bundle does not fake it."
             ),
         }
     return {

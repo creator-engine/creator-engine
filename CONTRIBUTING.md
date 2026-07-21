@@ -106,10 +106,11 @@ Pull requests should:
 - Include or update tests/examples when changing the validator or
   schema/template behavior.
 
-## Local validation
+## Optional local diagnostics
 
-Before opening a PR, please run the checks that CI also runs locally. These are
-offline; see [`validators/README.md`](./validators/README.md) for setup.
+The following offline checks are optional iteration diagnostics; see
+[`validators/README.md`](./validators/README.md) for setup. They cannot
+substitute for required CI on the pushed current head.
 
 ```bash
 # Catch whitespace defects and merge-conflict markers.
@@ -125,15 +126,17 @@ PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check-e
 PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator scan-no-limitless
 ```
 
-If you change the validator, schemas, or examples, also run the full
-check suite:
+If you change the validator, schemas, or examples, you may also run the full
+local diagnostic suite:
 
 ```bash
 CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
 PYTHONPATH=validators "$CE_VALIDATOR_PYTHON" -m creator_engine_validator check
 ```
 
-A PR whose changes do not pass these checks locally will not pass CI.
+Commit the complete carrier set, push that final head, open or update the PR,
+and wait for the required Validate run bound to that exact head. Record its
+URL/status together with independent review and ratification evidence.
 
 > **Running from an isolated worktree (creator-engine#82)?** CE lane worktrees under
 > `ce-worktrees/*` have no local `.venv`; set `CE_VALIDATOR_PYTHON` to a known

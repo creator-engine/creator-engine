@@ -1282,6 +1282,13 @@ def test_preflight_build_parser_accepts_canonical_and_legacy_work_class_inputs()
         assert pr_preflight.normalize_work_class(args.declared_work_class) == expected
 
 
+def test_preflight_build_parser_labels_command_as_optional_diagnostic():
+    parser = pr_preflight.build_parser()
+
+    assert "optional local PR diagnostic" in parser.description
+    assert "not gate evidence" in parser.description
+
+
 def test_preflight_build_parser_still_rejects_bogus_work_class():
     parser = pr_preflight.build_parser()
 

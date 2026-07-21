@@ -190,9 +190,9 @@ the verifies-not-ratifies rule at SDLC transition T17
 ([`../architecture/agentic-sdlc-operating-model.md`](../architecture/agentic-sdlc-operating-model.md)
 §b). For the Definition of Done:
 
-1. CI green status MAY be cited as **validation evidence** under
-   §b.2 once a CI workflow is wired (currently deferred to Feature
-   003 / Sprint 0 Slice C). CI red status MUST block `Done`.
+1. The required Validate run URL/status bound to the exact pushed current-head
+   SHA (or required synthetic merge-group head) is authoritative **validation
+   evidence** under §b.2. CI red status MUST block `Done`.
 2. CI green status MUST NOT, by itself, satisfy §b.5. A passing CI
    run is mechanical validation; it is not Source ratification.
 3. A change to CI policy, branch protection, or `.github/` content is
@@ -207,11 +207,8 @@ the verifies-not-ratifies rule at SDLC transition T17
    the `.github/` baseline (live GitHub branch protection settings,
    CODEOWNERS, additional workflows, or any deeper instantiation)
    remains Feature 003 surface under a separately ratified
-   privileged envelope. Where no applicable CI workflow has been
-   wired for a given mutation class, §b.2 is satisfied by local
-   validation evidence captured in the post-merge report; the
-   report names the local-validation evidence relied upon per
-   [`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b.3.
+   privileged envelope. Local full-suite transcripts are not accepted as gate
+   evidence and cannot substitute for required current-head CI.
 
 ## d. External tracker status cannot mark a repo work item Done
 

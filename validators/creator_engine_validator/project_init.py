@@ -102,8 +102,10 @@ Every governed PR should include:
 - A manifest line declaring `Declared work class: XS|S|M|L`.
 - A closed path list matching the PR diff.
 
-Run `ce validate-pr` before review. The validator checks changelog fragments,
-path-manifest fidelity, work-sizing declarations, and the local test gate.
+Push the committed current head and record the required Validate run URL/status
+for that exact head (or required synthetic merge-group head). Require independent
+review and ratification. Local full-suite transcripts are not gate evidence;
+`ce validate-pr` remains an optional diagnostic.
 """
 
 
@@ -180,7 +182,7 @@ Budget (optional):
 
 - [ ] Shape the acceptance criteria.
 - [ ] Build the scoped change.
-- [ ] Review evidence and run `ce validate-pr`.
+- [ ] Record required current-head Validate evidence and independent review.
 """
 
 
@@ -241,7 +243,7 @@ M_TASKS = """# Tasks: <short-name>
 ## Review
 
 - [ ] Run targeted tests.
-- [ ] Run `ce validate-pr`.
+- [ ] Record the required Validate run URL/status for the pushed current head.
 - [ ] Confirm changelog and path manifest are complete.
 """
 
@@ -305,7 +307,7 @@ Use this skill when checking a governed change before review.
 1. Compare the diff to the path-manifest carrier.
 2. Confirm the declared work class line is present and not below the diff floor.
 3. Check the per-PR changelog fragment.
-4. Run or cite `ce validate-pr`.
+4. Record the required Validate run URL/status for the pushed current head.
 5. Report findings as evidence against the Scope's done criteria.
 """
 

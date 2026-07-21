@@ -24,6 +24,15 @@ def test_embedded_templates_are_ce_native():
     assert ("spec" + "-kit") not in combined
 
 
+def test_embedded_templates_use_current_head_ci_as_gate_evidence():
+    combined = "\n".join(t.content for t in project_init.embedded_templates())
+
+    assert "required Validate run URL/status" in combined
+    assert "Local full-suite transcripts are not gate evidence" in combined
+    assert "Run `ce validate-pr` before review" not in combined
+    assert "Run or cite `ce validate-pr`" not in combined
+
+
 def test_init_project_creates_right_sized_ce_scaffold(tmp_path: Path):
     result = project_init.init_project(tmp_path / "project")
     root = result.target

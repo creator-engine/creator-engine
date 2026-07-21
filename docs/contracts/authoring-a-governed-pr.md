@@ -29,20 +29,31 @@ diff and report the declared class alongside it. Legacy inputs normalize as
 class at or above the computed floor clears this check; a lower declaration must
 be raised or the work split.
 
-## Local preflight
+## Authoritative validation evidence
 
-Run from the PR worktree:
+Do not run full local `ce validate-pr` as a standing pre-push, harvest,
+controller, or merge-gate prerequisite. Push the committed current head; wait
+for required Validate checks; require independent review and ratification.
+
+The authoritative validation evidence is the pushed current-head SHA, the
+required Validate run URL/status for that exact head (or required synthetic
+merge-group head), independent review, and ratification. Local full-suite
+transcripts are not accepted as gate evidence. Targeted author tests remain
+optional iteration evidence and cannot substitute for required CI.
+
+`ce validate-pr` remains available as an optional diagnostic from the PR
+worktree:
 
 ```bash
 scripts/ce-preflight.sh --base origin/main --head-ref "$(git branch --show-current)" --declared-work-class M
 ```
 
-The command refuses a dirty worktree by default because it validates committed
+The diagnostic refuses a dirty worktree by default because it validates committed
 state only. If you need to inspect committed state while unrelated local files
 exist, pass `--allow-dirty`; the diff gates still use `git diff <base>..HEAD`,
 never working-tree content.
 
-The preflight resolves the comparison base by fetching the base branch and
+The diagnostic resolves the comparison base by fetching the base branch and
 using `git merge-base <base> HEAD`; record its derived base SHA. It then runs
 the same gate families as
 `.github/workflows/validate.yml`:
@@ -72,13 +83,14 @@ the same gate families as
 12. Workflow permissions audit: `validate.yml` must not request any `write` permission.
     Remedy: remove write scopes from workflow-level or job-level `permissions`.
 
-The command prints exactly one final summary: `GREEN` when every gate passes or
-`FAIL` when any gate fails.
+The command prints exactly one final summary: `GREEN` when every local
+diagnostic passes or `FAIL` when one fails. Neither result is merge-gate
+evidence.
 
-## Two-strikes rule
+## Optional-diagnostic two-strikes rule
 
-A failed preflight is strike one. Make the smallest concrete correction and run
-the preflight again.
+A failed local diagnostic is strike one. Make the smallest concrete correction
+and run only the relevant focused check or diagnostic again.
 
 If the same gate fails a second time, stop widening the PR. Either split the PR,
 ask for review on the specific gate, or document why the declared work class and

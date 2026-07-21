@@ -13,17 +13,23 @@
 
 ## Validation Evidence
 
-<!-- Paste the output of validation commands run locally before opening this PR.
-     CI verifies; CI does not ratify.
-     A green CI run is evidence, not authorization. -->
+<!-- Commit carriers first, push the final head, and open/update the PR. Then
+     record the required Validate run bound to that exact head. CI verifies;
+     CI does not ratify. A green CI run is evidence, not authorization. -->
+
+- **Pushed head SHA:**
+- **Required Validate run URL/status:**
+- **Independent review:**
+- **Ratification:**
+
+Optional targeted author checks (not gate evidence):
 
 ```
-# paste validation output here
+# paste optional iteration evidence here
 ```
 
-- [ ] `git diff --check` clean
-- [ ] YAML parse clean for all changed YAML files
-- [ ] Creator Engine validator passes on changed artifacts (if applicable)
+- [ ] Required Validate run is green for the exact pushed head (or required synthetic merge-group head)
+- [ ] Independent review and ratification evidence are present
 - [ ] No write permissions or deploy/merge/approve actions introduced in workflow changes
 - [ ] Boundary check: only files within the authorized scope are staged
 

@@ -50,10 +50,11 @@ and any explicit Operator direction in force for the repository.
 
    Check out or inspect the signaled head without mutating unrelated work. Verify
    that the branch is based on the intended base and that the committed head is
-   the one named in the signal. Run the full local preflight required for the
-   current repo policy before any commit-for-harvest, self-push, or gate handoff:
-   `ce validate-pr` with CI parity unless the governing brief names a stricter
-   command.
+   the one named in the signal. Harvest into staging, generate and commit the
+   complete carrier set, then push that final committed head and open or update
+   the delivery PR. Only then wait for the required Validate result bound to
+   that exact head. Do not run full local `ce validate-pr` as a standing
+   prerequisite or treat its transcript as gate evidence.
 
    Confirm carrier fidelity before routing review:
 
@@ -117,7 +118,8 @@ On any re-push:
 
 1. Compare the old approved head to the new head.
 2. Regenerate the path-manifest carrier when the path set changes.
-3. Re-run full local preflight before the next push or harvest commit.
+3. Push the new committed head and wait for its required Validate checks; prior
+   head status and local full-suite transcripts do not carry forward.
 4. Request delta re-review for changed code, docs, generated artifacts, carrier
    changes, and any changed evidence file.
 5. Treat force-pushes as approval invalidation unless a machine restamp policy
@@ -130,7 +132,8 @@ Ledger-touching PRs must be serialized. Brain assertions and similar append-only
 ledgers form a global chain: concurrent PRs that each append to the same chain
 can be individually valid while pairwise conflicting after one lands. Land one
 ledger PR, update the next branch from the new base, regenerate affected
-carriers, and re-run preflight before reviewing the next head.
+carriers, and wait for the required Validate result on the next pushed head
+before reviewing it.
 
 ## Takeover Hydration Use
 
@@ -203,8 +206,8 @@ A standby controller hydrated only from repository artifacts should be able to
 execute this sequence in a drill:
 
 1. Read takeover evidence and this runbook.
-2. Harvest one completed branch and verify full preflight, carrier fidelity, and
-   honest work class.
+2. Harvest one completed branch and verify current-head required Validate
+   evidence, carrier fidelity, and honest work class.
 3. Enumerate the seat pool and conveyor front end; dispatch restock work for any
    idle or starved seat using a pointer-plus-SHA brief, or raise the
    empty-conveyor-front-end alarm when ready work exists with no active intake.

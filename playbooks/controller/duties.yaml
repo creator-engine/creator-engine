@@ -175,8 +175,8 @@ duties:
   - id: harvest
     kind: procedure
     description: >-
-      Collect worker output at READY, verify local preflight, stage, regenerate
-      carriers, and route independent review.
+      Collect worker output at READY, stage and regenerate carriers, record the
+      required Validate result for the pushed current head, and route independent review.
     procedure_ref: playbooks/controller/briefs/harvest.md
     criticality: high
 

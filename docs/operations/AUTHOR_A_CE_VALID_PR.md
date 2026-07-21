@@ -2,30 +2,14 @@
 
 Use this playbook before handing a branch to a controller for commit, push, or review.
 
-> **Standing directive: full local preflight before every self-push / commit-for-harvest.**
-> Run the FULL local validator preflight (`ce validate-pr`, CI-parity) before
-> every self-push or commit-for-harvest. Do not discover gates via CI. The full
-> suite is what must pass before push. For fast iteration once the test-tier
-> split lands on main, use `pytest -m "not slow"` — that is for iteration only;
-> the full suite still gates the push.
-
-> **MANDATORY before EVERY push — no exemptions.** `ce validate-pr` (the full
-> CI-parity offline suite, whole tree, run on a CLEAN working tree) MUST go green
-> locally before pushing ANY PR — feature PRs, release / publish PRs, AND
-> controller-authored PRs alike. There is no "it's just a release / signature
-> ceremony" exemption: a release-publish PR is still a code change to the install
-> spec and MUST pass the offline suite first. The offline suite mirrors
-> `.github/workflows/validate.yml` exactly, so a local green ≈ CI green; pushing
-> without it wastes a forge round-trip and surfaces failures publicly. Cautionary
-> example: a release-publish PR (0.2.0 → 0.3.0) was pushed after verifying only
-> the release signature, and 6 version-pinned install-spec tests still expecting
-> `0.2.0` went RED at CI — every one of them would have been caught by running the
-> offline suite locally first (see
-> [`../delivery/VERSIONING_AND_RELEASE_POLICY.md`](../delivery/VERSIONING_AND_RELEASE_POLICY.md)
-> "Release-publish preflight"). The durable fix — making those install-spec tests
-> read the version dynamically from `version.py` so a release bump no longer breaks
-> them — is tracked on the internal roadmap under the autonomous-release work
-> (W2 release-bump).
+> **Standing validation directive.** Do not run full local `ce validate-pr` as
+> a standing pre-push, harvest, controller, or merge-gate prerequisite. Push the
+> committed current head; wait for required Validate checks; require independent
+> review and ratification. Gate evidence is the pushed current-head SHA plus the
+> required Validate run URL/status for that exact head (or required synthetic
+> merge-group head). Local full-suite transcripts are not accepted as gate
+> evidence. Targeted author tests remain optional iteration evidence and cannot
+> substitute for required CI. `ce validate-pr` remains an optional diagnostic.
 
 1. Before every diff, re-derive and record the comparison base. Do this before
    creating the branch and again before each commit-for-harvest or PR-ready
@@ -74,19 +58,20 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    `--statement` explicitly, report the predecessor and successor ids, preserved
    statement, and asserted shipped hash, and never edit `claim.sha256` in place.
 
-4. Run the local preflight before push:
+4. Optionally run focused checks or the local diagnostic while iterating:
 
    ```sh
    PYTHONPATH=validators python -m creator_engine_validator.ce_cli validate-pr
    ```
 
-   The preflight's default test gate mirrors the CI offline invocation exactly — the whole `validators/tests/` tree (unit + integration), excluding `wheel_bake_gate`, run in parallel (`python -m pytest -p no:cacheprovider validators/tests/ -m "not wheel_bake_gate" -q -n auto --dist loadgroup`). This is true CI parity, so it is slower (~1-4 min) than a unit-only run; that cost is intentional to avoid CI false-greens.
+   The local command is diagnostic only. Its transcript is not gate evidence
+   and does not substitute for required CI on the pushed head.
 
    For uncommitted worker handoff checks, add `--allow-dirty` only to inspect deterministic gates before the foreman commit. The authoritative carrier and diff gates validate committed `base..HEAD` state.
 
-5. Fix every failed per-check line until the final summary is `PASS: PR preflight`.
-   A result is ready for handoff only after a commit exists: report the committed
-   `HEAD` and a clean worktree. A clean worktree alone never substitutes for a
-   committed head.
+5. A result is ready for handoff only after a commit exists: report the
+   committed `HEAD` and a clean worktree. A clean worktree alone never
+   substitutes for a committed head. After push, record the required Validate
+   run URL/status bound to that exact head.
 
 6. Hand off the branch evidence to the foreman/controller. Do not self-merge.

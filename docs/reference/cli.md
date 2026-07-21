@@ -36,10 +36,10 @@ There is no `ce dev` command in the v1.0 public CLI.
 
 | Command | Use it for |
 | --- | --- |
-| `ce init` | Run CE-native project scaffolding with local templates. The scaffolded governance flow includes path-manifest carriers, declared work-class lines, and `ce validate-pr` preflight evidence. |
+| `ce init` | Run CE-native project scaffolding with local templates. The scaffolded governance flow includes path-manifest carriers, declared work-class lines, and required current-head Validate evidence. |
 | `ce carrier` | Write, stage, and verify PR path-manifest carrier files. |
 | `ce carrier gc` | Sweep dead carrier manifests whose branch and remote-tracking ref are gone. Dry-run by default (reports the dead carriers with evidence); `--apply` removes them. It never touches live carriers and never deletes a carrier whose slug cannot be parsed. Run `git fetch --prune` first so the remote-tracking view reflects deleted origin branches. |
-| `ce validate-pr` | Run the local PR preflight gate set against committed base-to-head state. |
+| `ce validate-pr` | Run an optional local PR diagnostic against committed base-to-head state; its transcript is not gate evidence. |
 | `ce pr` | Push a governed run branch and open its pull request through the forge flow. |
 | `ce review` | Dispatch a distinct governed reviewer venue for an opened pull request. |
 | `ce review-submit` | Submit the separate reviewer approval for a run's opened pull request. |
