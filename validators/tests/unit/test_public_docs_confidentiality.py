@@ -284,3 +284,17 @@ def test_custody_runbook_is_an_exact_operations_exception():
 
     assert unreviewed == [unlisted_neighbor]
     assert stale_exceptions == []
+
+
+def test_devops_docs_are_exact_operations_exceptions():
+    """The DevOps mandate/runbook pair is admitted; an adjacent path is refused."""
+    mandate = "docs/operations/CE_DEVOPS_AGENT_MANDATE.md"
+    runbook = "docs/operations/CE_DEVOPS_RECOVERY_RUNBOOK.md"
+    unlisted_neighbor = "docs/operations/CE_DEVOPS_AGENT_NOTES.md"
+    paths = set(guard.KNOWN_OPERATIONS_EXCEPTIONS | guard.KNOWN_DELIVERY_EXCEPTIONS)
+    paths.update({mandate, runbook, unlisted_neighbor})
+
+    unreviewed, stale_exceptions = guard.internal_tree_violations_for_paths(paths)
+
+    assert unreviewed == [unlisted_neighbor]
+    assert stale_exceptions == []
