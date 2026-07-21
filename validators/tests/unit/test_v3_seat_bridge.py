@@ -1203,8 +1203,9 @@ def test_reviewer_brief_names_pr_and_collect_handoff(tmp_path):
     )
     brief = Path(rec.brief_ref).read_text(encoding="utf-8")
     assert "PR #7" in brief
-    assert "gh pr review 7" in brief
-    assert "--outcome review_submitted" in brief
+    assert "strict reviewer-terminal v2 JSON" in brief
+    assert "direct `gh pr review` is not" in brief
+    assert "--outcome review_submitted" in brief and "--review-terminal <terminal.json>" in brief
 
 
 def test_spawn_review_venue_runs_pco_then_lane_launch_then_seed(tmp_path):

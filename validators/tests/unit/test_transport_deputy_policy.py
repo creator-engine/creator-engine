@@ -30,6 +30,7 @@ def test_reviewer_can_submit_review_to_matching_pr():
             method="POST",
             path=f"/repos/{_REPO}/pulls/7/reviews",
             body=f'{{"event":"COMMENT","commit_id":"{_HEAD}"}}',
+            review_receipt_checked=True,
         )
     )
 
@@ -43,6 +44,7 @@ def test_reviewer_review_submit_denies_approve_without_prior_authority_check():
             method="POST",
             path=f"/repos/{_REPO}/pulls/7/reviews",
             body='{"event":"APPROVE","body":"not gate-valid"}',
+            review_receipt_checked=True,
         )
     )
 
@@ -57,6 +59,7 @@ def test_reviewer_review_submit_allows_approve_after_prior_authority_check():
             path=f"/repos/{_REPO}/pulls/7/reviews",
             body=f'{{"event":"APPROVE","commit_id":"{_HEAD}"}}',
             approve_authority_checked=True,
+            review_receipt_checked=True,
         )
     )
 
@@ -66,11 +69,20 @@ def test_reviewer_review_submit_allows_approve_after_prior_authority_check():
 
 def test_reviewer_review_submit_requires_explicit_event():
     decision = evaluate(
-        _request(method="POST", path=f"/repos/{_REPO}/pulls/7/reviews")
+        _request(method="POST", path=f"/repos/{_REPO}/pulls/7/reviews", review_receipt_checked=True)
     )
 
     assert decision.allowed is False
     assert "missing an explicit review event" in " ".join(decision.reasons)
+
+
+def test_reviewer_review_submit_refuses_without_receipt_check():
+    decision = evaluate(_request(
+        method="POST", path=f"/repos/{_REPO}/pulls/7/reviews",
+        body='{"event":"COMMENT"}',
+    ))
+    assert decision.allowed is False
+    assert "parser-issued exact-payload receipt" in " ".join(decision.reasons)
 
 
 def test_destructive_delete_is_blocked_before_injection():

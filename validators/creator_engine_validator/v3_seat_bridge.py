@@ -1141,6 +1141,23 @@ def _envelope_actor(envelope_ref: str | Path) -> str:
     return str((doc.get("reviewer_authority_envelope") or {}).get("actor") or "")
 
 
+def reviewer_envelope_target(envelope_ref: str | Path) -> tuple[int, str] | None:
+    """Return the immutable PR/head target from a reviewer authority envelope.
+
+    The dispatch ``review_of`` record intentionally stores a path reference,
+    not a duplicate head field.  Consumers that need the head must re-read this
+    schema-bound authority record rather than trusting a caller flag.
+    """
+    try:
+        doc = yaml.safe_load(Path(envelope_ref).read_text(encoding="utf-8")) or {}
+        record = doc.get("reviewer_authority_envelope") or {}
+        pr_number = int(record.get("pr_number"))
+        head_sha = str(record.get("head_sha") or "")
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        return None
+    return (pr_number, head_sha) if pr_number > 0 and head_sha else None
+
+
 def _resolve_validator_exe(validator_exe: str | None) -> str:
     """Resolve the shared ``creator-engine-validator`` console_script; refuse if absent."""
     if validator_exe:
@@ -1249,12 +1266,14 @@ def _render_reviewer_brief(
         f"against its acceptance criteria, with evidence (the diff, the CI, the manifest), not vibes.\n\n"
         f"## Your authority (one mechanic, one PR)\n"
         f"- Envelope: `{envelope_ref}` — it authorizes EXACTLY `pr_review` on PR #{pr_number}.\n"
-        f"- Submit your review with `gh pr review {pr_number}` (the Ring-1 hook honors the envelope "
-        f"by mechanic + PR number). You CANNOT push or merge — a governed venue is push-denied.\n\n"
+        f"- Produce a strict reviewer-terminal v2 JSON record with non-empty `verified` evidence. "
+        f"A refusal must use `CANNOT_REVIEW`/`BLOCKED`, never a zero-count verdict. "
+        f"Submit only through the trusted receipt-bound review command; direct `gh pr review` is not "
+        f"review evidence. You CANNOT push or merge — a governed venue is push-denied.\n\n"
         f"## Evidence handoff (for `cev3 collect`)\n"
         f"When you finish, your venue run is folded by:\n"
         f"`cev3 collect {scope_id} --run {review_run_id} "
-        f"--outcome review_submitted --pr {pr_number}`\n"
+        f"--outcome review_submitted --pr {pr_number} --review-terminal <terminal.json>`\n"
         f"Your harness transcript is resolved automatically from the session id stamped "
         f"at spawn — do NOT pass `--transcript`.\n"
         f"The conserved evidence chain lands at `{review_evidence_ref}`.\n"

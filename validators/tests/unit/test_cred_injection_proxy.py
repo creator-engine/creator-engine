@@ -7,6 +7,8 @@ plus durable audit projections token-free.
 
 import json
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +23,8 @@ from creator_engine_validator.forge.cred_injection_proxy import (
     submit_contained_seat_pr_review,
 )
 from creator_engine_validator.forge.scoped_token import ScopedToken, TokenRequest
+from creator_engine_validator.forge.review_submission_receipt import ReviewSubmissionReceiptAuthority
+from creator_engine_validator.forge.reviewer_terminal import require_reviewed_terminal
 from creator_engine_validator.forge.transport_deputy_policy import TransportRequest, evaluate
 
 _REPO = "creator-engine/creator-engine"
@@ -86,6 +90,21 @@ def _reviewer_authority_envelope(**overrides):
     return {"reviewer_authority_envelope": envelope}
 
 
+def _review_admission(event: str, *, repo: str = _REPO, pr: int = 7, head: str = _HEAD):
+    terminal = require_reviewed_terminal({
+        "version": 2, "state": "REVIEWED", "repository": repo, "pr_number": pr,
+        "head_sha": head, "base": "main", "range": "main...head", "reviewer": "reviewer-1",
+        "author": "author-1", "review_id": "dispatch-7", "verdict": event,
+        "verified": [{"claim": "unit path", "evidence": "fixture evidence"}], "findings": [],
+        "summary": "fixture reviewed", "timestamp": "2026-07-21T00:00:00Z",
+    })
+    authority = ReviewSubmissionReceiptAuthority(
+        state_root=Path(tempfile.mkdtemp(prefix="ce639-proxy-")) / "state",
+        key_supplier=lambda: b"k" * 32,
+    )
+    return terminal, authority.issue(terminal, ttl_seconds=60), authority
+
+
 class FakeMinter:
     def __init__(self, token: ScopedToken, events: list[str] | None = None):
         self.token = token
@@ -109,7 +128,7 @@ class FakeTransport:
         return {"status_code": 200}
 
 
-def test_allowed_request_mints_then_injects_only_into_outbound_transport():
+def test_generic_dispatch_refuses_review_post_even_when_caller_sets_receipt_boolean():
     events: list[str] = []
 
     def evaluator(request: TransportRequest):
@@ -122,7 +141,7 @@ def test_allowed_request_mints_then_injects_only_into_outbound_transport():
     worker_argv = ("codex", "exec", "--json")
     result = dispatch_with_credential_injection(
         ContainedDispatch(
-            request=_request(),
+            request=_request(review_receipt_checked=True),
             binding=_binding(),
             worker_env=worker_env,
             worker_argv=worker_argv,
@@ -133,22 +152,14 @@ def test_allowed_request_mints_then_injects_only_into_outbound_transport():
         evaluator=evaluator,
     )
 
-    assert events == ["policy", "mint", "transport"]
-    assert result.allowed is True
-    assert minter.calls[0].repo == _REPO
-    assert minter.calls[0].permissions == {"metadata": "read", "pull_requests": "write"}
-    assert transport.calls[0].headers["Authorization"] == f"Bearer {_SECRET}"
-    assert _SECRET not in repr(transport.calls[0])
-    assert "Authorization" not in _request().headers
+    assert events == ["policy"]
+    assert result.allowed is False
+    assert minter.calls == []
+    assert transport.calls == []
+    assert result.audit_record["outcome"] == "policy_denied"
+    assert "parser-issued exact-payload receipt" in repr(result.audit_record)
     assert worker_env == {"PATH": "/usr/bin", "CE_SEAT": "seat-reviewer-1"}
     assert worker_argv == ("codex", "exec", "--json")
-
-    rendered = repr(result.audit_record)
-    assert _SECRET not in rendered
-    assert f"Bearer {_SECRET}" not in rendered
-    assert "Authorization" in rendered  # header name only is attestable
-    assert "pull_requests" in rendered
-    assert result.audit_record["outcome"] == "transport_dispatched"
 
 
 def test_policy_denial_refuses_before_mint_or_transport():
@@ -195,7 +206,7 @@ def test_secret_bearing_launch_context_refuses_after_policy_before_mint():
     transport = FakeTransport()
     result = dispatch_with_credential_injection(
         ContainedDispatch(
-            request=_request(),
+                request=_request(method="GET", path=f"/repos/{_REPO}/pulls/7", body=None),
             binding=_binding(),
             worker_env={"GH_TOKEN": _SECRET},
             worker_argv=("codex", "exec"),
@@ -218,7 +229,7 @@ def test_token_shaped_ref_is_redacted_from_audit_but_value_still_in_transport():
     minter = FakeMinter(_token(token_ref=f"ref-{_SECRET}"))
     transport = FakeTransport()
     result = dispatch_with_credential_injection(
-        ContainedDispatch(request=_request(), binding=_binding()),
+            ContainedDispatch(request=_request(method="GET", path=f"/repos/{_REPO}/pulls/7", body=None), binding=_binding()),
         minter=minter,
         transport=transport,
     )
@@ -241,6 +252,7 @@ def test_contained_seat_review_smoke_uses_trusted_gh_runner_outside_seat_env(tmp
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": 987}), stderr="")
 
     minter = FakeMinter(_token())
+    terminal, receipt, receipt_authority = _review_admission("REQUEST_CHANGES")
     worker_env = {"PATH": "/usr/bin", "CE_SEAT": "seat-reviewer-1", "PWD": str(seat_fs)}
     worker_argv = ("gh", "pr", "review", "7", "--request-changes", "--body-file", "-")
     result = submit_contained_seat_pr_review(
@@ -251,6 +263,8 @@ def test_contained_seat_review_smoke_uses_trusted_gh_runner_outside_seat_env(tmp
             head_sha=_HEAD,
             event="REQUEST_CHANGES",
             body="Needs a fix before merge.",
+            terminal=terminal,
+            receipt=receipt,
         ),
         binding=_binding(),
         minter=minter,
@@ -258,6 +272,7 @@ def test_contained_seat_review_smoke_uses_trusted_gh_runner_outside_seat_env(tmp
         worker_argv=worker_argv,
         durable_metadata={"dispatch_id": "dispatch-1"},
         token_spawn=token_spawn,
+        receipt_authority=receipt_authority,
     )
 
     assert result.applied is True
@@ -267,7 +282,7 @@ def test_contained_seat_review_smoke_uses_trusted_gh_runner_outside_seat_env(tmp
     argv, input_text, child_env = spawned[0]
     assert argv == ["gh", "api", "-X", "POST", f"repos/{_REPO}/pulls/7/reviews", "--input", "-"]
     assert json.loads(input_text or "") == {
-        "body": "Needs a fix before merge.",
+        "body": terminal.canonical_body,
         "commit_id": _HEAD,
         "event": "REQUEST_CHANGES",
     }
@@ -289,6 +304,7 @@ def test_contained_seat_review_fails_closed_without_valid_injected_credential():
         spawned.append(args)
         raise AssertionError("transport must not run without a credential")
 
+    terminal, receipt, receipt_authority = _review_admission("COMMENT")
     with pytest.raises(CredentialProxyRefused):
         submit_contained_seat_pr_review(
             ContainedSeatReview(
@@ -298,10 +314,13 @@ def test_contained_seat_review_fails_closed_without_valid_injected_credential():
                 head_sha=_HEAD,
                 event="COMMENT",
                 body="Read-only opinion.",
+                terminal=terminal,
+                receipt=receipt,
             ),
             binding=_binding(),
             minter=FakeMinter(_token(value="")),
             token_spawn=token_spawn,
+            receipt_authority=receipt_authority,
         )
 
     assert spawned == []
@@ -413,6 +432,7 @@ def test_contained_seat_review_approve_refuses_review_venue_only_capability_befo
 def test_approve_allowed_for_independent_valid_envelope_and_permitting_mode(substrate):
     minter = FakeMinter(_token())
     transport = FakeTransport()
+    terminal, receipt, receipt_authority = _review_admission("APPROVE")
 
     result = submit_contained_seat_pr_review(
         ContainedSeatReview(
@@ -425,10 +445,13 @@ def test_approve_allowed_for_independent_valid_envelope_and_permitting_mode(subs
             run_mode="strangeLoop",
             reviewer_authority_envelope=_reviewer_authority_envelope(),
             containment_substrate=substrate,
+            terminal=terminal,
+            receipt=receipt,
         ),
         binding=_binding(),
         minter=minter,
         transport=transport,
+        receipt_authority=receipt_authority,
     )
 
     assert result.applied is True
@@ -442,7 +465,7 @@ def test_approve_allowed_for_independent_valid_envelope_and_permitting_mode(subs
     assert minter.calls[0].repo == _REPO
     assert transport.calls[0].repo == _REPO
     assert json.loads(transport.calls[0].body or "") == {
-        "body": "Independent reviewer approval.",
+        "body": terminal.canonical_body,
         "commit_id": _HEAD,
         "event": "APPROVE",
     }
@@ -451,6 +474,7 @@ def test_approve_allowed_for_independent_valid_envelope_and_permitting_mode(subs
 def test_contained_seat_review_refuses_wall_secret_in_launch_context_before_mint():
     minter = FakeMinter(_token())
     transport = FakeTransport()
+    terminal, receipt, receipt_authority = _review_admission("COMMENT")
 
     with pytest.raises(CredentialProxyRefused) as exc:
         submit_contained_seat_pr_review(
@@ -461,11 +485,14 @@ def test_contained_seat_review_refuses_wall_secret_in_launch_context_before_mint
                 head_sha=_HEAD,
                 event="COMMENT",
                 body="not a wall-capable approval",
+                terminal=terminal,
+                receipt=receipt,
             ),
             binding=_binding(),
             minter=minter,
             worker_env={"CE_APPROVAL_CAPABILITY_SECRET": "wall-signing-secret"},
             transport=transport,
+            receipt_authority=receipt_authority,
         )
 
     assert "launch_context_secret_denied" in str(exc.value)

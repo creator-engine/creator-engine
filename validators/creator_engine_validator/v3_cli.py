@@ -104,6 +104,7 @@ from .forge import (
     delete_ruleset,
     upsert_ruleset,
 )
+from .forge.reviewer_terminal import ReviewerTerminalRefused, require_reviewed_terminal
 from .forge import approval_capability, controller_inbox, fleet_status, integrator_belt, seats_status
 from .forge.github_repo_config import ForgeConfigError
 from .runner import usage_tap
@@ -2002,6 +2003,34 @@ def _cmd_collect(args: argparse.Namespace) -> int:
              f"(run {run_id!r} carries no stamped change block to derive it from)"],
             {"error": "outcome_required", "run_id": run_id},
         )
+    review_terminal = None
+    review_target_pr: int | None = None
+    review_target_head: str | None = None
+    if outcome == "review_submitted":
+        if not args.review_terminal:
+            return _emit(args, 2, [f"{_BRAND} · collect refused: review_submitted requires --review-terminal"],
+                         {"error": "review_terminal_required", "run_id": run_id})
+        try:
+            # Reviewer venues carry their immutable target under ``review_of``;
+            # author runs carry it under the forge-stamped change block.  Do
+            # not lose the venue binding merely because it has no local change.
+            review_of = dispatch.get("review_of") or {}
+            envelope_target = v3_seat_bridge.reviewer_envelope_target(
+                str(review_of.get("envelope_ref") or "")
+            )
+            envelope_pr, envelope_head = envelope_target if envelope_target is not None else (None, None)
+            expected_pr = change_block.get("pr_number") or envelope_pr or review_of.get("pr_number") or args.pr
+            expected_head = change_block.get("head_sha") or envelope_head or args.head_sha
+            if expected_pr is None or not expected_head:
+                raise ReviewerTerminalRefused("review target binding is unavailable")
+            review_terminal = require_reviewed_terminal(
+                Path(args.review_terminal).read_text(encoding="utf-8"),
+                pr_number=int(expected_pr), head_sha=str(expected_head),
+            )
+            review_target_pr, review_target_head = int(expected_pr), str(expected_head)
+        except (OSError, ValueError, ReviewerTerminalRefused) as exc:
+            return _emit(args, 2, [f"{_BRAND} · collect refused: invalid reviewer terminal: {exc}"],
+                         {"error": "review_terminal_invalid", "run_id": run_id})
 
     # 2) Resolve the harness transcript by the stamped session id — never by guess (D6/F9).
     #    The mis-fold that metered the orchestrator on the #14/#21 chains is machine-blocked.
@@ -2021,13 +2050,14 @@ def _cmd_collect(args: argparse.Namespace) -> int:
             policy_sha=policy_sha, run_id_of=lambda _t: run_id,
         )
         unpriced = len(unpriced_turns)
+    review_of = dispatch.get("review_of") or {}
     change_set: dict[str, Any] = {
         "branch": args.branch or change_block.get("branch") or run_id,
         "base": args.base or change_block.get("base") or "main",
         "manifest_paths": list(args.manifest_paths or change_block.get("manifest_paths") or []),
-        "head_sha": args.head_sha or change_block.get("head_sha") or run_id,
+        "head_sha": args.head_sha or change_block.get("head_sha") or review_target_head or run_id,
     }
-    pr_number = args.pr if args.pr is not None else change_block.get("pr_number")
+    pr_number = args.pr if args.pr is not None else (change_block.get("pr_number") or review_target_pr or review_of.get("pr_number"))
     if pr_number is not None:
         change_set["pr_number"] = pr_number
     # F6: propagate the value-free base-only re-stamp anchor so `cev3 merge` can machine-prove a
@@ -2045,7 +2075,6 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         "outcome": outcome,
         "change_set": change_set,
     }
-
     # 4) Hash-chain the leaves then the terminal outcome; persist via the existing
     #    sink (refuses empty / non-uniform run_id / hash-broken / schema-invalid).
     chain: list[dict[str, Any]] = []
@@ -2070,6 +2099,12 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     #    D6/F9 transcript-source honesty marker (the schema'd spend leaves stay untouched).
     dispatch["collected_at"] = _utc_now_iso()
     dispatch["transcript_source"] = transcript_source
+    if review_terminal is not None:
+        # The v1 runtime-evidence schema intentionally has no reviewer-terminal
+        # extension point.  Preserve the parsed (not producer-asserted) state
+        # and digest in the collection dispatch rather than mislabelling a
+        # GitHub-review outcome as verified evidence or widening that schema.
+        dispatch["review_terminal"] = {"state": review_terminal.state, "digest": review_terminal.digest}
     _dispatch_path(root, run_id).write_text(
         yaml.safe_dump(dispatch, sort_keys=True, default_flow_style=False), encoding="utf-8"
     )
@@ -2086,7 +2121,8 @@ def _cmd_collect(args: argparse.Namespace) -> int:
          "outcome": outcome, "pr": pr_number, "evidence": str(receipt.path),
          "spend_leaves": len(ledger_bodies), "unpriced_turns": unpriced,
          "transcript_source": transcript_source,
-         "record_count": receipt.record_count},
+         "record_count": receipt.record_count,
+         **({"review_terminal": dict(dispatch["review_terminal"])} if review_terminal is not None else {})},
     )
 
 
@@ -4369,6 +4405,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_collect.add_argument("--outcome", default=None, choices=list(v3_seat_bridge.OUTCOME_VOCABULARY),
                            help="the conserved terminal outcome (defaults to pr_opened when the "
                                 "dispatch carries a forge-stamped change block; otherwise required)")
+    p_collect.add_argument("--review-terminal", default=None, dest="review_terminal",
+                           help="strict v2 reviewer terminal JSON; required for review_submitted")
     p_collect.add_argument("--pr", type=int, default=None, help="PR number (if the run opened one)")
     p_collect.add_argument("--branch", default=None, help="value-free change branch ref (default: run id / change block)")
     p_collect.add_argument("--base", default=None, help="value-free change base ref (default: main / change block)")

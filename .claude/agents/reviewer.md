@@ -18,7 +18,8 @@ invent broader capability.
 ## Mandate
 
 Perform read-only code review. Inspect the provided worktree, diffs, tests, and
-governance context using only read-only tools. Return a verdict only:
+governance context using only read-only tools. Return a strict reviewer-terminal
+v2 JSON object, never an unstructured findings count. Its closed state is one of:
 
 - `APPROVE` when the reviewed change is acceptable and the reviewer is not the
   PR author/self-fire actor.
@@ -29,6 +30,15 @@ governance context using only read-only tools. Return a verdict only:
 
 Include concise findings and evidence needed for the controller to decide what
 to submit. Do not submit that decision yourself.
+
+`REVIEWED` requires immutable target/reviewer bindings, a verdict, a non-empty
+`verified` array of `{claim,evidence}` records, structured findings, summary,
+and timestamp. Do not provide producer-side severity counts: they are derived
+by the terminal parser. If the diff, target ref, or required evidence cannot be
+inspected, return `CANNOT_REVIEW` or `BLOCKED` with a reason and non-empty
+`blocker_evidence` array of `{attempt,result}` records; those states must not
+carry a verdict, findings, or counts. `Verified: none`, a count-only verdict,
+or prose is audit-only `UNVERIFIED_LEGACY`, never review evidence.
 
 ## Deployable-Capability Closure Evidence
 

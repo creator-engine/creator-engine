@@ -1177,7 +1177,12 @@ def _classify_github_api_request(
         return None
     if method not in {"DELETE", "PATCH", "PUT", "POST"}:
         return None
-    if approve_event and _github_review_pr_number(path) is not None:
+    # A terminal receipt binds the exact JSON body, but this Ring-1 hook cannot
+    # safely inspect stdin/file/flag payload variants.  Therefore *every* raw
+    # review write is a restricted mechanic: callers must use the host-only
+    # receipt-bound submission path instead of trying to present an authority
+    # envelope to a shell command.
+    if _github_review_pr_number(path) is not None:
         return "pr_review"
     tail = _repo_path_tail(path)
     if tail is None:
@@ -1778,10 +1783,10 @@ def _authority_covers(envelope: Any, action: str, command: Any) -> bool:
     if str(rec.get("mechanic", "")).strip().lower() != action:
         return False
     if action == "pr_review":
-        if _is_raw_gh_api_review_approve(command) or _is_gh_pr_review_approve(command):
-            return False
-        pr = _extract_pr_number(command)
-        return pr is not None and pr == rec.get("pr_number")
+        # The envelope authorizes the controlled broker path, not a raw shell
+        # request whose body may be supplied through flags, stdin, or a file.
+        # No shell form can prove an exact parser-issued receipt binding.
+        return False
     return False
 
 

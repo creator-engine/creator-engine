@@ -22,6 +22,26 @@ REPO = "creator-engine/creator-engine"
 HEAD = "d" * 40
 
 
+class _ReceiptAuthority:
+    def consume(self, *args, **kwargs):
+        return None
+
+
+def _terminal(change):
+    return {
+        "version": 2, "state": "REVIEWED", "repository": change.repo,
+        "pr_number": change.pr_number, "head_sha": change.head_sha, "base": "main",
+        "range": "main...head", "reviewer": "reviewer", "author": "author",
+        "review_id": "test-dispatch", "verdict": "APPROVE",
+        "verified": [{"claim": "unit", "evidence": "fake runner"}], "findings": [],
+        "summary": "verified", "timestamp": "2026-07-21T00:00:00Z",
+    }
+
+
+def _review_args(change):
+    return {"terminal": _terminal(change), "receipt": {"test": True}, "receipt_authority": _ReceiptAuthority()}
+
+
 def _change(**overrides) -> ChangeRef:
     base = dict(
         repo=REPO,
@@ -54,7 +74,7 @@ class FakeReviewGh:
 
 def test_review_submit_plan_does_not_post():
     fake = FakeReviewGh()
-    result = submit_review(_change(), apply=False, gh_runner=fake)
+    change = _change(); result = submit_review(change, apply=False, gh_runner=fake, **_review_args(change))
     assert result.changed is True
     assert result.applied is False
     assert fake.calls == []
@@ -70,24 +90,24 @@ def test_review_submit_refuses_sec7_governed_context_before_call():
 
 def test_review_submit_allows_non_governed_context():
     fake = FakeReviewGh()
-    result = submit_review(_change(), apply=True, gh_runner=fake, sec7_context={"posture": "ungoverned"})
+    change = _change(); result = submit_review(change, apply=True, gh_runner=fake, sec7_context={"posture": "ungoverned"}, **_review_args(change))
     assert result.applied is True
     assert fake.calls
 
 
 def test_review_submit_apply_posts_approve_with_commit_id():
     fake = FakeReviewGh()
-    result = submit_review(_change(), apply=True, body="LGTM", gh_runner=fake)
+    change = _change(); result = submit_review(change, apply=True, gh_runner=fake, **_review_args(change))
     assert result.applied is True and result.review_id == 123
     argv, body = fake.calls[0]
     assert argv[:5] == ["gh", "api", "-X", "POST", f"repos/{REPO}/pulls/7/reviews"]
-    assert json.loads(body) == {"event": "APPROVE", "commit_id": HEAD, "body": "LGTM"}
+    assert json.loads(body)["event"] == "APPROVE" and json.loads(body)["commit_id"] == HEAD
 
 
 def test_review_submit_self_approve_422_fails_closed():
     fake = FakeReviewGh(rc=1, stderr="HTTP 422: Can not approve your own pull request")
     with pytest.raises(ForgeConfigError) as ei:
-        submit_review(_change(), apply=True, gh_runner=fake)
+        change = _change(); submit_review(change, apply=True, gh_runner=fake, **_review_args(change))
     assert "422" in str(ei.value)
 
 
@@ -98,17 +118,24 @@ def test_review_submit_refuses_malformed_before_call():
     assert fake.calls == []
 
 
+def test_review_submit_refuses_arbitrary_approve_body_before_runner():
+    fake = FakeReviewGh()
+    with pytest.raises(ReviewSubmitRefused, match="terminal admission"):
+        submit_review(_change(), apply=True, body="APPROVE: looks good", gh_runner=fake)
+    assert fake.calls == []
+
+
 def test_review_submit_error_redacts_token():
     token = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
     fake = FakeReviewGh(rc=1, stderr=f"Authorization: Bearer {token}")
     with pytest.raises(ForgeConfigError) as ei:
-        submit_review(_change(), apply=True, gh_runner=fake)
+        change = _change(); submit_review(change, apply=True, gh_runner=fake, **_review_args(change))
     assert token not in str(ei.value)
     assert "<redacted>" in str(ei.value)
 
 
 def test_review_result_carries_no_secret():
-    result = submit_review(_change(), gh_runner=FakeReviewGh())
+    change = _change(); result = submit_review(change, gh_runner=FakeReviewGh(), **_review_args(change))
     names = {f.name for f in fields(result)}
     assert "token" not in names and "value" not in names
 
@@ -119,7 +146,7 @@ def test_review_submit_zero_live(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", explode)
     monkeypatch.setattr(socket, "socket", explode)
-    result = submit_review(_change(), apply=True, gh_runner=FakeReviewGh())
+    change = _change(); result = submit_review(change, apply=True, gh_runner=FakeReviewGh(), **_review_args(change))
     assert result.applied is True
 
 
@@ -156,11 +183,13 @@ def test_submit_review_for_run_mints_reviewer_pull_requests_only(tmp_path):
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"id": 321}), stderr="")
 
     cfg = v3_forge_join.AppConfig("client", 42, "/pem", REPO, ())
+    change = _change(repo=REPO)
     result = v3_forge_join.submit_review_for_run(
         tmp_path,
         "run-1",
         reviewer_app_config=cfg,
         apply=True,
+        **_review_args(change),
         mint_gh_runner=mint_runner,
         token_spawn=token_spawn,
     )
