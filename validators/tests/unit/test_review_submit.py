@@ -125,6 +125,18 @@ def test_review_submit_refuses_arbitrary_approve_body_before_runner():
     assert fake.calls == []
 
 
+@pytest.mark.parametrize("fixture", [
+    "ce637_gate_review_refusal.md",
+    "ce637_gate_review_retry_refusal.md",
+])
+def test_real_ce637_refusal_fixtures_never_submit_before_runner(fixture):
+    fake = FakeReviewGh()
+    raw = (Path(__file__).parents[1] / "fixtures" / "ce639" / fixture).read_text(encoding="utf-8")
+    with pytest.raises(ReviewSubmitRefused, match="terminal admission"):
+        submit_review(_change(), apply=True, body=raw, gh_runner=fake)
+    assert fake.calls == []
+
+
 def test_review_submit_error_redacts_token():
     token = "ghs_leak_secret_0123456789ABCDEFGHIJKLMNOP"
     fake = FakeReviewGh(rc=1, stderr=f"Authorization: Bearer {token}")

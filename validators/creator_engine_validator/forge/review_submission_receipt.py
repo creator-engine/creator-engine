@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .reviewer_terminal import ReviewerTerminal, require_reviewed_terminal
+from .reviewer_terminal import ReviewerTerminal, ReviewerTerminalRefused, require_reviewed_terminal
 
 if TYPE_CHECKING:
     from ..secret_identity import SecretIdentityBackend, SecretRequest
@@ -62,7 +62,10 @@ class ReviewSubmissionReceiptAuthority:
     def issue(self, terminal: ReviewerTerminal | Mapping[str, Any] | str, *, ttl_seconds: int) -> ReviewSubmissionReceipt:
         if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or not 0 < ttl_seconds <= 300:
             raise ReviewReceiptRefused("receipt TTL must be positive and at most 300 seconds")
-        checked = require_reviewed_terminal(terminal)
+        try:
+            checked = require_reviewed_terminal(terminal)
+        except ReviewerTerminalRefused as exc:
+            raise ReviewReceiptRefused("review terminal is not receipt-eligible") from exc
         now = self._clock()
         key = self._key()
         record = checked.record
@@ -78,8 +81,11 @@ class ReviewSubmissionReceiptAuthority:
     def consume(self, receipt: ReviewSubmissionReceipt | Mapping[str, Any], *, terminal: ReviewerTerminal | Mapping[str, Any] | str,
                 repository: str, pr_number: int, head_sha: str, event: str) -> None:
         rec = _receipt(receipt)
-        checked = require_reviewed_terminal(terminal, repository=repository, pr_number=pr_number,
-                                            head_sha=head_sha, event=event)
+        try:
+            checked = require_reviewed_terminal(terminal, repository=repository, pr_number=pr_number,
+                                                head_sha=head_sha, event=event)
+        except ReviewerTerminalRefused as exc:
+            raise ReviewReceiptRefused("review terminal is not receipt-eligible") from exc
         now = self._clock()
         if rec.expires_at < now or rec.issued_at > now:
             raise ReviewReceiptRefused("receipt is expired or clock is invalid")

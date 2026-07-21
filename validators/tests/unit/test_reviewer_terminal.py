@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from creator_engine_validator.forge.reviewer_terminal import (
-    REVIEWED, UNVERIFIED_LEGACY, ReviewerTerminalRefused, parse_reviewer_terminal,
+    BLOCKED, REVIEWED, UNVERIFIED_LEGACY, ReviewerTerminalRefused, parse_reviewer_terminal,
     require_reviewed_terminal,
 )
+
+
+_FIXTURES = Path(__file__).parents[1] / "fixtures" / "ce639"
 
 
 def _terminal(**overrides):
@@ -34,6 +38,27 @@ def test_reviewed_empty_verified_is_refused():
         require_reviewed_terminal(_terminal(verified=[]))
 
 
+@pytest.mark.parametrize("invalid", [
+    _terminal(verified=[]),
+    {
+        **_terminal(state="BLOCKED", reason="branch unavailable",
+                    blocker_evidence=[{"attempt": "git fetch", "result": "ref missing"}]),
+        "counts": {"HIGH": 0, "MEDIUM": 0, "LOW": 0},
+    },
+])
+def test_malformed_v2_is_audit_visible_legacy_and_never_receipt_eligible(invalid):
+    if invalid["state"] == "BLOCKED":
+        for key in ("verdict", "verified", "findings", "summary"):
+            invalid.pop(key)
+    parsed = parse_reviewer_terminal(invalid)
+    assert parsed.state == UNVERIFIED_LEGACY
+    assert parsed.terminal is None
+    assert parsed.raw == invalid
+    assert parsed.rejection_diagnostic
+    with pytest.raises(ReviewerTerminalRefused):
+        require_reviewed_terminal(invalid)
+
+
 def test_blocked_with_counts_is_refused():
     blocked = _terminal(state="BLOCKED", reason="branch unavailable",
                         blocker_evidence=[{"attempt": "git fetch", "result": "ref missing"}])
@@ -53,6 +78,20 @@ def test_canonical_cannot_review_fixture_is_not_a_verdict():
     assert parsed.state == "CANNOT_REVIEW"
     with pytest.raises(ReviewerTerminalRefused):
         require_reviewed_terminal(json.dumps(refusal))
+
+
+@pytest.mark.parametrize("fixture", [
+    "ce637_gate_review_refusal.md",
+    "ce637_gate_review_retry_refusal.md",
+])
+def test_real_ce637_refusal_fixtures_are_refusal_arms_not_verdicts(fixture):
+    raw = (_FIXTURES / fixture).read_text(encoding="utf-8")
+    parsed = parse_reviewer_terminal(raw)
+    assert parsed.state == BLOCKED
+    assert parsed.terminal is None
+    assert parsed.raw == raw
+    with pytest.raises(ReviewerTerminalRefused):
+        require_reviewed_terminal(raw)
 
 
 def test_verified_none_and_count_only_prose_are_legacy_not_evidence():

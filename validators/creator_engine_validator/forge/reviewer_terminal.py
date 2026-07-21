@@ -60,6 +60,8 @@ class ParsedReviewerTerminal:
     state: str
     terminal: ReviewerTerminal | None = None
     reason: str = ""
+    raw: str | bytes | Mapping[str, Any] | None = None
+    rejection_diagnostic: str = ""
 
     @property
     def verified(self) -> bool:
@@ -67,19 +69,40 @@ class ParsedReviewerTerminal:
 
 
 def parse_reviewer_terminal(value: str | bytes | Mapping[str, Any]) -> ParsedReviewerTerminal:
-    """Parse a strict v2 terminal; non-v2 material is audit-only legacy.
+    """Parse a strict v2 terminal and retain every rejected input for audit.
 
-    Structurally malformed *v2* is refused rather than silently downgraded: a
-    producer claiming v2 has made an invalid security assertion.  Plain prose,
-    v1, and count-only output are legacy and are never promotable.
+    No rejected material is promoted into a :class:`ReviewerTerminal`: prose,
+    v1, malformed v2, and count-only output remain receipt-ineligible.  A
+    malformed producer assertion is still useful audit evidence, however, so
+    the original payload and a refusal diagnostic travel with its explicit
+    ``UNVERIFIED_LEGACY`` classification instead of being lost in an exception.
     """
-    raw = _load(value)
+    audit_raw = _audit_payload(value)
+    try:
+        raw = _load(value)
+    except ReviewerTerminalRefused as exc:
+        return _legacy(audit_raw, "invalid_json_structure", str(exc))
     if raw is None:
-        return ParsedReviewerTerminal(UNVERIFIED_LEGACY, reason="non_json_or_legacy")
+        # The two canonical 2026-07-20 artifacts are explicit refusal reports,
+        # not verdict prose.  They remain terminal-less and receipt-ineligible,
+        # but retain their refusal arm for audit/reporting rather than being
+        # mistaken for a completed review.
+        refusal_state = _explicit_refusal_state(audit_raw)
+        if refusal_state is not None:
+            return ParsedReviewerTerminal(
+                refusal_state,
+                reason="legacy_explicit_refusal",
+                raw=audit_raw,
+                rejection_diagnostic="refusal prose is not a v2 terminal and cannot be submitted",
+            )
+        return _legacy(audit_raw, "non_json_or_legacy", "input is not a v2 terminal")
     if raw.get("version") != 2:
-        return ParsedReviewerTerminal(UNVERIFIED_LEGACY, reason="non_v2")
-    terminal = _parse_v2(raw)
-    return ParsedReviewerTerminal(terminal.state, terminal)
+        return _legacy(audit_raw, "non_v2", "terminal version is not 2")
+    try:
+        terminal = _parse_v2(raw)
+    except ReviewerTerminalRefused as exc:
+        return _legacy(audit_raw, "invalid_v2", str(exc))
+    return ParsedReviewerTerminal(terminal.state, terminal, raw=audit_raw)
 
 
 def require_reviewed_terminal(
@@ -91,9 +114,10 @@ def require_reviewed_terminal(
     event: str | None = None,
 ) -> ReviewerTerminal:
     """Require a receipt-eligible REVIEWED terminal and exact request bindings."""
-    terminal = value if isinstance(value, ReviewerTerminal) else parse_reviewer_terminal(value).terminal
+    parsed = None if isinstance(value, ReviewerTerminal) else parse_reviewer_terminal(value)
+    terminal = value if isinstance(value, ReviewerTerminal) else parsed.terminal
     if terminal is None:
-        raise ReviewerTerminalRefused("review terminal is UNVERIFIED_LEGACY and cannot be submitted")
+        raise ReviewerTerminalRefused(f"review terminal is {parsed.state} and cannot be submitted")
     if terminal.state != REVIEWED:
         raise ReviewerTerminalRefused(f"review terminal state {terminal.state} is a refusal, not a verdict")
     rec = terminal.record
@@ -124,9 +148,39 @@ def _load(value: str | bytes | Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     try:
         obj = json.loads(value, object_pairs_hook=_no_duplicate_keys)
-    except (TypeError, ValueError):
+    except (TypeError, json.JSONDecodeError):
         return None
     return dict(obj) if isinstance(obj, Mapping) else None
+
+
+def _audit_payload(value: str | bytes | Mapping[str, Any]) -> str | bytes | Mapping[str, Any]:
+    """Preserve the supplied material without attempting to reinterpret it."""
+    if isinstance(value, Mapping):
+        return dict(value)
+    return value
+
+
+def _legacy(
+    raw: str | bytes | Mapping[str, Any], reason: str, diagnostic: str,
+) -> ParsedReviewerTerminal:
+    return ParsedReviewerTerminal(
+        UNVERIFIED_LEGACY, reason=reason, raw=raw, rejection_diagnostic=diagnostic,
+    )
+
+
+def _explicit_refusal_state(value: str | bytes | Mapping[str, Any]) -> str | None:
+    """Classify an explicit refusal report without treating it as review evidence.
+
+    This deliberately recognizes only the canonical, slash-delimited refusal
+    marker.  It yields no ``ReviewerTerminal`` and therefore cannot issue a
+    receipt; arbitrary verdict/count prose stays ``UNVERIFIED_LEGACY``.
+    """
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.upper().split())
+    if "BLOCKED / CANNOT_REVIEW" in normalized:
+        return BLOCKED
+    return None
 
 
 def _parse_v2(rec: dict[str, Any]) -> ReviewerTerminal:

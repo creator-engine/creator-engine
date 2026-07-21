@@ -5,11 +5,11 @@ fail-closed evidence admission change. It lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
-- **Declared work class:** S
+- **Declared work class:** M
 
-AUTHORIZED_PATHS_COUNT=26
+AUTHORIZED_PATHS_COUNT=28
 
-AUTHORIZED_PATHS_SHA256=0744872f1c3f02c1b3d027466ffe0bac1386d373ce58fa9cb488d4ba97da3def
+AUTHORIZED_PATHS_SHA256=7432e40fa9cf37cd9d7ec9466ffac876635e4bf7a01f3d46903760966a193e63
 
 ```text
 .ce/changelog/ce639-reviewer-terminal-v2.md
@@ -27,6 +27,8 @@ validators/creator_engine_validator/hook_check.py
 validators/creator_engine_validator/v3_cli.py
 validators/creator_engine_validator/v3_forge_join.py
 validators/creator_engine_validator/v3_seat_bridge.py
+validators/tests/fixtures/ce639/ce637_gate_review_refusal.md
+validators/tests/fixtures/ce639/ce637_gate_review_retry_refusal.md
 validators/tests/unit/test_claude_code_review_wrapper.py
 validators/tests/unit/test_cred_injection_proxy.py
 validators/tests/unit/test_egress_self_review_broker.py
