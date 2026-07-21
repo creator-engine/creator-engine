@@ -46,23 +46,34 @@ authenticated API call with:
 gh api user -i
 ```
 
-Durable recovery facts are the expiry header, the command's exit-code
-convention, and an authentication refusal or expiry indication. Do not diagnose
-those facts as a repository, package, or broker failure first.
+The script-absent durable contract is:
+
+- Exit `0` means every authentication call succeeded and no warning threshold
+  was crossed. `NOT-REPORTED` metadata may be probe-blind and is never health
+  evidence.
+- Exit `1` means credential expiry is at or under 21 days, inclusive; rotation
+  is required before lapse.
+- Exit `2` means the credential is rejected, missing, or expired. Treat the
+  approval identity as gate-down.
+
+When the expiry header is absent, including for classic PATs and some App
+tokens, the probe is blind for that credential. The Operator must verify expiry
+in the provider UI rather than infer health. Do not diagnose an authentication
+refusal or expiry indication as a repository, package, or broker failure first.
 
 ### Instrument
 
-Report the header and exit-code evidence to the Operator. The 21-day warning
-threshold calls for planned Operator attention; minting, replacement, or
-rotation remains Operator-only. Do not copy a token between roles or invent a
-credential fallback. Productizing the probe into versioned repository tooling
+Report the header and exit-code evidence to the Operator. Minting, replacement,
+or rotation remains Operator-only. Do not copy a token between roles or invent
+a credential fallback. Productizing the probe into versioned repository tooling
 is the tracked T5 exit condition.
 
 ### Verification
 
 After the Operator-provided replacement route completes, repeat the
-authenticated API call and confirm its expected exit-code convention, a live
-identity, and no exposed credential value.
+authenticated API call and confirm exit `0`, a live identity, and no exposed
+credential value. Where expiry is header-blind, retain the Operator's provider
+UI verification instead of treating `NOT-REPORTED` as evidence of health.
 
 ## 3. Missing or Crashed Egress Broker
 

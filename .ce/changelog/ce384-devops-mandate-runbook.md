@@ -20,3 +20,9 @@ The credential-expiry procedure now labels its liveness probe as interim
 controller-local scaffolding. Durable evidence is the authenticated API expiry
 header and exit-code convention; repository productization remains the tracked
 T5 exit condition, while credential minting stays Operator-only.
+
+The script-absent contract now defines exit `0` as successful, non-warning
+authentication; exit `1` as expiry at or under the 21-day threshold; and exit
+`2` as rejected, missing, or expired credentials. It also makes clear that
+header-blind credentials require provider-UI verification and that
+`NOT-REPORTED` is never health evidence.
