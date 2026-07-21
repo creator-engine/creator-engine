@@ -51,6 +51,9 @@ class TransportRequest:
     body: str | None = None
     contains_secret_material: bool = False
     approve_authority_checked: bool = False
+    # Set only by the trusted receipt consumer immediately before policy
+    # evaluation.  A review write is otherwise denied before credential mint.
+    review_receipt_checked: bool = False
 
 
 @dataclass(frozen=True)
@@ -375,6 +378,11 @@ def _review_event_allowed(
 ) -> CheckResult | None:
     if method != "POST" or not _REVIEW_POST_RE.match(path):
         return None
+    if not request.review_receipt_checked:
+        return CheckResult(
+            "review_receipt_allowed", False,
+            "review POST lacks a parser-issued exact-payload receipt",
+        )
     if request.body is None:
         return CheckResult(
             "review_event_allowed",

@@ -17,7 +17,10 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import tempfile
 from contextlib import contextmanager
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +29,8 @@ import pytest
 import ce_egress_self_review_broker as broker
 from egress_broker.config import SeatAppConfig, VaultSecretRef
 from egress_broker.minter import EgressSignerError, VaultKvConfig, make_signer_for_seat
+from creator_engine_validator.forge.review_submission_receipt import ReviewSubmissionReceiptAuthority
+from creator_engine_validator.forge.reviewer_terminal import require_reviewed_terminal
 
 # ---------------------------------------------------------------------------
 # Shared fixtures and helpers
@@ -458,12 +463,13 @@ class TestSubmitSelfReviewVaultRouting:
             }
         )
 
-    def test_secret_ref_seat_missing_env_refuses_fail_closed(self, monkeypatch):
+    def test_secret_ref_seat_missing_env_refuses_fail_closed(self, monkeypatch, tmp_path):
         """A secret_ref seat with missing vault env yields a SelfReviewRefused (never posts)."""
         for var in ("BAO_ADDR", "VAULT_ADDR", "BROKER_APPROLE_ROLE_ID", "BROKER_APPROLE_SECRET_ID"):
             monkeypatch.delenv(var, raising=False)
 
         spawned: list[object] = []
+        config = self._vault_config()
         request = broker.SelfReviewRequest(
             seat_id="dev-3",
             pr_number=7,
@@ -471,16 +477,54 @@ class TestSubmitSelfReviewVaultRouting:
             event="COMMENT",
             body="x",
         )
+        # Admission is deliberately satisfied so the test reaches the vault
+        # configuration guard. Receipt failure is tested separately below and
+        # must remain before any signer/mint/transport work.
+        terminal = require_reviewed_terminal({
+            "version": 2, "state": "REVIEWED", "repository": config.repo,
+            "pr_number": request.pr_number, "head_sha": request.head_sha,
+            "base": "main", "range": "main...head", "reviewer": "reviewer-1",
+            "author": "some-other-author", "review_id": "vault-fixture",
+            "verdict": request.event,
+            "verified": [{"claim": "vault refusal", "evidence": "unit fixture"}],
+            "findings": [], "summary": "reviewed", "timestamp": "2026-07-21T00:00:00Z",
+        })
+        authority = ReviewSubmissionReceiptAuthority(
+            state_root=Path(tempfile.mkdtemp(prefix="ce639-vault-", dir=tmp_path)) / "state",
+            key_supplier=lambda: b"k" * 32,
+        )
+        request = replace(
+            request, terminal=terminal, receipt=authority.issue(terminal, ttl_seconds=60),
+        )
         with pytest.raises(broker.SelfReviewRefused) as exc_info:
             broker.submit_self_review(
                 request,
-                config=self._vault_config(),
+                config=config,
                 resolve_id_fn=lambda seat: 1,
                 mint_fn=lambda req: None,
                 gh_spawn=lambda *a: spawned.append(a),
                 resolve_author_fn=lambda repo, pr: "some-other-author",
+                receipt_authority=authority,
             )
         assert spawned == []
         msg = str(exc_info.value)
         assert "BAO_ADDR" in msg
         assert _SECRET_ID not in msg
+
+    def test_secret_ref_seat_missing_receipt_refuses_before_vault(self, monkeypatch):
+        """Receipt admission remains the first fail-closed broker decision."""
+        for var in ("BAO_ADDR", "VAULT_ADDR", "BROKER_APPROLE_ROLE_ID", "BROKER_APPROLE_SECRET_ID"):
+            monkeypatch.delenv(var, raising=False)
+
+        request = broker.SelfReviewRequest(
+            seat_id="dev-3", pr_number=7, head_sha="a" * 40, event="COMMENT", body="x",
+        )
+        with pytest.raises(broker.SelfReviewRefused, match="parser-issued receipt authority and receipt"):
+            broker.submit_self_review(
+                request,
+                config=self._vault_config(),
+                resolve_id_fn=lambda seat: 1,
+                mint_fn=lambda req: None,
+                gh_spawn=lambda *args: None,
+                resolve_author_fn=lambda repo, pr: "some-other-author",
+            )

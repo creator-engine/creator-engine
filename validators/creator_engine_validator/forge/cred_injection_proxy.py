@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ._redact import redact_gh_stderr
@@ -22,6 +22,8 @@ from .credential_runner import authenticated_gh_runner
 from .github_repo_config import ForgeConfigRefused
 from .scoped_token import ScopedToken, TokenRequest
 from .transport_deputy_policy import Decision, TransportRequest, evaluate
+from .review_submission_receipt import ReviewSubmissionReceipt, ReviewSubmissionReceiptAuthority, ReviewReceiptRefused
+from .reviewer_terminal import ReviewerTerminal, ReviewerTerminalRefused, require_reviewed_terminal
 
 REVIEWER_VENUE_ONLY_CAPABILITY = "independent_review_venue"
 
@@ -140,6 +142,8 @@ class ContainedSeatReview:
     head_sha: str
     event: str
     body: str = ""
+    terminal: ReviewerTerminal | Mapping[str, Any] | str | None = None
+    receipt: ReviewSubmissionReceipt | Mapping[str, Any] | None = None
     role_profile: str = "reviewer"
     host: str = "api.github.com"
     run_mode: str | None = None
@@ -180,7 +184,27 @@ def dispatch_with_credential_injection(
     transport: TransportAdapter,
     evaluator: PolicyEvaluator = evaluate,
 ) -> ProxyDispatchResult:
-    """Evaluate, mint, inject, and dispatch one contained-agent transport request.
+    """Evaluate, mint, inject, and dispatch a non-review transport request.
+
+    A review write cannot use this generic public entry point.  It must first
+    pass through ``submit_contained_seat_pr_review``, which consumes the exact
+    single-use receipt before minting.  A caller-set boolean is not evidence.
+    """
+    return _dispatch_with_credential_injection(
+        dispatch, minter=minter, transport=transport, evaluator=evaluator,
+        review_receipt_consumed=False,
+    )
+
+
+def _dispatch_with_credential_injection(
+    dispatch: ContainedDispatch,
+    *,
+    minter: CredentialMinter,
+    transport: TransportAdapter,
+    evaluator: PolicyEvaluator,
+    review_receipt_consumed: bool,
+) -> ProxyDispatchResult:
+    """Internal dispatch after the dedicated review-admission seam.
 
     Ordering is load-bearing:
     1. evaluate policy against the token-free request facts;
@@ -190,6 +214,12 @@ def dispatch_with_credential_injection(
     4. inject the bearer only into the trusted outbound transport request.
     """
 
+    request = dispatch.request
+    if _is_review_post(request):
+        # Ignore a caller supplied flag; only this internal call receives the
+        # fact that the receipt consumer has completed successfully.
+        request = replace(request, review_receipt_checked=review_receipt_consumed)
+        dispatch = replace(dispatch, request=request)
     decision = evaluator(dispatch.request)
     audit = _base_audit(dispatch, decision)
     if not decision.allowed:
@@ -255,6 +285,7 @@ def submit_contained_seat_pr_review(
     transport: TransportAdapter | None = None,
     token_spawn: Any = None,
     evaluator: PolicyEvaluator = evaluate,
+    receipt_authority: ReviewSubmissionReceiptAuthority | None = None,
 ) -> ContainedSeatReviewResult:
     """Submit a governed seat PR review through the request-time proxy.
 
@@ -266,10 +297,24 @@ def submit_contained_seat_pr_review(
     """
 
     event = _validate_contained_review(review)
+    try:
+        terminal = require_reviewed_terminal(
+            review.terminal if review.terminal is not None else review.body,
+            repository=review.repo, pr_number=review.pr_number, head_sha=review.head_sha, event=event,
+        )
+    except ReviewerTerminalRefused as exc:
+        raise CredentialProxyRefused(f"review terminal admission refused: {exc}") from exc
+    if receipt_authority is None or review.receipt is None:
+        raise CredentialProxyRefused("review submission requires parser-issued receipt authority and receipt")
+    try:
+        receipt_authority.consume(
+            review.receipt, terminal=terminal, repository=review.repo, pr_number=review.pr_number,
+            head_sha=review.head_sha, event=event,
+        )
+    except ReviewReceiptRefused as exc:
+        raise CredentialProxyRefused(f"review submission receipt refused: {exc}") from exc
     approve_authority_checked = event == _APPROVE_EVENT
-    payload: dict[str, object] = {"event": event, "commit_id": review.head_sha}
-    if review.body:
-        payload["body"] = review.body
+    payload: dict[str, object] = {"event": event, "commit_id": review.head_sha, "body": terminal.canonical_body}
 
     request = TransportRequest(
         seat_id=review.seat_id,
@@ -283,10 +328,11 @@ def submit_contained_seat_pr_review(
         headers={"Accept": "application/vnd.github+json"},
         body=json.dumps(payload, sort_keys=True),
         approve_authority_checked=approve_authority_checked,
+        review_receipt_checked=True,
     )
     metadata = dict(durable_metadata or {})
     metadata.setdefault("contained_review_event", event)
-    result = dispatch_with_credential_injection(
+    result = _dispatch_with_credential_injection(
         ContainedDispatch(
             request=request,
             binding=binding,
@@ -297,6 +343,7 @@ def submit_contained_seat_pr_review(
         minter=minter,
         transport=transport or gh_api_transport_adapter(spawn=token_spawn),
         evaluator=evaluator,
+        review_receipt_consumed=True,
     )
     if not result.allowed:
         raise CredentialProxyRefused(
@@ -365,6 +412,14 @@ def _token_request(dispatch: ContainedDispatch) -> TokenRequest:
         secret_name=binding.secret_name,
         requested_ttl_seconds=binding.requested_ttl_seconds,
         escalation_authority=binding.escalation_authority,
+    )
+
+
+def _is_review_post(request: TransportRequest) -> bool:
+    return (
+        request.method.upper() == "POST"
+        and bool(request.repo)
+        and request.path.rstrip("/") == f"/repos/{request.repo}/pulls/{request.pr}/reviews"
     )
 
 

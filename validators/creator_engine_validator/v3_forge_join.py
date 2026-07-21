@@ -64,6 +64,8 @@ from .forge.auto_merge import AutoMergeResult, enable_auto_merge
 from .forge.merge import MergeResult, merge
 from .forge import re_review
 from .forge.review_submit import ReviewResult, submit_review
+from .forge.review_submission_receipt import ReviewSubmissionReceipt, ReviewSubmissionReceiptAuthority
+from .forge.reviewer_terminal import ReviewerTerminal, ReviewerTerminalRefused, require_reviewed_terminal
 from .forge.scoped_token import (
     ScopedToken,
     TokenRequest,
@@ -456,6 +458,9 @@ def submit_review_for_run(
     reviewer_app_config: AppConfig,
     apply: bool = False,
     body: str = "",
+    terminal: ReviewerTerminal | dict | str | None = None,
+    receipt: ReviewSubmissionReceipt | dict | None = None,
+    receipt_authority: ReviewSubmissionReceiptAuthority | None = None,
     mint_gh_runner: GhRunner | None = None,
     token_spawn: Any = None,
     sec7_context: object | None = None,
@@ -466,6 +471,17 @@ def submit_review_for_run(
         raise ForgeJoinRefused(refusal)
     root = Path(root)
     change, plan_ref = _change_from_dispatch(root, run_id, reviewer_app_config.repo)
+    # Admission precedes operation-token minting.  A v1/prose result must never
+    # cause a reviewer credential to be minted merely to discover it is invalid.
+    try:
+        require_reviewed_terminal(
+            terminal if terminal is not None else body, repository=change.repo,
+            pr_number=change.pr_number, head_sha=change.head_sha, event="APPROVE",
+        )
+    except ReviewerTerminalRefused as exc:
+        raise ForgeJoinRefused(f"review terminal admission refused: {exc}") from exc
+    if apply and (receipt is None or receipt_authority is None):
+        raise ForgeJoinRefused("review submission requires parser-issued receipt authority and receipt")
     token = mint_operation_token(
         reviewer_app_config,
         run_id=run_id,
@@ -484,6 +500,9 @@ def submit_review_for_run(
         return submit_review(
             change,
             body=body,
+            terminal=terminal,
+            receipt=receipt,
+            receipt_authority=receipt_authority,
             apply=apply,
             gh_runner=authenticated_gh_runner(token, spawn=token_spawn),
         )
@@ -1048,25 +1067,13 @@ def _restore_same_reviewer_base_only_approval(
     )
     if prior is None:
         return None
-    return submit_review(
-        ChangeRef(
-            repo=repo,
-            branch=branch,
-            base=base,
-            pr_number=pr_number,
-            head_sha=active_head,
-            manifest_paths=tuple(manifest_paths),
-            plan_ref="",
-            changed=True,
-            applied=True,
-            verified=True,
-        ),
-        body=(
-            f"Auto-restored prior approval after machine-proven base-only rebase "
-            f"from {prior.commit_id[:8]} to {active_head[:8]}."
-        ),
-        apply=True,
-        gh_runner=gh_runner,
+    # A prior GitHub approval proves only a historical decision.  It is not a
+    # v2 REVIEWED terminal for this active head and must never be re-emitted as
+    # arbitrary approval prose.  Preserve the fail-closed boundary: obtain a
+    # fresh inspected terminal + receipt through the review-submission path.
+    raise ForgeJoinRefused(
+        "base-only approval restoration requires a fresh v2 reviewer terminal and "
+        "single-use submission receipt; automatic prose restoration is refused"
     )
 
 

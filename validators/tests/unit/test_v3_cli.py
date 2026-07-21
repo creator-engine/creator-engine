@@ -3655,9 +3655,18 @@ def test_e2e_scope_to_pr_to_review_to_merge_to_report(tmp_path, capsys, monkeypa
     # 4) cev3 collect the REVIEW venue run (its own run, its own chain) — D6/F9 resolves the
     #    transcript by the venue's stamped harness session id (no --transcript guess).
     _stage_transcript(tmp_path, review_run_id, monkeypatch)
+    terminal_path = tmp_path / "review-terminal.json"
+    terminal_path.write_text(json.dumps({
+        "version": 2, "state": "REVIEWED", "repository": _G2_REPO, "pr_number": 7,
+        "head_sha": "d" * 40, "base": "main", "range": "main...head",
+        "reviewer": "ubuntuaws745-cmyk", "author": "author-runner", "review_id": review_run_id,
+        "verdict": "COMMENT", "verified": [{"claim": "e2e", "evidence": "fixture transcript"}],
+        "findings": [], "summary": "e2e review", "timestamp": "2026-07-21T00:00:00Z",
+    }), encoding="utf-8")
     assert v3_cli.main([
         "collect", "rate-limit-login", "--run", review_run_id,
-        "--outcome", "review_submitted", "--pr", "7", "--root", str(tmp_path)]) == 0
+        "--outcome", "review_submitted", "--pr", "7", "--review-terminal", str(terminal_path),
+        "--root", str(tmp_path)]) == 0
 
     # 5) cev3 collect the AUTHOR run — derives change_set + pr_opened FROM the stamped change block.
     _stage_transcript(tmp_path, run_id, monkeypatch)

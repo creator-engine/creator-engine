@@ -810,7 +810,7 @@ def test_merge_apply_base_only_restamps_then_merges_new_head(tmp_path):
     assert _spine.verify_chain(records) == []
 
 
-def test_merge_apply_base_only_restores_same_reviewer_approval_then_merges(tmp_path):
+def test_merge_apply_base_only_refuses_synthetic_prose_approval_restoration(tmp_path):
     paths = ["validators/x.py", CARRIER_PATH]
     run_id = _collected_author_run(tmp_path, base_sha=OLD_BASE, manifest_paths=paths)
     gh = FakeMergeGh(
@@ -828,13 +828,10 @@ def test_merge_apply_base_only_restores_same_reviewer_approval_then_merges(tmp_p
         tree_by_ref={NEW_HEAD: "a" * 40, "f" * 40: "a" * 40},
     )
 
-    result = merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
+    with pytest.raises(ForgeJoinRefused, match="fresh v2 reviewer terminal"):
+        merge_for_run(tmp_path, run_id, merge_gh_runner=gh, apply=True, git_runner=git)
 
-    assert result.merged is True
-    assert result.review_decision == "APPROVED"
-    assert len(gh.review_submissions) == 1
-    assert gh.review_submissions[0]["event"] == "APPROVE"
-    assert gh.review_submissions[0]["commit_id"] == NEW_HEAD
+    assert gh.review_submissions == []
 
 
 def test_merge_apply_base_only_wrong_reviewer_does_not_restore(tmp_path):

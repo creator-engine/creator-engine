@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .review_spawn_provider import ProviderPolicy
+from .reviewer_terminal import ReviewerTerminalRefused, require_reviewed_terminal
 
 from ..pickup_search import GhRunner
 
@@ -294,6 +295,21 @@ def _reviewer_verdict(output: str, ctx: ActingContext) -> str | None:
     must identify itself and supply authority for this exact repository, PR and
     head.  Anything malformed, stale, or self-assigned fails closed.
     """
+    # This is an advisory issue-comment path, not review-evidence admission.
+    # A v2 terminal is preferred; a legacy v1 envelope may still produce the
+    # *advisory comment only* for compatibility, but no caller receives a
+    # terminal/receipt from this function and it can never promote that output.
+    try:
+        terminal = require_reviewed_terminal(
+            output, repository=ctx.repo, pr_number=ctx.pr_number, head_sha=ctx.head_sha,
+        )
+    except ReviewerTerminalRefused:
+        terminal = None
+    if terminal is not None:
+        if terminal.record["reviewer"] != ctx.assigned_reviewer or terminal.record["reviewer"] == ctx.author:
+            return None
+        verdict = str(terminal.record["verdict"])
+        return verdict if verdict in {"COMMENT", "REQUEST_CHANGES"} else None
     try:
         evidence = json.loads(output)
     except (TypeError, ValueError):
@@ -303,29 +319,21 @@ def _reviewer_verdict(output: str, ctx: ActingContext) -> str | None:
     verdict = evidence.get("verdict")
     reviewer = str(evidence.get("reviewer") or "")
     authority = evidence.get("reviewer_authority")
-    # Dual-support transition: legacy evidence carries ``reviewer_authority``
-    # directly; M2 emits a versioned envelope with the same binding mapping.
     if authority is None and evidence.get("version") == 1:
         authority = evidence.get("authority")
     if verdict not in {"COMMENT", "REQUEST_CHANGES"} or not isinstance(authority, Mapping):
         return None
-    if not ctx.assigned_reviewer or not ctx.author or reviewer != ctx.assigned_reviewer:
-        return None
-    if reviewer == ctx.author:
-        return None
-    if str(authority.get("actor") or "") != ctx.assigned_reviewer:
+    if not ctx.assigned_reviewer or not ctx.author or reviewer != ctx.assigned_reviewer or reviewer == ctx.author:
         return None
     try:
         authority_pr = int(authority.get("pr_number"))
     except (TypeError, ValueError):
         return None
-    if (
-        str(authority.get("repo") or "") != ctx.repo
-        or authority_pr != ctx.pr_number
-        or str(authority.get("head_sha") or "") != ctx.head_sha
-    ):
+    if (str(authority.get("repo") or "") != ctx.repo or authority_pr != ctx.pr_number
+            or str(authority.get("head_sha") or "") != ctx.head_sha
+            or str(authority.get("actor") or "") != ctx.assigned_reviewer):
         return None
-    return verdict
+    return str(verdict)
 
 
 def _claim_state(records: Iterable[Mapping[str, Any]], ctx: ActingContext) -> _ClaimState:

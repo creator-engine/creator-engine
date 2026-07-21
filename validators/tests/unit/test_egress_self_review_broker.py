@@ -6,12 +6,15 @@ import subprocess
 import shutil
 import tempfile
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import ce_egress_self_review_broker as broker
 from creator_engine_validator.forge.scoped_token import ScopedToken, TokenRequest
+from creator_engine_validator.forge.review_submission_receipt import ReviewSubmissionReceiptAuthority
+from creator_engine_validator.forge.reviewer_terminal import require_reviewed_terminal
 from egress_broker.config import load_broker_config
 
 _REPO = "creator-engine/creator-engine"
@@ -77,6 +80,37 @@ def _payload(event="COMMENT", body="Looks reasonable."):
         "event": event,
         "body": body,
     }
+
+
+def _review_admission(request, repo):
+    terminal = require_reviewed_terminal({
+        "version": 2, "state": "REVIEWED", "repository": repo, "pr_number": request.pr_number,
+        "head_sha": request.head_sha, "base": "main", "range": "main...head", "reviewer": "reviewer-1",
+        "author": "author-1", "review_id": "broker-fixture", "verdict": request.event,
+        "verified": [{"claim": "broker path", "evidence": "fixture evidence"}], "findings": [],
+        "summary": "fixture reviewed", "timestamp": "2026-07-21T00:00:00Z",
+    })
+    authority = ReviewSubmissionReceiptAuthority(
+        state_root=Path(tempfile.mkdtemp(prefix="ce639-broker-")) / "state",
+        key_supplier=lambda: b"k" * 32,
+    )
+    return replace(request, terminal=terminal, receipt=authority.issue(terminal, ttl_seconds=60)), authority
+
+
+@pytest.fixture(autouse=True)
+def _migrate_legacy_submit_fixtures(monkeypatch):
+    """Existing broker cases exercise post-admission policy, not legacy prose."""
+    real_submit = broker.submit_self_review
+
+    def admitted_submit(request, *args, **kwargs):
+        if kwargs.get("receipt_authority") is None and request.event in {"COMMENT", "REQUEST_CHANGES", "APPROVE"}:
+            config = kwargs.get("config")
+            seat = config.seats[request.seat_id] if config is not None else None
+            request, authority = _review_admission(request, seat.repo if seat is not None else _REPO)
+            kwargs["receipt_authority"] = authority
+        return real_submit(request, *args, **kwargs)
+
+    monkeypatch.setattr(broker, "submit_self_review", admitted_submit)
 
 
 def _token(value=_SECRET, *, repo=_REPO):
@@ -172,11 +206,11 @@ def test_comment_review_mints_and_injects_token_only_into_gh_env(caplog):
 
     argv, input_text, child_env = spawned[0]
     assert argv == ["gh", "api", "-X", "POST", f"repos/{_REPO}/pulls/7/reviews", "--input", "-"]
-    assert json.loads(input_text or "") == {
-        "body": "Looks reasonable.",
-        "commit_id": _HEAD,
-        "event": "COMMENT",
-    }
+    payload = json.loads(input_text or "")
+    assert payload["commit_id"] == _HEAD and payload["event"] == "COMMENT"
+    canonical = json.loads(payload["body"])
+    assert canonical["state"] == "REVIEWED"
+    assert canonical["severity_counts"] == {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
     assert child_env["GH_TOKEN"] == _SECRET
 
     evidence = (

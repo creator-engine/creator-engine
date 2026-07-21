@@ -11,6 +11,8 @@ from ..sec7_forge_guard import sec7_forge_refusal
 from ._redact import redact_gh_stderr
 from .change import ChangeRef
 from .github_repo_config import ForgeConfigError, ForgeConfigRefused, GhRunner
+from .review_submission_receipt import ReviewSubmissionReceipt, ReviewSubmissionReceiptAuthority, ReviewReceiptRefused
+from .reviewer_terminal import ReviewerTerminal, ReviewerTerminalRefused, require_reviewed_terminal
 
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 
@@ -91,6 +93,9 @@ def submit_review(
     change: ChangeRef,
     *,
     body: str = "",
+    terminal: ReviewerTerminal | dict | str | None = None,
+    receipt: ReviewSubmissionReceipt | dict | None = None,
+    receipt_authority: ReviewSubmissionReceiptAuthority | None = None,
     apply: bool = False,
     gh_runner: GhRunner | None = None,
     sec7_context: object | None = None,
@@ -100,15 +105,32 @@ def submit_review(
     if refusal is not None:
         raise ReviewSubmitRefused(refusal)
     pr_number, head_sha = _validate(change)
+    # ``body`` remains a compatibility input only so old callers fail closed
+    # with a useful refusal.  It is never submitted verbatim.
+    candidate = terminal if terminal is not None else body
+    try:
+        admitted = require_reviewed_terminal(
+            candidate, repository=change.repo, pr_number=pr_number, head_sha=head_sha,
+            event="APPROVE",
+        )
+    except ReviewerTerminalRefused as exc:
+        raise ReviewSubmitRefused(f"review terminal admission refused: {exc}") from exc
     if not apply:
         return ReviewResult(
             repo=change.repo, pr_number=pr_number, head_sha=head_sha,
             event="APPROVE", changed=True, applied=False, review_id=None,
         )
+    if receipt is None or receipt_authority is None:
+        raise ReviewSubmitRefused("review submission requires a parser-issued receipt authority and receipt")
+    try:
+        receipt_authority.consume(
+            receipt, terminal=admitted, repository=change.repo, pr_number=pr_number,
+            head_sha=head_sha, event="APPROVE",
+        )
+    except ReviewReceiptRefused as exc:
+        raise ReviewSubmitRefused(f"review submission receipt refused: {exc}") from exc
     runner = gh_runner or _default_gh_runner
-    payload = {"event": "APPROVE", "commit_id": head_sha}
-    if body:
-        payload["body"] = body
+    payload = {"event": "APPROVE", "commit_id": head_sha, "body": admitted.canonical_body}
     code, parsed, stderr = _gh_api_method(
         runner, "POST", f"repos/{change.repo}/pulls/{pr_number}/reviews", payload
     )

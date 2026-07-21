@@ -82,6 +82,12 @@ from creator_engine_validator.forge.cred_injection_proxy import (  # noqa: E402
     validate_approve_authority,
 )
 from creator_engine_validator.forge.scoped_token import ScopedToken, TokenRequest  # noqa: E402
+from creator_engine_validator.forge.review_submission_receipt import (  # noqa: E402
+    ReviewSubmissionReceiptAuthority, ReviewReceiptRefused,
+)
+from creator_engine_validator.forge.reviewer_terminal import (  # noqa: E402
+    ReviewerTerminalRefused, require_reviewed_terminal,
+)
 from egress_broker.config import BrokerConfig, BrokerConfigError, SeatAppConfig, load_broker_config  # noqa: E402
 from egress_broker.host_broker import systemd_activated_unix_socket  # noqa: E402
 from egress_broker.minter import (  # noqa: E402
@@ -337,6 +343,8 @@ class SelfReviewRequest:
     head_sha: str
     event: str
     body: str = ""
+    terminal: Mapping[str, Any] | str | None = None
+    receipt: Mapping[str, Any] | None = None
     reviewer_authority_envelope: Mapping[str, Any] | None = None
     containment_substrate: str | None = None
 
@@ -391,6 +399,8 @@ def parse_request(payload: Mapping[str, Any], run_mode: str | None = None) -> Se
     if event not in _allowed_events(run_mode):
         raise SelfReviewRefused(_event_refusal_message(run_mode))
     body = str(payload.get("body") or "")
+    terminal = payload.get("terminal")
+    receipt = payload.get("receipt")
     reviewer_authority_envelope = _request_reviewer_authority_envelope(
         payload,
         allow_env_ref=event == "APPROVE",
@@ -416,6 +426,8 @@ def parse_request(payload: Mapping[str, Any], run_mode: str | None = None) -> Se
         head_sha=head_sha,
         event=event,
         body=body,
+        terminal=terminal if isinstance(terminal, (Mapping, str)) else None,
+        receipt=dict(receipt) if isinstance(receipt, Mapping) else None,
         reviewer_authority_envelope=reviewer_authority_envelope,
         containment_substrate=containment_substrate,
     )
@@ -522,6 +534,7 @@ def submit_self_review(
     mint_fn: Callable[[TokenRequest], ScopedToken] | None = None,
     resolve_author_fn: Callable[[str, int], str] | None = None,
     run_mode: str | None = None,
+    receipt_authority: ReviewSubmissionReceiptAuthority | None = None,
 ) -> SelfReviewResult:
     """Mint a scoped review credential and submit a governed PR review via ``gh api``.
 
@@ -545,6 +558,24 @@ def submit_self_review(
     except BrokerConfigError as exc:
         raise SelfReviewRefused(str(exc)) from exc
     seat_repo = seat.repo
+
+    # Receipt admission is before author lookup, signer selection, installation
+    # lookup, token minting, and transport.  A client cannot spend host-side
+    # authority merely by supplying free-form review prose.
+    if receipt_authority is None or request.receipt is None:
+        raise SelfReviewRefused("review submission requires parser-issued receipt authority and receipt")
+    try:
+        terminal = require_reviewed_terminal(
+            request.terminal if request.terminal is not None else request.body,
+            repository=seat_repo, pr_number=request.pr_number, head_sha=request.head_sha,
+            event=request.event,
+        )
+        receipt_authority.consume(
+            request.receipt, terminal=terminal, repository=seat_repo, pr_number=request.pr_number,
+            head_sha=request.head_sha, event=request.event,
+        )
+    except (ReviewerTerminalRefused, ReviewReceiptRefused) as exc:
+        raise SelfReviewRefused(f"review submission receipt refused: {exc}") from exc
 
     # Author≠reviewer guard. Positioned with the APPROVE refusal — BEFORE any
     # installation/credential minting or source-host write. The seat's review
@@ -630,7 +661,11 @@ def submit_self_review(
                 pr_number=request.pr_number,
                 head_sha=request.head_sha,
                 event=request.event,
-                body=request.body,
+                terminal=terminal,
+                body=terminal.canonical_body,
+                # The broker consumed the receipt before any identity or token
+                # operation; proxy still canonicalizes and marks policy context.
+                receipt=request.receipt,
                 run_mode=run_mode,
                 reviewer_authority_envelope=request.reviewer_authority_envelope,
                 containment_substrate=request.containment_substrate,
@@ -639,6 +674,7 @@ def submit_self_review(
             minter=mint_fn or _default_minter,
             durable_metadata={"broker": "ce_egress_self_review_broker"},
             token_spawn=gh_spawn,
+            receipt_authority=_already_consumed_receipt_authority(receipt_authority),
         )
     except CredentialProxyRefused as exc:
         raise SelfReviewRefused(str(exc)) from exc
@@ -661,6 +697,20 @@ def submit_self_review(
         result.review_id,
     )
     return result
+
+
+def _already_consumed_receipt_authority(authority: ReviewSubmissionReceiptAuthority) -> ReviewSubmissionReceiptAuthority:
+    """Adapt the broker's pre-mint consume to the proxy's defense-in-depth seam.
+
+    The proxy receives an authority whose consume rechecks no values because the
+    original authority's durable consume has already occurred.  This helper is
+    intentionally private to this host broker; direct proxy callers must supply
+    a normal authority and consume there.
+    """
+    class _ConsumedAuthority:
+        def consume(self, *args: Any, **kwargs: Any) -> None:
+            return None
+    return _ConsumedAuthority()  # type: ignore[return-value]
 
 
 def _read_bounded_from_socket(conn: socket.socket, *, max_bytes: int) -> bytes:

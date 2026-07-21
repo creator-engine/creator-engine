@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,8 @@ from creator_engine_validator.forge.cred_injection_proxy import (
     submit_contained_seat_pr_review,
 )
 from creator_engine_validator.forge.scoped_token import ScopedToken
+from creator_engine_validator.forge.review_submission_receipt import ReviewSubmissionReceiptAuthority
+from creator_engine_validator.forge.reviewer_terminal import require_reviewed_terminal
 from creator_engine_validator.forge.transport_deputy_policy import TransportRequest, evaluate
 
 
@@ -68,6 +72,20 @@ def _review(event: str) -> ContainedSeatReview:
         event=event,
         body="self-fire review body",
     )
+
+
+def _admit(review: ContainedSeatReview):
+    terminal = require_reviewed_terminal({
+        "version": 2, "state": "REVIEWED", "repository": review.repo, "pr_number": review.pr_number,
+        "head_sha": review.head_sha, "base": "main", "range": "main...head", "reviewer": "reviewer-1",
+        "author": "author-1", "review_id": "self-fire", "verdict": review.event,
+        "verified": [{"claim": "wrapper", "evidence": "fixture evidence"}], "findings": [],
+        "summary": "fixture reviewed", "timestamp": "2026-07-21T00:00:00Z",
+    })
+    authority = ReviewSubmissionReceiptAuthority(
+        state_root=Path(tempfile.mkdtemp(prefix="ce639-wrapper-")) / "state", key_supplier=lambda: b"k" * 32,
+    )
+    return replace(review, terminal=terminal, receipt=authority.issue(terminal, ttl_seconds=60)), authority
 
 
 def _reviewer_authority_envelope() -> dict[str, object]:
@@ -124,7 +142,8 @@ def test_code_review_command_posts_only_comment_or_request_changes() -> None:
     text = _text(COMMAND)
 
     assert '"event": "COMMENT | REQUEST_CHANGES"' in text
-    assert "gh api -X POST repos/<owner>/<repo>/pulls/<pr>/reviews --input -" in text
+    assert "receipt-bound review-submission" in text
+    assert "raw `gh api`" in text
     assert "anything other\n   than `COMMENT` or `REQUEST_CHANGES`" in text
     assert "convert that to `COMMENT`" in text
 
@@ -151,12 +170,14 @@ def test_self_fire_review_path_never_posts_approve_event() -> None:
         return {"id": 1000 + len(captured)}
 
     for event in ("COMMENT", "REQUEST_CHANGES"):
+        review, authority = _admit(_review(event))
         result = submit_contained_seat_pr_review(
-            _review(event),
+            review,
             binding=_binding(),
             minter=minter,
             transport=capture_transport,
             worker_argv=("gh", "api", "-X", "POST", f"repos/{REPO}/pulls/592/reviews", "--input", "-"),
+            receipt_authority=authority,
         )
         assert result.event == event
         assert result.applied is True
@@ -190,7 +211,7 @@ def test_self_fire_review_path_never_posts_approve_event() -> None:
     )
     assert raw_decision.allowed is False
     assert any(
-        check.name == "review_event_allowed" and not check.passed
+        check.name == "review_receipt_allowed" and not check.passed
         for check in raw_decision.checks
     )
 
