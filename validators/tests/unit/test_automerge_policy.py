@@ -871,6 +871,32 @@ def test_ref_name_base_resolution_failure_emits_no_coupling_snapshot() -> None:
     assert decision.to_payload()["coupling_obligations"] is None
 
 
+def test_immutable_base_sha_builds_snapshot_without_gh_runner() -> None:
+    def forbidden_runner(*_args, **_kwargs):
+        raise AssertionError("a 40-hex decision base must not require gh")
+
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="creator-engine/creator-engine",
+        branch="ce/live-pr-data",
+        base=BASE_SHA,
+        coupling_gh_runner=forbidden_runner,
+        **canary_identity(),
+    )
+
+    snapshot = decision.to_payload()["coupling_obligations"]
+    assert snapshot is not None
+    assert snapshot["subject"]["base_sha"] == BASE_SHA
+    assert snapshot["subject"]["base_provenance"] == "provided_sha"
+
+
 @pytest.mark.parametrize("declared_work_class", ["XS", "S", "tiny", "story"])
 def test_canary_work_class_aliases_are_accepted(declared_work_class: str) -> None:
     decision = decide_automerge(
@@ -1473,6 +1499,21 @@ def test_automerge_workflows_materialize_policy_before_validator_invocation() ->
     )
 
 
+def test_automerge_decision_workflow_emits_immutable_base_sha_for_all_subjects() -> None:
+    steps = _workflow_steps(REPO_ROOT / ".github/workflows/automerge-decide.yml")
+    resolve_step = next(step for step in steps if step.get("name") == "Resolve changed paths")
+    decide_step = next(step for step in steps if step.get("name") == "Run automerge decision")
+    resolve_run = resolve_step["run"]
+    decide_run = decide_step["run"]
+
+    # pull_request and merge_group each capture an immutable base SHA before
+    # the shared output emits it to the decision CLI.
+    assert 'base_sha="${PR_BASE_SHA}"' in resolve_run
+    assert 'base_sha="${MERGE_GROUP_BASE_SHA}"' in resolve_run
+    assert 'echo "base=${base_sha}"' in resolve_run
+    assert 'echo "base=${base_ref}"' not in resolve_run
+    assert decide_step["env"]["BASE"] == "${{ steps.inputs.outputs.base }}"
+    assert '--base "${BASE}"' in decide_run
 def _workflow_steps(path: Path) -> list[dict]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)

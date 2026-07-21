@@ -11,3 +11,6 @@
 - Coupling discovered: an AUTO decision needs an immutable base SHA and an
   obligation snapshot; a mutable base ref is advisory-only and cannot be used
   as pre-mutation coupling evidence.
+- The decision workflow now emits its already captured immutable base SHA for
+  both pull-request and merge-group subjects, avoiding a token-dependent base
+  ref resolution in the decision step while preserving the resolver fallback.
