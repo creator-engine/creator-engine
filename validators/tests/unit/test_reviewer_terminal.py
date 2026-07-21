@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from creator_engine_validator.forge.reviewer_terminal import (
-    BLOCKED, REVIEWED, UNVERIFIED_LEGACY, ReviewerTerminalRefused, parse_reviewer_terminal,
+    CANNOT_REVIEW, BLOCKED, REVIEWED, UNVERIFIED_LEGACY, ReviewerTerminalRefused, parse_reviewer_terminal,
     require_reviewed_terminal,
 )
 
 
 _FIXTURES = Path(__file__).parents[1] / "fixtures" / "ce639"
+_CE637_REFUSAL_SOURCE_SHA256 = {
+    "ce637_gate_review_refusal.md": "53475343b50e9d72e6ed73cdd20a7a348169235589d8447f1befe6144c4d37f2",
+    "ce637_gate_review_retry_refusal.md": "9ba240045c8b5a38b9f140f8410ecfd36dcc9a632ed89e666f833dfddb6c9d3c",
+}
 
 
 def _terminal(**overrides):
@@ -80,18 +85,25 @@ def test_canonical_cannot_review_fixture_is_not_a_verdict():
         require_reviewed_terminal(json.dumps(refusal))
 
 
-@pytest.mark.parametrize("fixture", [
-    "ce637_gate_review_refusal.md",
-    "ce637_gate_review_retry_refusal.md",
-])
-def test_real_ce637_refusal_fixtures_are_refusal_arms_not_verdicts(fixture):
-    raw = (_FIXTURES / fixture).read_text(encoding="utf-8")
+@pytest.mark.parametrize("fixture, source_sha256", _CE637_REFUSAL_SOURCE_SHA256.items())
+def test_real_ce637_refusal_fixtures_are_cannot_review_arms_not_verdicts(fixture, source_sha256):
+    raw_bytes = (_FIXTURES / fixture).read_bytes()
+    assert hashlib.sha256(raw_bytes).hexdigest() == source_sha256
+    raw = raw_bytes.decode("utf-8")
     parsed = parse_reviewer_terminal(raw)
-    assert parsed.state == BLOCKED
+    assert parsed.state == CANNOT_REVIEW
     assert parsed.terminal is None
     assert parsed.raw == raw
     with pytest.raises(ReviewerTerminalRefused):
         require_reviewed_terminal(raw)
+
+
+def test_generic_blocked_cannot_review_prose_remains_legacy():
+    parsed = parse_reviewer_terminal(
+        "BLOCKED / CANNOT_REVIEW — my unrelated local tool is unavailable."
+    )
+    assert parsed.state == UNVERIFIED_LEGACY
+    assert parsed.terminal is None
 
 
 def test_verified_none_and_count_only_prose_are_legacy_not_evidence():

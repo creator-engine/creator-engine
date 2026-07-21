@@ -171,15 +171,27 @@ def _legacy(
 def _explicit_refusal_state(value: str | bytes | Mapping[str, Any]) -> str | None:
     """Classify an explicit refusal report without treating it as review evidence.
 
-    This deliberately recognizes only the canonical, slash-delimited refusal
-    marker.  It yields no ``ReviewerTerminal`` and therefore cannot issue a
-    receipt; arbitrary verdict/count prose stays ``UNVERIFIED_LEGACY``.
+    This deliberately recognizes only the two canonical 2026-07-20
+    unavailable-inspection report forms: the slash-delimited marker plus the
+    target-unavailable or missing-inspectable-evidence reason quoted below.
+    It is an audit classification, not a prose-to-v2 promotion: it yields no
+    ``ReviewerTerminal`` and therefore cannot issue a receipt.  Generic,
+    malformed, or merely similarly worded refusal prose stays
+    ``UNVERIFIED_LEGACY``.
     """
     if not isinstance(value, str):
         return None
     normalized = " ".join(value.upper().split())
-    if "BLOCKED / CANNOT_REVIEW" in normalized:
-        return BLOCKED
+    canonical_reasons = (
+        "THE EXACT REQUESTED TARGET REF AND SHA ARE UNAVAILABLE.",
+        "REQUIRED EVIDENCE FOR THE ASSERTED APPROVED-AND-GREEN #1055 REPLAY "
+        "YIELDING RAW, BYTE-REPEATABLE `AUTO` IS NOT AVAILABLE IN THE CARRIER "
+        "OR LOCALLY INSPECTABLE REVIEW MATERIAL.",
+    )
+    if "BLOCKED / CANNOT_REVIEW" in normalized and any(
+        reason in normalized for reason in canonical_reasons
+    ):
+        return CANNOT_REVIEW
     return None
 
 

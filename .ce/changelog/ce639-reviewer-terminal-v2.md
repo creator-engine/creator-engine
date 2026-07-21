@@ -13,4 +13,5 @@ issue: ce-ops#639
 - Denies raw shell review writes and prevents synthetic prose approval restoration.
 - Retains malformed v2 material as audit-visible legacy data while keeping it
   receipt-ineligible, and preserves the two canonical CE637 refusal reports as
-  regression fixtures.
+  byte-verified regression fixtures.  Their unavailable-target/evidence
+  refusal form is audit-classified as `CANNOT_REVIEW`, never as review evidence.
