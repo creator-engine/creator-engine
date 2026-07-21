@@ -6,11 +6,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** M
 
-AUTHORIZED_PATHS_COUNT=12
+AUTHORIZED_PATHS_COUNT=13
 
-AUTHORIZED_PATHS_SHA256=494e27c7215c3e1737ceabb9f5d2d8569568b54dcf2ae42455c0811535238cca
+AUTHORIZED_PATHS_SHA256=6efacd2672501dc33b64b00368f0585df62f1ab5560c0014c338b257996aa676
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/t4-ci-migration-local-gates.md
 .ce/pr-manifests/t4-ci-migration-local-gates.md
 .ce/reference/cli.generated.md
