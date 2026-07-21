@@ -186,7 +186,7 @@ def _subject_from_inputs(
         "pr_number": pr_number,
         "url": pr_metadata.get("url"),
         "title": pr_metadata.get("title"),
-        "base_ref": decision.get("base") or pr_metadata.get("base_ref") or pr_metadata.get("baseRefName"),
+        "base_ref": pr_metadata.get("baseRefName") or pr_metadata.get("base_ref") or decision.get("base"),
         "head_ref": decision.get("branch")
         or pr_metadata.get("head_ref")
         or pr_metadata.get("headRefName"),

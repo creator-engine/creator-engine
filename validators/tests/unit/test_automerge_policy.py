@@ -13,6 +13,8 @@ import yaml
 from creator_engine_validator.checks.work_sizing_floor import ChangeStat
 from creator_engine_validator import brain_runtime
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
+from creator_engine_validator.forge.coupling_current_head import build_obligation_set
+from creator_engine_validator.forge.press_merge_evidence import _subject_from_inputs
 from creator_engine_validator.forge.automerge_policy import (
     AUTOMERGE_DECISION_AUTO,
     AUTOMERGE_DECISION_GESTURE,
@@ -43,6 +45,7 @@ from creator_engine_validator.work_sizing import size_ceremony
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REQUIRED_CHECK = "Validate governance artifacts"
 HEAD_SHA = "d" * 40
+BASE_SHA = "b" * 40
 POLICY_SHA = "a" * 64
 
 ALL_CLASSES = (
@@ -819,6 +822,82 @@ def test_decide_returns_auto_with_live_pr_data_when_policy_is_armed() -> None:
     assert decision.enabling_decision_ref == "ce-ops#291-test-enable"
 
 
+def test_ref_name_base_builds_a_provenanced_coupling_snapshot() -> None:
+    def base_resolver(argv, input_text=None):
+        assert argv[:3] == ["gh", "pr", "view"]
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"baseRefOid": "b" * 40}), stderr="")
+
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="creator-engine/creator-engine",
+        branch="ce/live-pr-data",
+        base="main",
+        coupling_gh_runner=base_resolver,
+        **canary_identity(),
+    )
+
+    snapshot = decision.to_payload()["coupling_obligations"]
+    assert snapshot is not None
+    assert snapshot["subject"]["base_sha"] == "b" * 40
+    assert snapshot["subject"]["base_provenance"] == "live_pr_view"
+
+
+def test_ref_name_base_resolution_failure_emits_no_coupling_snapshot() -> None:
+    def failed_resolver(argv, input_text=None):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="unavailable")
+
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="creator-engine/creator-engine",
+        branch="ce/live-pr-data",
+        base="main",
+        coupling_gh_runner=failed_resolver,
+        **canary_identity(),
+    )
+
+    assert decision.to_payload()["coupling_obligations"] is None
+
+
+def test_immutable_base_sha_builds_snapshot_without_gh_runner() -> None:
+    def forbidden_runner(*_args, **_kwargs):
+        raise AssertionError("a 40-hex decision base must not require gh")
+
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="creator-engine/creator-engine",
+        branch="ce/live-pr-data",
+        base=BASE_SHA,
+        coupling_gh_runner=forbidden_runner,
+        **canary_identity(),
+    )
+
+    snapshot = decision.to_payload()["coupling_obligations"]
+    assert snapshot is not None
+    assert snapshot["subject"]["base_sha"] == BASE_SHA
+    assert snapshot["subject"]["base_provenance"] == "provided_sha"
+
+
 @pytest.mark.parametrize("declared_work_class", ["XS", "S", "tiny", "story"])
 def test_canary_work_class_aliases_are_accepted(declared_work_class: str) -> None:
     decision = decide_automerge(
@@ -1118,6 +1197,15 @@ class FakeActuateGh:
             payload = [{"name": REQUIRED_CHECK, "conclusion": self.check_conclusion}]
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
         if argv[:3] == ["gh", "pr", "view"]:
+            if "headRefOid,baseRefOid,headRefName,state,isDraft" in argv:
+                payload = {
+                    "headRefOid": HEAD_SHA,
+                    "baseRefOid": BASE_SHA,
+                    "headRefName": "ce-arm-automerge-actuate",
+                    "state": "OPEN",
+                    "isDraft": False,
+                }
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
             payload = {
                 "author": {"login": "author-dev"},
                 "latestReviews": [
@@ -1125,6 +1213,8 @@ class FakeActuateGh:
                 ],
             }
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+        if argv[:3] == ["gh", "pr", "diff"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="README.md\n", stderr="")
 
         query = next((str(arg) for arg in argv if str(arg).startswith("query=")), "")
         if "enablePullRequestAutoMerge" in query:
@@ -1163,6 +1253,15 @@ class FakeActuateGh:
 
 
 def _strange_loop_decision(**overrides):
+    coupling_obligations = build_obligation_set(
+        repo="strange-loop/creator-engine",
+        pr_number=313,
+        base=BASE_SHA,
+        head=HEAD_SHA,
+        branch="ce-arm-automerge-actuate",
+        paths=["README.md"],
+    )
+    assert coupling_obligations is not None
     payload = {
         "class": "S",
         "size_band": "target_advisory",
@@ -1182,12 +1281,14 @@ def _strange_loop_decision(**overrides):
         "checks_green": True,
         "pr_number": 313,
         "head_sha": HEAD_SHA,
+        "base": BASE_SHA,
         "author_login": "author-dev",
         "approver_login": "reviewer-dev",
+        "coupling_obligations": coupling_obligations,
         "change": {
             "repo": "strange-loop/creator-engine",
             "branch": "ce-arm-automerge-actuate",
-            "base": "main",
+            "base": BASE_SHA,
             "pr_number": 313,
             "head_sha": HEAD_SHA,
             "manifest_paths": [".ce/pr-manifests/ce-arm-automerge-actuate.md"],
@@ -1297,14 +1398,14 @@ def test_materialized_decision_reaches_actuator_with_change_ref(
         head_sha=HEAD_SHA,
         repo="strange-loop/creator-engine",
         branch="ce-arm-automerge-actuate",
-        base="main",
+        base=BASE_SHA,
         **canary_identity(),
     )
     payload = decision.to_payload()
     assert payload["decision"] == AUTOMERGE_DECISION_AUTO
     assert payload["repo"] == "strange-loop/creator-engine"
     assert payload["branch"] == "ce-arm-automerge-actuate"
-    assert payload["base"] == "main"
+    assert payload["base"] == BASE_SHA
 
     gh = FakeActuateGh(check_conclusion="success")
     result = actuate_decision(_write_decision(tmp_path, payload), gh_runner=gh)
@@ -1397,6 +1498,32 @@ def test_automerge_workflows_materialize_policy_before_validator_invocation() ->
         actuate,
         later_step="Actuate if ready",
     )
+
+
+def test_automerge_decision_workflow_emits_immutable_base_sha_for_all_subjects() -> None:
+    steps = _workflow_steps(REPO_ROOT / ".github/workflows/automerge-decide.yml")
+    resolve_step = next(step for step in steps if step.get("name") == "Resolve changed paths")
+    decide_step = next(step for step in steps if step.get("name") == "Run automerge decision")
+    resolve_run = resolve_step["run"]
+    decide_run = decide_step["run"]
+
+    # pull_request and merge_group each capture an immutable base SHA before
+    # the shared output emits it to the decision CLI.
+    assert 'base_sha="${PR_BASE_SHA}"' in resolve_run
+    assert 'base_sha="${MERGE_GROUP_BASE_SHA}"' in resolve_run
+    assert 'echo "base=${base_sha}"' in resolve_run
+    assert 'echo "base=${base_ref}"' not in resolve_run
+    assert decide_step["env"]["BASE"] == "${{ steps.inputs.outputs.base }}"
+    assert '--base "${BASE}"' in decide_run
+
+
+def test_sha_decision_base_does_not_replace_live_press_merge_base_ref() -> None:
+    subject = _subject_from_inputs(
+        {"head_sha": HEAD_SHA, "base": "b" * 40},
+        {"baseRefName": "main", "headRefOid": HEAD_SHA},
+    )
+
+    assert subject["base_ref"] == "main"
 
 
 def _workflow_steps(path: Path) -> list[dict]:

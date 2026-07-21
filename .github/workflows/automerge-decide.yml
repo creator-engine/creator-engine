@@ -326,7 +326,7 @@ jobs:
             echo "pr-number=${pr_number}"
             echo "head-sha=${head_sha}"
             echo "branch=${branch}"
-            echo "base=${base_ref}"
+            echo "base=${base_sha}"
             echo "review-decision=${review_decision}"
             echo "author-login=${author_login}"
             echo "approver-login=${approver_login}"
