@@ -71,6 +71,10 @@ There is no `ce dev` command in the v1.0 public CLI.
 | `ce takeover` | Produce a read-only controller-continuity takeover plan and evidence packet. |
 | `ce continuity-drill` | Run the scheduled benign controller-continuity drill proof. |
 | `ce checkpoint` | Save a validated resume point at a clean handoff, so the next session can continue with clear, trustworthy context. |
+| `ce preflight-gate` | Run one focused repository invariant that is also used by the local PR preflight. |
+| `ce preflight-gate brain-current-tail` | Prove a changed brain ledger still appends from the live base tail. |
+| `ce preflight-gate brain-append-intent-xor` | Refuse a change that mixes append intent with direct brain-ledger edits. |
+| `ce preflight-gate fleet-manifest` | Validate fleet manifests and reject CE-internal identifiers. |
 
 ## Queue And Coordination
 

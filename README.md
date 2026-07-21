@@ -84,6 +84,7 @@ ce shape         Describe and refine a proposed change
 ce scope         Save the agreed change details
 ce drive --spawn Ask CE to start the implementation work
 ce report        Read the resulting work and check summary
+ce preflight-gate Run one focused repository preflight invariant
 ```
 
 See the [CLI Reference](./docs/reference/cli.md) for every command and option.
