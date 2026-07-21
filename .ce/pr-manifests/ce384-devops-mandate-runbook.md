@@ -1,7 +1,8 @@
 # PR path manifest — ce-ops#384 · CE DevOps agent mandate and recovery runbook seed
 
 This per-PR carrier lists the complete authorized path-set for the CE DevOps
-mandate and recovery-runbook seed. It lists itself.
+mandate and recovery-runbook seed, including its FACE Medium credential-probe
+framing correction. It lists itself.
 
 Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 

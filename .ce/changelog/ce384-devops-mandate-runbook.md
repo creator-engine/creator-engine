@@ -15,3 +15,8 @@ The change also records the public-docs coupling: each net-new operations
 document requires its own exact registration in the public-docs exception
 ratchet in the same change. This preserves the current fail-closed boundary and
 makes the coupling available for a future dedicated gate.
+
+The credential-expiry procedure now labels its liveness probe as interim
+controller-local scaffolding. Durable evidence is the authenticated API expiry
+header and exit-code convention; repository productization remains the tracked
+T5 exit condition, while credential minting stays Operator-only.

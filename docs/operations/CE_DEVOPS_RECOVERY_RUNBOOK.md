@@ -38,27 +38,31 @@ change.
 
 ### Diagnostic
 
-Run the token-liveness probe maintained at the controller state root. Observe
-the response headers with:
+The token-liveness probe is interim controller-local scaffolding, not versioned
+repository tooling. Observe the headers and exit-code convention of an
+authenticated API call with:
 
 ```bash
 gh api user -i
 ```
 
-Treat an expiry indication or an authentication refusal as credential evidence;
-do not diagnose it as a repository, package, or broker failure first.
+Durable recovery facts are the expiry header, the command's exit-code
+convention, and an authentication refusal or expiry indication. Do not diagnose
+those facts as a repository, package, or broker failure first.
 
 ### Instrument
 
-Report the liveness and header evidence to the Operator. Minting, replacement,
-or rotation is Operator-only. Do not copy a token between roles or invent a
-credential fallback.
+Report the header and exit-code evidence to the Operator. The 21-day warning
+threshold calls for planned Operator attention; minting, replacement, or
+rotation remains Operator-only. Do not copy a token between roles or invent a
+credential fallback. Productizing the probe into versioned repository tooling
+is the tracked T5 exit condition.
 
 ### Verification
 
-After the Operator-provided replacement route completes, repeat the liveness
-probe and `gh api user -i`; both must show a live authenticated identity without
-exposing a credential value.
+After the Operator-provided replacement route completes, repeat the
+authenticated API call and confirm its expected exit-code convention, a live
+identity, and no exposed credential value.
 
 ## 3. Missing or Crashed Egress Broker
 
