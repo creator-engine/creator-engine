@@ -14,3 +14,5 @@
 - The decision workflow now emits its already captured immutable base SHA for
   both pull-request and merge-group subjects, avoiding a token-dependent base
   ref resolution in the decision step while preserving the resolver fallback.
+- Press-merge evidence now preserves the live PR base ref when the decision
+  payload correctly carries an immutable base SHA.

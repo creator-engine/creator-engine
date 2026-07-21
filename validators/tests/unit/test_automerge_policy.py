@@ -14,6 +14,7 @@ from creator_engine_validator.checks.work_sizing_floor import ChangeStat
 from creator_engine_validator import brain_runtime
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.coupling_current_head import build_obligation_set
+from creator_engine_validator.forge.press_merge_evidence import _subject_from_inputs
 from creator_engine_validator.forge.automerge_policy import (
     AUTOMERGE_DECISION_AUTO,
     AUTOMERGE_DECISION_GESTURE,
@@ -1514,6 +1515,17 @@ def test_automerge_decision_workflow_emits_immutable_base_sha_for_all_subjects()
     assert 'echo "base=${base_ref}"' not in resolve_run
     assert decide_step["env"]["BASE"] == "${{ steps.inputs.outputs.base }}"
     assert '--base "${BASE}"' in decide_run
+
+
+def test_sha_decision_base_does_not_replace_live_press_merge_base_ref() -> None:
+    subject = _subject_from_inputs(
+        {"head_sha": HEAD_SHA, "base": "b" * 40},
+        {"baseRefName": "main", "headRefOid": HEAD_SHA},
+    )
+
+    assert subject["base_ref"] == "main"
+
+
 def _workflow_steps(path: Path) -> list[dict]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
