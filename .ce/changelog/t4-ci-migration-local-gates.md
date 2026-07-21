@@ -14,3 +14,5 @@ scope: ci/validate
   the existing preflight implementations.
 - Cover the `preflight-gate` parser, dispatch, failure, and unsupported-command
   behavior at the CLI layer.
+- Regenerate the checked CLI reference so the new `preflight-gate` command
+  surface remains byte-synchronized with the argparse tree.
