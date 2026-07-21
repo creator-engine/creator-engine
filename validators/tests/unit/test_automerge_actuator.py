@@ -19,9 +19,11 @@ from creator_engine_validator.forge.automerge_policy import (
 )
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
 from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
+from creator_engine_validator.forge.coupling_current_head import build_obligation_set
 
 _REPO = "creator-engine/creator-engine"
 _HEAD = "d" * 40
+_BASE = "b" * 40
 _POLICY_SHA = "a" * 64
 BRAIN_SUPERSEDE_PATHS = [
     ".ce/brain/assertions.yaml",
@@ -38,8 +40,9 @@ DOCS_ENVELOPE_PATHS = [
 
 
 class FakeActuatorGh:
-    def __init__(self, *, check_conclusion: str = "success") -> None:
+    def __init__(self, *, check_conclusion: str = "success", live_head: str = _HEAD) -> None:
         self.check_conclusion = check_conclusion
+        self.live_head = live_head
         self.calls: list[list[str]] = []
 
     def __call__(self, argv, input_text=None):
@@ -48,6 +51,13 @@ class FakeActuatorGh:
             payload = [{"name": "validate", "conclusion": self.check_conclusion}]
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
         if argv[:3] == ["gh", "pr", "view"]:
+            if "headRefOid,baseRefOid,headRefName" in argv:
+                payload = {
+                    "headRefOid": self.live_head,
+                    "baseRefOid": _BASE,
+                    "headRefName": "ce-automerge-actuator",
+                }
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
             payload = {
                 "author": {"login": "author-dev"},
                 "latestReviews": [
@@ -55,6 +65,8 @@ class FakeActuatorGh:
                 ],
             }
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+        if argv[:3] == ["gh", "pr", "diff"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="README.md\n", stderr="")
 
         query = next((str(arg) for arg in argv if str(arg).startswith("query=")), "")
         if "enablePullRequestAutoMerge" in query:
@@ -93,6 +105,15 @@ class FakeActuatorGh:
 
 
 def _decision(**overrides):
+    coupling_obligations = build_obligation_set(
+        repo=_REPO,
+        pr_number=313,
+        base=_BASE,
+        head=_HEAD,
+        branch="ce-automerge-actuator",
+        paths=["README.md"],
+    )
+    assert coupling_obligations is not None
     payload = {
         "class": "XS",
         "size_band": "target_advisory",
@@ -117,12 +138,14 @@ def _decision(**overrides):
         "checks_green": True,
         "pr_number": 313,
         "head_sha": _HEAD,
+        "base": _BASE,
         "author_login": "author-dev",
         "approver_login": "reviewer-dev",
+        "coupling_obligations": coupling_obligations,
         "change": {
             "repo": _REPO,
             "branch": "ce-automerge-actuator",
-            "base": "main",
+            "base": _BASE,
             "pr_number": 313,
             "head_sha": _HEAD,
             "manifest_paths": [".ce/pr-manifests/ce-automerge-actuator.md"],
@@ -345,6 +368,19 @@ def test_actuates_only_when_all_green(tmp_path: Path, monkeypatch: pytest.Monkey
     assert result.audit_record["author_login"] == "author-dev"
     assert result.audit_record["approver_login"] == "reviewer-dev"
     assert result.audit_record["reviewer_venue"] == "reviewer-dev"
+
+
+def test_refuses_a_new_live_head_before_auto_merge_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch)
+    gh = FakeActuatorGh(live_head="e" * 40)
+
+    result = actuate_if_ready(_write(tmp_path, _decision()), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason.startswith("coupling_current_head_drift:subject_drift:")
+    assert gh.mutation_calls() == []
 
 
 @pytest.mark.parametrize("work_class", ["XS", "S", "tiny", "story"])

@@ -25,6 +25,7 @@ from .mutation_classifier import (
     default_mutation_policy,
     mutation_class_for_paths,
 )
+from .coupling_current_head import build_obligation_set
 
 AUTOMERGE_DECISION_AUTO: Final[str] = "AUTO"
 AUTOMERGE_DECISION_GESTURE: Final[str] = "GESTURE"
@@ -248,6 +249,7 @@ class AutoMergeDecision:
     approver_login: str | None = None
     ledger_evidence: Mapping[str, Any] | None = None
     ledger_inputs: Mapping[str, Any] | None = None
+    coupling_obligations: Mapping[str, Any] | None = None
 
     @property
     def is_auto(self) -> bool:
@@ -293,6 +295,7 @@ class AutoMergeDecision:
             "approver_login": self.approver_login,
             "ledger_evidence": _jsonable(self.ledger_evidence),
             "ledger_inputs": _jsonable(self.ledger_inputs),
+            "coupling_obligations": _jsonable(self.coupling_obligations),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -498,6 +501,14 @@ def decide_automerge(
     tier_flag = _tier_flag_for_decision(resolved_state, tier, mutation_class)
     ledger_evidence: Mapping[str, Any] | None = None
     ledger_inputs: Mapping[str, Any] | None = None
+    coupling_obligations = build_obligation_set(
+        repo=repo,
+        pr_number=pr_number,
+        base=base,
+        head=head_sha,
+        branch=branch,
+        paths=resolved_paths,
+    )
     brain_predicate_reason: str | None = None
     if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
         ledger_pair = _resolve_brain_ledger_pair(
@@ -634,6 +645,7 @@ def decide_automerge(
             tier_flag,
             ledger_evidence,
             ledger_inputs,
+            coupling_obligations,
         )
 
     if mutation_class not in AUTO_CLASSES and tier != AUTOMERGE_TIER_BRAIN_SUPERSEDE:
@@ -663,6 +675,7 @@ def decide_automerge(
             tier_flag,
             ledger_evidence,
             ledger_inputs,
+            coupling_obligations,
         )
 
     rationale.append("all_auto_guards_passed")
@@ -691,6 +704,7 @@ def decide_automerge(
         tier_flag,
         ledger_evidence,
         ledger_inputs,
+        coupling_obligations,
     )
 
 
@@ -776,6 +790,7 @@ def _decision(
     tier_flag: bool | None,
     ledger_evidence: Mapping[str, Any] | None = None,
     ledger_inputs: Mapping[str, Any] | None = None,
+    coupling_obligations: Mapping[str, Any] | None = None,
 ) -> AutoMergeDecision:
     return AutoMergeDecision(
         decision=decision,
@@ -820,6 +835,7 @@ def _decision(
         approver_login=_non_empty_string_or_none(approver_login),
         ledger_evidence=ledger_evidence,
         ledger_inputs=ledger_inputs,
+        coupling_obligations=_jsonable(coupling_obligations),
     )
 
 

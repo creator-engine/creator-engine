@@ -24,6 +24,7 @@ from .automerge_policy import (
     load_automerge_policy_state,
 )
 from .mutation_classifier import AUTO_CLASSES, mutation_class_for_paths
+from .coupling_current_head import verify_live_current_head
 
 _AUTO_DECISION = "AUTO"
 _ARMING_RUN_MODES = AUTOMERGE_ARMING_RUN_MODES
@@ -146,6 +147,16 @@ def actuate_if_ready(decision_path, *, gh_runner) -> ActuationResult:
         return _with_payload_audit(live, payload)
     if not live:
         return _refuse("required_checks_not_green", payload, live_run_mode=live_policy.run_mode)
+
+    # This is deliberately the final read-only predicate before mutation.  A
+    # decision-time snapshot is not authority: a newer PR head/base/path set
+    # must produce a fresh decision rather than reuse an earlier green result.
+    coupling = verify_live_current_head(payload.get("coupling_obligations"), gh_runner=gh_runner)
+    if not coupling.passed:
+        reason = f"coupling_current_head_{coupling.status.lower()}:{coupling.reason}"
+        if coupling.drifted_kinds:
+            reason += f":{','.join(coupling.drifted_kinds)}"
+        return _refuse(reason, payload, live_run_mode=live_policy.run_mode)
 
     try:
         result = _enable_auto_merge(change, gh_runner)
