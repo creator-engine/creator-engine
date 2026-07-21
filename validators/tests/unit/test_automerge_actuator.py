@@ -51,11 +51,13 @@ class FakeActuatorGh:
             payload = [{"name": "validate", "conclusion": self.check_conclusion}]
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
         if argv[:3] == ["gh", "pr", "view"]:
-            if "headRefOid,baseRefOid,headRefName" in argv:
+            if "headRefOid,baseRefOid,headRefName,state,isDraft" in argv:
                 payload = {
                     "headRefOid": self.live_head,
                     "baseRefOid": _BASE,
                     "headRefName": "ce-automerge-actuator",
+                    "state": "OPEN",
+                    "isDraft": False,
                 }
                 return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
             payload = {
@@ -380,6 +382,21 @@ def test_refuses_a_new_live_head_before_auto_merge_mutation(
 
     assert result.refused is True
     assert result.reason.startswith("coupling_current_head_drift:subject_drift:")
+    assert gh.mutation_calls() == []
+
+
+def test_missing_coupling_snapshot_refuses_before_auto_merge_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_live_policy(tmp_path, monkeypatch)
+    gh = FakeActuatorGh()
+    payload = _decision()
+    del payload["coupling_obligations"]
+
+    result = actuate_if_ready(_write(tmp_path, payload), gh_runner=gh)
+
+    assert result.refused is True
+    assert result.reason == "coupling_current_head_indeterminate:obligation_set_invalid"
     assert gh.mutation_calls() == []
 
 

@@ -821,6 +821,56 @@ def test_decide_returns_auto_with_live_pr_data_when_policy_is_armed() -> None:
     assert decision.enabling_decision_ref == "ce-ops#291-test-enable"
 
 
+def test_ref_name_base_builds_a_provenanced_coupling_snapshot() -> None:
+    def base_resolver(argv, input_text=None):
+        assert argv[:3] == ["gh", "pr", "view"]
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"baseRefOid": "b" * 40}), stderr="")
+
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="creator-engine/creator-engine",
+        branch="ce/live-pr-data",
+        base="main",
+        coupling_gh_runner=base_resolver,
+        **canary_identity(),
+    )
+
+    snapshot = decision.to_payload()["coupling_obligations"]
+    assert snapshot is not None
+    assert snapshot["subject"]["base_sha"] == "b" * 40
+    assert snapshot["subject"]["base_provenance"] == "live_pr_view"
+
+
+def test_ref_name_base_resolution_failure_emits_no_coupling_snapshot() -> None:
+    def failed_resolver(argv, input_text=None):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="unavailable")
+
+    decision = decide_automerge(
+        numstat=numstat_for(["README.md"]),
+        paths=["README.md"],
+        declared_work_class="S",
+        policy_state=state_with_flags("docs", run_mode="ceo"),
+        checks=LIVE_GREEN_CHECKS,
+        review_decision="APPROVED",
+        pr_number=313,
+        head_sha=HEAD_SHA,
+        repo="creator-engine/creator-engine",
+        branch="ce/live-pr-data",
+        base="main",
+        coupling_gh_runner=failed_resolver,
+        **canary_identity(),
+    )
+
+    assert decision.to_payload()["coupling_obligations"] is None
+
+
 @pytest.mark.parametrize("declared_work_class", ["XS", "S", "tiny", "story"])
 def test_canary_work_class_aliases_are_accepted(declared_work_class: str) -> None:
     decision = decide_automerge(
@@ -1120,11 +1170,13 @@ class FakeActuateGh:
             payload = [{"name": REQUIRED_CHECK, "conclusion": self.check_conclusion}]
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
         if argv[:3] == ["gh", "pr", "view"]:
-            if "headRefOid,baseRefOid,headRefName" in argv:
+            if "headRefOid,baseRefOid,headRefName,state,isDraft" in argv:
                 payload = {
                     "headRefOid": HEAD_SHA,
                     "baseRefOid": BASE_SHA,
                     "headRefName": "ce-arm-automerge-actuate",
+                    "state": "OPEN",
+                    "isDraft": False,
                 }
                 return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
             payload = {

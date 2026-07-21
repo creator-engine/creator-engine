@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
@@ -19,6 +20,7 @@ COUPLING_GATE_ID: Final[str] = "ce.coupling-current-head"
 COUPLING_GATE_VERSION: Final[int] = 1
 _SHA_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
 _REPO_RE: Final[re.Pattern[str]] = re.compile(r"^[^/\s]+/[^/\s]+$")
+_BASE_PROVENANCE: Final[frozenset[str]] = frozenset({"provided_sha", "live_pr_view"})
 
 # These are seed *kinds*, rather than a closed list of paths.  Each obligation
 # binds the exact target head and deterministic subject projection; individual
@@ -62,12 +64,13 @@ def build_obligation_set(
     head: str | None,
     branch: str | None,
     paths: Sequence[str] | None,
+    base_provenance: str = "provided_sha",
 ) -> dict[str, Any] | None:
     """Build a deterministic decision snapshot, or ``None`` when incomplete.
 
-    A branch name is retained for carrier-slug identity.  The base and head are
-    immutable object IDs; accepting a mutable ref here would leave a stale
-    decision capable of being replayed after its comparison changed.
+    A branch name is retained for carrier-slug identity. A supplied base SHA is
+    accepted directly; a supplied mutable ref must first be resolved through
+    :func:`resolve_decision_base_sha`, which records that live read provenance.
     """
 
     if (
@@ -81,6 +84,7 @@ def build_obligation_set(
         or not isinstance(branch, str)
         or not branch.strip()
         or paths is None
+        or base_provenance not in _BASE_PROVENANCE
     ):
         return None
     try:
@@ -92,6 +96,7 @@ def build_obligation_set(
         "repo": repo,
         "pr_number": pr_number,
         "base_sha": base,
+        "base_provenance": base_provenance,
         "head_sha": head,
         "head_ref": branch.strip(),
         "paths_sha256": canonical_paths_digest(normalized_paths),
@@ -113,6 +118,48 @@ def build_obligation_set(
     }
     result["obligation_set_sha256"] = _canonical_digest(result)
     return result
+
+
+def resolve_decision_base_sha(
+    *,
+    repo: str | None,
+    pr_number: int | None,
+    base: str | None,
+    gh_runner=None,
+) -> tuple[str | None, str | None]:
+    """Return an immutable decision base and the source that supplied it.
+
+    Workflows currently pass a base *ref* to the CLI.  Resolving that ref with
+    the same read-only PR-view endpoint used at actuation prevents a complete
+    snapshot from silently disappearing merely because the input was ``main``.
+    """
+
+    if _sha(base):
+        return base, "provided_sha"
+    if (
+        not isinstance(repo, str)
+        or not _REPO_RE.fullmatch(repo)
+        or not isinstance(pr_number, int)
+        or isinstance(pr_number, bool)
+        or pr_number <= 0
+    ):
+        return None, None
+    runner = gh_runner or _default_gh_runner
+    try:
+        result = runner(
+            ["gh", "pr", "view", str(pr_number), "--repo", repo, "--json", "baseRefOid"],
+            None,
+        )
+    except Exception:
+        return None, None
+    if getattr(result, "returncode", 1) != 0:
+        return None, None
+    try:
+        payload = json.loads((getattr(result, "stdout", "") or "").strip() or "{}")
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None, None
+    resolved = payload.get("baseRefOid") if isinstance(payload, Mapping) else None
+    return (resolved, "live_pr_view") if _sha(resolved) else (None, None)
 
 
 def verify_obligation_set(
@@ -160,7 +207,7 @@ def rederive_live_obligation_set(
         view = gh_runner(
             [
                 "gh", "pr", "view", str(subject["pr_number"]), "--repo", subject["repo"],
-                "--json", "headRefOid,baseRefOid,headRefName",
+                "--json", "headRefOid,baseRefOid,headRefName,state,isDraft",
             ],
             None,
         )
@@ -177,6 +224,12 @@ def rederive_live_obligation_set(
     head = live.get("headRefOid")
     base = live.get("baseRefOid")
     branch = live.get("headRefName")
+    state = live.get("state")
+    is_draft = live.get("isDraft")
+    if not isinstance(state, str) or state.upper() != "OPEN":
+        return None, "live_subject_not_open"
+    if is_draft is not False:
+        return None, "live_subject_draft" if is_draft is True else "live_subject_incomplete"
     if not _sha(head) or not _sha(base) or not isinstance(branch, str) or not branch.strip():
         return None, "live_subject_incomplete"
 
@@ -197,6 +250,7 @@ def rederive_live_obligation_set(
         head=head,
         branch=branch,
         paths=paths,
+        base_provenance=subject["base_provenance"],
     )
     if current is None:
         return None, "live_obligation_derivation_failed"
@@ -243,6 +297,7 @@ def _valid_subject(subject: Mapping[str, Any]) -> bool:
         and not isinstance(subject.get("pr_number"), bool)
         and subject["pr_number"] > 0
         and _sha(subject.get("base_sha"))
+        and subject.get("base_provenance") in _BASE_PROVENANCE
         and _sha(subject.get("head_sha"))
         and isinstance(subject.get("head_ref"), str)
         and bool(subject["head_ref"].strip())
@@ -295,8 +350,13 @@ def _sha(value: Any) -> bool:
     return isinstance(value, str) and bool(_SHA_RE.fullmatch(value))
 
 
+def _default_gh_runner(argv, input_text=None):
+    return subprocess.run(argv, input=input_text, capture_output=True, text=True, check=False)
+
+
 __all__ = [
     "COUPLING_GATE_ID", "COUPLING_GATE_VERSION", "SEED_KINDS", "CouplingVerification",
     "build_obligation_set", "canonical_paths_digest", "rederive_live_obligation_set",
+    "resolve_decision_base_sha",
     "verify_live_current_head", "verify_obligation_set",
 ]

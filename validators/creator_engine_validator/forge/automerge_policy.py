@@ -25,7 +25,7 @@ from .mutation_classifier import (
     default_mutation_policy,
     mutation_class_for_paths,
 )
-from .coupling_current_head import build_obligation_set
+from .coupling_current_head import build_obligation_set, resolve_decision_base_sha
 
 AUTOMERGE_DECISION_AUTO: Final[str] = "AUTO"
 AUTOMERGE_DECISION_GESTURE: Final[str] = "GESTURE"
@@ -466,6 +466,7 @@ def decide_automerge(
     brain_ledger_base_text: str | None = None,
     brain_ledger_head_text: str | None = None,
     repo_root: str | Path = ".",
+    coupling_gh_runner=None,
 ) -> AutoMergeDecision:
     """Return an ``AUTO`` or ``GESTURE`` decision without side effects."""
 
@@ -501,13 +502,20 @@ def decide_automerge(
     tier_flag = _tier_flag_for_decision(resolved_state, tier, mutation_class)
     ledger_evidence: Mapping[str, Any] | None = None
     ledger_inputs: Mapping[str, Any] | None = None
-    coupling_obligations = build_obligation_set(
+    coupling_base, coupling_base_provenance = resolve_decision_base_sha(
         repo=repo,
         pr_number=pr_number,
         base=base,
+        gh_runner=coupling_gh_runner,
+    )
+    coupling_obligations = build_obligation_set(
+        repo=repo,
+        pr_number=pr_number,
+        base=coupling_base,
         head=head_sha,
         branch=branch,
         paths=resolved_paths,
+        base_provenance=coupling_base_provenance or "provided_sha",
     )
     brain_predicate_reason: str | None = None
     if tier == AUTOMERGE_TIER_BRAIN_SUPERSEDE:
