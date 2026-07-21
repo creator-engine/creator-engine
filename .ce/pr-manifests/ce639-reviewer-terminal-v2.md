@@ -7,11 +7,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** M
 
-AUTHORIZED_PATHS_COUNT=28
+AUTHORIZED_PATHS_COUNT=33
 
-AUTHORIZED_PATHS_SHA256=7432e40fa9cf37cd9d7ec9466ffac876635e4bf7a01f3d46903760966a193e63
+AUTHORIZED_PATHS_SHA256=78543709187ce4884652ffba076305d6914e3ea1b45457ceea06b181847e0c2f
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce639-reviewer-terminal-v2.md
 .ce/pr-manifests/ce639-reviewer-terminal-v2.md
 .claude/agents/reviewer.md
@@ -29,9 +30,13 @@ validators/creator_engine_validator/v3_forge_join.py
 validators/creator_engine_validator/v3_seat_bridge.py
 validators/tests/fixtures/ce639/ce637_gate_review_refusal.md
 validators/tests/fixtures/ce639/ce637_gate_review_retry_refusal.md
+validators/tests/integration/test_claude_hook_pack_pretooluse.py
 validators/tests/unit/test_claude_code_review_wrapper.py
 validators/tests/unit/test_cred_injection_proxy.py
+validators/tests/unit/test_egress_review_daemon_vault.py
 validators/tests/unit/test_egress_self_review_broker.py
+validators/tests/unit/test_hook_check.py
+validators/tests/unit/test_hook_check_cli_reviewer_authority_ref.py
 validators/tests/unit/test_hook_check_reviewer_authority.py
 validators/tests/unit/test_review_submission_receipt.py
 validators/tests/unit/test_review_submit.py

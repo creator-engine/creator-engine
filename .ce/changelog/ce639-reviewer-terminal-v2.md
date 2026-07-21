@@ -15,3 +15,8 @@ issue: ce-ops#639
   receipt-ineligible, and preserves the two canonical CE637 refusal reports as
   byte-verified regression fixtures.  Their unavailable-target/evidence
   refusal form is audit-classified as `CANNOT_REVIEW`, never as review evidence.
+- Keeps receiptless direct `gh pr review --comment` denied: a reviewer-authority
+  envelope is not parser-issued evidence.  Vault routing now proves both
+  fail-closed orders (receipt first, then missing-vault configuration after
+  valid admission), and the reviewer-role doctrine pin is append-only
+  superseded for the updated terminal contract.

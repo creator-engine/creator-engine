@@ -70,7 +70,9 @@ def test_cli_reviewer_authority_ref_allows_matching_pr_review(tmp_path, capsys, 
         capsys, monkeypatch, json.dumps(_pr_review_event(108)),
     )
     assert code == 0
-    assert payload["hookSpecificOutput"]["permissionDecision"] == "allow"
+    # The ref is necessary for the controlled broker path, but cannot turn a
+    # direct gh command into receipt-bound evidence.
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_cli_reviewer_authority_ref_denies_matching_pr_review_approve(tmp_path, capsys, monkeypatch):
@@ -130,4 +132,6 @@ def test_cli_ref_does_not_override_inline_event_ce(tmp_path, capsys, monkeypatch
         capsys, monkeypatch, json.dumps(event),
     )
     assert code == 0
-    assert payload["hookSpecificOutput"]["permissionDecision"] == "allow"
+    # The inline ref still wins over the CLI fallback; neither ref is enough
+    # to admit a receiptless direct source-host review write.
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"

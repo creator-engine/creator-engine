@@ -948,9 +948,10 @@ def test_mechanics_classification_reuses_reserved_restricted():
 
 
 def test_governed_bash_with_reviewer_authority_envelope_allows_matching_pr_review():
-    # G2.007.2: a bounded, validated reviewer-authority envelope opens exactly its mechanic on
-    # exactly its PR — a raw loose token no longer authorizes anything, and the envelope does not
-    # open an unrelated mechanic.
+    # G2.007.2 authorizes the controlled receipt-bound broker path, not a raw
+    # `gh pr review` body. COMMENT is a source-host write just as APPROVE is;
+    # the hook cannot bind a shell body to a parser-issued receipt, so it must
+    # deny both forms even with a matching authority envelope.
     envelope = {
         "mechanic": "pr_review",
         "pr_number": 106,
@@ -961,7 +962,7 @@ def test_governed_bash_with_reviewer_authority_envelope_allows_matching_pr_revie
         "operating_mode": "strict",
     }
     ctx = hook_check.HookContext(posture="governed", manifest_paths=MANIFEST, side_effect_authority=envelope)
-    assert hook_check.evaluate(_bash_event("gh pr review 106 --comment --body governed-redo"), ctx).decision == "allow"
+    assert hook_check.evaluate(_bash_event("gh pr review 106 --comment --body governed-redo"), ctx).decision == "deny"
     assert hook_check.evaluate(_bash_event("gh pr review 106 --approve"), ctx).decision == "deny"
     # the same pr_review envelope does NOT open an unrelated restricted mechanic
     assert hook_check.evaluate(_bash_event("git push origin main"), ctx).decision == "deny"

@@ -237,6 +237,13 @@ def test_governed_git_push_denies(tmp_path):
 
 
 def test_distinct_reviewer_authority_env_allows_live_pr_review_comment(tmp_path):
+    """A reviewer envelope alone cannot authorize a raw source-host review write.
+
+    ``gh pr review --comment`` is still a review submission, even though it is
+    not an approval.  Ring-1 cannot inspect a flag/stdin/file supplied body
+    and bind it to the parser-issued receipt, so the command must use the
+    trusted receipt-bound transport instead.
+    """
     root = _build_governed_root(tmp_path, ["docs/keep.md"])
     ref = _write_reviewer_authority_envelope(root)
 
@@ -247,7 +254,7 @@ def test_distinct_reviewer_authority_env_allows_live_pr_review_comment(tmp_path)
     )
 
     assert proc.returncode == 0
-    assert _permission(proc) == "allow"
+    assert _permission(proc) == "deny"
 
 
 def test_live_pr_review_without_reviewer_authority_env_denies(tmp_path):
