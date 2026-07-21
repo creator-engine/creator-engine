@@ -4617,6 +4617,13 @@ def _check(args) -> int:
 
 def _preflight_gate(args) -> int:
     """Expose selected repository invariants without reimplementing preflight."""
+    if args.preflight_gate_cmd not in {
+        "brain-current-tail",
+        "brain-append-intent-xor",
+        "fleet-manifest",
+    }:
+        print("ERROR: preflight-gate requires a supported subcommand", file=sys.stderr)
+        return 2
     repo_root = Path(args.repo_root).resolve()
     try:
         if args.preflight_gate_cmd == "brain-current-tail":

@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** M
 
-AUTHORIZED_PATHS_COUNT=7
+AUTHORIZED_PATHS_COUNT=8
 
-AUTHORIZED_PATHS_SHA256=a28deb48230ffc81802efbeac19a76cd17c54c78ae7224c4d37e843356e2acaa
+AUTHORIZED_PATHS_SHA256=efd5422f8563231d7f5b7eab1ba45e1a245546ab0ed69002f6e38a3a08ca7585
 
 ```text
 .ce/changelog/t4-ci-migration-local-gates.md
@@ -16,6 +16,7 @@ AUTHORIZED_PATHS_SHA256=a28deb48230ffc81802efbeac19a76cd17c54c78ae7224c4d37e8433
 .github/workflows/validate.yml
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/pr_preflight.py
+validators/tests/unit/test_ce_cli_preflight_gate.py
 validators/tests/unit/test_pr_preflight.py
 validators/tests/unit/test_t4_ci_migration_wiring.py
 ```

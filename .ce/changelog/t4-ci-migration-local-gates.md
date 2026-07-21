@@ -12,3 +12,5 @@ scope: ci/validate
   examples, signed artifacts, and dual-format sync.
 - Expose the two preflight-only invariants through thin CLI adapters that retain
   the existing preflight implementations.
+- Cover the `preflight-gate` parser, dispatch, failure, and unsupported-command
+  behavior at the CLI layer.
