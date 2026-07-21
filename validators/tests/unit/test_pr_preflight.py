@@ -489,6 +489,61 @@ def test_preflight_refuses_brain_ledger_delta_when_live_base_tail_moved(tmp_path
     )
 
 
+def test_brain_current_tail_adapter_delegates_to_preflight_invariant(tmp_path: Path, monkeypatch):
+    captured = {}
+
+    def fake_gate(config, comparison_base, runner):
+        captured.update(config=config, comparison_base=comparison_base, runner=runner)
+        return "current tail"
+
+    runner = FakeRunner(tmp_path)
+    monkeypatch.setattr(pr_preflight, "_assert_brain_ledger_delta_uses_current_tail", fake_gate)
+
+    assert (
+        pr_preflight.run_brain_current_tail_gate(
+            tmp_path,
+            comparison_base="pr-merge-base",
+            live_base="origin/main",
+            runner=runner,
+        )
+        == "current tail"
+    )
+    assert captured["config"].repo_root == tmp_path
+    assert captured["config"].base == "origin/main"
+    assert captured["comparison_base"] == "pr-merge-base"
+    assert captured["runner"] is runner
+
+
+def test_brain_append_intent_xor_adapter_delegates_and_preserves_refusal(tmp_path: Path, monkeypatch):
+    def refusing_gate(config, comparison_base, runner):
+        assert config.repo_root == tmp_path
+        assert config.base == comparison_base == "pr-merge-base"
+        raise RuntimeError("hybrid brain edit refused")
+
+    monkeypatch.setattr(pr_preflight, "_assert_brain_append_intent_xor", refusing_gate)
+
+    with pytest.raises(RuntimeError, match="hybrid brain edit refused"):
+        pr_preflight.run_brain_append_intent_xor_gate(
+            tmp_path,
+            comparison_base="pr-merge-base",
+            runner=FakeRunner(tmp_path),
+        )
+
+
+def test_fleet_manifest_adapter_delegates_to_preflight_guard(tmp_path: Path, monkeypatch):
+    captured = {}
+
+    def fake_guard(repo_root, out):
+        captured.update(repo_root=repo_root, out=out)
+        return "fleet guarded"
+
+    output = io.StringIO()
+    monkeypatch.setattr(pr_preflight, "_fleet_manifest_guard", fake_guard)
+
+    assert pr_preflight.run_fleet_manifest_guard(tmp_path, out=output) == "fleet guarded"
+    assert captured == {"repo_root": tmp_path, "out": output}
+
+
 def test_preflight_fails_closed_when_comparison_base_missing(tmp_path: Path):
     class MissingComparisonBaseRunner(FakeRunner):
         def __call__(self, argv, cwd, env=None, *, timeout=None):

@@ -52,6 +52,31 @@ jobs:
             --find-links validators/wheelhouse-dev \
             -r validators/requirements-dev.txt
 
+      - name: Creator Engine validator — public-docs confidentiality gate
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator \
+            scan-public-docs-confidentiality .
+
+      - name: Creator Engine validator — documented verbs gate
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator \
+            scan-documented-verbs .
+
+      - name: Creator Engine validator — control-plane portability gate
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator \
+            scan-portability-plane .
+
+      - name: Creator Engine validator — support-corpus confidentiality gate
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator \
+            scan-support-corpus .
+
+      - name: Creator Engine validator — fleet manifest guard
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator.ce_cli \
+            preflight-gate fleet-manifest --repo-root .
+
       - name: Creator Engine validator — pytest suite (offline)
         run: |
           # F-wheel-2's post-merge bake lane runs the first-party wheel parity gate.
@@ -140,6 +165,10 @@ jobs:
       - name: Creator Engine validator — list checks (audit evidence)
         run: |
           PYTHONPATH=validators python -m creator_engine_validator --list-checks
+
+      - name: Creator Engine validator — check-examples aggregate gate
+        run: |
+          PYTHONPATH=validators python -m creator_engine_validator check-examples
 
       - name: Creator Engine validator — install-spec signature guard
         run: |
@@ -444,6 +473,66 @@ jobs:
             echo "head_ref=${live_head_ref}"
             echo "head_sha=${live_head_sha}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Creator Engine validator — brain current-tail PR-diff gate
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        env:
+          COMPARISON_BASE: ${{ steps.live-base.outputs.comparison_base }}
+          LIVE_BASE: origin/${{ steps.live-base.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          comparison_base="${COMPARISON_BASE}"
+          live_base="${LIVE_BASE}"
+          if [[ -z "${comparison_base}" || -z "${live_base}" ]]; then
+            echo "FAIL: live comparison base and live base ref are required" >&2
+            exit 1
+          fi
+          PYTHONPATH=validators python -m creator_engine_validator.ce_cli \
+            preflight-gate brain-current-tail --comparison-base "${comparison_base}" \
+            --live-base "${live_base}" --repo-root .
+
+      - name: Creator Engine validator — brain append-intent XOR PR-diff gate
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        env:
+          COMPARISON_BASE: ${{ steps.live-base.outputs.comparison_base }}
+        run: |
+          set -euo pipefail
+          comparison_base="${COMPARISON_BASE}"
+          if [[ -z "${comparison_base}" ]]; then
+            echo "FAIL: live comparison base was not resolved" >&2
+            exit 1
+          fi
+          PYTHONPATH=validators python -m creator_engine_validator.ce_cli \
+            preflight-gate brain-append-intent-xor --comparison-base "${comparison_base}" \
+            --repo-root .
+
+      - name: Creator Engine validator — signed-artifact hash-pin PR-diff gate
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        env:
+          COMPARISON_BASE: ${{ steps.live-base.outputs.comparison_base }}
+        run: |
+          set -euo pipefail
+          comparison_base="${COMPARISON_BASE}"
+          if [[ -z "${comparison_base}" ]]; then
+            echo "FAIL: live comparison base was not resolved" >&2
+            exit 1
+          fi
+          PYTHONPATH=validators python -m creator_engine_validator \
+            verify-signed-artifact-pins --base "${comparison_base}" .
+
+      - name: Creator Engine validator — dual-format sync PR-diff gate
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        env:
+          COMPARISON_BASE: ${{ steps.live-base.outputs.comparison_base }}
+        run: |
+          set -euo pipefail
+          comparison_base="${COMPARISON_BASE}"
+          if [[ -z "${comparison_base}" ]]; then
+            echo "FAIL: live comparison base was not resolved" >&2
+            exit 1
+          fi
+          PYTHONPATH=validators python -m creator_engine_validator \
+            verify-dual-format-sync --base "${comparison_base}" .
 
       - name: Dockerfile image-build smoke tier
         if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
