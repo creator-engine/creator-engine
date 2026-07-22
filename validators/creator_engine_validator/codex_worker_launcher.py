@@ -1,8 +1,9 @@
 """Fail-closed, policy-bound ``ce worker launch`` Codex one-shot launcher.
 
-The only production policy source is the canonical tracked policy inside the
-allocated worktree.  Prompt bodies never enter a plan: exact canonical role
-policy bytes and SHA-256-verified brief bytes are framed only for runner stdin.
+Canonical role policy and SHA-256-verified brief bytes are bound to their
+canonical paths and digests in the allocated worktree.  The role contract is
+translated into a bounded, content-free ``developer_instructions`` envelope;
+runner stdin receives only the verified brief bytes.
 """
 from __future__ import annotations
 
