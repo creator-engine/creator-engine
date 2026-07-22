@@ -240,6 +240,16 @@ def test_uv_lock_present_and_pins_contract(validators_dir: Path):
     assert lock["jsonschema"] == "4.26.0"
 
 
+def test_runtime_export_excludes_optional_extra_closure(validators_dir: Path):
+    lock = pkg.parse_uv_lock(validators_dir / "uv.lock")
+    runtime = pkg.parse_uv_lock_runtime_closure(validators_dir / "uv.lock")
+
+    assert lock["textual"] == "8.2.7"
+    assert "textual" not in runtime
+    assert runtime["pyyaml"] == "6.0.3"
+    assert runtime["jsonschema"] == "4.26.0"
+
+
 def test_requirements_export_is_lockstep_with_uv_lock(validators_dir: Path):
     violations = pkg.lockstep_violations(
         validators_dir / "requirements.txt", validators_dir / "uv.lock"
