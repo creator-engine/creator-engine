@@ -9,8 +9,9 @@ issue: ce-ops#620
 **Enforce the ratified model-tier and reasoning-effort floor at launch.**
 
 - Resolve model and effort before spawning; Luna is refused for persistent
-  seat/foreman roles, low effort clamps to medium with an auditable warning,
-  and stale raw flags are removed before canonical args are injected.
+  seat/foreman roles, and Python governed-launch paths clamp low effort to
+  medium with an auditable warning. The DGX/VPS bash recreate paths strip and
+  silently override stale raw flags before canonical args are injected.
 - Reassert the resolved Terra/high standing policy when DGX or VPS recreates a
   contained Codex configuration after stale session state.
 - Require dispatch receipts to carry the canonical resolved model/effort stamp
@@ -30,5 +31,7 @@ issue: ce-ops#620
   single Python policy constants. DGX injects unconditionally because it is a
   Codex-only wrapper; VPS injects only for its Codex image because it also
   launches Claude, whose model flags are not Codex flags.
+- The committed receipt compatibility sweep found no receipt violating the
+  tightened model/effort schema pattern.
 
-Closure waiver (controller, 20260722): live-target observation deferred to the next canonical seat relaunch on each substrate (vps-runsc: ce-vps-codex / ce-vps-codex-dev4; dgx-runsc: next DGX seat stand-up), scope = strip-and-reassert argv behavior at revision 47d70e8b44ce60d304027738716630a78e4ec710, reason = relaunch is Operator-gated and next relaunch is the natural canary; tracking = watcher asserts the reasserted model/effort line in the first post-merge relaunch receipt.
+Closure waiver (controller, 20260722): live-target observation deferred to the next canonical seat relaunch on each substrate (vps-runsc: ce-vps-codex / ce-vps-codex-dev4; dgx-runsc: next DGX seat stand-up), scope = strip-and-reassert argv behavior at branch tip `ce620-launch-wrapper-model-effort-floor`, reason = relaunch is Operator-gated and next relaunch is the natural canary; tracking = watcher asserts the reasserted model/effort line in the first post-merge relaunch receipt.

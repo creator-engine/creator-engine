@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ import yaml
 from . import (
     brain_bootstrap,
     claude_launch_spec,
+    codex_launch_spec,
+    model_effort_policy,
     resource_bound_spec,
     runtime_backend_bridge,
     seat_lifecycle,
@@ -58,6 +61,19 @@ from .visibility_backend import (
 # Pane Registry role enum is exactly the visibility-required role set.
 VISIBILITY_REQUIRED_ROLES = frozenset({"architect", "implementer", "reviewer", "verification"})
 LIVE_STATUSES = frozenset({"active", "blocked", "closing"})
+LOGGER = logging.getLogger(__name__)
+
+# The pane-registry role is a visibility taxonomy, while the model resolver
+# deliberately names model-tier classes.  Keep the bridge explicit at this
+# second live launch entry point: only verification is a Luna-eligible verify
+# organ; reviewer is advisory; implementation and architecture remain
+# persistent-seat tier.
+LANE_MODEL_POLICY_ROLES = {
+    "architect": "seat",
+    "implementer": "implementation",
+    "reviewer": "advisory",
+    "verification": "verify",
+}
 
 # G2.002.1 operating-mode runtime carriers. `strict` is the default; elevation
 # fails closed unless an Operator-ratified tenant policy ratifies the mode.
@@ -166,6 +182,18 @@ class ClaudeLaunchRefused(LaneLaunchError):
     """CC-G-D Ring 0: a governed Claude lane surface is refused before side effects."""
 
     code = "G3-CLAUDE-REFUSED"
+
+
+class CodexLaunchRefused(LaneLaunchError):
+    """A governed Codex lane surface was refused before any side effect."""
+
+    code = "G3-CODEX-REFUSED"
+
+
+class ModelEffortLaneRefused(LaneLaunchError):
+    """A lane model tier or reasoning-effort request was refused before spawn."""
+
+    code = "G3-MODEL-EFFORT-REFUSED"
 
 
 class ReviewerAuthorityInvalid(LaneLaunchError):
@@ -381,6 +409,38 @@ def _is_claude_command(command: Sequence[str]) -> bool:
         return False
     head = str(command[0])
     return head == "claude" or head.rsplit("/", 1)[-1] == "claude"
+
+
+def _is_codex_command(command: Sequence[str]) -> bool:
+    """True when ``command`` invokes the Codex harness (basename ``codex``)."""
+    if not command:
+        return False
+    head = str(command[0])
+    return head == "codex" or head.rsplit("/", 1)[-1] == "codex"
+
+
+def _resolve_lane_model_effort(
+    requested: Sequence[str], *, role: str
+) -> model_effort_policy.ResolvedModelEffort:
+    """Resolve the lane's explicit role through the fleet-wide policy.
+
+    This remains ahead of each harness builder so a Luna-tier refusal happens
+    before MCP provisioning, binary resolution, pane creation, or any process
+    launch.  A low-effort request is retained only as an auditable warning; the
+    returned object always carries the canonical floor-compliant value.
+    """
+    try:
+        policy_role = LANE_MODEL_POLICY_ROLES.get(role, "seat")
+        resolved = model_effort_policy.resolve_model_effort(
+            requested, policy_role=policy_role
+        )
+    except model_effort_policy.ModelEffortPolicyRefused as exc:
+        raise ModelEffortLaneRefused(
+            f"refusing governed lane model/effort before side effects: {exc}"
+        ) from exc
+    for warning in resolved.warnings:
+        LOGGER.warning("governed lane model/effort: %s", warning)
+    return resolved
 
 
 def _confirm_pack(repo_root: Path | str | None) -> bool:
@@ -1093,13 +1153,15 @@ def launch(
     )
     brain_payload = _build_lane_brain_bootstrap(state_root=resolved_state_root, role=role)
 
-    # 6. CC-G-D Ring 0: when the command is a Claude invocation, refuse prohibited
-    #    surfaces and pin the governed command BEFORE any side effect (no tmux
-    #    spawn, no Pane Registry write). Non-Claude lanes are untouched.
+    # 6. Ring-0 governed harnesses: Claude and Codex lane commands resolve the
+    #    fleet-wide model/effort policy with the lane's explicit role, then pin
+    #    the rewritten argv BEFORE any side effect (no tmux spawn, no Pane
+    #    Registry write). Other lane commands remain untouched.
     launch_command = list(command) if command else list(INERT_PLACEHOLDER_COMMAND)
     claude_governance: dict[str, Any] | None = None
     if _is_claude_command(launch_command):
         requested = list(launch_command[1:])
+        resolved_model_effort = _resolve_lane_model_effort(requested, role=role)
         spec = claude_launch_spec.parse_claude_argv(requested)
         confirmed = _confirm_pack(repo_root) if spec.skip_permissions else False
         spec_result = claude_launch_spec.evaluate_claude_launch(
@@ -1128,6 +1190,8 @@ def launch(
                 mcp_config_path=resolved_mcp,
                 closeout_file=closeout_file,
                 completion_report_ref=completion_report_ref,
+                policy_role=LANE_MODEL_POLICY_ROLES.get(role, "seat"),
+                resolved_model_effort=resolved_model_effort,
             )
         except claude_launch_spec.GovernedCommandError as exc:
             clause = (
@@ -1147,6 +1211,19 @@ def launch(
             "closeout_ref": closeout_file,
             "completion_report_ref": completion_report_ref,
         }
+    elif _is_codex_command(launch_command):
+        requested = list(launch_command[1:])
+        resolved_model_effort = _resolve_lane_model_effort(requested, role=role)
+        try:
+            launch_command = codex_launch_spec.build_governed_codex_command(
+                base_argv=requested,
+                policy_role=LANE_MODEL_POLICY_ROLES.get(role, "seat"),
+                resolved_model_effort=resolved_model_effort,
+            )
+        except codex_launch_spec.GovernedCommandError as exc:
+            raise CodexLaunchRefused(
+                f"refusing governed Codex lane launch before side effects: {exc}"
+            ) from exc
 
     # 6b.5 v3.1-G2f (F4/D2) seat-env exec-wrap — applied to the OUTPUT of the step-6
     #      Ring-0 build (the governed tokens stay byte-identical) and BEFORE the

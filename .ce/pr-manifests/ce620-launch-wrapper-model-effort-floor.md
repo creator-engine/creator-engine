@@ -10,9 +10,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-AUTHORIZED_PATHS_COUNT=23
+AUTHORIZED_PATHS_COUNT=25
 
-AUTHORIZED_PATHS_SHA256=87e41cc5c421153ed2b2998b0a8646fa915960501e509c8f02b75881ac5e82d0
+AUTHORIZED_PATHS_SHA256=9fd1b141429a5581d0c850dc2d8544fb9869276fab588eca81149d11aee564ef
 
 ```text
 .ce/changelog/ce620-launch-wrapper-model-effort-floor.md
@@ -26,6 +26,7 @@ validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/claude_launch_spec.py
 validators/creator_engine_validator/codex_launch_spec.py
 validators/creator_engine_validator/dispatch_receipt.py
+validators/creator_engine_validator/lane_runtime.py
 validators/creator_engine_validator/launch_runtime.py
 validators/creator_engine_validator/model_effort_policy.py
 validators/creator_engine_validator/schemas/dispatch-receipt.v1.schema.yaml
@@ -35,6 +36,7 @@ validators/tests/unit/test_claude_launch_spec.py
 validators/tests/unit/test_codex_launch_spec.py
 validators/tests/unit/test_dgx_runsc.py
 validators/tests/unit/test_dispatch_receipt.py
+validators/tests/unit/test_lane_runtime.py
 validators/tests/unit/test_launch_runtime.py
 validators/tests/unit/test_vps_runsc_launcher.py
 validators/tests/unit/test_worker_spawn.py

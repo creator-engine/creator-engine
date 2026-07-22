@@ -895,7 +895,7 @@ def test_lane_launch_pins_governed_command_for_claude(tmp_path, monkeypatch):
     result = _launch(
         tmp_path,
         ledger_root=ledger,
-        command=["claude", "--model", "claude-opus-4-7"],
+        command=["claude", "--model", "gpt-5.6-terra"],
         tmux_adapter=adapter,
     )
     (_sess, _win, cmd) = adapter.spawned[-1]
@@ -904,9 +904,87 @@ def test_lane_launch_pins_governed_command_for_claude(tmp_path, monkeypatch):
     inner = _wrapper_inner_argv(result)
     assert inner[0] == "claude"
     assert "--setting-sources" in inner and "project" in inner and "--strict-mcp-config" in inner
-    assert "--model" in inner and "claude-opus-4-7" in inner
+    assert "--model" in inner and "gpt-5.6-terra" in inner
     # The written pane record stays schema-clean (no extra CC-G-D fields).
     assert validate_pane_registry_record(result.record, result.pane_path) == []
+
+
+def test_lane_launch_verification_role_can_use_luna_at_real_entrypoint(tmp_path, monkeypatch):
+    """The lane role bridge admits Luna only for the explicit verify organ."""
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    adapter = FakeAdapter()
+
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        role="verification",
+        command=["claude", "--model", "gpt-5.6-luna"],
+        tmux_adapter=adapter,
+    )
+
+    assert _wrapper_inner_argv(result)[-4:] == [
+        "--model",
+        "gpt-5.6-luna",
+        "--effort",
+        "high",
+    ]
+    assert len(adapter.spawned) == 1
+
+
+def test_lane_launch_implementer_role_refuses_luna_before_spawn(tmp_path, monkeypatch):
+    """The real lane entry point cannot turn an implementer into a Luna seat."""
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(lane_runtime, "_confirm_pack", lambda repo_root: True)
+    adapter = FakeAdapter()
+
+    with pytest.raises(lane_runtime.ModelEffortLaneRefused) as exc:
+        _launch(
+            tmp_path,
+            ledger_root=ledger,
+            role="implementer",
+            command=["claude", "--model", "gpt-5.6-luna"],
+            tmux_adapter=adapter,
+        )
+
+    assert exc.value.code == "G3-MODEL-EFFORT-REFUSED"
+    assert adapter.spawned == []
+    _assert_no_pane(ledger)
+
+
+def test_lane_launch_codex_clamps_low_effort_and_injects_canonical_args(
+    tmp_path, monkeypatch, caplog
+):
+    """Codex lanes use the same role-aware resolver, rather than bypassing it."""
+    ledger = _ledger_root(tmp_path)
+    _write_claim(ledger, "hermes-primary", "gate3-lane")
+    monkeypatch.setattr(
+        lane_runtime.codex_launch_spec,
+        "resolve_codex_harness_binary",
+        lambda: "/test/bin/codex",
+    )
+    adapter = FakeAdapter()
+
+    result = _launch(
+        tmp_path,
+        ledger_root=ledger,
+        role="implementer",
+        command=["codex", "--model", "gpt-5.6-terra", "--effort", "low"],
+        tmux_adapter=adapter,
+    )
+
+    inner = _wrapper_inner_argv(result)
+    assert inner[-4:] == [
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "medium",
+    ]
+    assert "low" not in inner
+    assert "clamped to fleet minimum" in caplog.text
+    assert len(adapter.spawned) == 1
 
 
 def test_lane_launch_non_claude_command_unchanged(tmp_path):
@@ -1215,7 +1293,7 @@ def test_lane_launch_autoprovisions_mcp_config_when_missing(tmp_path, monkeypatc
     _launch(
         tmp_path,
         ledger_root=ledger,
-        command=["claude", "--model", "claude-opus-4-7"],
+        command=["claude", "--model", "gpt-5.6-terra"],
         worktree_path=str(wt),
         tmux_adapter=FakeAdapter(),
     )
@@ -1242,7 +1320,7 @@ def test_lane_launch_does_not_overwrite_existing_mcp_config(tmp_path, monkeypatc
     _launch(
         tmp_path,
         ledger_root=ledger,
-        command=["claude", "--model", "claude-opus-4-7"],
+        command=["claude", "--model", "gpt-5.6-terra"],
         worktree_path=str(wt),
         tmux_adapter=FakeAdapter(),
     )
@@ -1262,7 +1340,7 @@ def test_lane_launch_refuses_nonfile_mcp_target_before_side_effects(tmp_path, mo
         _launch(
             tmp_path,
             ledger_root=ledger,
-            command=["claude", "--model", "claude-opus-4-7"],
+            command=["claude", "--model", "gpt-5.6-terra"],
             worktree_path=str(wt),
             tmux_adapter=adapter,
         )
