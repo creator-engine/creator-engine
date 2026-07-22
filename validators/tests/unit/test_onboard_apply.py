@@ -1110,18 +1110,18 @@ def test_runtime_policy_existing_pair_mode_check_uses_symlink_metadata(
     os.rename(policy_path, aside)
     policy_path.symlink_to(aside)
 
-    original_read = onboard_apply._read_regular_nofollow
+    original_read = onboard_apply._read_regular_nofollow_at
 
-    def follow_symlink_read(path, *args, **kwargs):
+    def follow_symlink_read(directory_fd, name, *args, **kwargs):
         # Adversarial seam: model the race where the no-follow read admitted
         # the destination bytes before the name was swapped to a symlink; the
         # mode check must still refuse on the name's own lstat metadata
         # instead of following the link to its 0o600 target.
-        if path == policy_path:
+        if name == policy_path.name:
             return aside.read_bytes()
-        return original_read(path, *args, **kwargs)
+        return original_read(directory_fd, name, *args, **kwargs)
 
-    monkeypatch.setattr(onboard_apply, "_read_regular_nofollow", follow_symlink_read)
+    monkeypatch.setattr(onboard_apply, "_read_regular_nofollow_at", follow_symlink_read)
     with pytest.raises(onboard_apply.ApplyFailed, match="last-known-good"):
         onboard_apply.provision_canonical_runtime_policy(
             state_root=state_root, repository_root=Path.cwd()
@@ -1134,7 +1134,7 @@ def test_runtime_policy_existing_pair_mode_check_uses_symlink_metadata(
 def test_runtime_policy_destination_with_parent_traversal_is_refused(tmp_path):
     nested = tmp_path / "state" / ".." / "state" / "onboard" / "runtime"
     with pytest.raises(onboard_apply.ApplyFailed, match="normalized"):
-        onboard_apply._ensure_nofollow_directory_path(nested)
+        onboard_apply._open_nofollow_directory_path(nested)
     assert not (tmp_path / "state").exists()
 
 

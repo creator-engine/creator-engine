@@ -440,6 +440,8 @@ def _read_regular_nofollow(path: Path, *, max_bytes: int = 256 * 1024) -> bytes:
 
 
 _NOFOLLOW_DIRECTORY_CAPTURE_FLAGS = (
+    # Do not add O_DIRECTORY here: each O_PATH|O_NOFOLLOW capture is checked
+    # with S_ISDIR below, before it can become the next component's dirfd.
     getattr(os, "O_PATH", 0)
     | getattr(os, "O_CLOEXEC", 0)
     | getattr(os, "O_NOFOLLOW", 0)
@@ -504,14 +506,6 @@ def _open_nofollow_directory_path(path: Path) -> tuple[Path, int]:
         raise
     assert descriptor is not None
     return absolute, descriptor
-
-
-def _ensure_nofollow_directory_path(path: Path) -> Path:
-    """Create a directory tree with a dirfd walk so no component can be a symlink."""
-    absolute, descriptor = _open_nofollow_directory_path(path)
-    os.close(descriptor)
-    return absolute
-
 
 def _read_regular_nofollow_at(directory_fd: int, name: str, *, max_bytes: int = 256 * 1024) -> bytes:
     """Read a regular entry beneath a pinned directory without following links."""
