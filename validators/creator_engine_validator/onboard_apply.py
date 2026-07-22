@@ -439,16 +439,28 @@ def _read_regular_nofollow(path: Path, *, max_bytes: int = 256 * 1024) -> bytes:
         os.close(descriptor)
 
 
-_NOFOLLOW_DIRECTORY_OPEN_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
+_NOFOLLOW_DIRECTORY_CAPTURE_FLAGS = (
+    # Do not add O_DIRECTORY here: each O_PATH|O_NOFOLLOW capture is checked
+    # with S_ISDIR below, before it can become the next component's dirfd.
+    getattr(os, "O_PATH", 0)
     | getattr(os, "O_CLOEXEC", 0)
     | getattr(os, "O_NOFOLLOW", 0)
 )
+_PINNED_DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+_RUNTIME_POLICY_DIRFD_PRIMITIVES = (os.open, os.mkdir, os.link, os.rename, os.unlink, os.stat)
 
 
-def _ensure_nofollow_directory_path(path: Path) -> Path:
-    """Create a directory tree with a dirfd walk so no component can be a symlink."""
+def _runtime_policy_dirfd_primitives_available() -> bool:
+    """Whether every pair-commit pathname operation has a dirfd form."""
+    # ``os.replace`` shares the POSIX renameat primitive exposed by ``os.rename``;
+    # CPython does not list replace separately in supports_dir_fd.
+    return all(
+        operation in os.supports_dir_fd for operation in _RUNTIME_POLICY_DIRFD_PRIMITIVES
+    ) and hasattr(os, "O_PATH")
+
+
+def _open_nofollow_directory_path(path: Path) -> tuple[Path, int]:
+    """Create and pin a directory tree with a no-follow dirfd walk."""
     absolute = path.absolute()
     parts = absolute.parts
     if any(part in {".", ".."} for part in parts[1:]):
@@ -456,44 +468,78 @@ def _ensure_nofollow_directory_path(path: Path) -> Path:
             "runtime_policy_destination_refused",
             "runtime-policy destination path must be absolute and normalized",
         )
-    if os.open not in os.supports_dir_fd or os.mkdir not in os.supports_dir_fd:
+    if not _runtime_policy_dirfd_primitives_available():
         raise ApplyFailed(
             "runtime_policy_destination_refused",
             "runtime-policy destination cannot be pinned without dir_fd support",
         )
     descriptor: int | None = None
     try:
-        descriptor = os.open(parts[0], _NOFOLLOW_DIRECTORY_OPEN_FLAGS)
+        descriptor = os.open(parts[0], _NOFOLLOW_DIRECTORY_CAPTURE_FLAGS)
         for name in parts[1:]:
             try:
                 os.mkdir(name, mode=0o700, dir_fd=descriptor)
             except FileExistsError:
                 pass
-            child = os.open(name, _NOFOLLOW_DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            child = os.open(name, _NOFOLLOW_DIRECTORY_CAPTURE_FLAGS, dir_fd=descriptor)
+            if not stat.S_ISDIR(os.fstat(child).st_mode):
+                os.close(child)
+                raise ApplyFailed(
+                    "runtime_policy_destination_refused",
+                    "runtime-policy destination parent is not a real directory",
+                )
             os.close(descriptor)
             descriptor = child
-        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
-            raise ApplyFailed(
-                "runtime_policy_destination_refused",
-                "runtime-policy destination parent is not a real directory",
-            )
+        pinned = os.open(".", _PINNED_DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+        os.close(descriptor)
+        descriptor = pinned
     except OSError as exc:
+        if descriptor is not None:
+            os.close(descriptor)
         raise ApplyFailed(
             "runtime_policy_destination_refused",
             "runtime-policy destination parent cannot be created safely",
         ) from exc
-    finally:
+    except Exception:
         if descriptor is not None:
             os.close(descriptor)
-    return absolute
+        raise
+    assert descriptor is not None
+    return absolute, descriptor
+
+def _read_regular_nofollow_at(directory_fd: int, name: str, *, max_bytes: int = 256 * 1024) -> bytes:
+    """Read a regular entry beneath a pinned directory without following links."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_fd)
+    except OSError as exc:
+        raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input is unreadable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input is not regular")
+        payload = bytearray()
+        while len(payload) <= max_bytes:
+            chunk = os.read(descriptor, min(64 * 1024, max_bytes + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        if len(payload) > max_bytes:
+            raise ApplyFailed("runtime_policy_source_refused", "canonical runtime-policy input exceeds size bound")
+        return bytes(payload)
+    finally:
+        os.close(descriptor)
 
 
-def _stage_private_write(path: Path, payload: bytes) -> Path:
-    """Write and verify one private replacement without changing its destination."""
-    path = _ensure_nofollow_directory_path(path.parent) / path.name
-    if path.is_symlink() or (path.exists() and not path.is_file()):
+def _stage_private_write(directory_fd: int, name: str, payload: bytes) -> str:
+    """Write and verify one private replacement beneath a pinned directory."""
+    try:
+        metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None and not stat.S_ISREG(metadata.st_mode):
         raise ApplyFailed("runtime_policy_destination_refused", "runtime-policy destination is not a regular file")
-    temporary = path.parent / f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+    temporary = f".{name}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
     descriptor: int | None = None
     staged = False
     try:
@@ -501,14 +547,15 @@ def _stage_private_write(path: Path, payload: bytes) -> Path:
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
             0o600,
+            dir_fd=directory_fd,
         )
         os.write(descriptor, payload)
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = None
         if (
-            _read_regular_nofollow(temporary, max_bytes=max(len(payload), 1)) != payload
-            or stat.S_IMODE(temporary.stat().st_mode) != 0o600
+            _read_regular_nofollow_at(directory_fd, temporary, max_bytes=max(len(payload), 1)) != payload
+            or stat.S_IMODE(os.stat(temporary, dir_fd=directory_fd, follow_symlinks=False).st_mode) != 0o600
         ):
             raise ApplyFailed(
                 "runtime_policy_stage_mismatch",
@@ -523,15 +570,15 @@ def _stage_private_write(path: Path, payload: bytes) -> Path:
             os.close(descriptor)
         if not staged:
             with contextlib.suppress(FileNotFoundError):
-                temporary.unlink()
+                os.unlink(temporary, dir_fd=directory_fd)
 
 
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+def _runtime_policy_entry_exists(directory_fd: int, name: str) -> bool:
     try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _commit_runtime_policy_pair(
@@ -552,57 +599,76 @@ def _commit_runtime_policy_pair(
     recovery link on disk and raises a typed recovery failure chained to the
     original error.
     """
-    policy_path = _ensure_nofollow_directory_path(policy_path.parent) / policy_path.name
-    receipt_path = policy_path.parent / receipt_path.name
-    present = tuple(os.path.lexists(path) for path in (policy_path, receipt_path))
-    existing_valid = False
-    if any(present):
-        if not all(present):
-            raise ApplyFailed(
-                "runtime_policy_existing_pair_refused",
-                "runtime-policy destination contains an incomplete existing pair",
-            )
-        try:
-            existing_valid = (
-                _read_regular_nofollow(policy_path) == policy_bytes
-                and _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) == receipt_bytes
-                and stat.S_IMODE(os.lstat(policy_path).st_mode) == 0o600
-                and stat.S_IMODE(os.lstat(receipt_path).st_mode) == 0o600
-            )
-        except (ApplyFailed, OSError):
-            existing_valid = False
-        if not existing_valid:
-            raise ApplyFailed(
-                "runtime_policy_existing_pair_refused",
-                "runtime-policy destination does not contain a valid last-known-good pair",
-            )
-
-    staged_policy: Path | None = None
-    staged_receipt: Path | None = None
-    backup_policy: Path | None = None
-    backup_receipt: Path | None = None
+    _, directory_fd = _open_nofollow_directory_path(policy_path.parent)
+    policy_name = policy_path.name
+    receipt_name = receipt_path.name
+    staged_policy: str | None = None
+    staged_receipt: str | None = None
+    backup_policy: str | None = None
+    backup_receipt: str | None = None
     commit_started = False
     try:
-        staged_policy = _stage_private_write(policy_path, policy_bytes)
-        staged_receipt = _stage_private_write(receipt_path, receipt_bytes)
+        present = tuple(
+            _runtime_policy_entry_exists(directory_fd, name) for name in (policy_name, receipt_name)
+        )
+        existing_valid = False
+        if any(present):
+            if not all(present):
+                raise ApplyFailed(
+                    "runtime_policy_existing_pair_refused",
+                    "runtime-policy destination contains an incomplete existing pair",
+                )
+            try:
+                existing_valid = (
+                    _read_regular_nofollow_at(directory_fd, policy_name) == policy_bytes
+                    and _read_regular_nofollow_at(directory_fd, receipt_name, max_bytes=64 * 1024) == receipt_bytes
+                    and stat.S_IMODE(
+                        os.stat(policy_name, dir_fd=directory_fd, follow_symlinks=False).st_mode
+                    ) == 0o600
+                    and stat.S_IMODE(
+                        os.stat(receipt_name, dir_fd=directory_fd, follow_symlinks=False).st_mode
+                    ) == 0o600
+                )
+            except (ApplyFailed, OSError):
+                existing_valid = False
+            if not existing_valid:
+                raise ApplyFailed(
+                    "runtime_policy_existing_pair_refused",
+                    "runtime-policy destination does not contain a valid last-known-good pair",
+                )
+
+        staged_policy = _stage_private_write(directory_fd, policy_name, policy_bytes)
+        staged_receipt = _stage_private_write(directory_fd, receipt_name, receipt_bytes)
         if existing_valid:
             nonce = f"{os.getpid()}.{uuid.uuid4().hex}"
-            backup_policy = policy_path.parent / f".{policy_path.name}.backup.{nonce}"
-            backup_receipt = receipt_path.parent / f".{receipt_path.name}.backup.{nonce}"
-            os.link(policy_path, backup_policy, follow_symlinks=False)
-            os.link(receipt_path, backup_receipt, follow_symlinks=False)
+            backup_policy = f".{policy_name}.backup.{nonce}"
+            backup_receipt = f".{receipt_name}.backup.{nonce}"
+            os.link(
+                policy_name,
+                backup_policy,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+            os.link(
+                receipt_name,
+                backup_receipt,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
 
         commit_started = True
-        os.replace(staged_policy, policy_path)
+        os.replace(staged_policy, policy_name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
         staged_policy = None
-        os.replace(staged_receipt, receipt_path)
+        os.replace(staged_receipt, receipt_name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
         staged_receipt = None
-        _fsync_directory(policy_path.parent)
+        os.fsync(directory_fd)
         if (
-            _read_regular_nofollow(policy_path) != policy_bytes
-            or _read_regular_nofollow(receipt_path, max_bytes=64 * 1024) != receipt_bytes
-            or stat.S_IMODE(os.lstat(policy_path).st_mode) != 0o600
-            or stat.S_IMODE(os.lstat(receipt_path).st_mode) != 0o600
+            _read_regular_nofollow_at(directory_fd, policy_name) != policy_bytes
+            or _read_regular_nofollow_at(directory_fd, receipt_name, max_bytes=64 * 1024) != receipt_bytes
+            or stat.S_IMODE(os.stat(policy_name, dir_fd=directory_fd, follow_symlinks=False).st_mode) != 0o600
+            or stat.S_IMODE(os.stat(receipt_name, dir_fd=directory_fd, follow_symlinks=False).st_mode) != 0o600
         ):
             raise ApplyFailed(
                 "runtime_policy_post_replace_mismatch",
@@ -616,11 +682,11 @@ def _commit_runtime_policy_pair(
                 # recovery link on disk instead of unlinking last-known-good.
                 recovery_failed = False
                 for backup, destination in (
-                    (backup_policy, policy_path),
-                    (backup_receipt, receipt_path),
+                    (backup_policy, policy_name),
+                    (backup_receipt, receipt_name),
                 ):
                     try:
-                        os.rename(backup, destination)
+                        os.rename(backup, destination, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
                     except OSError:
                         recovery_failed = True
                         continue
@@ -629,11 +695,11 @@ def _commit_runtime_policy_pair(
                     # recovery link behind; drop the leftover name only after
                     # a successful restore.
                     with contextlib.suppress(FileNotFoundError):
-                        backup.unlink()
+                        os.unlink(backup, dir_fd=directory_fd)
                 backup_policy = None
                 backup_receipt = None
                 with contextlib.suppress(OSError):
-                    _fsync_directory(policy_path.parent)
+                    os.fsync(directory_fd)
                 if recovery_failed:
                     raise ApplyFailed(
                         "runtime_policy_recovery_failed",
@@ -642,7 +708,7 @@ def _commit_runtime_policy_pair(
             else:
                 for candidate in (policy_path, receipt_path):
                     with contextlib.suppress(FileNotFoundError):
-                        candidate.unlink()
+                        os.unlink(candidate.name, dir_fd=directory_fd)
         if isinstance(exc, ApplyFailed):
             raise
         raise ApplyFailed(
@@ -652,7 +718,8 @@ def _commit_runtime_policy_pair(
         for candidate in (staged_policy, staged_receipt, backup_policy, backup_receipt):
             if candidate is not None:
                 with contextlib.suppress(FileNotFoundError):
-                    candidate.unlink()
+                    os.unlink(candidate, dir_fd=directory_fd)
+        os.close(directory_fd)
 
 
 def _validated_repository_root(repository_root: Path) -> Path:
