@@ -277,6 +277,42 @@ def test_custom_token_source_names_are_isolated_from_child_environments(monkeypa
     assert all(pr_token not in " ".join(call[0]) for call in runner.calls)
 
 
+def test_child_environments_scrub_control_and_selected_source_names_case_insensitively(
+    monkeypatch,
+):
+    """The child receives one authoritative token even with mixed-case inheritance."""
+    ticket_source = "CUSTOM_TICKET_SOURCE"
+    pr_source = "CUSTOM_PR_SOURCE"
+    monkeypatch.setenv("gh_host", "untrusted.example")
+    monkeypatch.setenv("gItHuB_tOkEn", "ambient-token")
+    monkeypatch.setenv("ce_github_app_private_key", "app-key-material")
+    monkeypatch.setenv("custom_ticket_source", "ticket-source-secret")
+    monkeypatch.setenv("CuStOm_Pr_SoUrCe", "pr-source-secret")
+    runner = FakeGraphqlRunner([_page([])], [_page([])])
+
+    feed.collect_inputs(
+        _TICKET_REPO,
+        _PR_REPO,
+        1,
+        runner=runner,
+        now=_NOW,
+        ticket_token="ticket-only",
+        pr_token="pr-only",
+        ticket_token_env=ticket_source,
+        pr_token_env=pr_source,
+    )
+
+    excluded = {
+        "gh_host",
+        "github_token",
+        "ce_github_app_private_key",
+        "custom_ticket_source",
+        "custom_pr_source",
+    }
+    for child_env in (runner.calls[0][1]["env"], runner.calls[1][1]["env"]):
+        assert excluded.isdisjoint({name.casefold() for name in child_env})
+
+
 @pytest.mark.parametrize(
     "ticket_token,pr_token",
     [
