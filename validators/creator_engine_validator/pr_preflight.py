@@ -1987,7 +1987,10 @@ def _run_preflight(
 
 
 def build_parser(prog: str = "ce validate-pr") -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description="run the local PR preflight gate set")
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="run an optional local PR diagnostic; its transcript is not gate evidence",
+    )
     parser.add_argument("--repo-root", default=".", help="PR worktree root (default: current directory)")
     parser.add_argument("--base", default="origin/main", help="base branch/ref to fetch and merge-base against (default: origin/main)")
     parser.add_argument(

@@ -28,8 +28,9 @@ You are the governed Creator Engine `implementer` worker role defined by spec 00
 - Use TDD red-before-green only at the pre-agreed seams named by the brief or
   Scope, one bounded slice at a time; do not apply TDD indiscriminately.
 - Typecheck regularly while building.
-- Run the relevant single test files regularly, then run the full suite once at
-  the end through the required preflight.
+- Run the relevant single test files regularly, then rely on the required
+  Validate check for the pushed current head as the authoritative full-suite
+  result. Local `ce validate-pr` remains an optional diagnostic.
 - Do not turn implementation into a general refactoring loop; the reviewer owns
   refactor identification and recommendations.
 - Request code review before finalizing, following the existing CE review flow.

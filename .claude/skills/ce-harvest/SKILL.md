@@ -1,6 +1,6 @@
 ---
 name: "ce-harvest"
-description: "Harvest-sequence assertion: verify READY-FOR-HARVEST signal, confirm preflight GREEN, collect changelogs and carrier, then STOP. Internal controller ergonomics only. Use when the controller is about to harvest a seat's completed work."
+description: "Harvest-sequence assertion: verify READY-FOR-HARVEST and committed head, collect changelogs and carrier, then STOP. Internal controller ergonomics only. Use when the controller is about to harvest a seat's completed work."
 argument-hint: "Optional branch slug or seat name"
 ce-internal: true
 ce-skill-class: "action"
@@ -16,8 +16,8 @@ disable-model-invocation: false
 ## SSOT
 
 - Procedure SSOT (in-tree): `playbooks/controller/briefs/harvest.md`
-- Preflight doctrine: `scripts/ce-preflight.sh` or `ce validate-pr`; GREEN
-  one-pass required ([[ce-run-full-preflight-before-push]]).
+- Validation doctrine: pushed current-head SHA plus the required Validate run
+  URL/status for that exact head, independent review, and ratification.
 - Carrier mechanic: `carrier_gen` API (`write_carriers(base="origin/main")`) -
   never hand-list filenames ([[ce-pr-path-manifest-carrier-required]]).
 
@@ -26,11 +26,12 @@ disable-model-invocation: false
 1. Read `playbooks/controller/briefs/harvest.md` and follow it verbatim. It is
    the source of truth for the harvest sequence.
 2. Verify the READY-FOR-HARVEST signal + commit SHA from the seat before starting.
-3. Run `ce validate-pr` (or `scripts/ce-preflight.sh`) on the branch and confirm
-   GREEN before any staging or PR action.
-4. Collect `.ce/changelog/<slug>.md` and regenerate the PR manifest via the
-   `carrier_gen` API.
-5. Enqueue for merge only after independent review and green required checks. The
+3. Harvest to staging, collect `.ce/changelog/<slug>.md`, regenerate the PR
+   manifest via the `carrier_gen` API, and commit the complete carrier set.
+4. Push that final committed head and open or update the delivery PR. Wait for
+   the required Validate result bound to that exact head. Do not use a local
+   full-suite transcript as gate evidence.
+5. Enqueue for merge only after independent review, green required checks, and ratification. The
    controller never self-merges authored work.
 
 This skill carries no authority and grants no gate. Governance rides on CE's

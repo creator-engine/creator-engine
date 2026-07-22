@@ -51,8 +51,8 @@ The local runner evidence is in
   containment/routing only; a non-empty `egress_allowlist` must refuse unless a
   real allowlist enforcement primitive is proven.
 
-The DGX seat image itself includes the CI-parity Python 3.14 validator venv,
-so `ce validate-pr` is available in the contained seat. The validator venv
+The DGX seat image itself includes the Python 3.14 validator venv, so optional
+diagnostic `ce validate-pr` remains available in the contained seat. The venv
 exposes both the `ce` and `creator-engine-validator` console scripts. The
 portable CE CLI image in `deploy/oci` remains a separate general-purpose
 payload.
@@ -491,9 +491,12 @@ after merge:
    record the resulting immutable image digest. If publishing to GHCR is
    authorized, push the explicitly tagged image and record the published
    manifest-list digest; do not treat a mutable tag as reproducibility proof.
-3. Canary one seat (UID/GID `1002:1002`), run contained `ce validate-pr`, and
-   inspect the dry-run/contained evidence. Then roll through the remaining
-   shared-Dockerfile seats: `1003:1003`, then `1004:1004`.
+3. Canary one seat (UID/GID `1002:1002`) with the separately named DGX apply
+   checks above: build/load the image, prove the `runsc-gvproxy-ptrace` runtime
+   and HTTPS route, and inspect dry-run/contained launcher evidence. Record the
+   immutable image digest and canary output; this is DGX runtime/image evidence,
+   not generic PR validation. Then roll through the remaining shared-Dockerfile
+   seats: `1003:1003`, then `1004:1004`.
 4. If the canary or a later seat fails, stop rollout and restore the prior
    recorded image tag/digest. Keep the failed named container for forensic
    inspection until its evidence has been captured.

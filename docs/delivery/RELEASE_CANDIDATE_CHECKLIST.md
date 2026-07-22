@@ -85,17 +85,12 @@ satisfied.
 
 ### c.3 Validation evidence passes (or skipped checks are named with a rationale)
 
-The validation commands or validation plan declared at readiness
-(per [`./DEFINITION_OF_READY.md`](./DEFINITION_OF_READY.md) §b.8)
-have been run and their outputs captured. Failing checks MUST be
-either remediated under the envelope's authorship or surfaced as
-blocking findings; skipped checks MUST be named with an explicit
-rationale per
-[`./DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md) §b.2. Where a
-Creator Engine validator run applies, its exit status and any
-failure output are recorded; where no CI workflow is wired for the
-batch's mutation class, local-validation evidence is named per
-[`./NEXT_TASK_PROTOCOL.md`](./NEXT_TASK_PROTOCOL.md) §b.3.
+The pushed current-head SHA and required Validate run URL/status for that exact
+head (or required synthetic merge-group head) are captured. Failing checks MUST
+be either remediated under the envelope's authorship or surfaced as blocking
+findings. Optional targeted author checks may be recorded as iteration evidence,
+but local full-suite transcripts are not gate evidence and cannot substitute
+for required CI.
 
 ### c.4 The review gate has been evaluated per `REVIEW_GATE.md`
 

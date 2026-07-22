@@ -61,7 +61,7 @@ CE_VALIDATOR_PYTHON="${CE_VALIDATOR_PYTHON:-.venv/bin/python}"
 UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index --find-links validators/wheelhouse -r validators/requirements.txt
 ```
 
-If you need the full pytest gate, add dev/test dependencies to the same interpreter (`validators/README.md:41-55`):
+If you choose to run optional full-suite diagnostics, add dev/test dependencies to the same interpreter (`validators/README.md:41-55`):
 
 ```bash
 UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-index \
@@ -71,7 +71,8 @@ UV_PYTHON_DOWNLOADS=never uv pip install --python "$CE_VALIDATOR_PYTHON" --no-in
   -r validators/requirements-dev.txt
 ```
 
-Run these three named CI checks locally before asking for review:
+You may run any of these checks locally as optional iteration diagnostics. They
+cannot substitute for the required Validate result on the pushed current head:
 
 ```bash
 # Creator Engine validator - pytest suite (offline)
@@ -92,13 +93,20 @@ fi
 
 Those names and commands mirror the workflow steps in `.github/workflows/validate.yml:43-46`, `.github/workflows/validate.yml:83-94`. For smaller documentation PRs, the existing `CONTRIBUTING.md` also asks contributors to run `git diff --check`, `check-examples`, and `scan-no-limitless` locally (`CONTRIBUTING.md:108-125`).
 
-Before you push, run the full PR gate set once and keep going until it is green:
+Full local validation is optional diagnostic evidence while iterating:
 
 ```bash
 TMPDIR=/var/tmp ce validate-pr
 ```
 
-`ce validate-pr` is the canonical local preflight. It is a superset of the individual pytest and validator commands above, resolves the committed comparison base, and prints one final `GREEN` or `FAIL` summary (`docs/contracts/authoring-a-governed-pr.md:18-61`, `validators/creator_engine_validator/pr_preflight.py:175-180`). Use the single preflight as the final local evidence pass before push.
+Do not run full local `ce validate-pr` as a standing pre-push, harvest,
+controller, or merge-gate prerequisite. Push the committed current head; wait
+for required Validate checks; require independent review and ratification. PR
+gate evidence is the pushed current-head SHA plus the required Validate run
+URL/status for that exact head (or required synthetic merge-group head),
+independent review, and ratification. Local full-suite transcripts are not gate
+evidence; targeted author tests remain optional iteration evidence and cannot
+substitute for required CI.
 
 > **Running from an isolated worktree?** Set
 > `CE_VALIDATOR_PYTHON` to the dependency interpreter. See [`../../validators/README.md`](../../validators/README.md).
@@ -126,7 +134,8 @@ Under the words is a conserved state machine. Shape-to-Build is the front gate, 
 For a contributor, the practical loop is:
 
 1. Compose: frame the request, scope it, and name the mutation class.
-2. Verify: run the local validator/pytest checks and collect evidence.
+2. Verify: run optional targeted author checks, push the committed head, and
+   collect the required Validate run URL/status for that exact head.
 3. Ratify: obtain the required human ratification for governed or privileged scope.
 4. Implement: produce the bounded diff and PR.
 5. Review/Ship: obtain independent review, then a maintainer/Operator lands what is authorized.
@@ -154,7 +163,8 @@ Checklist for the first PR:
 - Keep the changed-file boundary tight.
 - Add the per-PR changelog fragment at `.ce/changelog/<branch-slug>.md`.
 - Add the path-manifest carrier at `.ce/pr-manifests/<branch-slug>.md` when the PR is governed by a manifest (`docs/contracts/authoring-a-governed-pr.md:72-90`).
-- Paste validation evidence, including `ce validate-pr` and the focused local checks above when they apply.
+- Record the pushed head SHA and required Validate run URL/status for that exact
+  head; focused local checks may be cited as optional iteration evidence only.
 - Do not include secrets, local session state, generated logs, or machine-local paths. `CONTRIBUTING.md` explicitly excludes instance-local state and credentials (`CONTRIBUTING.md:91-106`).
 
 ## 6. Review And Independence

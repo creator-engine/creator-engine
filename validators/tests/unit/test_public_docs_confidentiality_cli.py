@@ -1,8 +1,8 @@
 """Tests for the standalone public-docs confidentiality check + CLI subcommand.
 
-This locks the pre-push half of the root fix: the same single-sourced rule the
-CI guard uses is exposed as ``scan-public-docs-confidentiality`` and runs in
-``ce validate-pr`` before push.
+This locks the optional local diagnostic surface: the same single-sourced rule
+the CI guard uses is exposed as ``scan-public-docs-confidentiality`` and runs
+in the optional ``ce validate-pr`` diagnostic.
 """
 from __future__ import annotations
 

@@ -55,8 +55,9 @@ Inputs:
 Governed steps:
 
 1. Confirm the PR has a closed path set and exactly one declared work class.
-2. Confirm required checks and preflight evidence are green or identify the
-   failing gate.
+2. Confirm the required Validate run URL/status is green and bound to the
+   current pushed head (or required synthetic merge-group head), or identify the
+   failing gate. Local full-suite transcripts are not gate evidence.
 3. Route review to an independent reviewer or harvest an existing independent
    verdict.
 4. Reconcile stale review, base drift, and unresolved review threads.
@@ -90,10 +91,13 @@ Governed steps:
 
 1. Compare worker output against the brief, stop lines, and allowed path set.
 2. Refuse or return to author if changed paths exceed the dispatched envelope.
-3. Run the required local preflight for the lane.
-4. Generate changelog and path-manifest carriers from the committed diff.
-5. Open or update the delivery PR with evidence, work class, and residual-risk
-   notes.
+3. Generate changelog and path-manifest carriers from the committed diff and
+   commit the complete final path set.
+4. Push that final committed head and open or update the delivery PR with work
+   class and residual-risk notes.
+5. Wait for the required Validate result bound to that exact head, then attach
+   the run URL/status as evidence. Targeted author tests remain optional
+   iteration evidence only.
 
 Classification: autonomous for ordinary in-scope delivery PR creation and
 updates. Reserved if the output requests broader paths, broader credentials,

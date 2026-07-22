@@ -44,31 +44,30 @@ changing release credentials/settings is outside ordinary documentation work.
 Those actions require a later, separate Operator-ratified publication gate with
 explicit evidence, validation, and stop conditions.
 
-## Release-publish preflight
+## Release-publish validation
 
-A release-publish PR is a code change, not a signature ceremony, and is subject
-to the same mandatory preflight as any other PR: `ce validate-pr` (the full
-CI-parity offline suite, whole tree, on a CLEAN working tree) MUST go green
-locally before the PR is pushed. Verifying only the release signature is not
-sufficient. The offline suite mirrors `.github/workflows/validate.yml`, so a
-local green ≈ CI green.
+A release-publish PR is a code change, not a signature ceremony. Do not run
+full local `ce validate-pr` as a standing pre-push, harvest, controller, or
+merge-gate prerequisite. Push the committed current head; wait for required
+Validate checks; require independent review and ratification. Verifying only
+the release signature is not sufficient.
 
-Release-publish PRs have a specific failure mode that makes this preflight
-non-optional. Publishing a new version `X.Y.Z` updates `docs/llms-install.md`
-and adds `docs/downloads/X.Y.Z/`, which BREAKS the version-pinned install-spec
+Publishing a new version `X.Y.Z` updates `docs/llms-install.md` and adds
+`docs/downloads/X.Y.Z/`, which can expose stale version-pinned install-spec
 tests that assert the prior version:
 
 - `validators/tests/unit/test_v3_installer.py`
 - `validators/tests/integration/test_install_bootstrap.py`
 - `validators/tests/unit/test_onboard_apply_live.py`
 
-The publish PR MUST run `ce validate-pr` locally and update those version-pinned
-tests to the new version **in the same PR** before pushing.
+The publish PR must update those version-pinned tests to the new version in the
+same PR. The required Validate result for the exact pushed head is the
+authoritative evidence that this coupling is green.
 
 Cautionary example: a release-publish PR (0.2.0 → 0.3.0) was pushed after
 verifying only the release signature. Six version-pinned install-spec
-assertions still expecting `0.2.0` went RED at CI — every one of them would have
-been caught by running the offline suite locally first.
+assertions still expecting `0.2.0` went RED at CI. Required current-head CI is
+therefore load-bearing release evidence, not a forge-round-trip inconvenience.
 
 The durable fix is to make those install-spec tests read the version
 dynamically from `creator_engine_validator.version` (release-agnostic) so a
@@ -242,7 +241,8 @@ When a release operation changes mirror bytes, the release owner must:
 5. Embed the new signature and canonical content digest.
 6. Verify the signature with the published trust root and an independent trust
    anchor before publication.
-7. Run the full release-publish preflight on a clean tree before push.
+7. Push the committed head and record the required Validate run URL/status for
+   that exact head.
 
 Changing only `SHA256SUMS` is not sufficient. The signed install spec is the
 authority that binds the installer flow to the mirror bytes, so it must move in
@@ -260,4 +260,5 @@ Before a PR that touches a published release mirror is pushed or merged, confirm
 - The signer and verification evidence are present.
 - User-facing guidance explains whether users should keep pinning the old
   version, move to a point release, or treat the old version as deprecated.
-- The release-publish preflight passed on the committed branch.
+- The required Validate run passed for the exact pushed head (or required
+  synthetic merge-group head), with its URL/status recorded.

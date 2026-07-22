@@ -63,7 +63,7 @@ ce containment-status   # probe fleet seat containment from live pids and runtim
 ce posture          # print a deterministic read-only Controller posture banner
 ce dispatch-receipt emit   # build + persist a dispatch-activation receipt (ce-ops#615)
 ce dispatch-receipt verify # verify a receipt for activation-gap classes (read-only)
-ce validate-pr          # run local PR preflight against committed base..HEAD state
+ce validate-pr          # run an optional local PR diagnostic against committed base..HEAD state
 ce automerge-decide     # classify a PR's mutation class + emit AUTO/GESTURE decision (dry-run only; no merge)
 ce automerge-status     # read dry-run automerge decision logs (read-only; no merge)
 ce automerge-kill-switch # read or toggle durable live-policy automerge kill-switch
@@ -1835,7 +1835,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     validate_pr = groups.add_parser(
         "validate-pr",
-        help="run the local PR preflight gate set against committed base..HEAD state",
+        help="run an optional local PR diagnostic against committed base..HEAD state",
+        description=(
+            "Run an optional local PR diagnostic against committed base..HEAD state. "
+            "Its transcript is not gate evidence and does not substitute for required CI."
+        ),
     )
     validate_pr.add_argument("--repo-root", default=".", help="PR worktree root (default: current directory)")
     validate_pr.add_argument(

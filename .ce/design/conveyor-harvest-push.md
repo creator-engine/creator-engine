@@ -12,10 +12,7 @@ arming transport or reviewer actions. The full path is:
 5. Clean generated validator artifacts.
 6. Regenerate the changelog and per-PR carrier from final `base..HEAD`.
 7. Re-add the legacy carrier line `- **Declared work class:** <tiny|story|feature|epic>`.
-8. Run `validate-pr` with a known-good host venv and
-   `PYTHONPATH=<worktree>/validators`.
-9. Clean `validators/build` and `validators/*.egg-info` after validation.
-10. Stop for controller/Operator-gated push, PR, and approval decisions.
+8. Stop for controller/Operator-gated push, PR, and approval decisions.
 
 ## Safe Automation
 
@@ -32,11 +29,12 @@ helper because they do not publish or approve code:
 - Regenerate `.ce/changelog/<branch-slug>.md` and
   `.ce/pr-manifests/<branch-slug>.md` with `carrier_gen.write_carriers`.
 - Re-add the old-name declared work-class line for cross-gate compatibility.
-- Run the injected `validate-pr` seam with a known-good venv and explicit
-  `PYTHONPATH`.
-- Remove generated validator artifacts again after validation and before any
-  future staging step.
 - Return structured ready/not-ready results with reasons.
+
+The current helper still invokes its injected `validate-pr` seam by default.
+Retiring that runtime control-flow invocation is a separately scoped follow-up;
+this policy carrier does not redesign `conveyor.py`, `conveyor_daemon.py`, or
+`release_orchestrator.py`.
 
 ## Autonomy-Arming Gates
 
@@ -58,10 +56,10 @@ XS: Local harvest prep core.
 
 - Implement `creator_engine_validator.conveyor.prepare_harvest`.
 - Accept worktree path, branch, base, carrier metadata, old-name work class, and
-  injected git/validate runners.
+  injected git/validate runners until the runtime follow-up removes the latter.
 - Clean generated validator artifacts, normalize branch naming, rebase or verify
-  base, regenerate carriers, run validate, clean again, and return a structured
-  result.
+  base, regenerate carriers, preserve the existing diagnostic seam, clean
+  again, and return a structured result.
 - Unit test all behavior with fake runners. No push, PR, docker, daemon, or
   autonomy arming.
 

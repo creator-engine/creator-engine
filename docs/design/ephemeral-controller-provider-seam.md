@@ -54,7 +54,8 @@ path.
 - No change to the approval capability wall, queue daemon, merge gate, or
   signing deputy protocols.
 - No new source of gate, approval, release, or Operator authority.
-- No replacement for governed work claims, PR carriers, or `ce validate-pr`.
+- No replacement for governed work claims, PR carriers, or required
+  current-head Validate evidence.
 - No durable provider database, queue, transcript store, or hidden work memory.
 
 ## Threat Model
@@ -350,7 +351,12 @@ Each run emits a takeover-compatible value-free packet:
   "validation": {
     "mandate_digest_verified": true,
     "profile_refusals": [],
-    "local_checks": ["git diff --check", "ce validate-pr"]
+    "local_checks": ["git diff --check"],
+    "required_validate": {
+      "head_sha": "<pushed-current-head-sha>",
+      "run_url": "https://github.com/OWNER/REPO/actions/runs/123",
+      "status": "success"
+    }
   },
   "refusals": [
     {
@@ -429,8 +435,9 @@ Before any provider is promoted beyond read/report:
    requests from every provider identity.
 8. Add `ce takeover` ingestion tests for ephemeral evidence packets, including
    completed, failed, refused, and expired runs.
-9. Run full local `ce validate-pr` before every push of any implementation
-   slice.
+9. Push each committed implementation head and require the Validate run
+   URL/status bound to that exact head. Local `ce validate-pr` remains an
+   optional diagnostic and its transcript is not gate evidence.
 
 Gate-adjacent work remains blocked until the seam validation and harness matrix
 evidence are present. Even then, gate/sign custody stays outside the ephemeral

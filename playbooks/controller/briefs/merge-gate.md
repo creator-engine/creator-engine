@@ -4,14 +4,13 @@ Confirm independent review, green required checks, and ratification. If any
 gate is missing, do not merge. If all gates pass, execute only the ratified
 merge action and record the closeout.
 
-## Preflight precondition (before EVERY push, no exemptions)
+## Authoritative validation evidence
 
-`ce validate-pr` — the full CI-parity offline suite, whole tree, run on a CLEAN
-working tree — MUST go green locally before any PR is pushed: feature PRs,
-release / publish PRs, AND controller-authored PRs alike. There is no "it's just
-a release / signature ceremony" exemption; a release-publish PR is still a code
-change to the install spec and must pass the offline suite first. The offline
-suite mirrors `.github/workflows/validate.yml`, so a local green ≈ CI green;
-pushing without it wastes a forge round-trip and surfaces failures publicly. See
-[`../../../docs/operations/AUTHOR_A_CE_VALID_PR.md`](../../../docs/operations/AUTHOR_A_CE_VALID_PR.md)
-for the standing directive and the #603 cautionary example.
+Do not run full local `ce validate-pr` as a standing pre-push, harvest,
+controller, or merge-gate prerequisite. Push the committed current head; wait
+for required Validate checks; require independent review and ratification.
+Record the pushed head SHA and required Validate run URL/status for that exact
+head (or required synthetic merge-group head). Local full-suite transcripts are
+not accepted as gate evidence; targeted author tests are optional iteration
+evidence and cannot substitute for required CI. `ce validate-pr` remains an
+optional diagnostic.

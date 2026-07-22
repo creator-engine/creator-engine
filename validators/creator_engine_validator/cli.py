@@ -136,7 +136,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "fast public-docs confidentiality scan: fail if any non-allowlisted "
             "public doc leaks a ce-ops# ticket ref or internal host identifier "
-            "(same rule as the CI guard; runs in ce validate-pr before push)"
+            "(same rule as the CI guard; also runs in optional ce validate-pr diagnostics)"
         ),
     )
     scan_public_docs_confidentiality.add_argument(

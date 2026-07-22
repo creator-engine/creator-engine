@@ -4,11 +4,10 @@ Status: design-only
 
 ## Purpose
 
-Prevent governed seats from signaling READY with stale generated reference
-artifacts or malformed PR carriers. The seat-side preflight runs before push
-and before the READY stop line, so the authoring seat repairs its own branch
-instead of leaving controller harvest to discover and fix avoidable carrier or
-autogen drift.
+Prevent governed seats from handing off stale generated reference artifacts or
+malformed PR carriers. Focused author checks and repair tools may run before
+push, while the required Validate check on the pushed current head remains the
+authoritative validation gate.
 
 The check is a prevention layer in the author loop. It does not replace CI,
 review, path-manifest enforcement, or controller harvest. It moves the first
@@ -52,9 +51,9 @@ review or verification lanes may run the same checks for evidence, but they do
 not repair or push.
 
 The source of truth is committed branch state compared to the resolved PR base.
-Working-tree-only edits are not READY material. A seat may run an early
-advisory pass while dirty, but the blocking READY pass must validate committed
-state.
+Working-tree-only edits are not READY material. A seat may run focused checks or
+an optional full diagnostic while dirty, but gate evidence is the required
+Validate result bound to the exact pushed head.
 
 ## Validation Contract
 
@@ -145,7 +144,7 @@ Future generators should register the same contract:
 - a deterministic source-surface matcher;
 - a deterministic `--write` repair command;
 - a checked artifact path or path set;
-- a read-only verify mode used by CI and `ce validate-pr`;
+- a read-only verify mode used by CI and, optionally, `ce validate-pr`;
 - an allow-list decision for public-docs confidentiality scanning.
 
 The seat-side preflight should iterate the registry instead of hard-coding only
@@ -170,14 +169,12 @@ Two command shapes are plausible:
 
 | Option | Shape | Strengths | Weaknesses |
 | --- | --- | --- | --- |
-| New named verb | `ce seat-preflight` or `ce preflight seat` | Discoverable as a seat action; can print seat-specific READY language. | Creates another validation entry point; risks drift from CI-parity `validate-pr`; adds CLI surface during a contested CLI period. |
-| Validate-pr profile | `ce validate-pr --profile seat-ready` | Reuses the canonical PR preflight, base resolution, work-class parsing, path-manifest gate, autogen checks, and public-docs scanner. Keeps one authoritative validation command. | Profile needs clear documentation so seats know it is required before READY, not merely an optional CI mirror. |
+| Validate-pr profile | `ce validate-pr --profile seat-ready` | Reuses existing diagnostics, base resolution, work-class parsing, path-manifest checks, autogen checks, and public-docs scanner. | A full local run is expensive and cannot become progression or gate evidence. |
 
-Recommendation: implement this as a required `ce validate-pr --profile
-seat-ready` sub-profile for seat READY, not as a new top-level verb. The profile
-should be visible in seat briefs and checklists even if the lower-level CLI
-option remains narrow. This keeps CI parity and seat preflight on the same
-implementation spine and avoids creating a second validation vocabulary.
+Recommendation: keep `ce validate-pr --profile seat-ready` as an optional
+diagnostic, not a READY prerequisite. Authoring automation should invoke the
+focused carrier, autogen, work-class, and confidentiality checks it can repair;
+the pushed current-head required Validate check remains authoritative.
 
 `seat-ready` is a new successor profile, not a mutation of the existing
 `contained-seat` profile. The legacy `contained-seat` profile continues to serve
@@ -200,28 +197,30 @@ The expected write-capable seat loop is:
    them.
 4. Generate the changelog and path-manifest carrier with repo-native tooling.
 5. Commit all intended READY artifacts.
-6. Run the seat-ready `ce validate-pr` profile against committed state.
-7. If it fails, repair the branch, regenerate the carrier if the path set
-   changed, recommit, and rerun.
-8. Push and emit READY only after the profile passes.
+6. Optionally run the seat-ready `ce validate-pr` profile as a diagnostic.
+7. Push the committed current head and wait for its required Validate result.
+8. Repair any failure, regenerate the carrier if the path set changed, recommit,
+   push the new head, and wait for the new head's required Validate result.
 
 The seat must not signal READY based on a dirty worktree, an uncommitted carrier
-repair, or an advisory-only check.
+repair, or a local full-suite transcript. READY evidence names the pushed head
+SHA and required Validate run URL/status for that exact head.
 
 ## Fail-Closed Semantics
 
-The preflight result is blocking:
+Focused author checks fail closed for the artifact they inspect, while only the
+required current-head Validate result is load-bearing progression evidence:
 
-- PASS means the seat may push and emit READY, subject to any additional brief
-  requirements.
-- FAIL means the seat must not push as READY and must not emit READY.
+- PASS from a local check means only that its focused obligation passed; it is
+  optional iteration evidence, not a merge gate.
+- FAIL means repair the named obligation before treating the artifact as ready.
 - ENV-SKIP is introduced by the implementation slice as an explicit
   classification for checks the host environment cannot run. Carrier fidelity,
   changelog presence, declared work class, registered autogen freshness, and
   confidentiality checks are not optional skips.
-- TOOLING ERROR is treated as FAIL unless the implementation slice classifies
-  the environment as unable to run the full profile. In that case the seat emits
-  the worker stop state `BLOCKED` rather than READY.
+- TOOLING ERROR in a focused artifact check is treated as FAIL for that
+  obligation. Failure or unavailability of the optional full profile does not,
+  by itself, block READY; report it only as diagnostic evidence.
 
 Self-repair happens before push and before READY. Controller harvest does not
 repair a stale autogen artifact, missing changelog, malformed carrier, missing
@@ -229,7 +228,8 @@ digest block, non-self-inclusive manifest, or invalid work-class declaration.
 
 ## Host Resource Rules
 
-Full-suite local preflight is resource-sensitive and must respect host bounds:
+An optional full-suite local diagnostic is resource-sensitive and must respect
+host bounds:
 
 - Serialize full-suite preflights. A seat should not start a full local preflight
   when another local full-suite or preflight run is active on the same host.
@@ -242,9 +242,9 @@ Full-suite local preflight is resource-sensitive and must respect host bounds:
 - Clean stale pytest directories after the run has completed and no live pytest
   from that run still needs them.
 
-These rules belong in the seat dispatch brief and in the validation wrapper that
-launches the full profile. They prevent READY validation from becoming a host
-resource incident while still preserving CI-parity evidence.
+These rules apply only when a seat elects to run the optional full diagnostic.
+They keep that diagnostic from becoming a host-resource incident; they do not
+make it READY or CI-parity evidence.
 
 ## Dispatch-Brief Integration
 
@@ -260,8 +260,9 @@ item before the READY stop line:
       carry AUTHORIZED_PATHS_COUNT and AUTHORIZED_PATHS_SHA256 for the real diff.
 - [ ] PR body or carrier input contains exactly one line:
       - **Declared work class:** <XS|S|M|L>
-- [ ] Run the seat-ready `ce validate-pr` profile against committed state before
-      push and READY.
+- [ ] Push the committed current head and record the required Validate run
+      URL/status for that exact head; local full-suite transcripts do not
+      substitute for this evidence.
 ```
 
 The checklist is not a substitute for tooling. Its purpose is to make the
@@ -274,8 +275,8 @@ The design is satisfied when an implementation slice can demonstrate:
 
 - A seat branch that changes a registered CLI or schema surface self-regenerates
   the relevant checked reference artifact before READY.
-- The first pushed branch passes the CLI/schema freshness gates without
-  controller-side regeneration.
+- The pushed branch passes the CLI/schema freshness gates in the required
+  Validate run without controller-side regeneration.
 - The path-manifest carrier for the branch is generated from the real diff,
   includes itself and the changelog, and has a valid
   `AUTHORIZED_PATHS_COUNT`/`AUTHORIZED_PATHS_SHA256` block.
@@ -297,7 +298,7 @@ The design is satisfied when an implementation slice can demonstrate:
 A later implementation should prefer small extensions to existing validator
 surfaces:
 
-- Add or document the seat-ready `ce validate-pr` profile.
+- Keep the seat-ready `ce validate-pr` profile as an optional diagnostic.
 - Wire registered autogen repair commands only in the authoring profile, while
   CI remains verify-only.
 - Invoke the existing `cli_reference_autogen_sync` and
