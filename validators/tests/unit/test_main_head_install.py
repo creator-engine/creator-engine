@@ -202,6 +202,37 @@ def test_promoter_builds_console_scripts_against_final_target(monkeypatch, tmp_p
         main_head_install._remove_worktree(resolved, artifact.worktree)
 
 
+def test_promoter_recovers_from_debris_at_final_target(monkeypatch, tmp_path: Path):
+    repo, _commit = _write_main_repo(tmp_path)
+    resolved = resolve_origin_main(repo)
+    artifact = build_main_head_artifact(
+        resolved,
+        work_root=tmp_path / "artifact-work",
+        build_wheel=_fake_builder,
+    )
+    install_root = tmp_path / "install-root"
+    target = install_root / (
+        f"venv-main-{artifact.identity.commit[:12]}-"
+        f"{artifact.artifact_manifest_sha256[:12]}"
+    )
+    (target / "bin").mkdir(parents=True)
+    debris = target / "crashed-install-debris"
+    debris.write_text("partial target", encoding="utf-8")
+    try:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+        MainHeadVenvPromoter().apply(install_root, artifact)
+        assert (install_root / "venv").resolve() == target
+        assert not debris.exists()
+        for command in ("ce", "cev3"):
+            lines = (target / "bin" / command).read_text(encoding="utf-8").splitlines()
+            interpreter_lines = [line for line in lines if "bin/python" in line]
+            assert interpreter_lines
+            assert all(str(target) in line for line in interpreter_lines)
+            assert all(".staging." not in line for line in interpreter_lines)
+    finally:
+        main_head_install._remove_worktree(resolved, artifact.worktree)
+
+
 def test_clean_main_install_uses_resolver_and_promoter_without_release_signature(tmp_path: Path):
     repo, commit = _write_main_repo(tmp_path)
     install_root = tmp_path / "install-root"

@@ -232,6 +232,45 @@ def test_apply_update_builds_console_scripts_against_final_target(monkeypatch, t
         assert all(".staging." not in line for line in interpreter_lines)
 
 
+def test_apply_update_recovers_from_debris_at_final_target(monkeypatch, tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
+    install_root = tmp_path / "install-root"
+    release = update_runtime.resolve_latest_signed_release(
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        os_name="Linux",
+        machine="x86_64",
+    )
+    target = install_root / f"venv-{release.manifest.package_version}-{release.sha256s_sha256}"
+    (target / "bin").mkdir(parents=True)
+    debris = target / "crashed-install-debris"
+    debris.write_text("partial target", encoding="utf-8")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    result = update_runtime.apply_update(
+        install_root=install_root,
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.2.0", "a" * 40),
+        os_name="Linux",
+        machine="x86_64",
+    )
+
+    assert result.ok is True
+    assert (install_root / "venv").resolve() == target
+    assert not debris.exists()
+    for command in ("ce", "cev3"):
+        lines = (target / "bin" / command).read_text(encoding="utf-8").splitlines()
+        interpreter_lines = [line for line in lines if "bin/python" in line]
+        assert interpreter_lines
+        assert all(str(target) in line for line in interpreter_lines)
+        assert all(".staging." not in line for line in interpreter_lines)
+
+
 def test_verification_doubt_fails_closed_before_any_swap(tmp_path: Path):
     mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
     swapper = FakeSwapper()
