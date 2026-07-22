@@ -23,7 +23,9 @@ from .mutation_classifier import (
     GESTURE_CLASSES,
     MutationPolicy,
     default_mutation_policy,
+    governance_docs_path_predicates,
     mutation_class_for_paths,
+    path_matches_any_predicate,
 )
 from .coupling_current_head import build_obligation_set, resolve_decision_base_sha
 
@@ -1070,21 +1072,33 @@ def _root_markdown(path: str) -> bool:
     return "/" not in path and path.endswith(".md")
 
 
+def docs_envelope_governance_exclusion_predicates() -> tuple[str, ...]:
+    """Return docs-governance exclusions from the mutation-classifier source."""
+    return governance_docs_path_predicates()
+
+
 def _docs_envelope_path_permitted(path: str) -> bool:
     """Return True iff *path* is permitted inside the docs_envelope tier.
 
     Paths under .ce/changelog/ and .ce/pr-manifests/ pass by prefix rule
     (existing behaviour preserved).  Root-level .md files pass via the
     _root_markdown guard.  Paths under docs/** must carry an extension from
-    _DOCS_ENVELOPE_ALLOWED_EXTENSIONS (case-insensitive); any other extension
-    or no extension fails closed to GESTURE.  All other paths fail closed.
+    _DOCS_ENVELOPE_ALLOWED_EXTENSIONS (case-insensitive) and must not match a
+    governance-class docs predicate from the mutation classifier; any other
+    extension, governance path, or no extension fails closed to GESTURE.  All
+    other paths fail closed.
     """
     if path.startswith((".ce/changelog/", ".ce/pr-manifests/")):
         return True
     if _root_markdown(path):
         return True
     if path.startswith("docs/"):
-        return Path(path).suffix.lower() in _DOCS_ENVELOPE_ALLOWED_EXTENSIONS
+        return (
+            Path(path).suffix.lower() in _DOCS_ENVELOPE_ALLOWED_EXTENSIONS
+            and not path_matches_any_predicate(
+                path, docs_envelope_governance_exclusion_predicates()
+            )
+        )
     return False
 
 

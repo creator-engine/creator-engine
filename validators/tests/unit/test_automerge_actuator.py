@@ -18,6 +18,7 @@ from creator_engine_validator.forge.automerge_policy import (
     brain_supersede_tier_evidence,
 )
 from creator_engine_validator.forge.automerge_actuate_cli import actuate_decision
+from creator_engine_validator.forge import automerge_actuator
 from creator_engine_validator.forge.automerge_actuator import actuate_if_ready
 from creator_engine_validator.forge.coupling_current_head import build_obligation_set
 
@@ -490,11 +491,47 @@ def test_refuses_docs_envelope_tier_when_live_docs_class_flag_is_off(
     assert gh.mutation_calls() == []
 
 
-def test_refuses_docs_envelope_tier_when_live_mutation_class_is_governance(
+def test_refuses_docs_envelope_tier_when_governance_path_predicate_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _write_live_policy(tmp_path, monkeypatch, docs_class=True)
+    gh = FakeActuatorGh()
+
+    result = actuate_if_ready(
+        _write(
+            tmp_path,
+            _decision(
+                tier=AUTOMERGE_TIER_DOCS_ENVELOPE,
+                tier_flag=True,
+                path_envelope=AUTOMERGE_TIER_DOCS_ENVELOPE_PATH_ENVELOPE,
+                changed_paths=[
+                    *DOCS_ENVELOPE_PATHS,
+                    "docs/decisions/actuator-governance.md",
+                ],
+            ),
+        ),
+        gh_runner=gh,
+    )
+
+    assert result.refused is True
+    assert result.reason == "tier_docs_envelope_path_predicate_failed"
+    assert result.acted is False
+    assert gh.calls == []
+    assert gh.mutation_calls() == []
+
+
+def test_docs_envelope_classifier_backstop_refuses_predicate_admitted_governance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The classifier stays an independent backstop if the path predicate diverges."""
+    _write_live_policy(tmp_path, monkeypatch, docs_class=True)
+    monkeypatch.setattr(
+        automerge_actuator,
+        "docs_envelope_tier_matches",
+        lambda _paths: True,
+    )
     gh = FakeActuatorGh()
 
     result = actuate_if_ready(
