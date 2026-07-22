@@ -537,6 +537,27 @@ if [ -n "${CE_VPS_TTY_FLAGS}" ]; then
   read -r -a tty_flags <<<"${CE_VPS_TTY_FLAGS}"
 fi
 
+strip_raw_model_effort_args() {
+  # Recreate-on-relaunch must not replay a stale session's raw model/effort
+  # argv.  The VPS seat's ratified standing policy is Terra/high.
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --model|--reasoning-effort|--effort|-m)
+        shift
+        [ "$#" -gt 0 ] || { printf 'model/effort flag requires a value\n' >&2; exit 2; }
+        shift
+        ;;
+      --model=*|--reasoning-effort=*|--effort=*|-m=*)
+        shift
+        ;;
+      *)
+        printf '%s\n' "$1"
+        shift
+        ;;
+    esac
+  done
+}
+
 container_cmd=()
 if [ "${mode}" = "exec" ]; then
   container_cmd+=(exec)
@@ -544,7 +565,13 @@ fi
 if [ "${image_harness}" = "codex" ]; then
   container_cmd+=(--dangerously-bypass-hook-trust)
 fi
-container_cmd+=("$@")
+while IFS= read -r token; do
+  container_cmd+=("${token}")
+done < <(strip_raw_model_effort_args "$@")
+if [ "${image_harness}" = "codex" ]; then
+  # Matches prepare_contained_codex_config on every recreate-on-relaunch.
+  container_cmd+=(--model gpt-5.6-terra --reasoning-effort high)
+fi
 
 repo_mount="type=bind,source=${CE_VPS_REPO},target=${CE_VPS_CONTAINER_REPO}"
 codex_home_mount="type=bind,source=${CE_VPS_CODEX_HOME},target=${CE_VPS_CONTAINER_CODEX_HOME}"

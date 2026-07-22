@@ -2186,6 +2186,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="Enter was delivered as a SEPARATE send-keys call (safe pattern)")
     dr_emit.add_argument("--model-effort-line", required=True, dest="model_effort_line",
                          help="seat status-line model/effort text at dispatch time")
+    dr_emit.add_argument("--model-effort-note", default=None, dest="model_effort_note",
+                         help="bounded observation note for an unverified --resume attachment")
     dr_emit.add_argument("--dispatcher", required=True,
                          help="controller/operator identity performing the dispatch")
     dr_emit.add_argument("--work-unit", required=True, dest="work_unit",
@@ -4494,6 +4496,7 @@ def _dispatch_receipt_emit(args) -> int:
             activation_method=args.activation_method,
             separate_enter=args.separate_enter,
             model_effort_line=args.model_effort_line,
+            model_effort_note=args.model_effort_note,
             dispatcher=args.dispatcher,
             work_unit=args.work_unit,
             claim_path=getattr(args, "claim_path", None),
@@ -4778,6 +4781,7 @@ def _launch(args, invoked_as: str = "launch") -> int:
             mcp_config_path=getattr(args, "mcp_config", None),
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),
+            role=getattr(args, "role", None),
             runtime_policy=getattr(args, "runtime_policy", None),
             backend=getattr(args, "backend", None),
             repo_root=getattr(args, "repo_root", None),

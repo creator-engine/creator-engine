@@ -418,12 +418,37 @@ if [ -n "${CE_DGX_TTY_FLAGS}" ]; then
   read -r -a tty_flags <<<"${CE_DGX_TTY_FLAGS}"
 fi
 
+strip_raw_model_effort_args() {
+  # The contained seat is always a governed seat.  Do not let a stale herdr
+  # invocation override the regenerated Terra/high config with raw argv.
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --model|--reasoning-effort|--effort|-m)
+        shift
+        [ "$#" -gt 0 ] || { printf 'model/effort flag requires a value\n' >&2; exit 2; }
+        shift
+        ;;
+      --model=*|--reasoning-effort=*|--effort=*|-m=*)
+        shift
+        ;;
+      *)
+        printf '%s\n' "$1"
+        shift
+        ;;
+    esac
+  done
+}
+
 container_cmd=()
 if [ "${mode}" = "exec" ]; then
   container_cmd+=(exec)
 fi
 container_cmd+=(--dangerously-bypass-hook-trust)
-container_cmd+=("$@")
+while IFS= read -r token; do
+  container_cmd+=("${token}")
+done < <(strip_raw_model_effort_args "$@")
+# Reassert the same resolved policy written into the regenerated config.
+container_cmd+=(--model gpt-5.6-terra --reasoning-effort high)
 
 repo_mount="type=bind,source=${CE_DGX_REPO},target=${CE_DGX_CONTAINER_REPO}"
 codex_home_mount="type=bind,source=${CE_DGX_CODEX_HOME},target=${CE_DGX_CONTAINER_CODEX_HOME}"

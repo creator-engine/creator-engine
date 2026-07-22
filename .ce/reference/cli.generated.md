@@ -547,6 +547,7 @@ Options:
 | `--activation-method` | yes | `herdr-send-keys, send-keys` | primitive used to deliver the Enter keystroke |
 | `--separate-enter` | no |  | Enter was delivered as a SEPARATE send-keys call (safe pattern) |
 | `--model-effort-line` | yes |  | seat status-line model/effort text at dispatch time |
+| `--model-effort-note` | no |  | bounded observation note for an unverified --resume attachment |
 | `--dispatcher` | yes |  | controller/operator identity performing the dispatch |
 | `--work-unit` | yes |  | ticket / work unit (e.g. ce-ops#615) |
 | `--claim-path` | no |  | optional: path to the active work claim file |

@@ -111,12 +111,20 @@ properties:
       seat state.
   model_effort_line:
     type: string
-    minLength: 1
+    pattern: "^model=[^=;\\s]+; effort=(medium|high|xhigh)$"
     description: |
-      The seat's observable model/effort status-line text as seen by the
-      dispatcher at the moment of send (per the 2026-07-19 Operator floor
-      ruling). Example: "claude-sonnet-4-5 / effort:normal". Value-free:
-      this is an observable UI string, not a credential or account id.
+      Canonical launch-policy stamp, generated from the resolved wrapper
+      model/effort pair: "model=gpt-5.6-terra; effort=high". It is not free
+      prose: the receipt builder validates it against the same policy that
+      clamps low effort and refuses Luna seat/foreman launches.
+  model_effort_note:
+    type: string
+    const: "unverified-attached-session: --resume did not recreate or reassert model/effort"
+    description: |
+      Optional, bounded observation note. Present only when a dispatcher
+      attached to an existing session, whose recorded model/effort cannot be
+      verified or reasserted by the wrapper. Watchers must treat this as an
+      attachment warning, not a claim that the canonical line was applied.
   dispatcher:
     type: string
     minLength: 1

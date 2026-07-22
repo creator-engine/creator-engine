@@ -160,7 +160,7 @@ def test_build_governed_command_pins_settings_strict_mcp():
 def test_build_governed_command_does_not_emit_closeout_as_flags():
     # Closeout pointers ride the lane environment, never as claude flags.
     cmd = cls.build_governed_claude_command(
-        base_argv=["--model", "claude-opus-4-7"],
+        base_argv=["--model", "gpt-5.6-terra"],
         mcp_config_path=".hermes/lane-x/mcp/ce-mcp.json",
         closeout_file=".hermes/lane-x/closeout.md",
         completion_report_ref="reports/cc-g-d.yaml",
@@ -169,7 +169,7 @@ def test_build_governed_command_does_not_emit_closeout_as_flags():
     assert "closeout" not in joined
     assert "reports/cc-g-d.yaml" not in joined
     # Operator base args are preserved.
-    assert "--model" in cmd and "claude-opus-4-7" in cmd
+    assert "--model" in cmd and "gpt-5.6-terra" in cmd
 
 
 def test_build_governed_command_is_idempotent_on_clean_setting_sources():

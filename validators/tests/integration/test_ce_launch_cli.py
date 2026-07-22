@@ -64,11 +64,24 @@ def test_codex_dry_run_is_pure_and_governed(tmp_path, monkeypatch, capsys):
     )
     codex = _fake_codex(tmp_path, monkeypatch)
     ret = ce_cli.main([
-        "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",
+        "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5.6-terra",
         "--dry-run", "--json",
     ])
     assert ret == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["spawned"] is False
-    assert payload["plan"]["command"][-3:] == [str(codex), "--model", "gpt-5"]
+    assert payload["plan"]["command"][-5:] == [
+        str(codex),
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
+    ]
+    assert payload["plan"]["model_effort"] == {
+        "effort": "high",
+        "model": "gpt-5.6-terra",
+        "role": "seat",
+        "status_line": "model=gpt-5.6-terra; effort=high",
+        "warnings": [],
+    }
     assert payload["plan"]["codex_bypass_mode"] == "config"

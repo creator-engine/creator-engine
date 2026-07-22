@@ -265,10 +265,14 @@ def test_codex_exec_dry_run_uses_runsc_image_entrypoint_and_harness_markers() ->
     assert "/run/creator-engine:uid=1000,gid=1000,mode=0700" in argv
     assert not any(arg.startswith("--network=") for arg in argv)
     assert "creator-engine/codex-runsc:test" in argv
-    assert argv[-3:] == [
+    assert argv[-7:] == [
         "exec",
         "--dangerously-bypass-hook-trust",
         "print working tree status",
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
     ]
     assert "/usr/local/bin/codex" not in argv[argv.index("creator-engine/codex-runsc:test") + 1 :]
     assert "CE_DGX_HARNESS=codex" in argv
@@ -367,8 +371,25 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
     assert "--dangerously-bypass-hook-trust" in argv
     assert (
         argv[argv.index("creator-engine/codex-runsc:test") + 1 :]
-        == ["--dangerously-bypass-hook-trust"]
+        == ["--dangerously-bypass-hook-trust", "--model", "gpt-5.6-terra", "--reasoning-effort", "high"]
     )
+
+
+def test_relaunch_reasserts_policy_and_replaces_stale_raw_model_effort(tmp_path: Path) -> None:
+    config_path = tmp_path / "contained-codex.toml"
+    config_path.write_text('model = "gpt-5.6-luna"\nmodel_reasoning_effort = "low"\n')
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            "--model=gpt-5.6-luna",
+            "--effort",
+            "low",
+            CE_DGX_CONTAINED_CODEX_CONFIG=str(config_path),
+        )
+    )
+    assert config_path.read_text(encoding="utf-8") == expected_contained_codex_config()
+    assert "gpt-5.6-luna" not in argv
+    assert argv[-4:] == ["--model", "gpt-5.6-terra", "--reasoning-effort", "high"]
 
 
 def test_codex_config_embeds_container_visible_governance_refs(tmp_path: Path) -> None:
@@ -400,9 +421,13 @@ def test_codex_tui_dry_run_lets_image_entrypoint_select_default_harness() -> Non
 
     assert "--name" in argv
     assert argv[argv.index("--name") + 1] == "ce-dgx-codex"
-    assert argv[-2:] == [
+    assert argv[-6:] == [
         "creator-engine/codex-runsc:test",
         "--dangerously-bypass-hook-trust",
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
     ]
 
 

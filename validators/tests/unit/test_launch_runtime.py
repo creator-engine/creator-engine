@@ -26,6 +26,7 @@ from creator_engine_validator import (
     brain_runtime,
     codex_controller_evidence,
     launch_runtime,
+    model_effort_policy,
 )
 from creator_engine_validator.brain_sqlite_vec import SqliteVecStore
 from creator_engine_validator.tmux_adapter import TmuxPane
@@ -1606,6 +1607,70 @@ def test_claude_launch_refuses_bare_before_side_effects(monkeypatch):
     assert adapter.spawned == []
 
 
+def test_luna_foreman_launch_refuses_before_any_spawn():
+    """Luna is a verify organ tier, never a persistent foreman/seat."""
+    adapter = FakeAdapter()
+    with pytest.raises(launch_runtime.ModelEffortLaunchRefused) as exc:
+        launch_runtime.launch(
+            harness="claude",
+            role="foreman",
+            extra_args=["--model=gpt-5.6-luna"],
+            tmux_adapter=adapter,
+        )
+    assert "luna" in str(exc.value)
+    assert adapter.spawned == []
+
+
+def test_low_effort_is_clamped_and_stamped_in_dry_run_plan():
+    result = launch_runtime.launch(
+        harness="claude",
+        dry_run=True,
+        extra_args=["--model", "gpt-5.6-terra", "--effort=low"],
+    )
+    assert result.plan.model_effort == {
+        "model": "gpt-5.6-terra",
+        "effort": "medium",
+        "role": "seat",
+        "warnings": ["requested reasoning effort 'low' clamped to fleet minimum 'medium'"],
+        "status_line": "model=gpt-5.6-terra; effort=medium",
+    }
+    assert result.plan.command[-4:] == ["--model", "gpt-5.6-terra", "--effort", "medium"]
+
+
+def test_resume_warns_and_marks_model_effort_as_unverified_attachment(caplog):
+    adapter = FakeAdapter(sessions={"existing"})
+
+    with caplog.at_level(logging.WARNING, logger=launch_runtime.__name__):
+        result = launch_runtime.launch(
+            harness="claude", session="existing", resume=True, tmux_adapter=adapter
+        )
+
+    assert result.attached is True
+    assert result.plan.model_effort["attachment_note"] == (
+        "unverified-attached-session: --resume did not recreate or reassert model/effort"
+    )
+    assert "model_effort_note" in caplog.text
+
+
+def test_contained_launchers_and_model_canon_bind_to_policy_defaults():
+    """Wrapper literals are intentionally bound to the single policy source."""
+    repo = Path(__file__).resolve().parents[3]
+    expected_argv = (
+        f"container_cmd+=(--model {model_effort_policy.DEFAULT_MODEL} "
+        f"--reasoning-effort {model_effort_policy.DEFAULT_EFFORT})"
+    )
+    for relative in (
+        "deploy/dgx-runsc/run-codex-runsc.sh",
+        "deploy/vps-runsc/run-vps-runsc.sh",
+    ):
+        assert expected_argv in (repo / relative).read_text(encoding="utf-8")
+
+    canon = yaml.safe_load((repo / "surfaces/model-canon.yaml").read_text(encoding="utf-8"))
+    for seat in canon["seats"]:
+        assert seat["model"] == model_effort_policy.DEFAULT_MODEL
+        assert seat["model_reasoning_effort"] == model_effort_policy.DEFAULT_EFFORT
+
+
 def test_claude_launch_refuses_skip_perms_without_confirmed_pack(monkeypatch):
     adapter = FakeAdapter()
     monkeypatch.setattr(launch_runtime, "_confirm_pack", lambda repo_root: False)
@@ -1680,13 +1745,20 @@ def test_codex_launch_builds_governed_env_scrubbed_command(tmp_path, monkeypatch
         harness="codex",
         backend="host",
         session="s",
-        extra_args=["--model", "gpt-5"],
+        extra_args=["--model", "gpt-5.6-terra"],
         tmux_adapter=adapter,
     )
     inner = _inner_argv(result)
     assert inner[:2] == ["env", "-u"]
     assert "GH_TOKEN" in inner and "GITHUB_TOKEN" in inner
-    assert inner[-3:] == [str(codex), "--model", "gpt-5"]
+    codex_index = inner.index(str(codex))
+    assert inner[codex_index:] == [
+        str(codex),
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
+    ]
     assert result.plan.codex_bypass_mode == "config"
     assert "CE_CONTROLLER_ROLE=read-only" in inner
     assert result.plan.codex_controller_authority == "read-only"

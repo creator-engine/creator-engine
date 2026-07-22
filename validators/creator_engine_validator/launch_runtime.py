@@ -44,7 +44,9 @@ from . import (
     claude_launch_spec,
     codex_controller_evidence,
     codex_launch_spec,
+    dispatch_receipt,
     hermes_launch_spec,
+    model_effort_policy,
     resource_bound_spec,
     runtime_backend_bridge,
     seat_lifecycle,
@@ -109,6 +111,12 @@ class LaunchRefused(LaunchError):
     """CC-G-D Ring 0: a governed Claude launch surface is refused before side effects."""
 
     code = "G6-LAUNCH-CLAUDE-REFUSED"
+
+
+class ModelEffortLaunchRefused(LaunchError):
+    """A model tier or effort request was refused before the launcher spawns."""
+
+    code = "G6-LAUNCH-MODEL-EFFORT-REFUSED"
 
 
 class CodexLaunchRefused(LaunchRefused):
@@ -574,6 +582,7 @@ class LaunchPlan:
     brain_bootstrap_ref: str | None = None
     brain_bootstrap_sha256: str | None = None
     brain_recall_status: dict[str, Any] | None = None
+    model_effort: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -599,6 +608,7 @@ class LaunchPlan:
             "brain_bootstrap_ref": self.brain_bootstrap_ref,
             "brain_bootstrap_sha256": self.brain_bootstrap_sha256,
             "brain_recall_status": self.brain_recall_status,
+            "model_effort": self.model_effort,
         }
 
 
@@ -1346,10 +1356,23 @@ def _evaluate_harness_governance(
     closeout_file: str | None,
     completion_report_ref: str | None,
     host_id: str | None = None,
+    policy_role: str | None = None,
 ) -> _HarnessGateResult:
+    requested = list(extra_args) if extra_args else []
+    try:
+        resolved_model_effort = model_effort_policy.resolve_model_effort(
+            requested, policy_role=policy_role
+        )
+    except model_effort_policy.ModelEffortPolicyRefused as exc:
+        raise ModelEffortLaunchRefused(
+            f"refusing governed launch model/effort before side effects: {exc}"
+        ) from exc
+    plan = replace(plan, model_effort=resolved_model_effort.to_dict())
+    for warning in resolved_model_effort.warnings:
+        LOGGER.warning("governed launch model/effort: %s", warning)
+
     resolved_mcp: str | None = None
     if harness == "claude":
-        requested = list(extra_args) if extra_args else []
         spec = claude_launch_spec.parse_claude_argv(requested)
         # The pack confirmation only changes the decision when skip-permissions is
         # requested, so the (possibly I/O-bound) probe is invoked only then.
@@ -1371,6 +1394,8 @@ def _evaluate_harness_governance(
                 mcp_config_path=resolved_mcp,
                 closeout_file=closeout_file,
                 completion_report_ref=completion_report_ref,
+                policy_role=policy_role,
+                resolved_model_effort=resolved_model_effort,
             )
         except claude_launch_spec.GovernedCommandError as exc:
             clause = (
@@ -1384,7 +1409,6 @@ def _evaluate_harness_governance(
         plan = replace(plan, command=governed)
 
     elif harness == "codex":
-        requested = list(extra_args) if extra_args else []
         managed_confirmed = _confirm_codex_managed_pack(repo_root)
         if not managed_confirmed:
             raise CodexLaunchRefused(
@@ -1435,7 +1459,11 @@ def _evaluate_harness_governance(
             "CE_REMOTE_CONTROL_STATUS": remote_control_status,
         }
         governed = codex_launch_spec.build_governed_codex_command(
-            base_argv=requested, codex_bin=codex_bin, env_overrides=env_overrides
+            base_argv=requested,
+            codex_bin=codex_bin,
+            env_overrides=env_overrides,
+            policy_role=policy_role,
+            resolved_model_effort=resolved_model_effort,
         )
         plan = replace(
             plan,
@@ -1454,7 +1482,6 @@ def _evaluate_harness_governance(
         )
 
     elif harness == "hermes":
-        requested = list(extra_args) if extra_args else []
         spec_result = hermes_launch_spec.evaluate_hermes_launch(
             hermes_launch_spec.parse_hermes_argv(requested)
         )
@@ -1906,9 +1933,20 @@ def launch(
         closeout_file=closeout_file,
         completion_report_ref=completion_report_ref,
         host_id=host_id,
+        policy_role=role,
     )
     plan = harness_gate.plan
     resolved_mcp = harness_gate.resolved_mcp
+
+    if resume:
+        attach_note = dispatch_receipt.MODEL_EFFORT_NOTE_UNVERIFIED_ATTACHED_SESSION
+        LOGGER.warning(
+            "governed launch model/effort: %s; dispatch receipt must carry model_effort_note",
+            attach_note,
+        )
+        model_effort = dict(plan.model_effort or {})
+        model_effort["attachment_note"] = attach_note
+        plan = replace(plan, model_effort=model_effort)
 
     # No hidden fallback — a non-visible / detached continuation is refused.
     if allow_hidden or not visible:
@@ -2303,6 +2341,7 @@ def preflight_launch(
     mcp_config_path: str | None = None,
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
+    role: str | None = None,
     systemctl_runner: Any | None = None,
     support_probe: Any | None = None,
     which: Any | None = None,
@@ -2350,6 +2389,7 @@ def preflight_launch(
                 closeout_file=closeout_file,
                 completion_report_ref=completion_report_ref,
                 host_id=None,
+                policy_role=role,
             )
         except LaunchError as exc:
             gates.append(_gate_refusal("harness-governance", exc))

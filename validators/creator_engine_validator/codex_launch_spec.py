@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from . import model_effort_policy
+
 CLAUSE_HEADLESS = "CDX-D-1"
 CLAUSE_REMOTE = "CDX-D-2"
 CLAUSE_TRANSCRIPT = "CDX-D-3"
@@ -461,15 +463,30 @@ def build_governed_codex_command(
     *,
     codex_bin: str | None = None,
     env_overrides: Mapping[str, str] | None = None,
+    policy_role: str | None = None,
+    resolved_model_effort: model_effort_policy.ResolvedModelEffort | None = None,
 ) -> list[str]:
-    """Build the governed Codex command with ambient repo-write credentials scrubbed."""
+    """Build the governed Codex command with credentials and policy pinned.
+
+    Model/effort flags are wrapper-owned: every raw spelling is removed before
+    the resolved pair is injected.  That keeps a stale herdr/session restore
+    from replaying a low-effort or Luna request behind the wrapper's back.
+    """
     resolved = codex_bin or resolve_codex_harness_binary()
+    policy = resolved_model_effort or model_effort_policy.resolve_model_effort(
+        base_argv, policy_role=policy_role
+    )
+    passthrough = model_effort_policy.strip_model_effort_args(base_argv)
     return [
         "env",
         *(part for name in CREDENTIAL_ENV_UNSETS for part in ("-u", name)),
         *(f"{name}={value}" for name, value in sorted((env_overrides or {}).items())),
         resolved,
-        *list(base_argv),
+        *passthrough,
+        "--model",
+        policy.model,
+        "--reasoning-effort",
+        policy.effort,
     ]
 
 
