@@ -21,6 +21,7 @@ from creator_engine_validator.ticket_reconcile import (
 )
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+GITHUB_API_SUBPROCESS_TIMEOUT_SECONDS: float = 30.0
 _SCOPED_GH_ENV_EXCLUSIONS = frozenset(
     {
         "GH_TOKEN",
@@ -288,10 +289,13 @@ def _run_gh_json(
         "capture_output": True,
         "text": True,
         "check": False,
+        "timeout": GITHUB_API_SUBPROCESS_TIMEOUT_SECONDS,
         "env": _scoped_gh_env(token, token_source_names=token_source_names),
     }
     try:
         completed = runner(command, **kwargs)
+    except subprocess.TimeoutExpired:
+        raise TicketReconcileFeedError("GitHub API subprocess timed out") from None
     except OSError as exc:
         raise TicketReconcileFeedError(
             _format_failure(command, _redact(str(exc), token))
