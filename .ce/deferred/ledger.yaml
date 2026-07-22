@@ -1,0 +1,6 @@
+kind: deferred-work-ledger
+schema_version: "1"
+# The validator derives this budget from this tracked contract; it is not a
+# hidden implementation constant.
+read_back_max_age_days: 14
+entries: []

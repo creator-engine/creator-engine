@@ -4,7 +4,7 @@
 
 GENERATED FILE -- do not edit by hand. This is a deterministic projection of `schemas/*.yaml`. To refresh it, run `python scripts/gen_schema_reference.py --write` and commit the result; a stale committed copy fails the validator gate (`VAL-AUTOGEN-STALE-SCHEMA`).
 
-Schema files: 80
+Schema files: 81
 
 ## Index
 
@@ -30,6 +30,7 @@ Schema files: 80
 | `schemas/crosswalk-register.schema.yaml` | Creator Engine v1 -> v2 Crosswalk Register | `object` |
 | `schemas/daemon-heartbeat.schema.yaml` | Creator Engine daemon heartbeat | `object` |
 | `schemas/decision-record.schema.yaml` | Creator Engine Decision Record front-matter | `object` |
+| `schemas/deferred-work-ledger.schema.yaml` | Creator Engine Deferred-Work Ledger | `object` |
 | `schemas/devops-privileged-action-broker.schema.yaml` | Creator Engine DevOps privileged-action broker envelope | `object` |
 | `schemas/dispatch-receipt.v1.schema.yaml` | Creator Engine Dispatch Receipt v1 | `object` |
 | `schemas/dispatch-record.schema.yaml` | Creator Engine Dispatch Record | `object` |
@@ -781,6 +782,36 @@ Properties:
 | `crosswalk` | object | no | unevaluatedProperties `false` | Supersession + traceability links between records. |
 | `disposition` | string | no | enum `merge`, `close`, `postpone` | RFC-only (Rust model): the motion's disposition. Forbidden on `adr` records (schema-conditional below). |
 | `fcp` | object | no | unevaluatedProperties `false` | RFC-only (Rust model): the Final Comment Period record. Forbidden on `adr` records (schema-conditional below). |
+
+### `schemas/deferred-work-ledger.schema.yaml`
+
+| Metadata | Value |
+| --- | --- |
+| Title | Creator Engine Deferred-Work Ledger |
+| `$id` | `https://creator-engine.local/schemas/deferred-work-ledger.schema.yaml` |
+| Root type | `object` |
+
+Repository-tracked, machine-readable inventory for agent-resolvable residue. This ledger is not an awaiting-operator queue: human decisions belong to the separate human-decision process. Every entry records provenance...
+
+Required fields:
+
+`kind`, `schema_version`, `read_back_max_age_days`, `entries`
+
+Properties:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | const | yes | const `deferred-work-ledger` |  |
+| `schema_version` | const | yes | const `1` |  |
+| `read_back_max_age_days` | integer | yes | minimum `1`<br>maximum `90` | Maximum permitted age of an entry's last_read_at timestamp. |
+| `entries` | array | yes |  |  |
+
+Definitions:
+
+| Property | Shape | Required | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `timestamp` | string | no | pattern `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$` |  |
+| `entry` | object | no | additionalProperties `false` |  |
 
 ### `schemas/devops-privileged-action-broker.schema.yaml`
 
