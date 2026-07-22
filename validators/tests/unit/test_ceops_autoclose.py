@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,57 @@ def test_refuses_when_shared_parser_shim_is_absent(monkeypatch):
 
     with pytest.raises(RuntimeError, match="issue-reference parser shim is unavailable"):
         _load_module()
+
+
+def test_missing_parser_shim_alerts_before_failing_closed(monkeypatch):
+    """A top-level shim refusal is surfaced through the non-blocking alert seam."""
+    parser_path = (
+        SCRIPT_PATH.parents[2]
+        / "tools"
+        / "ce-ops-autoclose"
+        / "parse_issue_refs.py"
+    )
+    original_is_file = Path.is_file
+    requests: list[tuple[urllib.request.Request, float]] = []
+
+    def is_file_except_parser_shim(path: Path) -> bool:
+        if path == parser_path:
+            return False
+        return original_is_file(path)
+
+    class EmptyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self) -> bytes:
+            return b""
+
+    def capture_alert(request: urllib.request.Request, timeout: float):
+        requests.append((request, timeout))
+        return EmptyResponse()
+
+    monkeypatch.setenv("GITHUB_TOKEN", "synthetic-alert-token")
+    monkeypatch.setattr(Path, "is_file", is_file_except_parser_shim)
+    monkeypatch.setattr(urllib.request, "urlopen", capture_alert)
+
+    with pytest.raises(RuntimeError, match="^issue-reference parser shim is unavailable$"):
+        _load_module()
+
+    assert len(requests) == 1
+    request, timeout = requests[0]
+    assert request.get_method() == "POST"
+    assert request.full_url.endswith("/repos/creator-engine/creator-engine/dispatches")
+    assert timeout == 20
+    assert json.loads(request.data.decode("utf-8")) == {
+        "event_type": "governance-alert",
+        "client_payload": {
+            "source": "ceops_autoclose",
+            "reason": "parser_shim_unavailable",
+        },
+    }
 
 
 def test_closing_keyword_with_separator_closes_ceops_ref():

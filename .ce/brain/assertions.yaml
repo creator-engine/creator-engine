@@ -5944,4 +5944,60 @@ records:
   verification_method:
     evidence_ref: tools/ce-ops-autoclose/parse_issue_refs.py
     type: static
+- claim:
+    details: Cross-repository closing keywords are mention-only without the dedicated
+      close workflow; merged PRs rely on the close bot for issue closure.
+    evidence_sha256: eb88c5edf7785bbcc37efeaecdd25d2797c24307c47b7dc787e264f11ba83a6b
+    item: 16
+    object: cross-repo-closes-bot
+    predicate: asserts
+    refs:
+    - .github/scripts/ceops_autoclose.py
+    - tools/ce-ops-autoclose/parse_issue_refs.py
+    subject: doctrine-item
+  content_hash: 794a20e81569d3bda6086803b596dd81cf5b601ee811560746a9189fc25b3589
+  evidence_ref: .github/scripts/ceops_autoclose.py
+  id: brain-assertion-3255445be9c8bbf16a1812a2
+  kind: brain-assertion
+  prev_hash: 3b9572b71475e4599b2e7ed5e6f313d48d18cc77590e79b1ea3986d924aa79e1
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 228
+  statement: Cross-repository closing keywords are mention-only without the dedicated
+    close workflow; merged PRs rely on the close bot for issue closure.
+  status: superseded
+  superseded_by: brain-assertion-4e5dccec60ab9c7ac15ee498
+  type: convention
+  verification_method:
+    evidence_ref: tools/ce-ops-autoclose/parse_issue_refs.py
+    type: static
+- claim:
+    details: Cross-repository closing keywords are mention-only without the dedicated
+      close workflow; merged PRs rely on the close bot for issue closure.
+    evidence_sha256: 5fa56f66705ced63a6b21386ac009fc404a541cc0b03ee7227b41e236a2e4138
+    item: 16
+    object: cross-repo-closes-bot
+    predicate: asserts
+    refs:
+    - .github/scripts/ceops_autoclose.py
+    - tools/ce-ops-autoclose/parse_issue_refs.py
+    subject: doctrine-item
+  content_hash: 86b51e12e8e7eae476818c83eb55f009d5ff19a3e2f4d15bd6596e9145bdb83e
+  evidence_ref: .github/scripts/ceops_autoclose.py
+  id: brain-assertion-4e5dccec60ab9c7ac15ee498
+  kind: brain-assertion
+  prev_hash: 794a20e81569d3bda6086803b596dd81cf5b601ee811560746a9189fc25b3589
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 229
+  statement: Cross-repository closing keywords are mention-only without the dedicated
+    close workflow; merged PRs rely on the close bot for issue closure.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .github/scripts/ceops_autoclose.py
+    type: static
 schema_version: '1'
