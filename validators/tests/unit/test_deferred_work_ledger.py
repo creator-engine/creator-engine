@@ -5,13 +5,17 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 import yaml
 
 from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.deferred_work_ledger import (
     CHECK_NAME,
+    CODE_FUTURE_TIMESTAMP,
     CODE_READ_BACK_STALE,
     CODE_SCHEMA,
+    CODE_TIMESTAMP_ORDER,
+    MAX_CLOCK_SKEW_SECONDS,
     run,
     validate_deferred_work_ledger,
 )
@@ -53,6 +57,8 @@ def test_check_registered():
     assert CHECK_NAME in checks
     assert CODE_SCHEMA in checks[CHECK_NAME].frs
     assert CODE_READ_BACK_STALE in checks[CHECK_NAME].frs
+    assert CODE_FUTURE_TIMESTAMP in checks[CHECK_NAME].frs
+    assert CODE_TIMESTAMP_ORDER in checks[CHECK_NAME].frs
 
 
 def test_valid_seed_passes():
@@ -98,3 +104,66 @@ def test_ratchet_uses_schema_declared_threshold_not_a_hardcoded_value(tmp_path: 
     _write(tmp_path / ".ce" / "deferred" / "ledger.yaml", ledger)
     result = run([tmp_path], now=NOW)
     assert any(error.code == CODE_READ_BACK_STALE for error in result.errors)
+
+
+def test_future_dated_last_read_fails_closed_with_entry_identity(tmp_path: Path):
+    ledger = valid_ledger()
+    ledger["entries"][0]["last_read_at"] = "9999-01-01T00:00:00Z"
+    errors = validate_deferred_work_ledger(ledger, tmp_path / "ledger.yaml", now=NOW)
+    future_errors = [error for error in errors if error.code == CODE_FUTURE_TIMESTAMP]
+    assert future_errors
+    assert "ce604-example-residue" in future_errors[0].message
+
+
+def test_last_read_before_created_fails_closed(tmp_path: Path):
+    ledger = valid_ledger()
+    ledger["entries"][0]["last_read_at"] = "2026-06-30T23:59:59Z"
+    errors = validate_deferred_work_ledger(ledger, tmp_path / "ledger.yaml", now=NOW)
+    assert any(error.code == CODE_TIMESTAMP_ORDER for error in errors)
+
+
+def test_future_created_at_fails_closed(tmp_path: Path):
+    ledger = valid_ledger()
+    ledger["entries"][0]["created_at"] = "9999-01-01T00:00:00Z"
+    ledger["entries"][0]["last_read_at"] = "9999-01-01T00:00:00Z"
+    errors = validate_deferred_work_ledger(ledger, tmp_path / "ledger.yaml", now=NOW)
+    assert any(error.code == CODE_FUTURE_TIMESTAMP for error in errors)
+
+
+def test_clock_skew_window_edge_passes(tmp_path: Path):
+    ledger = valid_ledger()
+    skew_edge = (NOW + timedelta(seconds=MAX_CLOCK_SKEW_SECONDS)).isoformat().replace("+00:00", "Z")
+    ledger["entries"][0]["created_at"] = skew_edge
+    ledger["entries"][0]["last_read_at"] = skew_edge
+    errors = validate_deferred_work_ledger(ledger, tmp_path / "ledger.yaml", now=NOW)
+    assert errors == []
+
+
+def test_malformed_yaml_ledger_fails_closed_with_invalid_code(tmp_path: Path):
+    ledger_path = tmp_path / ".ce" / "deferred" / "ledger.yaml"
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text("entries: [unterminated\n", encoding="utf-8")
+    result = run([tmp_path], now=NOW)
+    assert any(error.code == "deferred_work_ledger_invalid" for error in result.errors)
+
+
+@pytest.mark.parametrize("content", ["[]\n", "kind: a-different-ledger\n"])
+def test_non_mapping_or_wrong_kind_ledger_fails_closed(tmp_path: Path, content: str):
+    ledger_path = tmp_path / ".ce" / "deferred" / "ledger.yaml"
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text(content, encoding="utf-8")
+    result = run([tmp_path], now=NOW)
+    assert any(error.code == "deferred_work_ledger_invalid" for error in result.errors)
+
+
+def test_empty_ledger_fails_closed(tmp_path: Path):
+    ledger_path = tmp_path / ".ce" / "deferred" / "ledger.yaml"
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text("", encoding="utf-8")
+    result = run([tmp_path], now=NOW)
+    assert any(error.code == "deferred_work_ledger_invalid" for error in result.errors)
+
+
+def test_absent_ledger_is_skipped(tmp_path: Path):
+    result = run([tmp_path], now=NOW)
+    assert result.ok

@@ -8,7 +8,7 @@ This validator is deliberately read-only; belt actuation remains a later seam.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -24,7 +24,14 @@ LEDGER_RELATIVE = Path(".ce/deferred/ledger.yaml")
 KIND_VALUE = "deferred-work-ledger"
 CODE_SCHEMA = "CE604-001"
 CODE_READ_BACK_STALE = "CE604-002"
+CODE_FUTURE_TIMESTAMP = "CE604-003"
+CODE_TIMESTAMP_ORDER = "CE604-004"
 CODE_INVALID = "deferred_work_ledger_invalid"
+
+# Distributed controller clocks can differ slightly at a handoff. Five minutes
+# admits that operational skew without allowing a future timestamp to suppress
+# the read-back ratchet indefinitely.
+MAX_CLOCK_SKEW_SECONDS = 300
 
 
 def _repo_root_for(path: Path) -> Path | None:
@@ -57,12 +64,47 @@ def validate_deferred_work_ledger(
     effective_now = now or datetime.now(UTC)
     threshold = ledger["read_back_max_age_days"]
     for index, entry in enumerate(ledger["entries"]):
+        entry_id = entry["id"]
+        created_at = _parse_timestamp(entry["created_at"])
         last_read = _parse_timestamp(entry["last_read_at"])
-        if last_read is None:  # schema should make this unreachable; retain fail-closed behavior.
+        if created_at is None or last_read is None:  # Schema should make this unreachable; retain fail-closed behavior.
             errors.append(
-                make_error(CODE_READ_BACK_STALE, path, f"entries/{index}/last_read_at", "last_read_at is unreadable", CONTRACT)
+                make_error(CODE_TIMESTAMP_ORDER, path, f"entries/{index}", f"entry {entry_id!r} has unreadable timestamps", CONTRACT)
             )
             continue
+        created_at = created_at.astimezone(UTC)
+        last_read = last_read.astimezone(UTC)
+        latest_allowed = effective_now + timedelta(seconds=MAX_CLOCK_SKEW_SECONDS)
+        if created_at > latest_allowed:
+            errors.append(
+                make_error(
+                    CODE_FUTURE_TIMESTAMP,
+                    path,
+                    f"entries/{index}/created_at",
+                    f"entry {entry_id!r} has created_at beyond the {MAX_CLOCK_SKEW_SECONDS}-second clock-skew allowance",
+                    CONTRACT,
+                )
+            )
+        if last_read > latest_allowed:
+            errors.append(
+                make_error(
+                    CODE_FUTURE_TIMESTAMP,
+                    path,
+                    f"entries/{index}/last_read_at",
+                    f"entry {entry_id!r} has last_read_at beyond the {MAX_CLOCK_SKEW_SECONDS}-second clock-skew allowance",
+                    CONTRACT,
+                )
+            )
+        if last_read < created_at:
+            errors.append(
+                make_error(
+                    CODE_TIMESTAMP_ORDER,
+                    path,
+                    f"entries/{index}/last_read_at",
+                    f"entry {entry_id!r} has last_read_at before created_at",
+                    CONTRACT,
+                )
+            )
         age_seconds = (effective_now - last_read.astimezone(UTC)).total_seconds()
         if age_seconds > threshold * 24 * 60 * 60:
             errors.append(
@@ -82,7 +124,7 @@ def _ledger_for_root(root: Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-@register(CHECK_NAME, [CODE_SCHEMA, CODE_READ_BACK_STALE, CODE_INVALID])
+@register(CHECK_NAME, [CODE_SCHEMA, CODE_READ_BACK_STALE, CODE_FUTURE_TIMESTAMP, CODE_TIMESTAMP_ORDER, CODE_INVALID])
 def run(paths: Iterable[Path], *, now: datetime | None = None) -> CheckResult:
     """Validate each discovered checkout's one canonical deferred-work ledger."""
     roots: list[Path] = []
