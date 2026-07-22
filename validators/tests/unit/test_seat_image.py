@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import re
-import shlex
 from pathlib import Path
 
 import yaml
+
+from validators.tests.unit.image_contract_helpers import (
+    run_command_has_tokens as _run_command_has_tokens,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -23,52 +25,6 @@ def _dockerfile() -> str:
 
 def _readme() -> str:
     return README.read_text(encoding="utf-8")
-
-
-def _run_shell_commands(text: str) -> list[str]:
-    """Return uncommented shell commands from Dockerfile RUN instructions."""
-    blocks = re.findall(r"(?ms)^RUN\s+(.*?)(?=^[A-Z]+(?:\s|$)|\Z)", text)
-    commands: list[str] = []
-    for block in blocks:
-        uncommented = "\n".join(
-            line.split("#", 1)[0]
-            for line in block.splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        commands.extend(
-            command.strip()
-            for command in re.split(
-                r";(?=(?:[^\"']|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*')*$)",
-                uncommented.replace("\\\n", " "),
-            )
-            if command.strip()
-        )
-    return commands
-
-
-def _run_command_has_tokens(text: str, required: list[str]) -> bool:
-    for command in _run_shell_commands(text):
-        try:
-            tokens = shlex.split(command)
-        except ValueError:
-            continue
-        normalised = [token.rstrip(";") for token in tokens]
-        for start in range(len(normalised) - len(required) + 1):
-            if start and not tokens[start - 1].endswith(";"):
-                continue
-            if required[:4] == ["apt-get", "install", "-y", "--no-install-recommends"]:
-                command_end = next(
-                    (index for index in range(start, len(tokens)) if tokens[index].endswith(";")),
-                    len(tokens),
-                )
-                if (
-                    normalised[start : start + 4] == required[:4]
-                    and required[4] in normalised[start + 4 : command_end]
-                ):
-                    return True
-            if normalised[start : start + len(required)] == required:
-                return True
-    return False
 
 
 def _workflow() -> dict:

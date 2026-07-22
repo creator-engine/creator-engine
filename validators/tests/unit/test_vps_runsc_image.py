@@ -7,6 +7,10 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from validators.tests.unit.image_contract_helpers import (
+    run_command_has_tokens as _run_command_has_tokens,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VPS_DIR = REPO_ROOT / "deploy" / "vps-runsc"
@@ -26,61 +30,6 @@ def _entrypoint() -> str:
 
 def _readme() -> str:
     return README.read_text(encoding="utf-8")
-
-
-def _run_shell_commands(text: str) -> list[str]:
-    """Return uncommented shell commands from Dockerfile RUN instructions.
-
-    Image contracts must bind a requirement to the instruction that executes
-    it.  A repository comment or an unrelated Dockerfile instruction is not
-    evidence that the image installs or probes the requirement.
-    """
-    blocks = re.findall(r"(?ms)^RUN\s+(.*?)(?=^[A-Z]+(?:\s|$)|\Z)", text)
-    commands: list[str] = []
-    for block in blocks:
-        uncommented = "\n".join(
-            line.split("#", 1)[0]
-            for line in block.splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        commands.extend(
-            command.strip()
-            for command in re.split(
-                r";(?=(?:[^\"']|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*')*$)",
-                uncommented.replace("\\\n", " "),
-            )
-            if command.strip()
-        )
-    return commands
-
-
-def _run_command_has_tokens(text: str, required: list[str]) -> bool:
-    """Whether one RUN shell command contains *required* in order."""
-    for command in _run_shell_commands(text):
-        try:
-            tokens = shlex.split(command)
-        except ValueError:
-            # A semicolon inside a quoted `python -c` program is not a shell
-            # command separator.  It cannot satisfy the unquoted contracts
-            # asserted by this helper, so skip it rather than broadening it.
-            continue
-        normalised = [token.rstrip(";") for token in tokens]
-        for start in range(len(normalised) - len(required) + 1):
-            if start and not tokens[start - 1].endswith(";"):
-                continue
-            if required[:4] == ["apt-get", "install", "-y", "--no-install-recommends"]:
-                command_end = next(
-                    (index for index in range(start, len(tokens)) if tokens[index].endswith(";")),
-                    len(tokens),
-                )
-                if (
-                    normalised[start : start + 4] == required[:4]
-                    and required[4] in normalised[start + 4 : command_end]
-                ):
-                    return True
-            if normalised[start : start + len(required)] == required:
-                return True
-    return False
 
 
 def _has_python_314_probe(text: str) -> bool:
@@ -251,6 +200,7 @@ def test_vps_instruction_contracts_reject_comments_adjacent_tokens_and_other_pyt
 RUN set -eux; \\
     # apt-get install -y --no-install-recommends libsodium23 openssh-client; \\
     echo openssh-client; \\
+    libsodium23; \\
     command -v ce-not-the-launcher; \\
     /opt/ce-validator-venv/bin/python --version | grep -q '^Python 3.13.'
 """
@@ -261,6 +211,15 @@ RUN set -eux; \\
     assert not _run_command_has_tokens(adversarial, ["command", "-v", "ce"])
     assert not _has_python_314_probe(adversarial)
     assert not _has_python_314_probe(adversarial.replace("3.13", "3.15"))
+
+
+def test_vps_instruction_contracts_reject_naked_package_mentions() -> None:
+    adversarial = "RUN set -eux; libsodium23\n"
+
+    assert not _run_command_has_tokens(
+        adversarial,
+        ["apt-get", "install", "-y", "--no-install-recommends", "libsodium23"],
+    )
 
 
 def test_dockerfile_installs_durable_governed_ce_launcher(tmp_path: Path) -> None:
