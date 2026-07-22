@@ -5955,7 +5955,7 @@ records:
     - .github/scripts/ceops_autoclose.py
     - tools/ce-ops-autoclose/parse_issue_refs.py
     subject: doctrine-item
-  content_hash: 794a20e81569d3bda6086803b596dd81cf5b601ee811560746a9189fc25b3589
+  content_hash: e293a530457d030cc7977c214973af71b4f271c7f0b06bc462642da64ace93f4
   evidence_ref: .github/scripts/ceops_autoclose.py
   id: brain-assertion-3255445be9c8bbf16a1812a2
   kind: brain-assertion
@@ -5967,7 +5967,7 @@ records:
   statement: Cross-repository closing keywords are mention-only without the dedicated
     close workflow; merged PRs rely on the close bot for issue closure.
   status: superseded
-  superseded_by: brain-assertion-4e5dccec60ab9c7ac15ee498
+  superseded_by: brain-assertion-a9d7c468c3154614ac10e1f4
   type: convention
   verification_method:
     evidence_ref: tools/ce-ops-autoclose/parse_issue_refs.py
@@ -5975,7 +5975,7 @@ records:
 - claim:
     details: Cross-repository closing keywords are mention-only without the dedicated
       close workflow; merged PRs rely on the close bot for issue closure.
-    evidence_sha256: 5fa56f66705ced63a6b21386ac009fc404a541cc0b03ee7227b41e236a2e4138
+    evidence_sha256: aa1e596217be59adbfa8d9cd4ee3cbc42f4ff3c908a6c68f2700f849e39bada0
     item: 16
     object: cross-repo-closes-bot
     predicate: asserts
@@ -5983,11 +5983,11 @@ records:
     - .github/scripts/ceops_autoclose.py
     - tools/ce-ops-autoclose/parse_issue_refs.py
     subject: doctrine-item
-  content_hash: 86b51e12e8e7eae476818c83eb55f009d5ff19a3e2f4d15bd6596e9145bdb83e
+  content_hash: a4e929a7b09fe8ab6e37f2d75721abdeea3c91b200a107cb4d920ada8d35b61f
   evidence_ref: .github/scripts/ceops_autoclose.py
-  id: brain-assertion-4e5dccec60ab9c7ac15ee498
+  id: brain-assertion-a9d7c468c3154614ac10e1f4
   kind: brain-assertion
-  prev_hash: 794a20e81569d3bda6086803b596dd81cf5b601ee811560746a9189fc25b3589
+  prev_hash: e293a530457d030cc7977c214973af71b4f271c7f0b06bc462642da64ace93f4
   record_type: brain_assertion
   schema_version: '1'
   scope: doctrine/day1

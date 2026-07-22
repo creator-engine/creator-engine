@@ -107,16 +107,33 @@ _PARSER_PATH = _REPO_ROOT / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
 
 import importlib.util as _ilu
 
-try:
-    if not _PARSER_PATH.is_file():
-        # Actions checks out the complete repository, so a missing shim is a
-        # broken deployment. Refuse rather than reintroducing a drift-prone
-        # parser copy.
-        raise RuntimeError("issue-reference parser shim is unavailable")
 
-    _spec = _ilu.spec_from_file_location("parse_issue_refs", _PARSER_PATH)
-    if _spec is None or _spec.loader is None:
-        raise RuntimeError("issue-reference parser shim is unavailable")
+def _refuse_parser_shim(reason: str, message: str) -> None:
+    """Alert and fail closed with a constant parser-shim refusal."""
+    _alert_governance_failure(reason)
+    raise RuntimeError(message) from None
+
+
+try:
+    _spec = (
+        _ilu.spec_from_file_location("parse_issue_refs", _PARSER_PATH)
+        if _PARSER_PATH.is_file()
+        else None
+    )
+except Exception:
+    _refuse_parser_shim(
+        "parser_shim_unavailable", "issue-reference parser shim is unavailable"
+    )
+
+if _spec is None or _spec.loader is None:
+    # Actions checks out the complete repository, so a missing shim is a
+    # broken deployment. Refuse rather than reintroducing a drift-prone
+    # parser copy.
+    _refuse_parser_shim(
+        "parser_shim_unavailable", "issue-reference parser shim is unavailable"
+    )
+
+try:
     _parser_mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_parser_mod)
     parse_title_refs = _parser_mod.parse_title_refs
@@ -124,8 +141,9 @@ try:
     parse_acceptance_evidence = _parser_mod.parse_acceptance_evidence
     parse_all_refs = _parser_mod.parse_all_refs
 except Exception:
-    _alert_governance_failure("parser_shim_unavailable")
-    raise RuntimeError("issue-reference parser shim is unavailable") from None
+    _refuse_parser_shim(
+        "parser_shim_load_failed", "issue-reference parser shim failed to load"
+    )
 
 
 # ---------------------------------------------------------------------------
