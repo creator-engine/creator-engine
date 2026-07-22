@@ -93,6 +93,37 @@ def test_complete_cursor_traversal_and_local_utc_date_filter_avoid_search_ceilin
         "pageInfo" in next(value[6:] for value in command if value.startswith("query="))
         for command in commands
     )
+    assert all(
+        call[1]["timeout"] == 30.0
+        for call in runner.calls
+    )
+
+
+def test_subprocess_timeout_is_value_free_and_stops_collection_immediately():
+    command_token = "synthetic-command-token"
+    output_token = "synthetic-output-token"
+    stderr_token = "synthetic-stderr-token"
+    calls = []
+
+    def timed_out(command, **kwargs):
+        calls.append((list(command), kwargs))
+        raise subprocess.TimeoutExpired(
+            [*command, command_token],
+            30.0,
+            output=f"output {output_token}",
+            stderr=f"stderr {stderr_token}",
+        )
+
+    with pytest.raises(feed.TicketReconcileFeedError) as excinfo:
+        _collect_inputs(_TICKET_REPO, _PR_REPO, 1, runner=timed_out, now=_NOW)
+
+    assert str(excinfo.value) == "GitHub API subprocess timed out"
+    assert all(
+        token not in str(excinfo.value)
+        for token in (command_token, output_token, stderr_token)
+    )
+    assert len(calls) == 1
+    assert calls[0][1]["timeout"] == 30.0
 
 
 @pytest.mark.parametrize(
@@ -565,6 +596,9 @@ def test_workflow_is_daily_manual_dry_run_only_and_fail_closed_for_artifacts():
     assert workflow["permissions"] == {"contents": "read", "pull-requests": "read"}
 
     job = workflow["jobs"]["stale-ticket-reconcile"]
+    assert job["timeout-minutes"] == 15
+    assert "group: ce-ops-stale-ticket-reconcile" in text
+    assert "cancel-in-progress: false" in text
     checkout = job["steps"][0]
     assert checkout["with"]["persist-credentials"] is False
     scan = next(step for step in job["steps"] if step["name"] == "Build complete advisory")

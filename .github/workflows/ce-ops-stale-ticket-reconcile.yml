@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   stale-ticket-reconcile:
+    timeout-minutes: 15
     name: Build stale-ticket advisory
     runs-on: ubuntu-latest
     steps:
