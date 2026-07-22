@@ -348,17 +348,32 @@ def test_wrap_applies_to_every_harness_identically(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(launch_runtime, "_confirm_codex_managed_pack", lambda repo_root: True)
     codex = _fake_codex(tmp_path, monkeypatch)
-    result = launch_runtime.launch(
+    unbounded = launch_runtime.launch(
+        harness="codex",
+        session="codex-seat",
+        dry_run=True,
+        tmux_adapter=FakeAdapter(),
+    )
+    bounded = launch_runtime.launch(
         harness="codex",
         session="codex-seat",
         dry_run=True,
         tmux_adapter=FakeAdapter(),
         runtime_policy=_write_policy(tmp_path),
     )
-    wrapped = result.plan.command
+    wrapped = bounded.plan.command
     assert wrapped[:6] == WRAP_PREFIX_HEAD
     sep = wrapped.index("--")
     inner = wrapped[sep + 1:]
-    assert inner[:2] == ["env", "-u"]
-    assert "GH_TOKEN" in inner
-    assert inner[-1:] == [str(codex)]
+    # The resource wrapper encloses the complete Ring-0 output byte-for-byte;
+    # model/effort injection therefore stays inside the harness argv after its
+    # binary rather than becoming an outer wrapper token.
+    assert inner == unbounded.plan.command
+    codex_index = inner.index(str(codex))
+    assert inner[codex_index:] == [
+        str(codex),
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
+    ]

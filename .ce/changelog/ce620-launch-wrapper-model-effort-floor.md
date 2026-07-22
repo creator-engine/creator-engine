@@ -36,5 +36,9 @@ issue: ce-ops#620
 - Relocate the ratified routing table from served ``docs/operations`` to the
   internal controller playbook tree; no public-doc confidentiality allowlist
   was added.
+- Keep the Codex dry-run consumer fixture on a ratified model so it exercises
+  pure policy resolution rather than an intentional unratified-model refusal;
+  bind the resource wrapper test to byte-identical Ring-0 output, including
+  model/effort flags inside the Codex harness argv.
 
 Closure waiver (controller, 20260722): live-target observation deferred to the next canonical seat relaunch on each substrate (vps-runsc: ce-vps-codex / ce-vps-codex-dev4; dgx-runsc: next DGX seat stand-up), scope = strip-and-reassert argv behavior at branch tip `ce620-launch-wrapper-model-effort-floor`, reason = relaunch is Operator-gated and next relaunch is the natural canary; tracking = watcher asserts the reasserted model/effort line in the first post-merge relaunch receipt.
