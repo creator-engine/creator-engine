@@ -170,6 +170,30 @@ def mutation_class_for_paths(
     return highest if highest_rank >= 0 else resolved.fail_closed_class
 
 
+def governance_docs_path_predicates(
+    policy: MutationPolicy | Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    """Return the governance-class path predicates that are under ``docs/``.
+
+    Consumers that need a docs-only sub-envelope can derive their exclusions
+    from the classifier's policy rather than maintain a second path list.
+    """
+    resolved = _coerce_policy(policy)
+    return tuple(
+        pattern
+        for pattern in resolved.path_predicates.get("governance", ())
+        if pattern.startswith("docs/")
+    )
+
+
+def path_matches_any_predicate(path: str, predicates: Sequence[str]) -> bool:
+    """Return whether *path* matches any classifier-style path predicate."""
+    normalized_path = _normalize_path(path)
+    return bool(normalized_path) and any(
+        _matches(normalized_path, pattern) for pattern in predicates
+    )
+
+
 def _coerce_policy(policy: MutationPolicy | Mapping[str, Any] | None) -> MutationPolicy:
     if policy is None:
         try:

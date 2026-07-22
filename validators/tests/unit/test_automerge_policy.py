@@ -32,12 +32,16 @@ from creator_engine_validator.forge.automerge_policy import (
     brain_supersede_tier_evidence,
     brain_supersede_path_envelope_matches,
     carrier_changelog_tier_matches,
+    docs_envelope_governance_exclusion_predicates,
     docs_envelope_tier_matches,
     decide_automerge,
     emit_automerge_dry_run_decision,
     load_automerge_policy_state,
     materialize_automerge_policy_state_from_variables,
     save_automerge_policy_state,
+)
+from creator_engine_validator.forge.mutation_classifier import (
+    governance_docs_path_predicates,
 )
 from creator_engine_validator.work_sizing import size_ceremony
 
@@ -406,6 +410,27 @@ def test_docs_envelope_tier_predicate_rejects_yaml_in_docs() -> None:
 
 def test_docs_envelope_tier_predicate_rejects_no_extension_in_docs() -> None:
     assert not docs_envelope_tier_matches(["docs/Makefile"])
+
+
+def test_docs_envelope_tier_predicate_rejects_classifier_governance_docs() -> None:
+    representatives = {
+        "docs/contracts/**": "docs/contracts/ratification-flow.md",
+        "docs/decisions/**": "docs/decisions/ADR-9999-x.md",
+        "docs/adr/**": "docs/adr/ADR-9999-x.md",
+        "docs/governance/**": "docs/governance/AUTHORITY.md",
+    }
+
+    assert set(governance_docs_path_predicates()) == set(representatives)
+    for pattern, path in representatives.items():
+        assert pattern in governance_docs_path_predicates()
+        assert not docs_envelope_tier_matches([path])
+
+
+def test_docs_envelope_governance_exclusions_share_classifier_source() -> None:
+    assert (
+        docs_envelope_governance_exclusion_predicates()
+        == governance_docs_path_predicates()
+    )
 
 
 # ce-ops#619 — extension allow-list allow cases

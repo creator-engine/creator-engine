@@ -151,7 +151,7 @@ resolves as failed (fail-closed):
 
 | # | Predicate | Source |
 |---|---|---|
-| P1 | `docs_envelope_tier_matches(changed_paths)` is True: every path starts with `docs/`, `.ce/changelog/`, or `.ce/pr-manifests/`, OR is a root-level `*.md` (no `/` in path, ends in `.md`). No empty path in the set. | `automerge_policy.py:919-924` (`docs_envelope_tier_matches`) |
+| P1 | `docs_envelope_tier_matches(changed_paths)` is True: every path is under `.ce/changelog/` or `.ce/pr-manifests/`, OR is a root-level `*.md` (no `/` in path), OR is a `docs/**` file with an allowed extension that does not match a governance-class docs predicate. The governance exclusion is derived from the mutation classifier policy. No empty path in the set. | `automerge_policy.py:docs_envelope_tier_matches`; `mutation_classifier.py:governance_docs_path_predicates` |
 | P2 | `mutation_class_for_paths(changed_paths, policy)` returns `"docs"`. The path classifier (`automerge_mutation_policy.yaml`) must classify ALL changed paths as `docs`; any path that matches `code`, `schema`, `deploy`, or any privileged class escalates the whole PR to GESTURE. Fail-closed class is `redaction`. | `mutation_classifier.py:136-170`; `automerge_mutation_policy.yaml` |
 | P3 | `ratification_gates` for `docs` mutation class = `("auto_back_gate",)` only. Verified by `size_ceremony(declared_work_class, "docs")`. | `work_sizing.py:_RISK_TABLE["docs"]` |
 | P4 | Declared work class in `{XS, S}` (normalized: `AUTOMERGE_CANARY_WORK_CLASSES`). Aliases: `tiny` → XS, `story` → S. | `automerge_policy.py:39-41`; `work_sizing.py:LEGACY_WORK_CLASS_ALIASES` |
