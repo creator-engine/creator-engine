@@ -216,6 +216,10 @@ class ConveyorDaemonItem:
             refresh_base=self.refresh_base,
             validate_command=validate_command,
             allow_dirty_validation=self.allow_dirty_validation,
+            # Discovery currently carries no test transcript.  The daemon
+            # explicitly classifies its generated harvest carrier as
+            # non-test-bearing rather than relying on an omitted seal.
+            harvest_evidence={"test_bearing": False},
         )
 
 

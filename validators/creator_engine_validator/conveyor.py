@@ -19,6 +19,7 @@ from pathlib import Path
 from .carrier_gen import CarrierSpec, WrittenCarriers, write_carriers
 from .checks.path_manifest_fidelity import branch_slug
 from .forge.authority_contexts import ValidationSandboxContext
+from .harvest_evidence import HarvestEvidenceAssessment, parse_harvest_evidence
 from .validation_sandbox import ValidationSandboxSpec, run_validation_sandbox
 
 
@@ -86,6 +87,9 @@ class ConveyorHarvestSpec:
     validate_command: tuple[str, ...] = DEFAULT_VALIDATE_COMMAND
     allow_dirty_validation: bool = True
     commit_carriers_before_validation: bool = False
+    # Data-only evidence supplied by the controller's harvest seal.  No
+    # implicit default: callers must explicitly claim non-test-bearing work.
+    harvest_evidence: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,7 @@ class ConveyorHarvestResult:
     validation_returncode: int | None = None
     validation_stdout: str = ""
     validation_stderr: str = ""
+    harvest_evidence: HarvestEvidenceAssessment | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +152,8 @@ def prepare_harvest(
     written: WrittenCarriers | None = None
     validation: ConveyorCommandResult | None = None
 
+    evidence_assessment = parse_harvest_evidence(spec.harvest_evidence)
+
     if spec.declared_work_class not in OLD_WORK_CLASSES:
         return _result(
             spec,
@@ -163,6 +170,19 @@ def prepare_harvest(
             ready=False,
             reasons=(f"worktree does not exist: {root}",),
             removed_artifacts=(),
+        )
+
+    if not evidence_assessment.ready:
+        return _result(
+            spec,
+            slug,
+            ready=False,
+            reasons=(
+                "harvest evidence not ready: "
+                f"{evidence_assessment.reason_code}: {evidence_assessment.message}",
+            ),
+            removed_artifacts=(),
+            harvest_evidence=evidence_assessment,
         )
 
     runner = git_runner or _default_git_runner
@@ -234,6 +254,7 @@ def prepare_harvest(
         removed_artifacts=tuple(dict.fromkeys(removed)),
         written=written,
         validation=validation,
+        harvest_evidence=evidence_assessment,
     )
 
 
@@ -652,6 +673,7 @@ def _result(
     removed_artifacts: tuple[str, ...],
     written: WrittenCarriers | None = None,
     validation: ConveyorCommandResult | None = None,
+    harvest_evidence: HarvestEvidenceAssessment | None = None,
 ) -> ConveyorHarvestResult:
     return ConveyorHarvestResult(
         ready=ready,
@@ -666,6 +688,7 @@ def _result(
         validation_returncode=None if validation is None else validation.returncode,
         validation_stdout="" if validation is None else validation.stdout,
         validation_stderr="" if validation is None else validation.stderr,
+        harvest_evidence=harvest_evidence,
     )
 
 

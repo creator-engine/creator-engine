@@ -26,6 +26,9 @@ disable-model-invocation: false
 1. Read `playbooks/controller/briefs/harvest.md` and follow it verbatim. It is
    the source of truth for the harvest sequence.
 2. Verify the READY-FOR-HARVEST signal + commit SHA from the seat before starting.
+   Admit test-bearing seals only when the SSOT's structured base/prior-head RED
+   and post-change GREEN evidence is present; retain a deficient seal as
+   flagged/not-ready rather than treating it as harvest evidence.
 3. Harvest to staging, collect `.ce/changelog/<slug>.md`, regenerate the PR
    manifest via the `carrier_gen` API, and commit the complete carrier set.
 4. Push that final committed head and open or update the delivery PR. Wait for

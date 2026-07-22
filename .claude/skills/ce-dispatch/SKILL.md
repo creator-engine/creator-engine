@@ -24,6 +24,9 @@ disable-model-invocation: false
 
 1. Read `playbooks/controller/briefs/dispatch.md` and follow it verbatim. It is
    the source of truth for what a dispatch brief must name.
+   In particular, classify every unit as test-bearing or non-test-bearing; for
+   test-bearing units the SSOT requires exact node IDs plus base/prior-head RED
+   output before post-change GREEN can count as build evidence.
 2. Apply the pointer + SHA mechanic per [[ce-seat-dispatch-prompt-pointer-sha]]:
    write the seed brief to a file, compute its `sha256sum`, and send the worker
    only the file pointer and the hash.

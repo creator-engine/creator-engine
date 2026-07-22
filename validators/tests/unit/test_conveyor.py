@@ -17,6 +17,19 @@ from creator_engine_validator.conveyor import (
     land_bundle,
     prepare_harvest,
 )
+from creator_engine_validator.harvest_evidence import parse_harvest_evidence
+
+
+NON_TEST_EVIDENCE = {"test_bearing": False}
+VALID_TEST_EVIDENCE = {
+    "test_bearing": True,
+    "node_ids": ["validators/tests/unit/test_conveyor.py::test_prepare_harvest_refuses_missing_test_evidence_before_carriers"],
+    "base_or_prior_head": "0123456789abcdef0123456789abcdef01234567",
+    "red_command": "python -m pytest exact-node",
+    "red_output": "1 failed",
+    "green_command": "python -m pytest exact-node",
+    "green_output": "1 passed",
+}
 
 
 class FakeGit:
@@ -132,6 +145,7 @@ def test_prepare_harvest_renames_branch_cleans_artifacts_writes_carriers_and_val
             title="Conveyor harvest",
             body="- Added conveyor helper.",
             carrier_date="2026-06-30",
+            harvest_evidence=NON_TEST_EVIDENCE,
         ),
         git_runner=git,
         validate_runner=validate,
@@ -187,7 +201,7 @@ def test_prepare_harvest_refuses_unexpected_current_branch_before_mutation(tmp_p
     validate = FakeValidate()
 
     result = prepare_harvest(
-        ConveyorHarvestSpec(worktree_path=root, branch="Feature/Test"),
+        ConveyorHarvestSpec(worktree_path=root, branch="Feature/Test", harvest_evidence=NON_TEST_EVIDENCE),
         git_runner=git,
         validate_runner=validate,
     )
@@ -204,7 +218,7 @@ def test_prepare_harvest_validation_failure_is_not_ready_and_post_cleans(tmp_pat
     validate = FakeValidate(returncode=2)
 
     result = prepare_harvest(
-        ConveyorHarvestSpec(worktree_path=root, branch="Feature/Test"),
+        ConveyorHarvestSpec(worktree_path=root, branch="Feature/Test", harvest_evidence=NON_TEST_EVIDENCE),
         git_runner=git,
         validate_runner=validate,
     )
@@ -221,7 +235,13 @@ def test_prepare_harvest_can_verify_base_without_rebase(tmp_path: Path):
     validate = FakeValidate()
 
     result = prepare_harvest(
-        ConveyorHarvestSpec(worktree_path=root, branch="Feature/Test", rebase=False, refresh_base=False),
+        ConveyorHarvestSpec(
+            worktree_path=root,
+            branch="Feature/Test",
+            rebase=False,
+            refresh_base=False,
+            harvest_evidence=NON_TEST_EVIDENCE,
+        ),
         git_runner=git,
         validate_runner=validate,
     )
@@ -401,6 +421,7 @@ def test_run_validation_preserves_slice6_command_and_env(tmp_path: Path):
             declared_work_class="story",
             refresh_base=False,
             rebase=False,
+            harvest_evidence=NON_TEST_EVIDENCE,
         ),
         git_runner=FakeGit(current_branch="feature-test"),
         validate_runner=validate,
@@ -426,3 +447,59 @@ def test_run_validation_preserves_slice6_command_and_env(tmp_path: Path):
         root,
         {"PYTHONPATH": str(root / "validators"), "TMPDIR": "/var/tmp", "PATH": "/usr/bin:/bin"},
     )
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason_code"),
+    (
+        (VALID_TEST_EVIDENCE, None),
+        ({**VALID_TEST_EVIDENCE, "red_command": ""}, "missing_red_command"),
+        ({**VALID_TEST_EVIDENCE, "red_output": ""}, "missing_red_output"),
+        ({**VALID_TEST_EVIDENCE, "node_ids": []}, "missing_test_node_ids"),
+        ({**VALID_TEST_EVIDENCE, "base_or_prior_head": ""}, "missing_base_or_prior_head"),
+        ({**VALID_TEST_EVIDENCE, "green_command": ""}, "missing_green_command"),
+        ({**VALID_TEST_EVIDENCE, "green_output": ""}, "missing_green_output"),
+        (NON_TEST_EVIDENCE, None),
+    ),
+)
+def test_parse_harvest_evidence_returns_named_ready_or_flagged_result(payload, reason_code):
+    assessment = parse_harvest_evidence(payload)
+
+    assert assessment.ready is (reason_code is None)
+    assert assessment.status == ("ready" if reason_code is None else "flagged")
+    assert assessment.reason_code == reason_code
+
+
+def test_parse_harvest_evidence_requires_an_explicit_non_test_classification():
+    assessment = parse_harvest_evidence(None)
+
+    assert assessment.status == "flagged"
+    assert assessment.ready is False
+    assert assessment.reason_code == "missing_evidence_classification"
+
+
+def test_prepare_harvest_refuses_missing_test_evidence_before_carrier_generation(tmp_path: Path):
+    root = _repo(tmp_path)
+    git = FakeGit(current_branch="feature-test")
+    validate = FakeValidate()
+
+    result = prepare_harvest(
+        ConveyorHarvestSpec(
+            worktree_path=root,
+            branch="Feature/Test",
+            harvest_evidence={**VALID_TEST_EVIDENCE, "red_output": ""},
+        ),
+        git_runner=git,
+        validate_runner=validate,
+    )
+
+    assert result.ready is False
+    assert result.harvest_evidence is not None
+    assert result.harvest_evidence.status == "flagged"
+    assert result.harvest_evidence.reason_code == "missing_red_output"
+    assert result.reasons == (
+        "harvest evidence not ready: missing_red_output: test-bearing evidence must retain captured RED output",
+    )
+    assert git.calls == []
+    assert validate.calls == []
+    assert not (root / ".ce" / "pr-manifests").exists()

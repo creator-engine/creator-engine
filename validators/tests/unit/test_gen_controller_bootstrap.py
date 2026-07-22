@@ -86,6 +86,17 @@ def test_merge_gate_checklist_rendered():
         assert "APPROVED" in content
 
 
+def test_test_bearing_red_to_green_requirement_is_rendered():
+    ssot, ssot_path, ssot_hash = _load_ssot()
+
+    files = gen_controller_bootstrap.build_files(ssot, "all", ssot_path, ssot_hash)
+    for rel_path in (Path("codex/AGENTS.md"), Path("claude/CLAUDE.md")):
+        content = files[rel_path]
+        assert "test-bearing or non-test-bearing" in content
+        assert "captured RED command/output" in content
+        assert "post-change GREEN command/output" in content
+
+
 def test_generator_refuses_live_paths():
     for path in (
         REPO_ROOT / "AGENTS.md",

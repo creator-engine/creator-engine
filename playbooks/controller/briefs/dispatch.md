@@ -27,6 +27,22 @@ not permission to broaden the role. Only the controller decides close-readiness.
 For research dispatches, the controller persists findings in the existing
 `.ce/state/research/` notes location, following its naming convention.
 
+## Test-bearing evidence (required before build evidence counts)
+
+Every brief must explicitly classify the unit as `test-bearing` or
+`non-test-bearing`. For a test-bearing unit, the brief must require a structured
+RED-to-GREEN record containing all of:
+
+1. exact test node ID(s);
+2. the named base or prior head identity;
+3. the RED command and captured output against that base/prior head; and
+4. the GREEN command and captured output after implementation.
+
+Without the named base/prior-head RED record, a test result is not build proof
+and harvest must flag the seal as not ready. The non-test-bearing exemption is
+available only when the brief explicitly states it. This local author-evidence
+rule does not replace the exact-head CI evidence required below.
+
 ## Standing validation directive
 
 Every dispatch brief must carry this line: do not run full local `ce
