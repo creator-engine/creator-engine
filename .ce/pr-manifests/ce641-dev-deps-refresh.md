@@ -8,11 +8,12 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** XS
 
-AUTHORIZED_PATHS_COUNT=9
+AUTHORIZED_PATHS_COUNT=10
 
-AUTHORIZED_PATHS_SHA256=4ba8e17040bd0b2cc1c6e9b7bf0251d8d84e2926f7288c4737c9cb859e0d9fe8
+AUTHORIZED_PATHS_SHA256=4d3ada765bd02fb7f2b4b203dbcdfaa38dee7ab747dadc47770441f93027dfc6
 
 ```text
+.ce/brain/assertions.yaml
 .ce/changelog/ce641-dev-deps-refresh.md
 .ce/pr-manifests/ce641-dev-deps-refresh.md
 validators/pyproject.toml

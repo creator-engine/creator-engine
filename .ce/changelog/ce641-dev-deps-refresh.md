@@ -19,6 +19,9 @@ scope: validators/development-dependencies
   normalization-insensitive (GHSA-h35f-9h28-mq5c), and removes `dry_run` in its
   synced distutils implementation. The project target remains Python 3.14+;
   no use of the removed option exists in this change.
+- Supersede the active brain evidence pin for `validators/pyproject.toml`
+  append-only, preserving its predecessor statement and binding the successor
+  to the refreshed artifact SHA.
 
 The regenerated lock has no removed pins. Its added optional-extra pins are
 intentionally absent from the runtime export and continue to belong to the
