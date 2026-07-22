@@ -10,6 +10,7 @@ from creator_engine_validator.checks import registered_checks
 from creator_engine_validator.checks.notice_inventory_autogen_sync import (
     CHECK_NAME,
     CODE_STALE,
+    CODE_UNREADABLE,
     DOC_RELATIVE,
     GENERATOR_RELATIVE,
     run,
@@ -17,6 +18,7 @@ from creator_engine_validator.checks.notice_inventory_autogen_sync import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _LOCK_RELATIVE = Path("validators/uv.lock")
+_DEV_REQUIREMENTS_RELATIVE = Path("validators/requirements-dev.txt")
 
 
 def _load_generator():
@@ -34,9 +36,22 @@ def _seed_repo(root: Path) -> None:
     shutil.copy2(_REPO_ROOT / GENERATOR_RELATIVE, root / GENERATOR_RELATIVE)
     (root / _LOCK_RELATIVE).parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(_REPO_ROOT / _LOCK_RELATIVE, root / _LOCK_RELATIVE)
+    shutil.copy2(_REPO_ROOT / _DEV_REQUIREMENTS_RELATIVE, root / _DEV_REQUIREMENTS_RELATIVE)
     (root / DOC_RELATIVE).write_text(
         (_REPO_ROOT / DOC_RELATIVE).read_text(encoding="utf-8"), encoding="utf-8"
     )
+    generator = _load_generator()
+    inventories = (
+        (generator._runtime_packages(root), generator.RUNTIME_WHEELHOUSE_RELATIVE),
+        (generator._dev_packages(root), generator.DEV_WHEELHOUSE_RELATIVE),
+    )
+    for packages, relative in inventories:
+        wheelhouse = root / relative
+        wheelhouse.mkdir(parents=True, exist_ok=True)
+        for name, version in packages.items():
+            # The generator's self-check consumes wheel *filenames*; compact fake
+            # wheels keep this isolated test hermetic without copying binaries.
+            (wheelhouse / f"{name.replace('-', '_')}-{version}-py3-none-any.whl").touch()
 
 
 def _codes(result) -> set[str]:
@@ -63,7 +78,7 @@ def test_fails_closed_when_notice_inventory_is_stale(tmp_path: Path):
     assert _codes(result) == {CODE_STALE}
 
 
-def test_fails_closed_when_lock_versions_drift(tmp_path: Path):
+def test_fails_closed_when_lock_version_has_no_matching_vendored_wheel(tmp_path: Path):
     _seed_repo(tmp_path)
     lock = tmp_path / _LOCK_RELATIVE
     lock.write_text(lock.read_text(encoding="utf-8").replace('name = "attrs"\nversion = "26.1.0"', 'name = "attrs"\nversion = "26.1.1"'), encoding="utf-8")
@@ -71,7 +86,32 @@ def test_fails_closed_when_lock_versions_drift(tmp_path: Path):
     result = run([tmp_path])
 
     assert not result.ok
-    assert _codes(result) == {CODE_STALE}
+    assert _codes(result) == {CODE_UNREADABLE}
+
+
+def test_runtime_excludes_optional_extra_while_dev_includes_build_dependencies():
+    generator = _load_generator()
+
+    rendered = generator.render(_REPO_ROOT)
+
+    runtime, development = rendered.split("Development wheelhouse inventory", 1)
+    assert "`textual`" not in runtime
+    assert "`setuptools` | `83.0.0`" in development
+    assert "`pyproject-hooks` | `1.2.0`" in development
+
+
+def test_curated_license_attribution_is_present_and_not_generated_away(tmp_path: Path):
+    _seed_repo(tmp_path)
+    generator = _load_generator()
+    before = (tmp_path / DOC_RELATIVE).read_text(encoding="utf-8")
+
+    generator.write(tmp_path)
+
+    after = (tmp_path / DOC_RELATIVE).read_text(encoding="utf-8")
+    assert "Curated per-package license attributions (hand-maintained):" in after
+    assert "- setuptools — MIT" in after
+    assert "- uv — MIT OR Apache-2.0" in after
+    assert after[after.index("Curated per-package") :] == before[before.index("Curated per-package") :]
 
 
 def test_generator_write_then_check_round_trips(tmp_path: Path):

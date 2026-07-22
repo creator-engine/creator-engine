@@ -8,18 +8,20 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** S
 
-Scope: generate the marked third-party package/version inventory in `NOTICE`
-from `validators/uv.lock`, add a fail-closed sync guard that rides the existing
-validator check registry, and prove fresh, NOTICE-drift, and lock-drift cases.
-License attribution remains curated because `uv.lock` does not carry
-authoritative license terms.
+Scope: generate the marked third-party package/version inventories in `NOTICE`:
+the lock's ordinary runtime closure and the dev requirements verified against
+vendored development wheels. Add a fail-closed sync guard that rides the
+existing validator check registry and prove stale-NOTICE, wheel-mismatch,
+runtime-extra exclusion, and curated-attribution preservation. License
+attribution remains curated because `uv.lock` does not carry authoritative
+license terms.
 
 Per-file purpose:
 
 - **`.ce/changelog/ce642-notice-autogen.md`** *(A)* — change record.
 - **`.ce/pr-manifests/ce642-notice-autogen.md`** *(A)* — this closed carrier.
-- **`NOTICE`** *(M)* — marked, generated lock-derived dependency inventory and
-  curated license-attribution boundary.
+- **`NOTICE`** *(M)* — marked generated runtime/dev inventories and the
+  hand-maintained per-package license-attribution section.
 - **`scripts/gen_notice_inventory.py`** *(A)* — deterministic inventory
   generator with read-only `--check` and scoped `--write` modes.
 - **`validators/creator_engine_validator/checks/__init__.py`** *(M)* — registers

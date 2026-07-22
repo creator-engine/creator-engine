@@ -27,42 +27,107 @@ not carry authoritative license terms. In case of a conflict, the license text
 and metadata in the distributed wheel govern.
 
 <!-- ce-autogen: notice-inventory begin -->
-Third-party dependency inventory (generated from `validators/uv.lock`):
+Runtime wheelhouse inventory (from `validators/uv.lock` runtime closure):
 
 | Package | Version |
 | --- | --- |
-| `aiohappyeyeballs` | `2.7.1` |
-| `aiohttp` | `3.14.2` |
-| `aiohttp-jinja2` | `1.6` |
-| `aiosignal` | `1.4.0` |
-| `anyio` | `4.14.2` |
 | `attrs` | `26.1.0` |
-| `frozenlist` | `1.8.0` |
-| `idna` | `3.18` |
-| `jinja2` | `3.1.6` |
 | `jsonschema` | `4.26.0` |
 | `jsonschema-specifications` | `2025.9.1` |
+| `pyyaml` | `6.0.3` |
+| `referencing` | `0.37.0` |
+| `rpds-py` | `0.30.0` |
+
+Development wheelhouse inventory (from `validators/requirements-dev.txt`, verified against `validators/wheelhouse-dev/`):
+
+| Package | Version |
+| --- | --- |
+| `aiohappyeyeballs` | `2.6.2` |
+| `aiohttp` | `3.14.1` |
+| `aiohttp-jinja2` | `1.6` |
+| `aiosignal` | `1.4.0` |
+| `anyio` | `4.13.0` |
+| `attrs` | `26.1.0` |
+| `build` | `1.3.0` |
+| `execnet` | `2.1.2` |
+| `frozenlist` | `1.8.0` |
+| `idna` | `3.18` |
+| `iniconfig` | `2.3.0` |
+| `jinja2` | `3.1.6` |
 | `linkify-it-py` | `2.1.0` |
 | `markdown-it-py` | `4.2.0` |
 | `markupsafe` | `3.0.3` |
 | `mdit-py-plugins` | `0.6.1` |
 | `mdurl` | `0.1.2` |
 | `multidict` | `6.7.1` |
-| `platformdirs` | `4.11.0` |
+| `packaging` | `26.2` |
+| `platformdirs` | `4.10.0` |
+| `pluggy` | `1.6.0` |
 | `propcache` | `0.5.2` |
 | `pygments` | `2.20.0` |
-| `pyyaml` | `6.0.3` |
-| `referencing` | `0.37.0` |
+| `pyproject-hooks` | `1.2.0` |
+| `pytest` | `9.0.2` |
+| `pytest-xdist` | `3.8.0` |
 | `rich` | `15.0.0` |
-| `rpds-py` | `0.30.0` |
+| `setuptools` | `83.0.0` |
 | `textual` | `8.2.7` |
 | `textual-serve` | `1.1.3` |
-| `typing-extensions` | `4.16.0` |
+| `typing-extensions` | `4.15.0` |
 | `uc-micro-py` | `2.0.0` |
 | `watchfiles` | `1.2.0` |
-| `yarl` | `1.24.5` |
+| `wheel` | `0.47.0` |
+| `yarl` | `1.24.2` |
 
 <!-- ce-autogen: notice-inventory end -->
+
+Curated per-package license attributions (hand-maintained):
+
+The following attributions were transcribed from the distributed wheels'
+`*.dist-info/METADATA` files. This section is deliberately not generated: the
+lock does not contain authoritative license terms. The wheel metadata and
+license text remain authoritative.
+
+- aiohappyeyeballs — PSF-2.0
+- aiohttp — Apache-2.0 AND MIT
+- aiohttp-jinja2 — Apache 2
+- aiosignal — Apache 2.0
+- anyio — MIT
+- attrs — MIT
+- build — MIT
+- execnet — MIT
+- frozenlist — Apache-2.0
+- idna — BSD-3-Clause
+- iniconfig — MIT
+- jinja2 — BSD License
+- jsonschema — MIT
+- jsonschema-specifications — MIT
+- linkify-it-py — MIT
+- markdown-it-py — MIT
+- markupsafe — BSD-3-Clause
+- mdit-py-plugins — MIT
+- mdurl — MIT
+- multidict — Apache License 2.0
+- packaging — Apache-2.0 OR BSD-2-Clause
+- platformdirs — MIT
+- pluggy — MIT
+- propcache — Apache-2.0
+- pygments — BSD-2-Clause
+- pyproject-hooks — MIT
+- pytest — MIT
+- pytest-xdist — MIT
+- pyyaml — MIT
+- referencing — MIT
+- rich — MIT
+- rpds-py — MIT
+- setuptools — MIT
+- textual — MIT
+- textual-serve — MIT
+- typing-extensions — PSF-2.0
+- uc-micro-py — MIT
+- uv — MIT OR Apache-2.0
+- watchfiles — MIT
+- wheel — MIT
+- yarl — Apache-2.0
 
 These vendored wheels are included for convenience and offline
 reproducibility only. Their inclusion does not relicense them: each
