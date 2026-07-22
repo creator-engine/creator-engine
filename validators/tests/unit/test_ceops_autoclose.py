@@ -19,6 +19,27 @@ def _load_module():
     return module
 
 
+def test_refuses_when_shared_parser_shim_is_absent(monkeypatch):
+    """A checkout missing the canonical parser shim must fail closed."""
+    parser_path = (
+        SCRIPT_PATH.parents[2]
+        / "tools"
+        / "ce-ops-autoclose"
+        / "parse_issue_refs.py"
+    )
+    original_is_file = Path.is_file
+
+    def is_file_except_parser_shim(path: Path) -> bool:
+        if path == parser_path:
+            return False
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", is_file_except_parser_shim)
+
+    with pytest.raises(RuntimeError, match="issue-reference parser shim is unavailable"):
+        _load_module()
+
+
 def test_closing_keyword_with_separator_closes_ceops_ref():
     autoclose = _load_module()
 
