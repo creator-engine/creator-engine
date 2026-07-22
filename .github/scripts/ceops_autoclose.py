@@ -43,62 +43,11 @@ from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Import shared parser (stdlib-only; no install required)
-# ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PARSER_PATH = _REPO_ROOT / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
-
-if not _PARSER_PATH.is_file():
-    # Actions checks out the complete repository, so a missing shim is a broken
-    # deployment. Refuse rather than reintroducing a drift-prone parser copy.
-    raise RuntimeError("issue-reference parser shim is unavailable")
-
-import importlib.util as _ilu
-
-_spec = _ilu.spec_from_file_location("parse_issue_refs", _PARSER_PATH)
-if _spec is None or _spec.loader is None:
-    raise RuntimeError("issue-reference parser shim is unavailable")
-_parser_mod = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_parser_mod)
-parse_title_refs = _parser_mod.parse_title_refs
-parse_body_closing_refs = _parser_mod.parse_body_closing_refs
-parse_acceptance_evidence = _parser_mod.parse_acceptance_evidence
-parse_all_refs = _parser_mod.parse_all_refs
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatibility shim
-# ---------------------------------------------------------------------------
-# The original ce154 implementation exposed `parse_closing_ceops_refs` at
-# module level; existing tests reference it.  Delegate to the shared parser
-# so the interface remains stable.
-
-def parse_closing_ceops_refs(text: str) -> list[int]:
-    """Return ce-ops issue numbers guarded by explicit closing keywords.
-
-    Backward-compatible wrapper around parse_body_closing_refs from
-    tools/ce-ops-autoclose/parse_issue_refs.py.  New callers should use
-    parse_all_refs (which also picks up title refs) or import the
-    parse_issue_refs module directly.
-    """
-    return parse_body_closing_refs(text)  # type: ignore[no-any-return]
-
-
-# ---------------------------------------------------------------------------
-# Constants
+# Constants and governance alerting
 # ---------------------------------------------------------------------------
 CE_OPS_REPO = "creator-engine/ce-ops"
 GITHUB_API = "https://api.github.com"
 
-# Primary secret name (ce-ops#262).  CE_OPS_TOKEN is the legacy name kept for
-# backwards-compatibility with any existing secret configuration.
-_TOKEN_ENVVAR_PRIMARY = "CE_CROSS_REPO_TOKEN"
-_TOKEN_ENVVAR_LEGACY = "CE_OPS_TOKEN"
-
-
-# ---------------------------------------------------------------------------
-# GitHub API helper
-# ---------------------------------------------------------------------------
 
 def _api_json(
     method: str,
@@ -124,6 +73,101 @@ def _api_json(
     if not body:
         return None
     return json.loads(body.decode("utf-8"))
+
+
+def _alert_governance_failure(reason: str) -> None:
+    """Emit a repository-dispatch alert for governance-class failures."""
+    alert_token = os.environ.get("GITHUB_TOKEN", "")
+    if not alert_token:
+        print("governance-alert: no GITHUB_TOKEN available for dispatch, skipping alert")
+        return
+    try:
+        _api_json(
+            "POST",
+            f"/repos/{CE_OPS_REPO.split('/')[0]}/creator-engine/dispatches",
+            alert_token,
+            {
+                "event_type": "governance-alert",
+                "client_payload": {
+                    "source": "ceops_autoclose",
+                    "reason": reason,
+                },
+            },
+        )
+        print(f"governance-alert dispatched: {reason}")
+    except Exception as exc:
+        print(f"governance-alert dispatch failed (non-blocking): {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Import shared parser (stdlib-only; no install required)
+# ---------------------------------------------------------------------------
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PARSER_PATH = _REPO_ROOT / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
+
+import importlib.util as _ilu
+
+
+def _refuse_parser_shim(reason: str, message: str) -> None:
+    """Alert and fail closed with a constant parser-shim refusal."""
+    _alert_governance_failure(reason)
+    raise RuntimeError(message) from None
+
+
+try:
+    _spec = (
+        _ilu.spec_from_file_location("parse_issue_refs", _PARSER_PATH)
+        if _PARSER_PATH.is_file()
+        else None
+    )
+except Exception:
+    _refuse_parser_shim(
+        "parser_shim_unavailable", "issue-reference parser shim is unavailable"
+    )
+
+if _spec is None or _spec.loader is None:
+    # Actions checks out the complete repository, so a missing shim is a
+    # broken deployment. Refuse rather than reintroducing a drift-prone
+    # parser copy.
+    _refuse_parser_shim(
+        "parser_shim_unavailable", "issue-reference parser shim is unavailable"
+    )
+
+try:
+    _parser_mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_parser_mod)
+    parse_title_refs = _parser_mod.parse_title_refs
+    parse_body_closing_refs = _parser_mod.parse_body_closing_refs
+    parse_acceptance_evidence = _parser_mod.parse_acceptance_evidence
+    parse_all_refs = _parser_mod.parse_all_refs
+except Exception:
+    _refuse_parser_shim(
+        "parser_shim_load_failed", "issue-reference parser shim failed to load"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility shim
+# ---------------------------------------------------------------------------
+# The original ce154 implementation exposed `parse_closing_ceops_refs` at
+# module level; existing tests reference it.  Delegate to the shared parser
+# so the interface remains stable.
+
+def parse_closing_ceops_refs(text: str) -> list[int]:
+    """Return ce-ops issue numbers guarded by explicit closing keywords.
+
+    Backward-compatible wrapper around parse_body_closing_refs from
+    tools/ce-ops-autoclose/parse_issue_refs.py.  New callers should use
+    parse_all_refs (which also picks up title refs) or import the
+    parse_issue_refs module directly.
+    """
+    return parse_body_closing_refs(text)  # type: ignore[no-any-return]
+
+
+# Primary secret name (ce-ops#262).  CE_OPS_TOKEN is the legacy name kept for
+# backwards-compatibility with any existing secret configuration.
+_TOKEN_ENVVAR_PRIMARY = "CE_CROSS_REPO_TOKEN"
+_TOKEN_ENVVAR_LEGACY = "CE_OPS_TOKEN"
 
 
 # ---------------------------------------------------------------------------
@@ -207,30 +251,6 @@ def _has_existing_warn_comment(issue_number: int, token: str) -> bool:
         isinstance(comment, dict) and str(comment.get("body", "")).startswith(marker)
         for comment in comments
     )
-
-
-def _alert_governance_failure(reason: str) -> None:
-    """Emit a repository-dispatch alert for governance-class failures."""
-    alert_token = os.environ.get("GITHUB_TOKEN", "")
-    if not alert_token:
-        print("governance-alert: no GITHUB_TOKEN available for dispatch, skipping alert")
-        return
-    try:
-        _api_json(
-            "POST",
-            f"/repos/{CE_OPS_REPO.split('/')[0]}/creator-engine/dispatches",
-            alert_token,
-            {
-                "event_type": "governance-alert",
-                "client_payload": {
-                    "source": "ceops_autoclose",
-                    "reason": reason,
-                },
-            },
-        )
-        print(f"governance-alert dispatched: {reason}")
-    except Exception as exc:
-        print(f"governance-alert dispatch failed (non-blocking): {exc}")
 
 
 def _is_directive_issue(issue: dict[str, Any]) -> bool:
