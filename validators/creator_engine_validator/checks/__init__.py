@@ -51,6 +51,7 @@ from . import review_evidence_schema as review_evidence_schema  # noqa: E402,F40
 from . import architect_evidence_schema as architect_evidence_schema  # noqa: E402,F401
 from . import implementer_evidence_schema as implementer_evidence_schema  # noqa: E402,F401
 from . import active_work_ledger_schema as active_work_ledger_schema  # noqa: E402,F401
+from . import deferred_work_ledger as deferred_work_ledger  # noqa: E402,F401
 from . import worktree_lease_schema as worktree_lease_schema  # noqa: E402,F401
 from . import controller_key_schema as controller_key_schema  # noqa: E402,F401
 from . import active_work_ledger_conflicts as active_work_ledger_conflicts  # noqa: E402,F401
