@@ -5436,4 +5436,46 @@ records:
   verification_method:
     evidence_ref: validators/tests/unit/test_v1_docs_reconciliation.py
     type: static
+- claim:
+    object: per-pr-carrier-discipline
+    predicate: verified-by-sha256
+    sha256: f64b953ab27dcfc66406d646075ae22d1458dcb8691f857b85dc95fd6ed12bb9
+    subject: convention
+  content_hash: 84c8eae1a10912ea5da187dde7fb64a514a9173ebcef2b2b03bcd59626283242
+  evidence_ref: docs/contracts/authoring-a-governed-pr.md
+  id: brain-assertion-7e4a2f24c5ad0b27aa589265
+  kind: brain-assertion
+  prev_hash: 10a4933c463f93a32bbbd2f7a334f2150c6d0f309aeb0587e4e4933c45404455
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 208
+  statement: convention verified-by-sha256 per-pr-carrier-discipline
+  status: superseded
+  superseded_by: brain-assertion-9da0098987b67f21b3700171
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/authoring-a-governed-pr.md
+    type: static
+- claim:
+    object: per-pr-carrier-discipline
+    predicate: verified-by-sha256
+    sha256: 9cdb0f734ca70a0f4c4ca148101159f05abf2b85e1b5e848c405e9c49c36efaa
+    subject: convention
+  content_hash: e2e56f0f2de0ba735cc45a00fc351d1411a9a1de6638d8b472e1b6b06c0de471
+  evidence_ref: docs/contracts/authoring-a-governed-pr.md
+  id: brain-assertion-9da0098987b67f21b3700171
+  kind: brain-assertion
+  prev_hash: 84c8eae1a10912ea5da187dde7fb64a514a9173ebcef2b2b03bcd59626283242
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: global
+  sequence: 209
+  statement: convention verified-by-sha256 per-pr-carrier-discipline
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: docs/contracts/authoring-a-governed-pr.md
+    type: static
 schema_version: '1'

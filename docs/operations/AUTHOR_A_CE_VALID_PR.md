@@ -50,9 +50,9 @@ Use this playbook before handing a branch to a controller for commit, push, or r
    - `.ce/pr-manifests/<branch-slug>.md`
 
    Derive the slug programmatically by invoking `branch_slug(head_ref)` (or the
-   existing `write_carriers` recipe); never hand-predict a carrier slug. That
-   canonical invocation owns slash collapse, long-slug truncation with hash
-   disambiguation, short-slug hash padding, and future normalization changes.
+   existing `write_carriers` recipe); never predict a carrier slug by hand.
+   For the programmatic carrier-writing path, follow the Manifest-fidelity
+   recipe in `docs/contracts/authoring-a-governed-pr.md`.
    Before commit and before PR, report the supplied head ref, the derived slug,
    and the matching carrier filenames. The PR manifest must list the closed
    `origin/main..HEAD` path set, include itself, and include exactly one current
