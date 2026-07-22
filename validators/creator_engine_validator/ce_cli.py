@@ -1881,6 +1881,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
 
+    preflight_gate = groups.add_parser(
+        "preflight-gate",
+        help="run one repository invariant shared with the local PR preflight",
+    )
+    preflight_gate_sub = preflight_gate.add_subparsers(dest="preflight_gate_cmd")
+    brain_current_tail = preflight_gate_sub.add_parser(
+        "brain-current-tail",
+        help="prove a changed brain ledger still appends from the live base tail",
+    )
+    brain_current_tail.add_argument("--comparison-base", required=True)
+    brain_current_tail.add_argument("--live-base", required=True)
+    brain_current_tail.add_argument("--repo-root", default=".")
+    brain_append_intent_xor = preflight_gate_sub.add_parser(
+        "brain-append-intent-xor",
+        help="refuse hybrid append-intent and direct brain-ledger edits",
+    )
+    brain_append_intent_xor.add_argument("--comparison-base", required=True)
+    brain_append_intent_xor.add_argument("--repo-root", default=".")
+    fleet_manifest = preflight_gate_sub.add_parser(
+        "fleet-manifest",
+        help="validate fleet manifests and reject CE-internal identifiers",
+    )
+    fleet_manifest.add_argument("--repo-root", default=".")
+
     # ce automerge-decide — CEO-mode auto-merge classifier (PR-A, ce-ops#291).
     # Classify-only / dry-run: prints the decision + rationale for a given PR;
     # performs NO merge, mints NO capability marker.  Inert by construction.
@@ -4591,6 +4615,40 @@ def _check(args) -> int:
     return validator_cli.main([*prefix, "check", *profile, *paths])
 
 
+def _preflight_gate(args) -> int:
+    """Expose selected repository invariants without reimplementing preflight."""
+    if args.preflight_gate_cmd not in {
+        "brain-current-tail",
+        "brain-append-intent-xor",
+        "fleet-manifest",
+    }:
+        print("ERROR: preflight-gate requires a supported subcommand", file=sys.stderr)
+        return 2
+    repo_root = Path(args.repo_root).resolve()
+    try:
+        if args.preflight_gate_cmd == "brain-current-tail":
+            detail = pr_preflight.run_brain_current_tail_gate(
+                repo_root,
+                comparison_base=args.comparison_base,
+                live_base=args.live_base,
+            )
+        elif args.preflight_gate_cmd == "brain-append-intent-xor":
+            detail = pr_preflight.run_brain_append_intent_xor_gate(
+                repo_root,
+                comparison_base=args.comparison_base,
+            )
+        elif args.preflight_gate_cmd == "fleet-manifest":
+            detail = pr_preflight.run_fleet_manifest_guard(repo_root)
+        else:
+            print("ERROR: preflight-gate requires a supported subcommand", file=sys.stderr)
+            return 2
+    except (OSError, RuntimeError) as exc:
+        print(f"FAIL: preflight-gate {args.preflight_gate_cmd}: {exc}", file=sys.stderr)
+        return 1
+    print(f"OK: preflight-gate {args.preflight_gate_cmd}: {detail}")
+    return 0
+
+
 def _scan_runtime_policy(args) -> int:
     """Expose the retained validator's discrete runtime-policy scan through ``ce``."""
     from . import cli as validator_cli
@@ -6395,6 +6453,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _publish_branch(args)
     if args.group == "validate-pr":
         return pr_preflight.run_cli(args)
+    if args.group == "preflight-gate":
+        return _preflight_gate(args)
     if args.group == "automerge-decide":
         return _automerge_decide(args)
     if args.group == "automerge-status":

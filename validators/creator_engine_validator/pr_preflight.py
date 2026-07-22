@@ -451,6 +451,35 @@ def _assert_brain_append_intent_xor(config: PreflightConfig, comparison_base: st
     return "passed; append intents and direct brain ledger edits are mutually exclusive"
 
 
+def run_brain_current_tail_gate(
+    repo_root: Path,
+    *,
+    comparison_base: str,
+    live_base: str,
+    runner: Runner | None = None,
+) -> str:
+    """Run the existing brain current-tail invariant outside full preflight.
+
+    CI resolves ``comparison_base`` from the live PR/merge-group event and has
+    already fetched ``live_base``.  Keep those two references distinct: the
+    former defines the PR diff while the latter proves the ledger tail has not
+    moved since that diff base.
+    """
+    config = PreflightConfig(repo_root=repo_root, base=live_base)
+    return _assert_brain_ledger_delta_uses_current_tail(config, comparison_base, runner or default_runner)
+
+
+def run_brain_append_intent_xor_gate(
+    repo_root: Path,
+    *,
+    comparison_base: str,
+    runner: Runner | None = None,
+) -> str:
+    """Run the existing append-intent/direct-ledger XOR invariant."""
+    config = PreflightConfig(repo_root=repo_root, base=comparison_base)
+    return _assert_brain_append_intent_xor(config, comparison_base, runner or default_runner)
+
+
 def _brain_drift_remediation_note() -> str:
     return (
         "If this is ignored instance-local .ce/state/brain drift, run `ce brain sync` "
@@ -1041,6 +1070,11 @@ def _fleet_manifest_guard(repo_root: Path, out: TextIO) -> str:
             print(error.format(), file=out)
         raise RuntimeError(f"{len(result.errors)} fleet manifest violation(s)")
     return "fleet manifests are schema-valid and free of CE-internal identifiers"
+
+
+def run_fleet_manifest_guard(repo_root: Path, *, out: TextIO | None = None) -> str:
+    """Run the preflight fleet-manifest guard through its canonical helper."""
+    return _fleet_manifest_guard(repo_root, out or sys.stdout)
 
 
 def _print_summary(checks: Sequence[CheckDetail], out: TextIO, *, skipped_tests: int = 0) -> None:

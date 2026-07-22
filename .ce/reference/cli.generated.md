@@ -1182,6 +1182,37 @@ Positional arguments:
 | --- | --- | --- |
 | `v3_args` |  |  |
 
+### `preflight-gate`
+
+run one repository invariant shared with the local PR preflight
+
+### `preflight-gate brain-append-intent-xor`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--comparison-base` | yes |  |  |
+| `--repo-root` | no |  |  |
+
+### `preflight-gate brain-current-tail`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--comparison-base` | yes |  |  |
+| `--live-base` | yes |  |  |
+| `--repo-root` | no |  |  |
+
+### `preflight-gate fleet-manifest`
+
+Options:
+
+| Option | Required | Choices | Description |
+| --- | --- | --- | --- |
+| `--repo-root` | no |  |  |
+
 ### `publish-branch`
 
 Positional arguments:

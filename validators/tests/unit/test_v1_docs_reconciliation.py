@@ -75,6 +75,7 @@ def test_as_built_ce_inventory_matches_expected():
         "artifacts", "report", "install", "carrier", "guide", "cockpit", "session",
         "queue-poll", "inbox", "controller-inbox", "queue-daemon", "emergency-stop",
         "queue-dequeue", "approval-capability", "checkpoint", "heartbeat",
+        "preflight-gate",
     }
 
 
