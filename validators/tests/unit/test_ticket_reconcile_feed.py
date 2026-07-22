@@ -312,32 +312,16 @@ def test_runner_oserror_is_redacted_without_credential_in_argv():
     assert "<redacted>" in str(excinfo.value)
 
 
-def test_parser_loader_uses_dynamic_file_seam_and_fails_closed(tmp_path, monkeypatch):
-    parser_path = tmp_path / "parse_issue_refs.py"
-    parser_path.write_text("def parse_all_refs(title, body):\n    return [7]\n", encoding="utf-8")
-
-    parser = feed._load_reference_parser(parser_path)
-    assert parser("title", "body") == [7]
-    assert feed._load_reference_parser(parser_path) is parser
-
-    with pytest.raises(feed.TicketReconcileFeedError, match="parser absent"):
-        feed._load_reference_parser(tmp_path / "missing.py")
-
-    broken_path = tmp_path / "broken.py"
-    broken_path.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
-    with pytest.raises(feed.TicketReconcileFeedError, match="parser load failed"):
-        feed._load_reference_parser(broken_path)
-
+def test_parser_failure_is_translated_at_the_package_boundary(monkeypatch):
     def broken_parser(*_args):
         raise RuntimeError("bad parse")
 
-    monkeypatch.setattr(feed, "_load_reference_parser", lambda: broken_parser)
+    monkeypatch.setattr(feed, "parse_all_refs", broken_parser)
     with pytest.raises(feed.TicketReconcileFeedError, match="parser failed"):
         feed._parse_reference_numbers("title", "body")
 
 
 def test_production_parser_visibility_matches_title_closing_and_bare_body_contract():
-    feed._load_reference_parser.cache_clear()
     reference_prefix = "ce-" + "ops#"
 
     assert feed._parse_reference_numbers("feat: ce-518 canonical", "") == [518]
@@ -468,7 +452,7 @@ def test_complete_zero_match_json_is_valid_and_raw_pr_body_is_not_emitted(monkey
     [["518"], [518.9], [True], [{}], [[518]], [0], [-518], [None]],
 )
 def test_canonical_parser_rejects_malformed_number_elements(monkeypatch, values):
-    monkeypatch.setattr(feed, "_load_reference_parser", lambda: lambda _title, _body: values)
+    monkeypatch.setattr(feed, "parse_all_refs", lambda _title, _body: values)
 
     with pytest.raises(
         feed.TicketReconcileFeedError,
@@ -503,7 +487,7 @@ def test_main_parser_failure_does_not_emit_raw_body_or_read_token(
     def failing_parser(_title, parser_body):
         raise error_type(parser_body)
 
-    monkeypatch.setattr(feed, "_load_reference_parser", lambda: failing_parser)
+    monkeypatch.setattr(feed, "parse_all_refs", failing_parser)
 
     assert (
         feed.main(

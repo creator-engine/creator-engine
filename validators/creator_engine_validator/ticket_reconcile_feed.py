@@ -3,18 +3,15 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import importlib.util
 import json
 import os
 import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from functools import lru_cache
-from pathlib import Path
-from types import ModuleType
 from typing import Any
 
+from creator_engine_validator.issue_refs import parse_all_refs
 from creator_engine_validator.ticket_reconcile import (
     MergedPullRequest,
     OpenTicket,
@@ -24,10 +21,6 @@ from creator_engine_validator.ticket_reconcile import (
 )
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
-ReferenceParser = Callable[[str, str], Sequence[int]]
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PARSER_PATH = _REPO_ROOT / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
 _SCOPED_GH_ENV_EXCLUSIONS = frozenset(
     {
         "GH_TOKEN",
@@ -403,30 +396,9 @@ def _parse_utc_timestamp(value: Any, field: str) -> dt.datetime:
     return parsed.astimezone(dt.timezone.utc)
 
 
-@lru_cache(maxsize=1)
-def _load_reference_parser(path: Path = _PARSER_PATH) -> ReferenceParser:
-    """Load the shared parser once using the production file-loader seam."""
-
-    if not path.is_file():
-        raise TicketReconcileFeedError(f"canonical reference parser absent: {path}")
-    try:
-        spec = importlib.util.spec_from_file_location("ce_ops_parse_issue_refs", path)
-        if spec is None or spec.loader is None:
-            raise ImportError("parser module spec has no loader")
-        module: ModuleType = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        parser = getattr(module, "parse_all_refs")
-    except Exception as exc:
-        raise TicketReconcileFeedError(f"canonical reference parser load failed: {exc}") from exc
-    if not callable(parser):
-        raise TicketReconcileFeedError("canonical reference parser has no parse_all_refs callable")
-    return parser
-
-
 def _parse_reference_numbers(title: str, body: str) -> Sequence[int]:
-    parser = _load_reference_parser()
     try:
-        values = parser(title, body)
+        values = parse_all_refs(title, body)
     except Exception:
         raise TicketReconcileFeedError("canonical reference parser failed") from None
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
