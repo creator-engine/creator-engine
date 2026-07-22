@@ -32,7 +32,7 @@ from creator_engine_validator.conveyor_daemon import (
     _PUBLISH_TRANSPORT_CONFIG_PATTERN,
 )
 from creator_engine_validator.conveyor_discovery import (
-    ConveyorSeatDiscoveryRunner,
+    ConveyorSeatDiscoveryRunner as _ConveyorSeatDiscoveryRunner,
     ReceiptDiscoveryPayload,
     ReceiptIdentity,
     SeatProbeSpec,
@@ -43,6 +43,29 @@ from creator_engine_validator.validation_sandbox_receipt import ValidationSandbo
 
 
 HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
+TEST_NON_TEST_HARVEST_EVIDENCE = {
+    "test_bearing": False,
+    "justification": "This fixture exercises conveyor receipt and transport behavior without introducing a test-bearing change.",
+}
+
+
+class ConveyorSeatDiscoveryRunner(_ConveyorSeatDiscoveryRunner):
+    """Test fixture wrapper that supplies an explicit factual exemption.
+
+    Production seat discovery deliberately emits no harvest evidence; CE-629
+    now flags that gap.  Receipt/transport tests opt in explicitly so they can
+    keep exercising their own control surfaces rather than silently relying on
+    a daemon-synthesized exemption.
+    """
+
+    def __call__(self):
+        return tuple(
+            ReceiptDiscoveryPayload(
+                {**payload, "harvest_evidence": TEST_NON_TEST_HARVEST_EVIDENCE},
+                payload.receipt_identity,
+            )
+            for payload in super().__call__()
+        )
 
 TEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="conveyor-daemon-alloc-test-"))
 TEST_ALLOCATOR = DaemonPathAllocator(
@@ -426,6 +449,7 @@ def _item(branch: str = "Feature/One", *, observed_receipt_identity: bool = True
         receipt_identity=(
             _observed_test_receipt_identity(branch) if observed_receipt_identity else None
         ),
+        harvest_evidence=TEST_NON_TEST_HARVEST_EVIDENCE,
     )
 
 
@@ -552,12 +576,13 @@ def _write_validation_policy(tmp_path: Path) -> Path:
     return path
 
 
-def _data_only_payload() -> dict[str, str]:
+def _data_only_payload() -> dict[str, object]:
     return {
         "issue": "388",
         "branch_name": "feature-one",
         "pr_title": "Land Feature/One",
         "pr_body": "- Conveyor item.",
+        "harvest_evidence": TEST_NON_TEST_HARVEST_EVIDENCE,
     }
 
 
@@ -1616,6 +1641,86 @@ def test_data_only_discovery_mapping_plans_without_payload_paths():
     assert not any("payload audit" in message for message in logs)
 
 
+def test_missing_harvest_evidence_is_flagged_before_receipt_carrier_or_validation_work():
+    prepare = FakePrepare()
+    allocator = CountingAllocator()
+    git = FakeGit()
+    gh = FakeGh()
+    payload = _data_only_payload()
+    payload.pop("harvest_evidence")
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [payload],
+        armed=True,
+        path_allocator=allocator,
+        daemon_lease=FakeLease(),
+        receipt_issuer=_receipt_issuer(),
+        git_runner=git,
+        validate_runner=FakeValidate(),
+        gh_runner=gh,
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+        validation_ledger_binding=_validation_ledger_binding(),
+        receipt_state_path=TEST_RECEIPT_STATE,
+    ).run_once()
+
+    assert result.results[0].status == "flagged"
+    assert result.results[0].reasons == (
+        "harvest evidence not ready: missing_evidence_classification: "
+        "harvest evidence must explicitly classify test_bearing",
+    )
+    assert allocator.allocate_calls == []
+    assert prepare.calls == []
+    assert git.calls == []
+    assert gh.calls == []
+
+
+def test_daemon_passes_explicit_harvest_evidence_verbatim_to_admission():
+    evidence = {
+        "test_bearing": True,
+        "node_ids": ["validators/tests/unit/test_conveyor_daemon.py::test_daemon_passes_explicit_harvest_evidence_verbatim_to_admission"],
+        "base_or_prior_head": HEAD_SHA,
+        "red_command": "python -m pytest exact-node",
+        "red_output": "1 failed",
+        "green_command": "python -m pytest exact-node",
+        "green_output": "1 passed",
+    }
+    prepare = FakePrepare(record_validation=True)
+    item = dataclasses.replace(_item(), harvest_evidence=evidence)
+
+    result = ConveyorDaemon(
+        discovery_runner=lambda: [item],
+        armed=True,
+        **ARMED_ROOTS,
+        git_runner=FakeGit(),
+        validate_runner=FakeValidate(),
+        gh_runner=FakeGh(),
+        now=FakeClock(),
+        ledger_writer=lambda record: None,
+        prepare_runner=prepare,
+        land_runner=FakeLand(),
+        validation_sandbox_runner=FakeValidationSandboxRunner(),
+    ).run_once()
+
+    assert result.results[0].status == "pr-opened"
+    assert prepare.calls[0].harvest_evidence is evidence
+
+
+def test_explicit_non_test_bearing_exemption_with_justification_is_accepted():
+    evidence = {
+        "test_bearing": False,
+        "justification": "The carrier only relocates an internal operational document and adds no test-bearing code.",
+    }
+    item = dataclasses.replace(_item(observed_receipt_identity=False), harvest_evidence=evidence)
+
+    result = ConveyorDaemon(discovery_runner=lambda: [item]).run_once()
+
+    assert result.results[0].status == "planned"
+
+
 def test_armed_data_only_discovery_mapping_without_receipt_identity_fails_closed():
     prepare = FakePrepare(record_validation=True)
     git = FakeGit()
@@ -1692,9 +1797,10 @@ def test_forged_receipt_from_another_allocator_instance_is_refused_before_prepar
         repo_path=foreign_allocation.repo_path,
         title="Land Feature/One",
         body="- Conveyor item.",
-        allocation_receipt=foreign_receipt,
-        receipt_identity=_observed_test_receipt_identity("Feature/One"),
-    )
+            allocation_receipt=foreign_receipt,
+            receipt_identity=_observed_test_receipt_identity("Feature/One"),
+            harvest_evidence=TEST_NON_TEST_HARVEST_EVIDENCE,
+        )
 
     result = ConveyorDaemon(
         discovery_runner=lambda: [item],

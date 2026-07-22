@@ -5680,4 +5680,212 @@ records:
   verification_method:
     evidence_ref: validators/pyproject.toml
     type: static
+- claim:
+    details: Before dispatch, the controller must check the live in-flight territory
+      map and stop on path collisions.
+    evidence_sha256: c17c783a729bd4e86ed1c41fe4a1983e9ece1d8db067227495d2cdf738ba88db
+    item: 22
+    object: dispatch-territory-check
+    predicate: asserts
+    refs:
+    - playbooks/controller/briefs/dispatch.md
+    subject: doctrine-item
+  content_hash: 46716045028b50c7d145d694d18e512f04ee88fa98f4b5985593967149ca3889
+  evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+  id: brain-assertion-d1b-22-dispatch-territory-check-v2
+  kind: brain-assertion
+  prev_hash: 632dfb2888fcf22875a965138b237e527da2e0a980ff1ec0eafe94527e867abf
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 218
+  statement: Before dispatch, the controller must check the live in-flight territory
+    map and stop on path collisions.
+  status: superseded
+  superseded_by: brain-assertion-ce629-dispatch-red-at-base
+  type: convention
+  verification_method:
+    evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+    type: static
+- claim:
+    details: Before dispatch, the controller must check the live in-flight territory
+      map and stop on path collisions.
+    evidence_sha256: 9b5a92cb12c3c5c8d62403829723d9efbf8f5eeb13118f8fa75ba4c095433f93
+    item: 22
+    object: dispatch-territory-check
+    predicate: asserts
+    refs:
+    - playbooks/controller/briefs/dispatch.md
+    subject: doctrine-item
+  content_hash: 7ae051d8d3b6cb368b6b50e7043e0d726cd75e1dfdb00d40e4e2fbde747be469
+  evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+  id: brain-assertion-ce629-dispatch-red-at-base
+  kind: brain-assertion
+  prev_hash: 46716045028b50c7d145d694d18e512f04ee88fa98f4b5985593967149ca3889
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 219
+  statement: Before dispatch, the controller must check the live in-flight territory
+    map and stop on path collisions.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and required Validate run URL/status bound to the exact pushed head.
+    evidence_sha256: 01da6e84e41fc3f8156f10c87addbee13ab1e3ca14a6123f161933cca42d5ae2
+    item: 25
+    object: harvest-requires-current-head-validate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 547cf6500283f1a9f12a00dd881fa7a66bc8c986e74c328fedc132562646c8cb
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-70634d0c993e4c4028915758
+  kind: brain-assertion
+  prev_hash: 7ae051d8d3b6cb368b6b50e7043e0d726cd75e1dfdb00d40e4e2fbde747be469
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 220
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and required Validate run URL/status bound to the exact pushed head.
+  status: superseded
+  superseded_by: brain-assertion-ce629-harvest-red-at-base
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and required Validate run URL/status bound to the exact pushed head.
+    evidence_sha256: 54b9b17b8911863223754daaf7277b4d19315da920589e0631ecb24a8e1a8597
+    item: 25
+    object: harvest-requires-current-head-validate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 451036dee1325ee6c663843131ecd210774604d6e69543496b12e12dad446a0c
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-ce629-harvest-red-at-base
+  kind: brain-assertion
+  prev_hash: 547cf6500283f1a9f12a00dd881fa7a66bc8c986e74c328fedc132562646c8cb
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 221
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and required Validate run URL/status bound to the exact pushed head.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    details: Before dispatch, the controller must check the live in-flight territory
+      map and stop on path collisions.
+    evidence_sha256: 9b5a92cb12c3c5c8d62403829723d9efbf8f5eeb13118f8fa75ba4c095433f93
+    item: 22
+    object: dispatch-territory-check
+    predicate: asserts
+    refs:
+    - playbooks/controller/briefs/dispatch.md
+    subject: doctrine-item
+  content_hash: e01b1fa6d48bf5cc2622f143423ba82efe443d5756c1e77cf84bfeef37231046
+  evidence_ref: playbooks/controller/briefs/dispatch.md
+  id: brain-assertion-ce629-dispatch-red-at-base
+  kind: brain-assertion
+  prev_hash: 451036dee1325ee6c663843131ecd210774604d6e69543496b12e12dad446a0c
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 222
+  statement: Before dispatch, the controller must check the live in-flight territory
+    map and stop on path collisions.
+  status: superseded
+  superseded_by: brain-assertion-ce629-round2-dispatch-residual
+  type: convention
+  verification_method:
+    evidence_ref: .claude/skills/ce-dispatch/SKILL.md
+    type: static
+- claim:
+    details: Before dispatch, the controller must check the live in-flight territory
+      map and stop on path collisions.
+    evidence_sha256: 9b5c32e6af4da356f520c1b128cd8ddd4c68cef645b52120615ef32e2519df7b
+    item: 22
+    object: dispatch-territory-check
+    predicate: asserts
+    refs:
+    - playbooks/controller/briefs/dispatch.md
+    subject: doctrine-item
+  content_hash: 1199d3b0a034449d38bce6b1d06a200711c0cd213d2d48027c3e6a6751eee784
+  evidence_ref: playbooks/controller/briefs/dispatch.md
+  id: brain-assertion-ce629-round2-dispatch-residual
+  kind: brain-assertion
+  prev_hash: e01b1fa6d48bf5cc2622f143423ba82efe443d5756c1e77cf84bfeef37231046
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 223
+  statement: Before dispatch, the controller must check the live in-flight territory
+    map and stop on path collisions.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/dispatch.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and required Validate run URL/status bound to the exact pushed head.
+    evidence_sha256: 54b9b17b8911863223754daaf7277b4d19315da920589e0631ecb24a8e1a8597
+    item: 25
+    object: harvest-requires-current-head-validate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 4f6806fa73554e4f4c91bb5ba19f5694afe8258837e8ea780deaa218b34f15d6
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-ce629-harvest-red-at-base
+  kind: brain-assertion
+  prev_hash: 1199d3b0a034449d38bce6b1d06a200711c0cd213d2d48027c3e6a6751eee784
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 224
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and required Validate run URL/status bound to the exact pushed head.
+  status: superseded
+  superseded_by: brain-assertion-ce629-round2-harvest-residual
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
+- claim:
+    details: A worker completion is not harvestable until the controller has a verifiable
+      commit SHA and required Validate run URL/status bound to the exact pushed head.
+    evidence_sha256: 8f1cde8242361f82969dd6455aa06f73c3f0bd14080de4304607be6acc79da98
+    item: 25
+    object: harvest-requires-current-head-validate
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 056f018ab31da805e5b32464f38a0abaeb29fd40493f697e5c7084a470f6a158
+  evidence_ref: playbooks/controller/briefs/harvest.md
+  id: brain-assertion-ce629-round2-harvest-residual
+  kind: brain-assertion
+  prev_hash: 4f6806fa73554e4f4c91bb5ba19f5694afe8258837e8ea780deaa218b34f15d6
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 225
+  statement: A worker completion is not harvestable until the controller has a verifiable
+    commit SHA and required Validate run URL/status bound to the exact pushed head.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: playbooks/controller/briefs/harvest.md
+    type: static
 schema_version: '1'

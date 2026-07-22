@@ -27,6 +27,7 @@ from .conveyor import (
     prepare_harvest,
     validation_sandbox_spec_from_command,
 )
+from .harvest_evidence import parse_harvest_evidence
 from .pickup_payload_schema import DiscoveryPayloadRejected, validate_discovery_payload
 from .conveyor_discovery import (
     HandledSignalReceipt,
@@ -159,6 +160,7 @@ class ConveyorDaemonItem:
     identity: str | None = None
     allocation_receipt: DaemonPathReceipt | None = None
     receipt_identity: ReceiptIdentity | None = None
+    harvest_evidence: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if self.receipt_identity is not None and self.receipt_identity.branch != self.branch:
@@ -188,6 +190,7 @@ class ConveyorDaemonItem:
             pr_title=parsed.pr_title,
             pr_body=parsed.pr_body,
             receipt_identity=receipt_identity,
+            harvest_evidence=parsed.harvest_evidence,
         )
 
     @property
@@ -216,6 +219,11 @@ class ConveyorDaemonItem:
             refresh_base=self.refresh_base,
             validate_command=validate_command,
             allow_dirty_validation=self.allow_dirty_validation,
+            # Discovery evidence is untrusted data, but it is retained exactly
+            # for harvest admission.  Missing or malformed evidence is named
+            # flagged before carrier generation or validation; never invent a
+            # non-test-bearing exemption in the daemon.
+            harvest_evidence=self.harvest_evidence,
         )
 
 
@@ -485,6 +493,21 @@ class ConveyorDaemon:
                 )
                 continue
             seen_this_pass.add(item.key)
+
+            evidence_assessment = parse_harvest_evidence(item.harvest_evidence)
+            if not evidence_assessment.ready:
+                result = ConveyorDaemonItemResult(
+                    status="flagged",
+                    branch=item.branch,
+                    key=item.key,
+                    reasons=(
+                        "harvest evidence not ready: "
+                        f"{evidence_assessment.reason_code}: {evidence_assessment.message}",
+                    ),
+                )
+                self._log(f"conveyor item flagged {item.branch}: {'; '.join(result.reasons)}")
+                results.append(result)
+                continue
 
             if not self.armed:
                 result = ConveyorDaemonItemResult(

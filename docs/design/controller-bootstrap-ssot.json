@@ -204,9 +204,11 @@
       "Save the seed brief to a file, send the seat the pointer plus sha256sum, and avoid long inline prompts.",
       "Verify-not-already-landed: before re-dispatching or re-deciding, check git log origin/main and the PR list for the ticket; if the work or Operator decision already landed, do not re-dispatch.",
       "Verify the work claim before the seat starts."
+      ,"Explicitly classify each unit as test-bearing or non-test-bearing. For test-bearing work, require exact test node IDs, a named base or prior head, captured RED command/output at that head, and GREEN command/output after implementation before build evidence counts."
     ],
     "harvest_sequence": [
       "Check seat output for READY-FOR-HARVEST.",
+      "For test-bearing work, refuse harvest and retain a named flagged/not-ready seal unless it has exact node IDs, named base/prior head, captured RED command/output at that head, and post-change GREEN command/output; the non-test-bearing exemption must be explicit.",
       "Harvest to a staging worktree under .ce/wt-<slug>-harvest/.",
       "Generate and commit the changelog and path-manifest carriers before transport.",
       "Push the final committed head and open or update the delivery PR, then record the required Validate run URL/status bound to that exact head (or required synthetic merge-group head).",
