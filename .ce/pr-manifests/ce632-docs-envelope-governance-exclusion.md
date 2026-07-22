@@ -6,9 +6,9 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 - **Declared work class:** XS
 
-AUTHORIZED_PATHS_COUNT=6
+AUTHORIZED_PATHS_COUNT=7
 
-AUTHORIZED_PATHS_SHA256=98657967f32b601524a79c1ea708c50a94cff25bbe4902b0cdcab1d26ce17e49
+AUTHORIZED_PATHS_SHA256=efb46180373792a14a5020cbade712ef521ce112eb1a670e22a975216ee1bd16
 
 ```text
 .ce/changelog/ce632-docs-envelope-governance-exclusion.md
@@ -16,5 +16,6 @@ AUTHORIZED_PATHS_SHA256=98657967f32b601524a79c1ea708c50a94cff25bbe4902b0cdcab1d2
 docs/decisions/ADR-0016-pre-delegated-merge-classes.md
 validators/creator_engine_validator/forge/automerge_policy.py
 validators/creator_engine_validator/forge/mutation_classifier.py
+validators/tests/unit/test_automerge_actuator.py
 validators/tests/unit/test_automerge_policy.py
 ```

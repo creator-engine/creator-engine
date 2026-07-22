@@ -19,3 +19,6 @@ issue: ce-ops#632
 - Coupling sweep found no brain assertion evidence pin and no generated-doc or
   reconciliation consumer. The ADR predicate reference was updated to record
   the classifier-derived exclusion.
+- The actuator test now records the strengthened predicate as the first
+  governance-doc refusal, while a synthetic divergence test preserves the
+  independent classifier backstop.
