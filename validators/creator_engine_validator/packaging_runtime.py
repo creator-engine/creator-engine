@@ -14,7 +14,8 @@ The contract (``docs/governance/V1_PRODUCT_CONTRACT.md`` §6):
   3.15 invalid/unreleased at decision time).
 * runtime pins ``PyYAML==6.0.3`` and ``jsonschema==4.26.0``.
     * cp314-only dual-arch Linux offline wheelhouse (no cp311/cp312/cp313 artifacts).
-* ``uv.lock`` is primary; ``requirements.txt`` is a lockstep export.
+* ``uv.lock`` is primary; ``requirements.txt`` is a lockstep runtime export
+  (declared optional extras remain in the development wheelhouse closure).
 * the first-party app wheel is not committed in ``validators/wheelhouse``.
 * build backend ``setuptools.build_meta``; distribution stays
   ``creator-engine-validator`` (DP-1 = A); console scripts retained.
@@ -194,6 +195,50 @@ def parse_uv_lock(path: Path | str) -> dict[str, str]:
     return out
 
 
+def parse_uv_lock_runtime_closure(path: Path | str) -> dict[str, str]:
+    """Map the project runtime dependency closure from a ``uv.lock``.
+
+    ``uv.lock`` records declared optional extras alongside the runtime graph,
+    while ``requirements.txt`` is installed before the development wheelhouse
+    is available.  Follow only ordinary ``dependencies`` from this project's
+    lock entry so the runtime export remains installable from the runtime
+    wheelhouse; never promote ``optional-dependencies`` into that surface.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return {}
+    data = tomllib.loads(p.read_text(encoding="utf-8"))
+    entries = {
+        normalize_name(str(entry["name"])): entry
+        for entry in data.get("package", [])
+        if entry.get("name") and entry.get("version")
+    }
+    project = entries.get(DISTRIBUTION_NAME)
+    if project is None:
+        return {}
+
+    closure: dict[str, str] = {}
+    pending = [
+        normalize_name(str(dependency["name"]))
+        for dependency in project.get("dependencies", [])
+        if dependency.get("name")
+    ]
+    while pending:
+        name = pending.pop()
+        if name in closure:
+            continue
+        entry = entries.get(name)
+        if entry is None:
+            continue
+        closure[name] = str(entry["version"])
+        pending.extend(
+            normalize_name(str(dependency["name"]))
+            for dependency in entry.get("dependencies", [])
+            if dependency.get("name")
+        )
+    return closure
+
+
 # --- violation collectors ---------------------------------------------------
 
 
@@ -335,7 +380,7 @@ def first_party_app_wheel_violations(wheelhouse_dir: Path | str) -> list[str]:
 def lockstep_violations(requirements_path: Path | str, uv_lock_path: Path | str) -> list[str]:
     v: list[str] = []
     reqs = parse_requirements(requirements_path)
-    lock = parse_uv_lock(uv_lock_path)
+    lock = parse_uv_lock_runtime_closure(uv_lock_path)
     if not lock:
         return [f"uv.lock missing or empty at {uv_lock_path}"]
     if not reqs:

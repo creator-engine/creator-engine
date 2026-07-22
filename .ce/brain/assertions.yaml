@@ -5628,4 +5628,56 @@ records:
   verification_method:
     evidence_ref: docs/contracts/authoring-a-governed-pr.md
     type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: dd7747ac340574feeafe5326a26346c1a207ad5bd7559b60aa6666c70f05c169
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 7b9d18f71727d7b8ac3172d5ef7fb702c54a7b9a85c461ae33e2022982352abc
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-49bfbe88f9462776fa485f14
+  kind: brain-assertion
+  prev_hash: 13981a39d1d4c48d3ea763327cf1c7dd1bdf8609fdf77dd0c8a4a8b6d0c734ea
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 216
+  statement: doctrine-item asserts full-validator-long-running
+  status: superseded
+  superseded_by: brain-assertion-ecca544824220ed7ffc90621
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
+- claim:
+    details: The full validator includes slow and integration test surfaces; long-running
+      execution is expected and should not be treated as a hang without evidence.
+    evidence_sha256: 3c1d143bab6047bbbcc6dc1d6c25ffe73be38c46ad28085ec514581e624abfb6
+    item: 39
+    object: full-validator-long-running
+    predicate: asserts
+    refs:
+    - validators/pyproject.toml
+    subject: doctrine-item
+  content_hash: 632dfb2888fcf22875a965138b237e527da2e0a980ff1ec0eafe94527e867abf
+  evidence_ref: validators/pyproject.toml
+  id: brain-assertion-ecca544824220ed7ffc90621
+  kind: brain-assertion
+  prev_hash: 7b9d18f71727d7b8ac3172d5ef7fb702c54a7b9a85c461ae33e2022982352abc
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 217
+  statement: doctrine-item asserts full-validator-long-running
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: validators/pyproject.toml
+    type: static
 schema_version: '1'
