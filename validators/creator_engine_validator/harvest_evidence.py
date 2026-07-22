@@ -45,7 +45,8 @@ def parse_harvest_evidence(payload: Mapping[str, object] | None) -> HarvestEvide
     """Parse and validate a data-only harvest seal payload without exceptions.
 
     A missing classification is not silently treated as non-test-bearing.  The
-    sole exemption is an explicit ``{"test_bearing": false}`` declaration.
+    sole exemption is an explicit non-test-bearing declaration with a factual
+    justification.  A boolean alone is not evidence for the exemption.
     """
 
     if payload is None:
@@ -57,6 +58,14 @@ def parse_harvest_evidence(payload: Mapping[str, object] | None) -> HarvestEvide
     if not isinstance(test_bearing, bool):
         return _flagged(None, payload, "missing_test_bearing_classification", "harvest evidence test_bearing must be boolean")
     if not test_bearing:
+        justification = payload.get("justification")
+        if not isinstance(justification, str) or not justification.strip():
+            return _flagged(
+                False,
+                payload,
+                "missing_non_test_justification",
+                "non-test-bearing evidence must state a nonempty factual justification",
+            )
         return HarvestEvidenceAssessment("ready", None, "explicit non-test-bearing exemption", False, payload)
 
     for field, code, message in _REQUIRED_TEST_FIELDS:

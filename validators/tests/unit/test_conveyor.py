@@ -20,7 +20,10 @@ from creator_engine_validator.conveyor import (
 from creator_engine_validator.harvest_evidence import parse_harvest_evidence
 
 
-NON_TEST_EVIDENCE = {"test_bearing": False}
+NON_TEST_EVIDENCE = {
+    "test_bearing": False,
+    "justification": "The conveyor unit exercises only data-only admission helpers; no implementation test was added.",
+}
 VALID_TEST_EVIDENCE = {
     "test_bearing": True,
     "node_ids": ["validators/tests/unit/test_conveyor.py::test_prepare_harvest_refuses_missing_test_evidence_before_carriers"],
@@ -460,6 +463,8 @@ def test_run_validation_preserves_slice6_command_and_env(tmp_path: Path):
         ({**VALID_TEST_EVIDENCE, "green_command": ""}, "missing_green_command"),
         ({**VALID_TEST_EVIDENCE, "green_output": ""}, "missing_green_output"),
         (NON_TEST_EVIDENCE, None),
+        ({"test_bearing": False}, "missing_non_test_justification"),
+        ({"test_bearing": False, "justification": "   "}, "missing_non_test_justification"),
     ),
 )
 def test_parse_harvest_evidence_returns_named_ready_or_flagged_result(payload, reason_code):

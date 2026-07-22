@@ -40,8 +40,16 @@ RED-to-GREEN record containing all of:
 
 Without the named base/prior-head RED record, a test result is not build proof
 and harvest must flag the seal as not ready. The non-test-bearing exemption is
-available only when the brief explicitly states it. This local author-evidence
-rule does not replace the exact-head CI evidence required below.
+available only when the brief explicitly states a nonempty factual
+justification meeting the `no runtime surface` standard above. This local
+author-evidence rule does not replace the exact-head CI evidence required
+below.
+
+This check is structural detectability, not proof: the parser can flag a
+missing or malformed RED/GREEN record, but cannot prove RED output semantically
+differs from GREEN. Identical pasted output defeats it. Controllers must weigh
+that residual rather than treating a structurally complete record as a proof of
+the claimed failure and repair.
 
 ## Standing validation directive
 

@@ -8,4 +8,4 @@ issue: ce-ops#629
 
 **Require RED-at-base evidence before harvest.**
 
-- Require structured RED-at-base and post-change GREEN evidence for test-bearing harvests, with explicit non-test-bearing exemptions.
+- Require structured RED-at-base and post-change GREEN evidence for test-bearing harvests, with explicit, factually justified non-test-bearing exemptions; daemon intake fails closed when evidence is absent.

@@ -8,8 +8,8 @@ from typing import Any
 
 AuditSink = Callable[[Mapping[str, Any]], None]
 
-ALLOWED_DISCOVERY_PAYLOAD_FIELDS = frozenset({"issue", "branch_name", "pr_title", "pr_body"})
-REQUIRED_DISCOVERY_PAYLOAD_FIELDS = ALLOWED_DISCOVERY_PAYLOAD_FIELDS
+ALLOWED_DISCOVERY_PAYLOAD_FIELDS = frozenset({"issue", "branch_name", "pr_title", "pr_body", "harvest_evidence"})
+REQUIRED_DISCOVERY_PAYLOAD_FIELDS = frozenset({"issue", "branch_name", "pr_title", "pr_body"})
 
 MAX_DISCOVERY_PAYLOAD_FIELD_LENGTHS: Mapping[str, int] = {
     "issue": 128,
@@ -69,14 +69,18 @@ class ConveyorDiscoveryPayload:
     branch_name: str
     pr_title: str
     pr_body: str
+    harvest_evidence: Mapping[str, object] | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        return {
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
             "issue": self.issue,
             "branch_name": self.branch_name,
             "pr_title": self.pr_title,
             "pr_body": self.pr_body,
         }
+        if self.harvest_evidence is not None:
+            payload["harvest_evidence"] = self.harvest_evidence
+        return payload
 
 
 class DiscoveryPayloadRejected(ValueError):
@@ -116,7 +120,7 @@ def validate_discovery_payload(
         audit_records.append(_audit_record(source, "missing_required_field", field=field))
 
     values: dict[str, str] = {}
-    for field in sorted(ALLOWED_DISCOVERY_PAYLOAD_FIELDS & keys):
+    for field in sorted(REQUIRED_DISCOVERY_PAYLOAD_FIELDS & keys):
         value = payload.get(field)
         if not isinstance(value, str):
             audit_records.append(_audit_record(source, "schema_mismatch", field=field, detail="field_not_string"))
@@ -133,6 +137,21 @@ def validate_discovery_payload(
             continue
         values[field] = value
 
+    harvest_evidence: Mapping[str, object] | None = None
+    if "harvest_evidence" in keys:
+        raw_harvest_evidence = payload.get("harvest_evidence")
+        if not isinstance(raw_harvest_evidence, Mapping):
+            audit_records.append(
+                _audit_record(source, "schema_mismatch", field="harvest_evidence", detail="field_not_mapping")
+            )
+        else:
+            # The harvest parser owns the evidence grammar and must retain the
+            # exact supplied mapping for a named ready/flagged assessment.
+            # This schema only admits data; it must neither synthesize a false
+            # exemption nor discard malformed evidence before admission can
+            # report its stable reason.
+            harvest_evidence = raw_harvest_evidence
+
     if audit_records:
         records = tuple(audit_records)
         for record in records:
@@ -144,6 +163,7 @@ def validate_discovery_payload(
         branch_name=values["branch_name"],
         pr_title=values["pr_title"],
         pr_body=values["pr_body"],
+        harvest_evidence=harvest_evidence,
     )
 
 

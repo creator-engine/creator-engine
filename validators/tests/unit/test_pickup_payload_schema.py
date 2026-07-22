@@ -122,6 +122,38 @@ def test_well_formed_four_field_payload_is_accepted():
     assert parsed.to_dict() == payload
 
 
+def test_harvest_evidence_mapping_is_preserved_verbatim_for_later_admission():
+    evidence = {
+        "test_bearing": True,
+        "node_ids": ["validators/tests/unit/test_pickup_payload_schema.py::test_harvest_evidence_mapping_is_preserved_verbatim_for_later_admission"],
+        "base_or_prior_head": "0123456789abcdef0123456789abcdef01234567",
+        "red_command": "python -m pytest exact-node",
+        "red_output": "1 failed",
+        "green_command": "python -m pytest exact-node",
+        "green_output": "1 passed",
+    }
+
+    parsed = validate_discovery_payload({**_valid_payload(), "harvest_evidence": evidence})
+
+    assert parsed.harvest_evidence is evidence
+    assert parsed.to_dict()["harvest_evidence"] is evidence
+
+
+def test_non_mapping_harvest_evidence_is_rejected_at_the_data_only_schema_boundary():
+    audit: list[dict] = []
+
+    with pytest.raises(DiscoveryPayloadRejected) as raised:
+        validate_discovery_payload(
+            {**_valid_payload(), "harvest_evidence": "not-a-mapping"},
+            audit_sink=lambda record: audit.append(dict(record)),
+        )
+
+    assert audit == list(raised.value.audit_records)
+    assert audit[0]["reason"] == "schema_mismatch"
+    assert audit[0]["field"] == "harvest_evidence"
+    assert audit[0]["detail"] == "field_not_mapping"
+
+
 def test_pickup_parser_uses_data_only_schema():
     payload = _valid_payload()
 
