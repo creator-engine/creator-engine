@@ -7,7 +7,7 @@ the launch boundary.
 
 The tier/effort rules are a clean transcription of the ratified
 ``MODEL_ROUTING_GPT56_RATIFIED_20260710.md`` table in
-``docs/operations/``.  ``policy_role`` below is deliberately distinct from
+``playbooks/controller/``.  ``policy_role`` below is deliberately distinct from
 the ``ce launch --role`` controller-governance flag: it names the model-tier
 taxonomy used by this resolver.
 """

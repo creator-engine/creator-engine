@@ -33,5 +33,8 @@ issue: ce-ops#620
   launches Claude, whose model flags are not Codex flags.
 - The committed receipt compatibility sweep found no receipt violating the
   tightened model/effort schema pattern.
+- Relocate the ratified routing table from served ``docs/operations`` to the
+  internal controller playbook tree; no public-doc confidentiality allowlist
+  was added.
 
 Closure waiver (controller, 20260722): live-target observation deferred to the next canonical seat relaunch on each substrate (vps-runsc: ce-vps-codex / ce-vps-codex-dev4; dgx-runsc: next DGX seat stand-up), scope = strip-and-reassert argv behavior at branch tip `ce620-launch-wrapper-model-effort-floor`, reason = relaunch is Operator-gated and next relaunch is the natural canary; tracking = watcher asserts the reasserted model/effort line in the first post-merge relaunch receipt.

@@ -12,7 +12,7 @@ Canonicalization: `sha256("\n".join(sorted(unique_paths)) + "\n")`.
 
 AUTHORIZED_PATHS_COUNT=25
 
-AUTHORIZED_PATHS_SHA256=9fd1b141429a5581d0c850dc2d8544fb9869276fab588eca81149d11aee564ef
+AUTHORIZED_PATHS_SHA256=c1629ccab9fffb31308a2ea0b1603d8748f95c4c66eff0e2e9c2c5b4d517f004
 
 ```text
 .ce/changelog/ce620-launch-wrapper-model-effort-floor.md
@@ -21,7 +21,7 @@ AUTHORIZED_PATHS_SHA256=9fd1b141429a5581d0c850dc2d8544fb9869276fab588eca81149d11
 .ce/reference/schemas.generated.md
 deploy/dgx-runsc/run-codex-runsc.sh
 deploy/vps-runsc/run-vps-runsc.sh
-docs/operations/MODEL_ROUTING_GPT56_RATIFIED_20260710.md
+playbooks/controller/MODEL_ROUTING_GPT56_RATIFIED_20260710.md
 validators/creator_engine_validator/ce_cli.py
 validators/creator_engine_validator/claude_launch_spec.py
 validators/creator_engine_validator/codex_launch_spec.py
