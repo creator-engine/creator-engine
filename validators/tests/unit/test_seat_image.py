@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import shlex
 from pathlib import Path
 
 import yaml
@@ -21,6 +23,52 @@ def _dockerfile() -> str:
 
 def _readme() -> str:
     return README.read_text(encoding="utf-8")
+
+
+def _run_shell_commands(text: str) -> list[str]:
+    """Return uncommented shell commands from Dockerfile RUN instructions."""
+    blocks = re.findall(r"(?ms)^RUN\s+(.*?)(?=^[A-Z]+(?:\s|$)|\Z)", text)
+    commands: list[str] = []
+    for block in blocks:
+        uncommented = "\n".join(
+            line.split("#", 1)[0]
+            for line in block.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        commands.extend(
+            command.strip()
+            for command in re.split(
+                r";(?=(?:[^\"']|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*')*$)",
+                uncommented.replace("\\\n", " "),
+            )
+            if command.strip()
+        )
+    return commands
+
+
+def _run_command_has_tokens(text: str, required: list[str]) -> bool:
+    for command in _run_shell_commands(text):
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            continue
+        normalised = [token.rstrip(";") for token in tokens]
+        for start in range(len(normalised) - len(required) + 1):
+            if start and not tokens[start - 1].endswith(";"):
+                continue
+            if required[:4] == ["apt-get", "install", "-y", "--no-install-recommends"]:
+                command_end = next(
+                    (index for index in range(start, len(tokens)) if tokens[index].endswith(";")),
+                    len(tokens),
+                )
+                if (
+                    normalised[start : start + 4] == required[:4]
+                    and required[4] in normalised[start + 4 : command_end]
+                ):
+                    return True
+            if normalised[start : start + len(required)] == required:
+                return True
+    return False
 
 
 def _workflow() -> dict:
@@ -76,10 +124,9 @@ def test_seat_dockerfile_installs_both_agent_clis_with_version_pins() -> None:
     assert '"@openai/codex@${CODEX_CLI_VERSION}"' in text
     assert '"@anthropic-ai/claude-code@${CLAUDE_CODE_CLI_VERSION}"' in text
     assert "node --version | grep -E '^v22\\.'" in text
-    assert "command -v codex" in text
-    assert "command -v claude" in text
-    assert "codex --version" in text
-    assert "claude --version" in text
+    for tool in ("codex", "claude"):
+        assert _run_command_has_tokens(text, ["command", "-v", tool])
+        assert _run_command_has_tokens(text, [tool, "--version"])
 
 
 def test_seat_dockerfile_preserves_non_root_ce_uid_runtime() -> None:
@@ -97,13 +144,32 @@ def test_seat_dockerfile_preserves_non_root_ce_uid_runtime() -> None:
 def test_seat_dockerfile_asserts_inherited_full_preflight_toolchain() -> None:
     text = _dockerfile()
 
-    assert "command -v ce" in text
-    assert "command -v ssh-keygen" in text
-    assert "import pytest, xdist" in text
-    assert "find_library('sodium')" in text
+    assert _run_command_has_tokens(text, ["command", "-v", "ce"])
+    assert _run_command_has_tokens(text, ["command", "-v", "ssh-keygen"])
+    assert _run_command_has_tokens(text, ["python", "-c", "import pytest, xdist"])
+    assert _run_command_has_tokens(
+        text,
+        [
+            "python",
+            "-c",
+            "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'",
+        ],
+    )
     assert "openssh-client" not in text
     assert "libsodium23" not in text
     assert "validators/wheelhouse" not in text
+
+
+def test_inherited_tool_contract_rejects_comment_only_and_adjacent_tool_names() -> None:
+    adversarial = """\
+RUN set -eux; \\
+    # command -v ce; \\
+    command -v ce-wrapper; \\
+    python -c "import pytest, xdist-extra"
+"""
+
+    assert not _run_command_has_tokens(adversarial, ["command", "-v", "ce"])
+    assert not _run_command_has_tokens(adversarial, ["python", "-c", "import pytest, xdist"])
 
 
 def test_seat_dockerfile_excludes_fleet_only_artifacts() -> None:

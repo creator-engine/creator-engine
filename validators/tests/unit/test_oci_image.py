@@ -30,6 +30,52 @@ def _readme() -> str:
     return README.read_text(encoding="utf-8")
 
 
+def _run_shell_commands(text: str) -> list[str]:
+    """Return uncommented shell commands from Dockerfile RUN instructions."""
+    blocks = re.findall(r"(?ms)^RUN\s+(.*?)(?=^[A-Z]+(?:\s|$)|\Z)", text)
+    commands: list[str] = []
+    for block in blocks:
+        uncommented = "\n".join(
+            line.split("#", 1)[0]
+            for line in block.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        commands.extend(
+            command.strip()
+            for command in re.split(
+                r";(?=(?:[^\"']|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*')*$)",
+                uncommented.replace("\\\n", " "),
+            )
+            if command.strip()
+        )
+    return commands
+
+
+def _run_command_has_tokens(text: str, required: list[str]) -> bool:
+    for command in _run_shell_commands(text):
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            continue
+        normalised = [token.rstrip(";") for token in tokens]
+        for start in range(len(normalised) - len(required) + 1):
+            if start and not tokens[start - 1].endswith(";"):
+                continue
+            if required[:4] == ["apt-get", "install", "-y", "--no-install-recommends"]:
+                command_end = next(
+                    (index for index in range(start, len(tokens)) if tokens[index].endswith(";")),
+                    len(tokens),
+                )
+                if (
+                    normalised[start : start + 4] == required[:4]
+                    and required[4] in normalised[start + 4 : command_end]
+                ):
+                    return True
+            if normalised[start : start + len(required)] == required:
+                return True
+    return False
+
+
 def _dry_run(*args: str) -> list[list[str]]:
     env = os.environ.copy()
     env.update(
@@ -65,7 +111,18 @@ def test_oci_dockerfile_builds_first_party_wheel_from_repo_source() -> None:
     assert "COPY validators/pyproject.toml validators/pyproject.toml" in text
     assert "COPY validators/creator_engine_validator validators/creator_engine_validator" in text
     assert "COPY validators/wheelhouse-dev /opt/build-tools" in text
-    assert "python -m pip install --no-index --find-links=/opt/build-tools setuptools" in text
+    assert _run_command_has_tokens(
+        text,
+        [
+            "python",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links=/opt/build-tools",
+            "setuptools",
+        ],
+    )
     assert "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" in text
     assert "python -m pip wheel" in text
     assert "--no-deps" in text
@@ -82,23 +139,93 @@ def test_oci_dockerfile_installs_wheelhouse_offline_and_exposes_cli() -> None:
     assert "COPY validators/wheelhouse /opt/creator-engine/wheelhouse" in text
     assert "COPY validators/wheelhouse-dev /opt/creator-engine/wheelhouse-dev" in text
     assert "COPY --from=wheel-builder /out/*.whl /opt/creator-engine/app/" in text
-    assert "python -m pip install" in text
-    assert "--no-index" in text
-    assert "--find-links=/opt/creator-engine/wheelhouse" in text
-    assert "--find-links=/opt/creator-engine/wheelhouse-dev" in text
-    assert "-r /opt/creator-engine/requirements.txt" in text
-    assert "-r /opt/creator-engine/requirements-dev.txt" in text
-    assert "--find-links=/opt/creator-engine/app" in text
+    assert _run_command_has_tokens(
+        text,
+        [
+            "python",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links=/opt/creator-engine/wheelhouse",
+            "-r",
+            "/opt/creator-engine/requirements.txt",
+        ],
+    )
+    assert _run_command_has_tokens(
+        text,
+        [
+            "python",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links=/opt/creator-engine/wheelhouse",
+            "--find-links=/opt/creator-engine/wheelhouse-dev",
+            "-r",
+            "/opt/creator-engine/requirements-dev.txt",
+        ],
+    )
+    assert _run_command_has_tokens(
+        text,
+        [
+            "python",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links=/opt/creator-engine/wheelhouse",
+            "--find-links=/opt/creator-engine/app",
+            "creator-engine-validator",
+        ],
+    )
     assert "creator-engine-validator" in text
-    assert "openssh-client" in text
-    assert "libsodium23" in text
-    assert "command -v ce" in text
-    assert "command -v creator-engine-validator" in text
-    assert "command -v ssh-keygen" in text
-    assert "import pytest, xdist" in text
-    assert "find_library('sodium')" in text
+    for package in ("openssh-client", "libsodium23"):
+        assert _run_command_has_tokens(
+            text, ["apt-get", "install", "-y", "--no-install-recommends", package]
+        )
+    for tool in ("ce", "creator-engine-validator", "ssh-keygen"):
+        assert _run_command_has_tokens(text, ["command", "-v", tool])
+    assert _run_command_has_tokens(text, ["python", "-c", "import pytest, xdist"])
+    assert _run_command_has_tokens(
+        text,
+        [
+            "python",
+            "-c",
+            "import ctypes.util; assert ctypes.util.find_library('sodium'), 'libsodium not resolvable'",
+        ],
+    )
     assert "ce --help" in text
     assert "creator-engine-validator --help" in text
+
+
+def test_oci_instruction_contracts_reject_comments_and_adjacent_tokens() -> None:
+    adversarial = """\
+RUN set -eux; \\
+    # python -m pip install --no-index --find-links=/opt/creator-engine/wheelhouse -r /opt/creator-engine/requirements.txt; \\
+    echo libsodium23; \\
+    command -v creator-engine-validator-shadow
+"""
+
+    assert not _run_command_has_tokens(
+        adversarial,
+        [
+            "python",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links=/opt/creator-engine/wheelhouse",
+            "-r",
+            "/opt/creator-engine/requirements.txt",
+        ],
+    )
+    assert not _run_command_has_tokens(
+        adversarial, ["apt-get", "install", "-y", "--no-install-recommends", "libsodium23"]
+    )
+    assert not _run_command_has_tokens(
+        adversarial, ["command", "-v", "creator-engine-validator"]
+    )
 
 
 def test_oci_dockerfile_installs_gate_daemon_runtime_dependencies_from_pinned_repos() -> None:
