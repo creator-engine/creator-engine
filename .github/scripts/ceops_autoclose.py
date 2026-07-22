@@ -48,60 +48,22 @@ from typing import Any
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PARSER_PATH = _REPO_ROOT / "tools" / "ce-ops-autoclose" / "parse_issue_refs.py"
 
-if _PARSER_PATH.exists():
-    import importlib.util as _ilu
+if not _PARSER_PATH.is_file():
+    # Actions checks out the complete repository, so a missing shim is a broken
+    # deployment. Refuse rather than reintroducing a drift-prone parser copy.
+    raise RuntimeError("issue-reference parser shim is unavailable")
 
-    _spec = _ilu.spec_from_file_location("parse_issue_refs", _PARSER_PATH)
-    assert _spec is not None and _spec.loader is not None
-    _parser_mod = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_parser_mod)
-    _parse_all_refs = _parser_mod.parse_all_refs
-    _parse_acceptance_evidence = _parser_mod.parse_acceptance_evidence
-else:
-    # Fallback: inline minimal parser so the workflow still runs if the tools
-    # directory is somehow absent (should not happen in CI).
-    import re as _re
+import importlib.util as _ilu
 
-    def _parse_all_refs(title: str, body: str) -> list[int]:  # type: ignore[misc]
-        """Minimal fallback parser (bare title refs + body closing-keyword refs)."""
-        _bare = _re.compile(r"(?:creator-engine/)?ce-ops#(\d+)\b", _re.IGNORECASE)
-        _kw = _re.compile(
-            r"^(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
-            r"(?:[ \t]+|[ \t]*:[ \t]*)(?P<refs>(?:(?:creator-engine/)?ce-ops#\d+\b)"
-            r"(?:(?:[ \t]*(?:,|;)[ \t]*|[ \t]+and[ \t]+)(?:creator-engine/)?ce-ops#\d+\b)*)",
-            _re.IGNORECASE,
-        )
-        _split = _re.compile(r"(?<=[.!?])\s+|\n+")
-        _lm = _re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
-        seen: set[int] = set()
-        numbers: list[int] = []
-        for m in _bare.finditer(title):
-            n = int(m.group(1))
-            if n not in seen:
-                seen.add(n)
-                numbers.append(n)
-        for clause in _split.split(body):
-            stripped = _lm.sub("", clause).strip()
-            cm = _kw.match(stripped)
-            if cm:
-                for rm in _bare.finditer(cm.group("refs")):
-                    n = int(rm.group(1))
-                    if n not in seen:
-                        seen.add(n)
-                        numbers.append(n)
-        return numbers
-
-    def _parse_acceptance_evidence(body: str) -> str | None:  # type: ignore[misc]
-        for line in body.splitlines():
-            stripped = line.strip()
-            if not stripped.startswith("Acceptance-Evidence"):
-                continue
-            field, separator, value = stripped.partition(":")
-            if field == "Acceptance-Evidence" and separator:
-                evidence = value.strip()
-                if evidence:
-                    return evidence
-        return None
+_spec = _ilu.spec_from_file_location("parse_issue_refs", _PARSER_PATH)
+if _spec is None or _spec.loader is None:
+    raise RuntimeError("issue-reference parser shim is unavailable")
+_parser_mod = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_parser_mod)
+parse_title_refs = _parser_mod.parse_title_refs
+parse_body_closing_refs = _parser_mod.parse_body_closing_refs
+parse_acceptance_evidence = _parser_mod.parse_acceptance_evidence
+parse_all_refs = _parser_mod.parse_all_refs
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +78,10 @@ def parse_closing_ceops_refs(text: str) -> list[int]:
 
     Backward-compatible wrapper around parse_body_closing_refs from
     tools/ce-ops-autoclose/parse_issue_refs.py.  New callers should use
-    _parse_all_refs (which also picks up title refs) or import the
+    parse_all_refs (which also picks up title refs) or import the
     parse_issue_refs module directly.
     """
-    if _PARSER_PATH.exists():
-        return _parser_mod.parse_body_closing_refs(text)  # type: ignore[return-value]
-    # Fallback: re-use _parse_all_refs with empty title
-    return _parse_all_refs("", text)
+    return parse_body_closing_refs(text)  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +244,7 @@ def close_issue_if_open(issue_number: int, token: str, context: dict[str, Any]) 
         print(f"ce-ops#{issue_number}: already closed, skipping")
         return
 
-    if _is_directive_issue(issue) and not _parse_acceptance_evidence(context.get("body") or ""):
+    if _is_directive_issue(issue) and not parse_acceptance_evidence(context.get("body") or ""):
         already_warned = _has_existing_warn_comment(issue_number, token)
         if already_warned:
             print(
@@ -332,7 +291,7 @@ def main() -> int:
 
     title = context.get("title") or ""
     body = context.get("body") or ""
-    numbers = _parse_all_refs(title, body)
+    numbers = parse_all_refs(title, body)
     if not numbers:
         print("No ce-ops refs found in PR title or body")
         return 0
