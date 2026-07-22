@@ -1,4 +1,5 @@
 import contextlib
+from collections.abc import Generator
 from datetime import datetime
 import io
 import os
@@ -112,7 +113,7 @@ def validators_root(repo_root: Path) -> Path:
 
 
 @pytest.fixture
-def unix_socket_tmp_path() -> Path:
+def unix_socket_tmp_path() -> Generator[Path, None, None]:
     """Provide a short, private AF_UNIX endpoint root for one test.
 
     ``tmp_path`` can be intentionally long (and receives audit/config data), while
@@ -122,16 +123,16 @@ def unix_socket_tmp_path() -> Path:
     traverses a symlink as the socket root.
     """
     root = Path(tempfile.mkdtemp(prefix="ce-unix-", dir=tempfile.gettempdir()))
-    root_stat = os.lstat(root)
-    if (
-        stat.S_ISLNK(root_stat.st_mode)
-        or not stat.S_ISDIR(root_stat.st_mode)
-        or root_stat.st_uid != os.getuid()
-        or stat.S_IMODE(root_stat.st_mode) != 0o700
-    ):
-        raise RuntimeError("refusing unsafe AF_UNIX temporary directory")
-
     try:
+        root_stat = os.lstat(root)
+        if (
+            stat.S_ISLNK(root_stat.st_mode)
+            or not stat.S_ISDIR(root_stat.st_mode)
+            or root_stat.st_uid != os.getuid()
+            or stat.S_IMODE(root_stat.st_mode) != 0o700
+        ):
+            raise RuntimeError("refusing unsafe AF_UNIX temporary directory")
+
         yield root
     finally:
         try:
