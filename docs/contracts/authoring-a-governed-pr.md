@@ -97,10 +97,10 @@ its branch slug:
 The branch slug is produced by
 `creator_engine_validator.checks.path_manifest_fidelity.branch_slug(head_ref)`;
 invoke that function with the actual `head_ref` (or use `write_carriers`) every
-time and never hand-predict the result. This primary rule subsumes slash
-collapse, long-slug truncate/hash disambiguation, short-slug hash padding, and
-future normalization changes. Before commit and before PR readiness, report the
-head ref, its derived slug, and both matching carrier filenames. For
+time and never predict the result by hand. Use the Manifest-fidelity recipe
+below for the programmatic carrier-writing path. Before commit and before PR
+readiness, report the head ref, its derived slug, and both matching carrier
+filenames. For
 implementation PRs like this lane, the declared work class is normally
 `M` unless the committed diff proves a smaller or larger class.
 
