@@ -955,22 +955,22 @@ def test_runtime_policy_reprovision_failure_preserves_last_known_good_pair(
         original_replace = onboard_apply.os.replace
         replace_calls = 0
 
-        def fail_second_replace(source, destination):
+        def fail_second_replace(source, destination, *args, **kwargs):
             nonlocal replace_calls
             replace_calls += 1
             if replace_calls == 2:
                 raise OSError("injected second replace failure")
-            return original_replace(source, destination)
+            return original_replace(source, destination, *args, **kwargs)
 
         monkeypatch.setattr(onboard_apply.os, "replace", fail_second_replace)
     else:
-        original_read = onboard_apply._read_regular_nofollow
+        original_read = onboard_apply._read_regular_nofollow_at
         destination_reads = 0
 
-        def fail_post_verify(path, *args, **kwargs):
+        def fail_post_verify(directory_fd, name, *args, **kwargs):
             nonlocal destination_reads
-            payload = original_read(path, *args, **kwargs)
-            if path in {policy_path, receipt_path}:
+            payload = original_read(directory_fd, name, *args, **kwargs)
+            if name in {policy_path.name, receipt_path.name}:
                 destination_reads += 1
                 # Two reads admit the valid existing pair; the third is the
                 # first post-replace verification read.
@@ -978,7 +978,7 @@ def test_runtime_policy_reprovision_failure_preserves_last_known_good_pair(
                     return payload + b"injected mismatch"
             return payload
 
-        monkeypatch.setattr(onboard_apply, "_read_regular_nofollow", fail_post_verify)
+        monkeypatch.setattr(onboard_apply, "_read_regular_nofollow_at", fail_post_verify)
 
     with pytest.raises(onboard_apply.ApplyFailed):
         onboard_apply.provision_canonical_runtime_policy(
@@ -1016,24 +1016,25 @@ def test_runtime_policy_recovery_rename_failure_is_best_effort_and_preserves_bac
     original_stage_private_write = onboard_apply._stage_private_write
     staged_names: list[str] = []
 
-    def stage_proposed_after_existing_pair_admission(path, payload):
-        destination_name = Path(path).name
+    def stage_proposed_after_existing_pair_admission(directory_fd, destination_name, payload):
         assert payload == original_by_name[destination_name]
         assert {
             policy_path.name: policy_path.read_bytes(),
             receipt_path.name: receipt_path.read_bytes(),
         } == original_by_name
         staged_names.append(destination_name)
-        return original_stage_private_write(path, proposed_by_name[destination_name])
+        return original_stage_private_write(
+            directory_fd, destination_name, proposed_by_name[destination_name]
+        )
 
     original_replace = onboard_apply.os.replace
     replace_calls = 0
     initiating_error = OSError("injected second replace failure")
 
-    def fail_second_replace(source, destination):
+    def fail_second_replace(source, destination, *args, **kwargs):
         nonlocal replace_calls
         replace_calls += 1
-        original_replace(source, destination)
+        original_replace(source, destination, *args, **kwargs)
         if replace_calls == 2:
             raise initiating_error
 
@@ -1047,9 +1048,11 @@ def test_runtime_policy_recovery_rename_failure_is_best_effort_and_preserves_bac
     restore_snapshots: dict[str, bytes] = {}
 
     def fail_selected_recovery_rename(source, destination, **kwargs):
-        destination_name = Path(destination).name
+        destination_name = destination
         attempted_restores.append(destination_name)
-        restore_snapshots[destination_name] = Path(destination).read_bytes()
+        restore_snapshots[destination_name] = onboard_apply._read_regular_nofollow_at(
+            kwargs["dst_dir_fd"], destination_name
+        )
         if destination_name in failing_names:
             raise OSError("injected recovery rename failure")
         return original_rename(source, destination, **kwargs)
@@ -1159,6 +1162,70 @@ def test_runtime_policy_provision_refuses_symlink_destination_parent(tmp_path):
             state_root=state, repository_root=Path.cwd()
         )
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("replacement", ["directory", "symlink"])
+def test_runtime_policy_pair_commit_stays_in_validated_directory_after_parent_swap(
+    tmp_path, monkeypatch, replacement
+):
+    """A pathname swap after validation cannot redirect pair replacement."""
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    runtime_dir.mkdir(parents=True)
+    policy_path = runtime_dir / "runtime-policy.yaml"
+    receipt_path = runtime_dir / "runtime-policy.receipt.json"
+    displaced = tmp_path / "validated-directory"
+    attacker = tmp_path / "attacker-directory"
+    attacker.mkdir()
+    original_replace = onboard_apply.os.replace
+    swapped = False
+
+    def swap_parent_before_first_replace(source, destination, *args, **kwargs):
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            os.rename(runtime_dir, displaced)
+            if replacement == "directory":
+                runtime_dir.mkdir()
+            else:
+                runtime_dir.symlink_to(attacker, target_is_directory=True)
+            # A path-based replace would now consume this attacker-controlled
+            # source and write the attacker-controlled replacement under the
+            # swapped parent. A dirfd-relative replace ignores it.
+            (runtime_dir / str(source)).write_bytes(b"attacker-controlled")
+        return original_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(onboard_apply.os, "replace", swap_parent_before_first_replace)
+
+    onboard_apply._commit_runtime_policy_pair(
+        policy_path=policy_path,
+        policy_bytes=b"expected-policy\n",
+        receipt_path=receipt_path,
+        receipt_bytes=b'{"expected":"receipt"}\n',
+    )
+
+    assert (displaced / policy_path.name).read_bytes() == b"expected-policy\n"
+    assert (displaced / receipt_path.name).read_bytes() == b'{"expected":"receipt"}\n'
+    assert not (runtime_dir / policy_path.name).exists()
+    assert not (runtime_dir / receipt_path.name).exists()
+
+
+def test_runtime_policy_pair_refuses_without_complete_dirfd_primitives_before_mutation(
+    tmp_path, monkeypatch
+):
+    runtime_dir = tmp_path / "state" / "onboard" / "runtime"
+    supported = set(onboard_apply.os.supports_dir_fd)
+    supported.discard(onboard_apply.os.rename)
+    monkeypatch.setattr(onboard_apply.os, "supports_dir_fd", supported)
+
+    with pytest.raises(onboard_apply.ApplyFailed, match="cannot be pinned without dir_fd support"):
+        onboard_apply._commit_runtime_policy_pair(
+            policy_path=runtime_dir / "runtime-policy.yaml",
+            policy_bytes=b"expected-policy\n",
+            receipt_path=runtime_dir / "runtime-policy.receipt.json",
+            receipt_bytes=b'{"expected":"receipt"}\n',
+        )
+
+    assert not runtime_dir.exists()
 
 
 def test_cli_exposure_records_owned_rollback(tmp_path):
