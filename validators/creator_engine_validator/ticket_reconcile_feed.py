@@ -11,6 +11,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from creator_engine_validator.github_child_env import scoped_github_child_env
 from creator_engine_validator.issue_refs import parse_all_refs
 from creator_engine_validator.ticket_reconcile import (
     MergedPullRequest,
@@ -22,21 +23,6 @@ from creator_engine_validator.ticket_reconcile import (
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 GITHUB_API_SUBPROCESS_TIMEOUT_SECONDS: float = 30.0
-_SCOPED_GH_ENV_EXCLUSIONS = frozenset(
-    {
-        "GH_TOKEN",
-        "GITHUB_TOKEN",
-        "CE_OPS_READ_TOKEN",
-        "CE_PR_READ_TOKEN",
-        "GH_ENTERPRISE_TOKEN",
-        "GITHUB_ENTERPRISE_TOKEN",
-        "GH_DEBUG",
-        "GH_HOST",
-        "GH_CONFIG_DIR",
-        "GITHUB_API_URL",
-    }
-)
-
 _ISSUES_QUERY = """
 query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
@@ -290,7 +276,9 @@ def _run_gh_json(
         "text": True,
         "check": False,
         "timeout": GITHUB_API_SUBPROCESS_TIMEOUT_SECONDS,
-        "env": _scoped_gh_env(token, token_source_names=token_source_names),
+        "env": scoped_github_child_env(
+            os.environ, token, token_source_names=token_source_names
+        ),
     }
     try:
         completed = runner(command, **kwargs)
@@ -431,26 +419,6 @@ def _validate_token_pair(ticket_token: Any, pr_token: Any) -> tuple[str, str]:
             "ticket and PR read tokens must be nonempty and distinct"
         )
     return ticket_token, pr_token
-
-
-def _is_app_key_var(name: str) -> bool:
-    """Return whether *name* could carry a GitHub App private key."""
-
-    upper = name.upper()
-    return upper.endswith("_PEM") or "PRIVATE_KEY" in upper or "APP_KEY" in upper
-
-
-def _scoped_gh_env(
-    token: str, *, token_source_names: Sequence[str | None] = ()
-) -> dict[str, str]:
-    child = dict(os.environ)
-    for name in (*_SCOPED_GH_ENV_EXCLUSIONS, *token_source_names):
-        if name is not None:
-            child.pop(name, None)
-    for name in [name for name in child if _is_app_key_var(name)]:
-        child.pop(name, None)
-    child["GH_TOKEN"] = token
-    return child
 
 
 def _split_repo(repo: str) -> tuple[str, str]:

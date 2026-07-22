@@ -121,6 +121,21 @@ def test_scrubs_debug_redirect_and_appkey_vars_from_child_env(monkeypatch):
     assert env.get("CE_KEEP_ME") == "ok"  # unrelated vars preserved
 
 
+def test_scrubs_control_and_appkey_vars_case_insensitively(monkeypatch):
+    monkeypatch.setenv("gh_host", "untrusted.example")
+    monkeypatch.setenv("gItHuB_tOkEn", "ambient-token")
+    monkeypatch.setenv("ce_github_app_private_key", "key-material")
+    spawn = _fake_spawn()
+    runner = authenticated_gh_runner(_token(), spawn=spawn)
+
+    runner(["gh", "api", "x"])
+
+    child_names = {name.casefold() for name in spawn.calls[0]["env"]}
+    assert {"gh_host", "github_token", "ce_github_app_private_key"}.isdisjoint(
+        child_names
+    )
+
+
 # ---------------------------------------------------------------------------
 # Child-only scope — the parent os.environ is never mutated
 # ---------------------------------------------------------------------------

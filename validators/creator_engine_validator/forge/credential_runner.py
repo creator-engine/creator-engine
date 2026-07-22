@@ -40,30 +40,9 @@ import os
 import subprocess
 from collections.abc import Sequence
 
+from ..github_child_env import scoped_github_child_env
 from .github_repo_config import ForgeConfigRefused, GhRunner
 from .scoped_token import ScopedToken
-
-#: Competing ambient auth env vars dropped from the child so the scoped ``GH_TOKEN`` is unambiguous.
-#: ``GH_TOKEN`` already wins by precedence; neutralizing these is defense-in-depth.
-_NEUTRALIZED_AUTH_ENV = ("GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
-
-#: Endpoint/debug host vars scrubbed from the child env so an inherited host var can neither
-#: redirect the ``Authorization`` header to a non-github host (``GH_HOST`` / ``GITHUB_API_URL`` /
-#: ``GH_CONFIG_DIR``) nor echo the bearer token via ``gh``'s request/response debug (``GH_DEBUG``).
-#: Dropping them is the safe default for CE's live drive (target = github.com); pinning them for a
-#: GitHub Enterprise Server target is a later concern.
-_SCRUBBED_CHILD_ENV = ("GH_DEBUG", "GH_HOST", "GH_CONFIG_DIR", "GITHUB_API_URL")
-
-
-def _is_app_key_var(name: str) -> bool:
-    """True for an env var that could carry the GitHub App private key.
-
-    The App private key (the crown jewel) must NEVER reach a child ``gh`` env a task could read.
-    Any ``*_PEM`` / ``*PRIVATE_KEY*`` / ``*APP_KEY*`` var inherited from ``os.environ`` is dropped.
-    """
-    upper = name.upper()
-    return upper.endswith("_PEM") or "PRIVATE_KEY" in upper or "APP_KEY" in upper
-
 
 def _default_spawn(  # pragma: no cover - the lone live shell; tests inject a fake spawn
     argv: Sequence[str], input_text: str | None, env: dict[str, str]
@@ -97,12 +76,7 @@ def authenticated_gh_runner(token: ScopedToken, *, spawn=None) -> GhRunner:
     _spawn = spawn or _default_spawn
 
     def runner(argv: Sequence[str], input_text: str | None = None) -> subprocess.CompletedProcess:
-        child_env = dict(os.environ)
-        for _name in _NEUTRALIZED_AUTH_ENV + _SCRUBBED_CHILD_ENV:
-            child_env.pop(_name, None)
-        for _name in [k for k in child_env if _is_app_key_var(k)]:
-            child_env.pop(_name, None)
-        child_env["GH_TOKEN"] = token.value  # scoped token only — never the argv, never logged
+        child_env = scoped_github_child_env(os.environ, token.value)
         return _spawn(list(argv), input_text, child_env)
 
     return runner
