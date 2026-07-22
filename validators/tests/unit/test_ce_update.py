@@ -27,10 +27,29 @@ def _sha(data: bytes) -> str:
 def _app_wheel(*, semver: str, build_sha: str) -> bytes:
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as archive:
+        dist_info = f"creator_engine_validator-{semver}.dist-info"
+        archive.writestr("creator_engine_validator/__init__.py", "")
         archive.writestr(
             "creator_engine_validator/_version.py",
             f'SEMVER = "{semver}"\nBUILD_GIT_SHA = "{build_sha}"\n',
         )
+        archive.writestr("creator_engine_validator/ce_cli.py", "def main():\n    return 0\n")
+        archive.writestr("creator_engine_validator/v3_cli.py", "def main():\n    return 0\n")
+        archive.writestr(
+            f"{dist_info}/METADATA",
+            f"Metadata-Version: 2.1\nName: creator-engine-validator\nVersion: {semver}\n",
+        )
+        archive.writestr(
+            f"{dist_info}/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: ce-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr(
+            f"{dist_info}/entry_points.txt",
+            "[console_scripts]\n"
+            "ce = creator_engine_validator.ce_cli:main\n"
+            "cev3 = creator_engine_validator.v3_cli:main\n",
+        )
+        archive.writestr(f"{dist_info}/RECORD", "")
     return out.getvalue()
 
 
@@ -185,6 +204,71 @@ def test_available_signed_release_verifies_and_swaps(tmp_path: Path):
     assert result.available.app_wheel_sha256 == wheel_sha
     assert len(swapper.calls) == 1
     assert swapper.calls[0][0] == tmp_path
+
+
+def test_apply_update_builds_console_scripts_against_final_target(monkeypatch, tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
+    install_root = tmp_path / "install-root"
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    result = update_runtime.apply_update(
+        install_root=install_root,
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.2.0", "a" * 40),
+        os_name="Linux",
+        machine="x86_64",
+    )
+
+    assert result.ok is True
+    target = (install_root / "venv").resolve()
+    for command in ("ce", "cev3"):
+        lines = (target / "bin" / command).read_text(encoding="utf-8").splitlines()
+        interpreter_lines = [line for line in lines if "bin/python" in line]
+        assert interpreter_lines
+        assert all(str(target) in line for line in interpreter_lines)
+        assert all(".staging." not in line for line in interpreter_lines)
+
+
+def test_apply_update_recovers_from_debris_at_final_target(monkeypatch, tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
+    install_root = tmp_path / "install-root"
+    release = update_runtime.resolve_latest_signed_release(
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        os_name="Linux",
+        machine="x86_64",
+    )
+    target = install_root / f"venv-{release.manifest.package_version}-{release.sha256s_sha256}"
+    (target / "bin").mkdir(parents=True)
+    debris = target / "crashed-install-debris"
+    debris.write_text("partial target", encoding="utf-8")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    result = update_runtime.apply_update(
+        install_root=install_root,
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.2.0", "a" * 40),
+        os_name="Linux",
+        machine="x86_64",
+    )
+
+    assert result.ok is True
+    assert (install_root / "venv").resolve() == target
+    assert not debris.exists()
+    for command in ("ce", "cev3"):
+        lines = (target / "bin" / command).read_text(encoding="utf-8").splitlines()
+        interpreter_lines = [line for line in lines if "bin/python" in line]
+        assert interpreter_lines
+        assert all(str(target) in line for line in interpreter_lines)
+        assert all(".staging." not in line for line in interpreter_lines)
 
 
 def test_verification_doubt_fails_closed_before_any_swap(tmp_path: Path):

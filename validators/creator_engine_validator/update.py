@@ -986,20 +986,19 @@ class VenvSwapper:
         return ce.is_file() and os.access(ce, os.X_OK) and cev3.is_file() and os.access(cev3, os.X_OK)
 
     def _build_target(self, target: Path, release: VerifiedRelease) -> None:
-        staging = target.with_name(f".{target.name}.staging.{os.getpid()}")
-        if staging.exists():
-            shutil.rmtree(staging)
-        wheelhouse = staging.parent / f".{target.name}.wheelhouse.{os.getpid()}"
+        wheelhouse = target.parent / f".{target.name}.wheelhouse.{os.getpid()}"
+        if target.exists():
+            shutil.rmtree(target)
         if wheelhouse.exists():
             shutil.rmtree(wheelhouse)
         try:
             wheelhouse.mkdir(parents=True)
             for filename, data in release.wheelhouse.items():
                 (wheelhouse / filename).write_bytes(data)
-            subprocess.run([self.python_executable, "-m", "venv", str(staging)], check=True)
+            subprocess.run([self.python_executable, "-m", "venv", str(target)], check=True)
             subprocess.run(
                 [
-                    str(staging / "bin" / "python"),
+                    str(target / "bin" / "python"),
                     "-m",
                     "pip",
                     "install",
@@ -1010,13 +1009,10 @@ class VenvSwapper:
                 ],
                 check=True,
             )
-            subprocess.run([str(staging / "bin" / "ce"), "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            subprocess.run([str(staging / "bin" / "cev3"), "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            if target.exists():
-                shutil.rmtree(target)
-            os.replace(staging, target)
+            subprocess.run([str(target / "bin" / "ce"), "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run([str(target / "bin" / "cev3"), "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         except Exception:
-            shutil.rmtree(staging, ignore_errors=True)
+            shutil.rmtree(target, ignore_errors=True)
             raise
         finally:
             shutil.rmtree(wheelhouse, ignore_errors=True)
