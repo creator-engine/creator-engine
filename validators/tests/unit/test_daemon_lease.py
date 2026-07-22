@@ -562,8 +562,8 @@ def test_queue_daemon_launcher_heartbeat_failure_terminates_child_and_exits_74(t
     lease_root = tmp_path / "leases"
     fake_bin = tmp_path / "fake-queue-daemon"
     started = tmp_path / "started"
-    child_pid_file = tmp_path / "child.pid"
-    _write_fake_queue_daemon(fake_bin, marker=started, pid_file=child_pid_file)
+    child_terminated = tmp_path / "child-terminated"
+    _write_fake_queue_daemon(fake_bin, marker=started, term_marker=child_terminated)
     env = _queue_daemon_env(tmp_path, lease_root, fake_bin)
     script = _repo_root() / "deploy" / "queue-daemon" / "launch-queue-daemon.sh"
 
@@ -577,10 +577,12 @@ def test_queue_daemon_launcher_heartbeat_failure_terminates_child_and_exits_74(t
     )
     try:
         lease_path = lease_root / "queue-daemon.lease"
-        _wait_for(lambda: started.exists() and child_pid_file.exists() and lease_path.exists())
-        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+        _wait_for(lambda: started.exists() and lease_path.exists())
         lease_path.unlink()
-        stdout, stderr = proc.communicate(timeout=5)
+        # The launcher itself gives the child up to 10 seconds to reap after a
+        # heartbeat failure.  Keep this test-local observation bounded while
+        # allowing scheduler contention beyond that production contract.
+        stdout, stderr = proc.communicate(timeout=15)
     finally:
         if proc.poll() is None:
             proc.terminate()
@@ -589,8 +591,9 @@ def test_queue_daemon_launcher_heartbeat_failure_terminates_child_and_exits_74(t
     assert proc.returncode == 74
     assert stdout == ""
     assert "queue-daemon singleton lease heartbeat failed" in stderr
-    with pytest.raises(ProcessLookupError):
-        os.kill(child_pid, 0)
+    # The launcher returned only after wait(); this child-owned TERM marker
+    # therefore proves the terminated child was observed without PID reuse.
+    assert child_terminated.exists()
 
 
 def test_queue_daemon_launcher_refuses_live_singleton_lease_before_child_exec(tmp_path: Path):
