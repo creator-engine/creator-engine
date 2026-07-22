@@ -44,6 +44,24 @@ def test_unix_socket_tmp_path_removes_root_when_setup_validation_refuses(monkeyp
     assert not roots[0].exists()
 
 
+def test_unix_socket_tmp_path_cleanup_unlinks_replaced_symlink_root(tmp_path):
+    conftest = _load_conftest_module()
+    fixture = conftest.unix_socket_tmp_path.__wrapped__()
+    root = next(fixture)
+    target = tmp_path / "symlink-target"
+    target.mkdir()
+    target_contents = target / "survives-cleanup"
+    target_contents.write_text("must not be removed through the symlink")
+
+    root.rmdir()
+    root.symlink_to(target, target_is_directory=True)
+
+    fixture.close()
+
+    assert not os.path.lexists(root)
+    assert target_contents.read_text() == "must not be removed through the symlink"
+
+
 def test_unix_socket_tmp_path_has_generator_annotation():
     conftest = _load_conftest_module()
 
