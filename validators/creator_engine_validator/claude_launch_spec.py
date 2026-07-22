@@ -289,7 +289,7 @@ def build_governed_claude_command(
     mcp_config_path: str,
     closeout_file: str | None = None,
     completion_report_ref: str | None = None,
-    role: str | None = None,
+    policy_role: str | None = None,
     resolved_model_effort: model_effort_policy.ResolvedModelEffort | None = None,
 ) -> list[str]:
     """Return the safe ``claude ...`` argv with the governed posture pinned.
@@ -318,7 +318,9 @@ def build_governed_claude_command(
             "is not a CE-owned path inside the repo / .hermes"
         )
 
-    policy = resolved_model_effort or model_effort_policy.resolve_model_effort(base, role=role)
+    policy = resolved_model_effort or model_effort_policy.resolve_model_effort(
+        base, policy_role=policy_role
+    )
     passthrough = model_effort_policy.strip_model_effort_args(_strip_builder_owned_flags(base))
     # Extra Claude arguments are independent of default resume behavior. Only a
     # real session selector supplied by the caller suppresses the default.

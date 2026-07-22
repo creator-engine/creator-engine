@@ -104,6 +104,15 @@ class TestBuildReceiptHappy:
         assert receipt["transport"]["kind"] == "herdr"
         assert receipt["transport"]["target"] == "w1:p1"
 
+    def test_unverified_resume_note_is_receipt_visible_and_bounded(self):
+        receipt = _bare_receipt(
+            model_effort_note=dr.MODEL_EFFORT_NOTE_UNVERIFIED_ATTACHED_SESSION
+        )
+        assert receipt["model_effort_note"] == dr.MODEL_EFFORT_NOTE_UNVERIFIED_ATTACHED_SESSION
+
+        with pytest.raises(dr.ReceiptBuildError, match="ratified model/effort observation"):
+            _bare_receipt(model_effort_note="unverified somehow")
+
     def test_scrollback_match_post_check(self):
         receipt = _bare_receipt(
             post_check_kind="scrollback-match",

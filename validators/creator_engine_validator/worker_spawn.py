@@ -25,7 +25,13 @@ from typing import Any
 
 import yaml
 
-from . import brain_bootstrap, codex_launch_spec, codex_worker_config, lane_runtime, launch_runtime
+from . import (
+    brain_bootstrap,
+    codex_launch_spec,
+    codex_worker_config,
+    lane_runtime,
+    launch_runtime,
+)
 
 
 WORKER_ROLES: dict[str, str] = {
@@ -34,6 +40,16 @@ WORKER_ROLES: dict[str, str] = {
     "implementer": "implementation",
     "reviewer": "review",
     "verification": "audit",
+}
+# The worker's execution lane is not itself a model-tier policy.  Keep this
+# translation explicit at the live spawn boundary so adding a worker role
+# cannot silently inherit the permissive ``role=None`` (seat) default.
+WORKER_POLICY_ROLES: dict[str, str] = {
+    "architect_research": "verify",
+    "researcher": "verify",
+    "implementer": "implementation",
+    "reviewer": "advisory",
+    "verification": "verify",
 }
 GOVERNED_WORKER_ROLES = frozenset({"researcher", "implementer", "reviewer"})
 WORKER_TIER_CONTRACT_SCHEMA = "schemas/worker-tier-contract.schema.yaml"
@@ -222,6 +238,12 @@ class LaunchRuntimeWorkerLauncher:
     """Default live seam: call v1 ``launch_runtime.launch`` with scrubbed env."""
 
     def launch(self, plan: WorkerSpawnPlan) -> WorkerLaunchOutcome:
+        try:
+            policy_role = WORKER_POLICY_ROLES[plan.role]
+        except KeyError as exc:  # defensive: plan construction validates this mapping too
+            raise WorkerLaunchFailed(
+                f"worker role {plan.role!r} has no model-tier policy mapping"
+            ) from exc
         launch_worktree = plan.worktree_path
         if plan.managed_config_receipt is not None:
             try:
@@ -243,6 +265,7 @@ class LaunchRuntimeWorkerLauncher:
                 purpose=f"worker:{plan.role}:{plan.scope_id}",
                 launch_cwd=launch_worktree,
                 launch_env=plan.child_env,
+                role=policy_role,
             )
         finally:
             os.environ.clear()
@@ -480,6 +503,10 @@ def plan_worker_spawn(
     if normalized_role not in WORKER_ROLES:
         raise InvalidWorkerRole(
             f"role {role!r} is not supported; expected one of: {', '.join(sorted(WORKER_ROLES))}"
+        )
+    if normalized_role not in WORKER_POLICY_ROLES:
+        raise InvalidWorkerRole(
+            f"role {normalized_role!r} has no model-tier policy mapping; refusing implicit tier"
         )
     lane_kind = WORKER_ROLES[normalized_role]
     if lane_kind not in lane_runtime.LANE_KINDS:

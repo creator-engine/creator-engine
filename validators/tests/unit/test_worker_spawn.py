@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from creator_engine_validator import codex_worker_config as config, worker_spawn
+from creator_engine_validator import codex_worker_config as config, model_effort_policy, worker_spawn
 
 
 class FakeLauncher:
@@ -400,6 +400,63 @@ def test_default_launcher_passes_clean_env_and_pinned_cwd_to_launch_runtime(tmp_
     assert "GH_CONFIG_DIR" not in captured["launch_env"]
     assert "SSH_AUTH_SOCK" not in captured["launch_env"]
     assert "GH_TOKEN" not in captured["launch_env"]
+    assert captured["role"] == "implementation"
+
+
+def test_real_worker_spawn_entrypoint_binds_worker_roles_to_model_tiers(tmp_path, monkeypatch):
+    """The live default launcher must pass the worker role, not the seat default."""
+    parent, worker = _worktrees(tmp_path)
+    captured_roles = []
+
+    class FakeLaunchPlan:
+        def to_dict(self):
+            return {"harness": "claude"}
+
+    class FakeLaunchResult:
+        spawned = True
+        attached = False
+        plan = FakeLaunchPlan()
+        terminal = {"kind": "tmux"}
+        events_ref = "events.jsonl"
+        seat_record_ref = "seat.yaml"
+        seat_lifecycle_state = "active"
+
+    def fake_launch(**kwargs):
+        captured_roles.append(kwargs["role"])
+        # This simulates the resolver at the live launch seam: verification is
+        # Luna-eligible, while an implementation/foreman-tier worker is not.
+        model_effort_policy.resolve_model_effort(
+            ["--model", model_effort_policy.LUNA_MODEL],
+            policy_role=kwargs["role"],
+        )
+        return FakeLaunchResult()
+
+    monkeypatch.setattr(worker_spawn.launch_runtime, "launch", fake_launch)
+    result = worker_spawn.spawn_worker(
+        role="verification",
+        harness="claude",
+        worktree=worker,
+        scope_id="ce-ops#620",
+        brief="verify model tier",
+        parent_worktree=parent,
+        environ={"PATH": "/bin"},
+    )
+    assert result.written is True
+    assert captured_roles == ["verify"]
+
+    implementation_worker = tmp_path / "implementation-worker"
+    implementation_worker.mkdir()
+    with pytest.raises(model_effort_policy.ModelEffortPolicyRefused, match="luna"):
+        worker_spawn.spawn_worker(
+            role="implementer",
+            harness="claude",
+            worktree=implementation_worker,
+            scope_id="ce-ops#620",
+            brief="must not run luna",
+            parent_worktree=parent,
+            environ={"PATH": "/bin"},
+        )
+    assert captured_roles == ["verify", "implementation"]
 
 
 def test_codex_spawn_materializes_managed_config_before_fake_prompt_seam(tmp_path):

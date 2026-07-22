@@ -50,6 +50,14 @@ PROSE_CONTRACT = "docs/operations/DISPATCH_RECEIPT_PROTOCOL.md"
 KIND = "ce.dispatch-receipt"
 SCHEMA_VERSION = "1"
 
+# The only currently ratified non-default observation.  An attach does not
+# execute the wrapper argv, so it cannot honestly claim that the resolved
+# model/effort pair was reasserted.  Keep the note enumerable rather than
+# admitting arbitrary receipt prose.
+MODEL_EFFORT_NOTE_UNVERIFIED_ATTACHED_SESSION = (
+    "unverified-attached-session: --resume did not recreate or reassert model/effort"
+)
+
 #: Default sub-directory under the CE state root for dispatch receipts.
 RECEIPTS_SUBDIR = "dispatch-receipts"
 
@@ -153,6 +161,7 @@ def build_receipt(
     activation_issued_at: str | None = None,
     separate_enter: bool,
     model_effort_line: str,
+    model_effort_note: str | None = None,
     dispatcher: str,
     work_unit: str,
     # Optional fields
@@ -185,6 +194,10 @@ def build_receipt(
             "model_effort_line must be the canonical resolved launch-policy line "
             "(per 2026-07-19 Operator floor ruling)"
         ) from exc
+    if model_effort_note is not None and model_effort_note != MODEL_EFFORT_NOTE_UNVERIFIED_ATTACHED_SESSION:
+        raise ReceiptBuildError(
+            "model_effort_note is not a ratified model/effort observation note"
+        )
     if not dispatcher:
         raise ReceiptBuildError("dispatcher is required")
     if not work_unit:
@@ -230,6 +243,9 @@ def build_receipt(
         "dispatcher": dispatcher,
         "work_unit": work_unit,
     }
+
+    if model_effort_note is not None:
+        receipt["model_effort_note"] = model_effort_note
 
     if claim_path is not None:
         receipt["claim_path"] = claim_path

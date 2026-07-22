@@ -44,6 +44,7 @@ from . import (
     claude_launch_spec,
     codex_controller_evidence,
     codex_launch_spec,
+    dispatch_receipt,
     hermes_launch_spec,
     model_effort_policy,
     resource_bound_spec,
@@ -1355,12 +1356,12 @@ def _evaluate_harness_governance(
     closeout_file: str | None,
     completion_report_ref: str | None,
     host_id: str | None = None,
-    role: str | None = None,
+    policy_role: str | None = None,
 ) -> _HarnessGateResult:
     requested = list(extra_args) if extra_args else []
     try:
         resolved_model_effort = model_effort_policy.resolve_model_effort(
-            requested, role=role
+            requested, policy_role=policy_role
         )
     except model_effort_policy.ModelEffortPolicyRefused as exc:
         raise ModelEffortLaunchRefused(
@@ -1393,7 +1394,7 @@ def _evaluate_harness_governance(
                 mcp_config_path=resolved_mcp,
                 closeout_file=closeout_file,
                 completion_report_ref=completion_report_ref,
-                role=role,
+                policy_role=policy_role,
                 resolved_model_effort=resolved_model_effort,
             )
         except claude_launch_spec.GovernedCommandError as exc:
@@ -1461,7 +1462,7 @@ def _evaluate_harness_governance(
             base_argv=requested,
             codex_bin=codex_bin,
             env_overrides=env_overrides,
-            role=role,
+            policy_role=policy_role,
             resolved_model_effort=resolved_model_effort,
         )
         plan = replace(
@@ -1932,10 +1933,20 @@ def launch(
         closeout_file=closeout_file,
         completion_report_ref=completion_report_ref,
         host_id=host_id,
-        role=role,
+        policy_role=role,
     )
     plan = harness_gate.plan
     resolved_mcp = harness_gate.resolved_mcp
+
+    if resume:
+        attach_note = dispatch_receipt.MODEL_EFFORT_NOTE_UNVERIFIED_ATTACHED_SESSION
+        LOGGER.warning(
+            "governed launch model/effort: %s; dispatch receipt must carry model_effort_note",
+            attach_note,
+        )
+        model_effort = dict(plan.model_effort or {})
+        model_effort["attachment_note"] = attach_note
+        plan = replace(plan, model_effort=model_effort)
 
     # No hidden fallback — a non-visible / detached continuation is refused.
     if allow_hidden or not visible:
@@ -2378,7 +2389,7 @@ def preflight_launch(
                 closeout_file=closeout_file,
                 completion_report_ref=completion_report_ref,
                 host_id=None,
-                role=role,
+                policy_role=role,
             )
         except LaunchError as exc:
             gates.append(_gate_refusal("harness-governance", exc))

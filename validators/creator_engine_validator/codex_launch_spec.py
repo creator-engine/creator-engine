@@ -463,7 +463,7 @@ def build_governed_codex_command(
     *,
     codex_bin: str | None = None,
     env_overrides: Mapping[str, str] | None = None,
-    role: str | None = None,
+    policy_role: str | None = None,
     resolved_model_effort: model_effort_policy.ResolvedModelEffort | None = None,
 ) -> list[str]:
     """Build the governed Codex command with credentials and policy pinned.
@@ -474,7 +474,7 @@ def build_governed_codex_command(
     """
     resolved = codex_bin or resolve_codex_harness_binary()
     policy = resolved_model_effort or model_effort_policy.resolve_model_effort(
-        base_argv, role=role
+        base_argv, policy_role=policy_role
     )
     passthrough = model_effort_policy.strip_model_effort_args(base_argv)
     return [

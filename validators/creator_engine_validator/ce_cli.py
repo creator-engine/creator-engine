@@ -2182,6 +2182,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="Enter was delivered as a SEPARATE send-keys call (safe pattern)")
     dr_emit.add_argument("--model-effort-line", required=True, dest="model_effort_line",
                          help="seat status-line model/effort text at dispatch time")
+    dr_emit.add_argument("--model-effort-note", default=None, dest="model_effort_note",
+                         help="bounded observation note for an unverified --resume attachment")
     dr_emit.add_argument("--dispatcher", required=True,
                          help="controller/operator identity performing the dispatch")
     dr_emit.add_argument("--work-unit", required=True, dest="work_unit",
@@ -4490,6 +4492,7 @@ def _dispatch_receipt_emit(args) -> int:
             activation_method=args.activation_method,
             separate_enter=args.separate_enter,
             model_effort_line=args.model_effort_line,
+            model_effort_note=args.model_effort_note,
             dispatcher=args.dispatcher,
             work_unit=args.work_unit,
             claim_path=getattr(args, "claim_path", None),

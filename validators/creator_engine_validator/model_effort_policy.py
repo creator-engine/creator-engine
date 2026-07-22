@@ -4,6 +4,12 @@ This is deliberately a pure, shared resolver.  Launchers use its result to
 rewrite harness argv and receipt writers use its canonical status line, so a
 human-entered status string cannot drift from the policy actually enforced at
 the launch boundary.
+
+The tier/effort rules are a clean transcription of the ratified
+``MODEL_ROUTING_GPT56_RATIFIED_20260710.md`` table in
+``docs/operations/``.  ``policy_role`` below is deliberately distinct from
+the ``ce launch --role`` controller-governance flag: it names the model-tier
+taxonomy used by this resolver.
 """
 from __future__ import annotations
 
@@ -91,17 +97,17 @@ def _flag_values(argv: Sequence[str]) -> tuple[str | None, str | None]:
 def resolve_model_effort(
     argv: Sequence[str] | None,
     *,
-    role: str | None = None,
+    policy_role: str | None = None,
 ) -> ResolvedModelEffort:
     """Resolve the ratified model tier and fleet-wide effort floor.
 
-    ``None`` role is a normal visible seat.  Luna is intentionally usable only
+    ``None`` policy role is a normal visible seat.  Luna is intentionally usable only
     for explicit verify/mechanical/advisory organs, never for any role that can
     be a foreman or a persistent seat.  Low is clamped, rather than silently
     accepted, and the warning is carried in the result/audit stamp.
     """
     requested_model, requested_effort = _flag_values(argv or ())
-    resolved_role = role or "seat"
+    resolved_role = policy_role or "seat"
     model = requested_model or DEFAULT_MODEL
     effort = requested_effort or DEFAULT_EFFORT
     if model not in _RATIFIED_MODELS:
