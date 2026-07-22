@@ -4,6 +4,7 @@ import hashlib
 import re
 import subprocess
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,26 @@ def _fake_builder(repo_root: Path, out_dir: Path, *, build_dir: Path | None = No
     assert f'BUILD_GIT_SHA = "{source_commit}"' in build_identity
     wheel_name = f"creator_engine_validator-{version}-py3-none-any.whl"
     wheel = out_dir / wheel_name
-    wheel.write_bytes(f"wheel\nversion={version}\nsource={source_commit}\n".encode("utf-8"))
+    dist_info = f"creator_engine_validator-{version}.dist-info"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("creator_engine_validator/__init__.py", "")
+        archive.writestr("creator_engine_validator/ce_cli.py", "def main():\n    return 0\n")
+        archive.writestr("creator_engine_validator/v3_cli.py", "def main():\n    return 0\n")
+        archive.writestr(
+            f"{dist_info}/METADATA",
+            f"Metadata-Version: 2.1\nName: creator-engine-validator\nVersion: {version}\n",
+        )
+        archive.writestr(
+            f"{dist_info}/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: ce-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr(
+            f"{dist_info}/entry_points.txt",
+            "[console_scripts]\n"
+            "ce = creator_engine_validator.ce_cli:main\n"
+            "cev3 = creator_engine_validator.v3_cli:main\n",
+        )
+        archive.writestr(f"{dist_info}/RECORD", "")
     return WheelManifest(
         wheel_name=wheel_name,
         sha256=hashlib.sha256(wheel.read_bytes()).hexdigest(),
@@ -159,6 +179,29 @@ def test_promoter_refuses_before_install_when_wheel_hash_mismatches(tmp_path: Pa
         main_head_install._remove_worktree(resolved, artifact.worktree)
 
 
+def test_promoter_builds_console_scripts_against_final_target(monkeypatch, tmp_path: Path):
+    repo, _commit = _write_main_repo(tmp_path)
+    resolved = resolve_origin_main(repo)
+    artifact = build_main_head_artifact(
+        resolved,
+        work_root=tmp_path / "artifact-work",
+        build_wheel=_fake_builder,
+    )
+    install_root = tmp_path / "install-root"
+    try:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+        MainHeadVenvPromoter().apply(install_root, artifact)
+        target = (install_root / "venv").resolve()
+        for command in ("ce", "cev3"):
+            lines = (target / "bin" / command).read_text(encoding="utf-8").splitlines()
+            interpreter_lines = [line for line in lines if "bin/python" in line]
+            assert interpreter_lines
+            assert all(str(target) in line for line in interpreter_lines)
+            assert all(".staging." not in line for line in interpreter_lines)
+    finally:
+        main_head_install._remove_worktree(resolved, artifact.worktree)
+
+
 def test_clean_main_install_uses_resolver_and_promoter_without_release_signature(tmp_path: Path):
     repo, commit = _write_main_repo(tmp_path)
     install_root = tmp_path / "install-root"
@@ -198,4 +241,3 @@ def test_clean_main_install_cli_and_update_track_main_route_to_main_resolver(mon
     assert ce_cli.main(["update", "--track", "main", "--check"]) == 0
 
     assert calls == [("clean-main-install", True), ("update", True)]
-
