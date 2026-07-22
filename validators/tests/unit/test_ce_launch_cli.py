@@ -986,14 +986,21 @@ def test_cli_codex_dry_run_json_uses_governed_command(use_fake_tmux, tmp_path, m
     )
     codex = _fake_codex(tmp_path, monkeypatch)
     ret = ce_cli.main([
-        "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5",
+        "launch", "--harness", "codex", "--codex-arg=--model", "--codex-arg", "gpt-5.6-terra",
         "--claude-arg=--bare", "--dry-run", "--json",
     ])
     assert ret == 0
     payload = json.loads(capsys.readouterr().out)
     command = payload["plan"]["command"]
     assert command[:2] == ["env", "-u"]
-    assert command[-3:] == [str(codex), "--model", "gpt-5"]
+    codex_index = command.index(str(codex))
+    assert command[codex_index:] == [
+        str(codex),
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
+    ]
     assert "--bare" not in command
     assert payload["plan"]["codex_bypass_mode"] == "config"
 

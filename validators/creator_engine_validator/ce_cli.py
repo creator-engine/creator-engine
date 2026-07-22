@@ -4774,6 +4774,7 @@ def _launch(args, invoked_as: str = "launch") -> int:
             mcp_config_path=getattr(args, "mcp_config", None),
             closeout_file=getattr(args, "closeout_file", None),
             completion_report_ref=getattr(args, "completion_report_ref", None),
+            role=getattr(args, "role", None),
             runtime_policy=getattr(args, "runtime_policy", None),
             backend=getattr(args, "backend", None),
             repo_root=getattr(args, "repo_root", None),

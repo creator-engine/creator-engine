@@ -74,12 +74,27 @@ def test_refuses_non_allowlisted_flags(tmp_path):
 
 def test_build_governed_command_scrubs_github_credentials():
     command = spec.build_governed_codex_command(
-        ["--model", "gpt-5"], codex_bin="/opt/codex/bin/codex"
+        ["--model", "gpt-5.6-terra"], codex_bin="/opt/codex/bin/codex"
     )
     assert command[:2] == ["env", "-u"]
     for name in spec.CREDENTIAL_ENV_UNSETS:
         assert ["-u", name] == command[command.index(name) - 1: command.index(name) + 1]
-    assert command[-3:] == ["/opt/codex/bin/codex", "--model", "gpt-5"]
+    codex_index = command.index("/opt/codex/bin/codex")
+    assert command[codex_index:] == [
+        "/opt/codex/bin/codex",
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
+    ]
+
+
+def test_build_governed_command_refuses_an_unratified_model_tier():
+    with pytest.raises(spec.model_effort_policy.ModelEffortPolicyRefused, match="unratified model"):
+        spec.build_governed_codex_command(
+            ["--model", "gpt-5.7-unreviewed"],
+            codex_bin="/opt/codex/bin/codex",
+        )
 
 
 def test_container_credential_env_guard_denies_known_names_without_values():

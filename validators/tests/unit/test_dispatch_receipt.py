@@ -36,7 +36,7 @@ def _minimal_receipt(**overrides) -> dict:
         transport_target="ce-dev1-orchestrator:0.0",
         activation_method="send-keys",
         separate_enter=True,
-        model_effort_line="claude-sonnet-4-5 / effort:normal",
+        model_effort_line="model=gpt-5.6-terra; effort=high",
         dispatcher="controller-1",
         work_unit="wu-615",
         post_check_kind="working-state",
@@ -57,7 +57,7 @@ def _bare_receipt(**overrides) -> dict:
         transport_target="ce-dev1-orchestrator:0.0",
         activation_method="send-keys",
         separate_enter=True,
-        model_effort_line="claude-sonnet-4-5 / effort:normal",
+        model_effort_line="model=gpt-5.6-terra; effort=high",
         dispatcher="controller-1",
         work_unit="wu-615",
         emitted_at=_TIMESTAMP,
@@ -120,7 +120,7 @@ class TestBuildReceiptHappy:
             transport_target="s:0.0",
             activation_method="send-keys",
             separate_enter=True,
-            model_effort_line="model/effort",
+            model_effort_line="model=gpt-5.6-terra; effort=high",
             dispatcher="controller-1",
             work_unit="wu-1",
         )
@@ -144,7 +144,7 @@ class TestBuildReceiptSadPaths:
                 transport_target="s:0.0",
                 activation_method="send-keys",
                 separate_enter=True,
-                model_effort_line="m/e",
+                model_effort_line="model=gpt-5.6-terra; effort=high",
                 dispatcher="controller-1",
                 work_unit="wu-1",
             )
@@ -158,7 +158,7 @@ class TestBuildReceiptSadPaths:
                 transport_target="s:0.0",
                 activation_method="send-keys",
                 separate_enter=True,
-                model_effort_line="m/e",
+                model_effort_line="model=gpt-5.6-terra; effort=high",
                 dispatcher="controller-1",
                 work_unit="wu-1",
             )
@@ -172,7 +172,7 @@ class TestBuildReceiptSadPaths:
                 transport_target="s:0.0",
                 activation_method="send-keys",
                 separate_enter=True,
-                model_effort_line="m/e",
+                model_effort_line="model=gpt-5.6-terra; effort=high",
                 dispatcher="controller-1",
                 work_unit="wu-1",
                 claim_path=".ce/claims/c.md",
@@ -188,7 +188,7 @@ class TestBuildReceiptSadPaths:
                 transport_target="s:0.0",
                 activation_method="send-keys",
                 separate_enter=True,
-                model_effort_line="m/e",
+                model_effort_line="model=gpt-5.6-terra; effort=high",
                 dispatcher="controller-1",
                 work_unit="wu-1",
                 post_check_kind="working-state",
@@ -209,6 +209,10 @@ class TestBuildReceiptSadPaths:
                 work_unit="wu-1",
             )
 
+    def test_arbitrary_model_effort_prose_is_not_receipt_evidence(self):
+        with pytest.raises(dr.ReceiptBuildError, match="canonical resolved launch-policy"):
+            _bare_receipt(model_effort_line="terra looks healthy")
+
     def test_invalid_transport_kind_fails_schema(self):
         """An invalid transport_kind passes build-time checks but fails schema."""
         # We have to go through a raw dict because build_receipt catches this
@@ -221,7 +225,7 @@ class TestBuildReceiptSadPaths:
                 transport_target="s:0.0",
                 activation_method="send-keys",
                 separate_enter=True,
-                model_effort_line="m/e",
+                model_effort_line="model=gpt-5.6-terra; effort=high",
                 dispatcher="controller-1",
                 work_unit="wu-1",
             )
@@ -450,7 +454,7 @@ class TestCliEmit:
             "--transport-target", "ce-dev1-orchestrator:0.0",
             "--activation-method", "send-keys",
             # NOTE: --separate-enter NOT passed → defaults to False
-            "--model-effort-line", "claude-sonnet-4-5 / effort:normal",
+            "--model-effort-line", "model=gpt-5.6-terra; effort=high",
             "--dispatcher", "controller-1",
             "--work-unit", "wu-615",
             "--state-root", str(tmp_path / "state"),
@@ -473,7 +477,7 @@ class TestCliEmit:
             "--transport-target", "s:0.0",
             "--activation-method", "send-keys",
             "--separate-enter",
-            "--model-effort-line", "m/e",
+            "--model-effort-line", "model=gpt-5.6-terra; effort=high",
             "--dispatcher", "controller-1",
             "--work-unit", "wu-615",
             "--state-root", str(tmp_path / "state"),
@@ -492,7 +496,7 @@ class TestCliEmit:
             "--transport-kind", "tmux",
             "--transport-target", "s:0.0",
             "--activation-method", "send-keys",
-            "--model-effort-line", "m/e",
+            "--model-effort-line", "model=gpt-5.6-terra; effort=high",
             "--dispatcher", "controller-1",
             "--work-unit", "wu-615",
             "--state-root", str(tmp_path / "state"),

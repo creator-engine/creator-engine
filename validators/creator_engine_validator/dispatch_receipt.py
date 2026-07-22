@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from .schema import validate_with_schema
+from . import model_effort_policy
 
 # ---------------------------------------------------------------------------
 # Schema / storage constants
@@ -177,8 +178,13 @@ def build_receipt(
         raise ReceiptBuildError("brief_path is required")
     if not _HEX64_RE.match(brief_sha256 or ""):
         raise ReceiptBuildError("brief_sha256 must be a 64-character lowercase hex string")
-    if not model_effort_line:
-        raise ReceiptBuildError("model_effort_line is required (per 2026-07-19 Operator floor ruling)")
+    try:
+        model_effort_policy.parse_canonical_status_line(model_effort_line)
+    except model_effort_policy.ModelEffortPolicyRefused as exc:
+        raise ReceiptBuildError(
+            "model_effort_line must be the canonical resolved launch-policy line "
+            "(per 2026-07-19 Operator floor ruling)"
+        ) from exc
     if not dispatcher:
         raise ReceiptBuildError("dispatcher is required")
     if not work_unit:

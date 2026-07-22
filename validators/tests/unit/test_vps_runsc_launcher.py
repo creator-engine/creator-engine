@@ -240,11 +240,15 @@ def test_codex_dry_run_uses_vps_containment_defaults() -> None:
     assert "--user" in argv
     assert "1234:5678" in argv
     image_index = runsc_image_index(argv)
-    assert image_index == len(argv) - 4
+    assert image_index == len(argv) - 8
     assert argv[image_index + 1 :] == [
         "exec",
         "--dangerously-bypass-hook-trust",
         "summarize status",
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
     ]
     assert "CE_DGX_HARNESS=codex" in argv
     assert "CE_DGX_HARNESS_MODE=exec" in argv
@@ -278,7 +282,30 @@ def test_codex_dry_run_generates_contained_codex_config(tmp_path: Path) -> None:
     assert HOOK.is_file()
     assert "--dangerously-bypass-hook-trust" in argv
     image_index = runsc_image_index(argv)
-    assert argv[image_index + 1 :] == ["--dangerously-bypass-hook-trust"]
+    assert argv[image_index + 1 :] == [
+        "--dangerously-bypass-hook-trust",
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
+    ]
+
+
+def test_relaunch_reasserts_policy_and_replaces_stale_raw_model_effort(tmp_path: Path) -> None:
+    config_path = tmp_path / "contained-codex.toml"
+    config_path.write_text('model = "gpt-5.6-luna"\nmodel_reasoning_effort = "low"\n')
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            "--model=gpt-5.6-luna",
+            "--effort",
+            "low",
+            CE_VPS_CONTAINED_CODEX_CONFIG=str(config_path),
+        )
+    )
+    assert config_path.read_text(encoding="utf-8") == expected_contained_codex_config()
+    assert "gpt-5.6-luna" not in argv
+    assert argv[-4:] == ["--model", "gpt-5.6-terra", "--reasoning-effort", "high"]
 
 
 def test_codex_config_embeds_container_visible_governance_refs(tmp_path: Path) -> None:
@@ -307,8 +334,14 @@ def test_codex_tui_dry_run_ends_at_image_without_literal_tui_subcommand() -> Non
     argv = dry_run_argv(run_wrapper("tui"))
 
     image_index = runsc_image_index(argv)
-    assert image_index == len(argv) - 2
-    assert argv[image_index + 1] == "--dangerously-bypass-hook-trust"
+    assert image_index == len(argv) - 6
+    assert argv[image_index + 1 :] == [
+        "--dangerously-bypass-hook-trust",
+        "--model",
+        "gpt-5.6-terra",
+        "--reasoning-effort",
+        "high",
+    ]
     assert "--name" in argv
     assert argv[argv.index("--name") + 1] == "ce-vps-codex"
     assert "CE_DGX_HARNESS=codex" in argv
