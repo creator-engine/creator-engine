@@ -28,6 +28,75 @@ def _readme() -> str:
     return README.read_text(encoding="utf-8")
 
 
+def _run_shell_commands(text: str) -> list[str]:
+    """Return uncommented shell commands from Dockerfile RUN instructions.
+
+    Image contracts must bind a requirement to the instruction that executes
+    it.  A repository comment or an unrelated Dockerfile instruction is not
+    evidence that the image installs or probes the requirement.
+    """
+    blocks = re.findall(r"(?ms)^RUN\s+(.*?)(?=^[A-Z]+(?:\s|$)|\Z)", text)
+    commands: list[str] = []
+    for block in blocks:
+        uncommented = "\n".join(
+            line.split("#", 1)[0]
+            for line in block.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        commands.extend(
+            command.strip()
+            for command in re.split(
+                r";(?=(?:[^\"']|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*')*$)",
+                uncommented.replace("\\\n", " "),
+            )
+            if command.strip()
+        )
+    return commands
+
+
+def _run_command_has_tokens(text: str, required: list[str]) -> bool:
+    """Whether one RUN shell command contains *required* in order."""
+    for command in _run_shell_commands(text):
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            # A semicolon inside a quoted `python -c` program is not a shell
+            # command separator.  It cannot satisfy the unquoted contracts
+            # asserted by this helper, so skip it rather than broadening it.
+            continue
+        normalised = [token.rstrip(";") for token in tokens]
+        for start in range(len(normalised) - len(required) + 1):
+            if start and not tokens[start - 1].endswith(";"):
+                continue
+            if required[:4] == ["apt-get", "install", "-y", "--no-install-recommends"]:
+                command_end = next(
+                    (index for index in range(start, len(tokens)) if tokens[index].endswith(";")),
+                    len(tokens),
+                )
+                if (
+                    normalised[start : start + 4] == required[:4]
+                    and required[4] in normalised[start + 4 : command_end]
+                ):
+                    return True
+            if normalised[start : start + len(required)] == required:
+                return True
+    return False
+
+
+def _has_python_314_probe(text: str) -> bool:
+    return _run_command_has_tokens(
+        text,
+        [
+            "/opt/ce-validator-venv/bin/python",
+            "--version",
+            "|",
+            "grep",
+            "-q",
+            "^Python 3\\.14\\.",
+        ],
+    )
+
+
 def _entrypoint_harness_env_block() -> str:
     text = _entrypoint()
     match = re.search(r"\nharness_env=\(\n(?P<block>.*?)\n\)\n", text, re.S)
@@ -84,10 +153,32 @@ def test_dockerfile_bakes_ci_parity_validator_venv() -> None:
     ) in text
     # Offline install from BOTH vendored wheelhouses, mirroring validate.yml.
     assert "python3.14 -m venv /opt/ce-validator-venv" in text
-    assert "--no-index --find-links validators/wheelhouse" in text
-    assert "--find-links validators/wheelhouse-dev" in text
-    assert "-r validators/requirements.txt" in text
-    assert "-r validators/requirements-dev.txt" in text
+    assert _run_command_has_tokens(
+        text,
+        [
+            "/opt/ce-validator-venv/bin/pip",
+            "install",
+            "--no-index",
+            "--find-links",
+            "validators/wheelhouse",
+            "-r",
+            "validators/requirements.txt",
+        ],
+    )
+    assert _run_command_has_tokens(
+        text,
+        [
+            "/opt/ce-validator-venv/bin/pip",
+            "install",
+            "--no-index",
+            "--find-links",
+            "validators/wheelhouse",
+            "--find-links",
+            "validators/wheelhouse-dev",
+            "-r",
+            "validators/requirements-dev.txt",
+        ],
+    )
     # No network resolution and no system-Python band-aid.
     assert "--break-system-packages" not in text
     # Relocate the venv + interpreter into the runtime and put it first on PATH.
@@ -95,10 +186,14 @@ def test_dockerfile_bakes_ci_parity_validator_venv() -> None:
     assert "COPY --from=validator-venv-builder /usr/local/bin/python3.14 /usr/local/bin/python3.14" in text
     assert 'ENV PATH="/opt/ce-validator-venv/bin:${PATH}"' in text
     # libsodium for the PCO-024 Ed25519 verification path.
-    assert "libsodium23" in text
+    assert _run_command_has_tokens(
+        text, ["apt-get", "install", "-y", "--no-install-recommends", "libsodium23"]
+    )
     assert "find_library('sodium')" in text
-    assert "openssh-client" in text
-    assert "command -v ssh-keygen" in text
+    assert _run_command_has_tokens(
+        text, ["apt-get", "install", "-y", "--no-install-recommends", "openssh-client"]
+    )
+    assert _run_command_has_tokens(text, ["command", "-v", "ssh-keygen"])
 
 
 def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> None:
@@ -108,10 +203,10 @@ def test_dockerfile_runtime_owns_socket_dir_and_fails_on_non_executables() -> No
     assert "/run/creator-engine/herdr" in text
     assert text.count("ENV HERDR_SOCKET_PATH=/run/creator-engine/herdr/herdr.sock") == 1
     assert "USER ${CE_VPS_UID}:${CE_VPS_GID}" in text
-    assert "tini" in text
-    assert "nodejs" in text
-    assert "python3" in text
-    assert "procps" in text
+    for package in ("tini", "nodejs", "python3", "procps"):
+        assert _run_command_has_tokens(
+            text, ["apt-get", "install", "-y", "--no-install-recommends", package]
+        )
     assert "install -d -m 0755 /usr/local/lib/node_modules/@openai" in text
     assert 'exec node /usr/local/lib/node_modules/@openai/codex/bin/codex.js "$@"' in text
     assert "test -x /usr/local/bin/codex" in text
@@ -139,9 +234,33 @@ def test_dgx_dockerfile_preserves_full_preflight_toolchain() -> None:
     assert "libsodium23" in text
     assert "command -v ssh-keygen" in text
     assert "command -v ce" in text
+    # ce-ops#647 owns this dormant DGX matcher: its BRE expression is defective,
+    # so CE-591 deliberately leaves this DGX contract unchanged.
     assert "/opt/ce-validator-venv/bin/python --version | grep -q '^Python 3" in text
     assert "import pytest, yaml, jsonschema, xdist" in text
     assert "find_library('sodium')" in text
+
+
+def test_vps_dockerfile_probes_exact_python_314() -> None:
+    """The VPS image's runtime probe is pinned to the CPython 3.14 contract."""
+    assert _has_python_314_probe(_dockerfile())
+
+
+def test_vps_instruction_contracts_reject_comments_adjacent_tokens_and_other_python_minor() -> None:
+    adversarial = """\
+RUN set -eux; \\
+    # apt-get install -y --no-install-recommends libsodium23 openssh-client; \\
+    echo openssh-client; \\
+    command -v ce-not-the-launcher; \\
+    /opt/ce-validator-venv/bin/python --version | grep -q '^Python 3.13.'
+"""
+
+    assert not _run_command_has_tokens(
+        adversarial, ["apt-get", "install", "-y", "--no-install-recommends", "libsodium23"]
+    )
+    assert not _run_command_has_tokens(adversarial, ["command", "-v", "ce"])
+    assert not _has_python_314_probe(adversarial)
+    assert not _has_python_314_probe(adversarial.replace("3.13", "3.15"))
 
 
 def test_dockerfile_installs_durable_governed_ce_launcher(tmp_path: Path) -> None:
