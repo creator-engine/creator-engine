@@ -1018,6 +1018,14 @@ def _workflow_permissions_audit(repo_root: Path) -> None:
         else:
             print(f"OK  {path.name}: permissions match governed profile")
 
+    stale_profiles = sorted(
+        set(GOVERNED_WORKFLOW_PERMISSIONS) - {path.name for path in workflow_paths}
+    )
+    errors.extend(
+        f"FAIL {name}: governed workflow is missing from .github/workflows"
+        for name in stale_profiles
+    )
+
     if errors:
         for message in errors:
             print(message)

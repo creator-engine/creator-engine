@@ -1795,6 +1795,20 @@ def test_workflow_permissions_audit_discovers_yaml_and_yml_extensions(tmp_path: 
     pr_preflight._workflow_permissions_audit(tmp_path)
 
 
+def test_workflow_permissions_audit_rejects_stale_governed_registry_entry(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        pr_preflight,
+        "GOVERNED_WORKFLOW_PERMISSIONS",
+        {"removed-workflow.yml": {"": {"contents": "read"}}},
+    )
+
+    with pytest.raises(RuntimeError, match="workflow permissions audit failed"):
+        pr_preflight._workflow_permissions_audit(tmp_path)
+
+    output = capsys.readouterr().out
+    assert "FAIL removed-workflow.yml: governed workflow is missing from .github/workflows" in output
+
+
 def test_workflow_permissions_audit_rejects_unregistered_workflow_with_permissions(tmp_path: Path, monkeypatch, capsys):
     _write_workflow(tmp_path, "rogue.yml", _READ_ONLY_WORKFLOW)
     monkeypatch.setattr(pr_preflight, "GOVERNED_WORKFLOW_PERMISSIONS", {})
@@ -1805,6 +1819,24 @@ def test_workflow_permissions_audit_rejects_unregistered_workflow_with_permissio
     output = capsys.readouterr().out
     assert "FAIL rogue.yml: unregistered workflow declares permissions" in output
     assert ".permissions (top-level)" in output
+
+
+def test_workflow_permissions_audit_rejects_unregistered_workflow_without_permissions(tmp_path: Path, monkeypatch, capsys):
+    _write_workflow(
+        tmp_path,
+        "rogue.yml",
+        "name: Rogue\non:\n  push: {}\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n",
+    )
+    monkeypatch.setattr(pr_preflight, "GOVERNED_WORKFLOW_PERMISSIONS", {})
+
+    with pytest.raises(RuntimeError, match="workflow permissions audit failed"):
+        pr_preflight._workflow_permissions_audit(tmp_path)
+
+    output = capsys.readouterr().out
+    assert (
+        "FAIL rogue.yml: unregistered workflow; add an explicit permission profile "
+        "to GOVERNED_WORKFLOW_PERMISSIONS"
+    ) in output
 
 
 def test_workflow_permissions_audit_rejects_unratified_expansion(tmp_path: Path, monkeypatch, capsys):
