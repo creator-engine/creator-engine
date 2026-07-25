@@ -538,6 +538,25 @@ def test_default_image_fails_closed_for_missing_mutable_or_malformed_manifest(tm
         assert "VPS runsc image" in result.stderr
 
 
+def test_default_image_fails_closed_for_duplicate_vps_image_manifest_entries(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.yaml"
+    entry = (
+        "  - name: VPS runsc image\n"
+        "    version: \"x86_64\"\n"
+        "    commit_or_digest: sha256:"
+        + "a" * 64
+        + "\n"
+        "    source: docker.io/creator-engine/codex-runsc:x86_64\n"
+        "    update_policy: digest pin required before default VPS launch use\n"
+    )
+    manifest.write_text("surfaces:\n" + entry + entry, encoding="utf-8")
+
+    result = run_wrapper("tui", CE_VPS_TEST_SURFACES_MANIFEST=str(manifest), CE_VPS_IMAGE=None)
+
+    assert result.returncode != 0
+    assert "expected exactly one VPS runsc image entry" in result.stderr
+
+
 def test_exact_name_commands_never_select_sibling_seat_by_image_ancestor() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert "ancestor=" not in text
