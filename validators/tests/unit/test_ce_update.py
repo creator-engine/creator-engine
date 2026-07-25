@@ -267,7 +267,7 @@ def test_apply_update_refuses_when_promoted_live_symlink_cannot_run(monkeypatch,
     install_root = tmp_path / "install-root"
 
     def refuse(_live: Path) -> None:
-        raise RuntimeError("live_cev3_reverify_failed: promoted venv cev3 --help failed")
+        raise venv_install_common.LiveSymlinkVerifyFailed("diagnostic wording deliberately changed")
 
     monkeypatch.setattr(venv_install_common, "verify_live_cev3", refuse)
     monkeypatch.delenv("PYTHONPATH", raising=False)
@@ -286,10 +286,32 @@ def test_apply_update_refuses_when_promoted_live_symlink_cannot_run(monkeypatch,
     assert result.ok is False
     assert result.status == "refuse"
     assert result.problems == (
-        "swap_failed:RuntimeError:live_cev3_reverify_failed: promoted venv cev3 --help failed",
+        "swap_failed:LiveSymlinkVerifyFailed:diagnostic wording deliberately changed",
     )
     assert not (install_root / "venv").exists()
     assert not (install_root / "install-state").exists()
+
+
+def test_apply_update_keeps_arbitrary_swap_exception_detail_private(tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
+
+    class RefusingSwapper:
+        def apply(self, _root: Path, _release) -> tuple[str, ...]:
+            raise RuntimeError("private host path: /srv/installer/secret")
+
+    result = update_runtime.apply_update(
+        install_root=tmp_path / "install-root",
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.2.0", "a" * 40),
+        os_name="Linux",
+        machine="x86_64",
+        swapper=RefusingSwapper(),
+    )
+
+    assert result.problems == ("swap_failed:RuntimeError",)
 
 
 def test_apply_update_recovers_from_debris_at_final_target(monkeypatch, tmp_path: Path):

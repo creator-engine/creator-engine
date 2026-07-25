@@ -8,6 +8,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+class LiveSymlinkVerifyFailed(RuntimeError):
+    """The promoted live ``cev3`` link could not execute successfully."""
+
+
 class InstallLock:
     """Exclusive installer lock whose refusal type belongs to the caller."""
 
@@ -99,7 +103,9 @@ def verify_live_cev3(live: Path) -> None:
             check=True,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise RuntimeError("live_cev3_reverify_failed: promoted venv cev3 --help failed") from exc
+        raise LiveSymlinkVerifyFailed(
+            "live_cev3_reverify_failed: promoted venv cev3 --help failed"
+        ) from exc
 
 
 def write_text_atomic(path: Path, text: str) -> None:
