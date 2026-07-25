@@ -92,7 +92,7 @@ def test_scan_classifies_clean_dirty_unpushed_and_orphaned_worktrees(tmp_path: P
     assert entries[dirty.resolve()].verdict == "REPORT_ONLY"
     assert entries[dirty.resolve()].reason == "dirty"
     assert entries[unpushed.resolve()].verdict == "REPORT_ONLY"
-    assert entries[unpushed.resolve()].reason == "unpushed-commits"
+    assert entries[unpushed.resolve()].reason == "not-on-origin"
     assert entries[orphan.resolve()].verdict == "PRUNABLE"
     assert entries[orphan.resolve()].reason == "orphan-empty"
     assert entries[repo.resolve()].reason == "active-worktree"
@@ -226,9 +226,90 @@ def test_scan_keeps_diverged_non_empty_tip_content_report_only(tmp_path: Path):
     entry = _by_path(result)[non_empty.resolve()]
 
     assert entry.verdict == "REPORT_ONLY"
-    assert entry.reason == "unpushed-commits"
+    assert entry.reason == "not-on-origin"
     assert entry.evidence["head_ancestor_origin_main"] is False
     assert entry.evidence["empty_tip_content_vs_origin_main"] is False
+
+
+def test_scan_prunes_main_ancestor_tip(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    merged = _add_worktree(repo, tmp_path, "wt-main-ancestor", "main-ancestor")
+    _set_old(merged)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[merged.resolve()]
+
+    assert entry.verdict == "PRUNABLE"
+    assert entry.reason == "merged"
+    assert entry.evidence["head_ancestor_origin_main"] is True
+
+
+def test_scan_prunes_tip_reachable_only_from_non_main_origin_ref(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    archived = _add_worktree(repo, tmp_path, "wt-origin-archive", "origin-archive")
+    (archived / "archive.txt").write_text("durably archived\n", encoding="utf-8")
+    _git(archived, "add", "archive.txt")
+    _git(archived, "commit", "-m", "archived tip")
+    _git(archived, "push", "origin", "HEAD:refs/heads/archive/seat-scratch/test-tip")
+    _git(
+        archived,
+        "fetch",
+        "origin",
+        "refs/heads/archive/seat-scratch/test-tip:refs/remotes/origin/archive/seat-scratch/test-tip",
+    )
+    _set_old(archived)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[archived.resolve()]
+
+    assert entry.verdict == "PRUNABLE"
+    assert entry.reason == "reachable-on-origin"
+    assert entry.evidence["head_ancestor_origin_main"] is False
+    assert entry.evidence["origin_reachable_ref"] == (
+        "refs/remotes/origin/archive/seat-scratch/test-tip"
+    )
+
+
+def test_scan_refuses_tip_not_reachable_from_any_origin_ref(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    local_only = _add_worktree(repo, tmp_path, "wt-local-only", "local-only")
+    (local_only / "local-only.txt").write_text("not archived\n", encoding="utf-8")
+    _git(local_only, "add", "local-only.txt")
+    _git(local_only, "commit", "-m", "local-only tip")
+    _set_old(local_only)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[local_only.resolve()]
+
+    assert entry.verdict == "REPORT_ONLY"
+    assert entry.reason == "not-on-origin"
+    assert "origin_reachable_ref" not in entry.evidence
+
+
+def test_scan_refuses_when_origin_ref_reachability_probe_fails(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    local_only = _add_worktree(repo, tmp_path, "wt-probe-failure", "probe-failure")
+    (local_only / "local-only.txt").write_text("not archived\n", encoding="utf-8")
+    _git(local_only, "add", "local-only.txt")
+    _git(local_only, "commit", "-m", "local-only tip")
+    _set_old(local_only)
+
+    original_run_git = worktree_prune._run_git
+
+    def failed_ref_list(path: Path, args):
+        if args[:1] == ["for-each-ref"]:
+            return worktree_prune.GitResult(2, "", "simulated ref-list failure")
+        return original_run_git(path, args)
+
+    monkeypatch.setattr(worktree_prune, "_run_git", failed_ref_list)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[local_only.resolve()]
+
+    assert entry.verdict == "REPORT_ONLY"
+    assert entry.reason == "unknown-state"
+    assert entry.evidence["origin_ref_list_returncode"] == 2
+    assert entry.evidence["origin_ref_list_stderr"] == "simulated ref-list failure"
 
 
 def test_scan_reports_locked_registered_worktree_explicitly(tmp_path: Path):

@@ -305,11 +305,36 @@ def _head_safety(path: Path) -> tuple[bool, dict[str, Any], str | None]:
 
     if ancestor.returncode == 0 or content.returncode == 0:
         return True, evidence, None
-    if ancestor.returncode == 1:
-        return False, evidence, "unpushed-commits"
+    if ancestor.returncode != 1:
+        evidence["ancestor_stderr"] = ancestor.stderr.strip()
+        return False, evidence, "unknown-state"
 
-    evidence["ancestor_stderr"] = ancestor.stderr.strip()
-    return False, evidence, "unknown-state"
+    try:
+        origin_refs = _run_git(
+            path,
+            [
+                "for-each-ref",
+                "--contains",
+                "HEAD",
+                "--format=%(refname)",
+                "refs/remotes/origin",
+            ],
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        evidence["origin_ref_list_error"] = str(exc)
+        return False, evidence, "unknown-state"
+    evidence["origin_ref_list_returncode"] = origin_refs.returncode
+    if origin_refs.returncode != 0:
+        evidence["origin_ref_list_stderr"] = origin_refs.stderr.strip()
+        return False, evidence, "unknown-state"
+
+    refs = [ref for ref in origin_refs.stdout.splitlines() if ref]
+    evidence["origin_ref_probe_count"] = len(refs)
+    if refs:
+        evidence["origin_reachable_ref"] = refs[0]
+        return True, evidence, None
+
+    return False, evidence, "not-on-origin"
 
 
 def _orphan_payload_files(path: Path) -> list[str]:
@@ -410,6 +435,8 @@ def classify_candidate(
     reason = (
         "merged"
         if evidence.get("head_ancestor_origin_main")
+        else "reachable-on-origin"
+        if evidence.get("origin_reachable_ref")
         else "empty-tip-content"
     )
     return WorktreeVerdict(
