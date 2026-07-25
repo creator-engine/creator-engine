@@ -524,7 +524,8 @@ class ConveyorDaemon:
                         self._failed(item, ("receipt identity is required for armed processing",))
                     )
                     continue
-                assert self.receipt_state_path is not None
+                if self.receipt_state_path is None:
+                    raise ValueError("armed conveyor daemon requires injected receipt_state_path")
                 receipt = HandledSignalReceipt(
                     self.receipt_state_path,
                     item.receipt_identity.seat_id,
@@ -591,7 +592,8 @@ class ConveyorDaemon:
     def _process_armed(self, item: ConveyorDaemonItem) -> ConveyorDaemonItemResult:
         records: list[ConveyorDaemonLedgerRecord] = []
         publish_started = False
-        assert self.path_allocator is not None
+        if self.path_allocator is None:
+            raise ValueError("armed conveyor daemon requires injected path_allocator")
         allocation: DaemonPathAllocation | None = None
         receipt: DaemonPathReceipt | None = None
         mode_check: Mapping[str, Any] | None = None
@@ -624,8 +626,10 @@ class ConveyorDaemon:
                 worktree_path=resolved_paths["worktree_path"],
             )
             audit_item = item
-            assert self.git_runner is not None
-            assert self.gh_runner is not None
+            if self.git_runner is None:
+                raise ValueError("armed conveyor daemon requires injected git_runner")
+            if self.gh_runner is None:
+                raise ValueError("armed conveyor daemon requires injected gh_runner")
             carrier_date = item.carrier_date or _date_from_timestamp(self._timestamp())
             prepared = self.prepare_runner(
                 dataclasses.replace(
@@ -792,7 +796,8 @@ class ConveyorDaemon:
     def _materialize_allocation(
         self, item: ConveyorDaemonItem
     ) -> tuple[ConveyorDaemonItem, DaemonPathAllocation, DaemonPathReceipt] | ConveyorDaemonItemResult:
-        assert self.path_allocator is not None
+        if self.path_allocator is None:
+            raise ValueError("armed conveyor daemon requires injected path_allocator")
 
         executable_paths = {
             "bundle_path": item.bundle_path,
@@ -862,9 +867,12 @@ class ConveyorDaemon:
         )
         if missing:
             return (f"daemon allocation is missing conveyor paths: {', '.join(missing)}",)
-        assert allocation.bundle_path is not None
-        assert allocation.repo_path is not None
-        assert allocation.worktree_path is not None
+        if allocation.bundle_path is None:
+            raise ValueError("daemon allocation is missing bundle_path")
+        if allocation.repo_path is None:
+            raise ValueError("daemon allocation is missing repo_path")
+        if allocation.worktree_path is None:
+            raise ValueError("daemon allocation is missing worktree_path")
         return allocation.bundle_path, allocation.repo_path, allocation.worktree_path
 
     def _allocation_path_mismatches(
@@ -886,7 +894,8 @@ class ConveyorDaemon:
         return tuple(mismatches)
 
     def _allocation_mode_check(self, allocation: DaemonPathAllocation) -> dict[str, Any]:
-        assert self.path_allocator is not None
+        if self.path_allocator is None:
+            raise ValueError("armed conveyor daemon requires injected path_allocator")
         checks: dict[str, Any] = {}
         all_ok = True
         for field_name, kind, path in allocation.iter_paths():
@@ -905,7 +914,8 @@ class ConveyorDaemon:
         return {"ok": all_ok, "paths": checks}
 
     def _cleanup_allocation(self, receipt: DaemonPathReceipt) -> Mapping[str, Any]:
-        assert self.path_allocator is not None
+        if self.path_allocator is None:
+            raise ValueError("armed conveyor daemon requires injected path_allocator")
         try:
             cleaned = self.path_allocator.cleanup(receipt)
         except DaemonAllocationError as exc:
@@ -920,7 +930,8 @@ class ConveyorDaemon:
         mode_check: Mapping[str, Any] | None,
         cleanup_result: Mapping[str, Any],
     ) -> None:
-        assert self.path_allocator is not None
+        if self.path_allocator is None:
+            raise ValueError("armed conveyor daemon requires injected path_allocator")
         paths = tuple({"field": field_name, "root_kind": kind} for field_name, kind, _path in allocation.iter_paths())
         record = {
             "action": "conveyor_allocation_audit",
@@ -953,8 +964,10 @@ class ConveyorDaemon:
         touched (see the TOCTOU note in ``_process_armed``).
         """
 
-        assert self.repo_root is not None
-        assert self.bundle_root is not None
+        if self.repo_root is None:
+            raise ValueError("armed conveyor daemon requires injected repo_root")
+        if self.bundle_root is None:
+            raise ValueError("armed conveyor daemon requires injected bundle_root")
 
         violations: list[str] = []
         resolved: dict[str, Path] = {}
@@ -1014,7 +1027,8 @@ class ConveyorDaemon:
         result: ConveyorCommandResult,
         details: Mapping[str, Any] | None = None,
     ) -> ConveyorDaemonLedgerRecord:
-        assert self.ledger_writer is not None
+        if self.ledger_writer is None:
+            raise ValueError("armed conveyor daemon requires injected ledger_writer")
         record_details: dict[str, Any] = {"command": tuple(command)}
         if details is not None:
             record_details.update(dict(details))
@@ -1044,9 +1058,12 @@ class ConveyorDaemon:
             cwd: Path,
             env: Mapping[str, str] | None,
         ) -> ConveyorCommandResult:
-            assert self.path_allocator is not None
-            assert self.git_runner is not None
-            assert self.receipt_issuer is not None
+            if self.path_allocator is None:
+                raise ValueError("armed conveyor daemon requires injected path_allocator")
+            if self.git_runner is None:
+                raise ValueError("armed conveyor daemon requires injected git_runner")
+            if self.receipt_issuer is None:
+                raise ValueError("armed conveyor daemon requires injected receipt_issuer")
             if allocation.worktree_path is None:
                 return ConveyorCommandResult(1, "", "daemon allocation is missing worktree_path")
             try:
@@ -1171,7 +1188,8 @@ class ConveyorDaemon:
         landed: ConveyorBundleLandingResult,
         validation_tree_sha: str,
     ) -> str | None:
-        assert self.git_runner is not None
+        if self.git_runner is None:
+            raise ValueError("armed conveyor daemon requires injected git_runner")
         if item.repo_path is None:
             return "repo_path is required to compare landed tree with validation record tree"
 
@@ -1226,7 +1244,8 @@ class ConveyorDaemon:
         landed: ConveyorBundleLandingResult,
         validation_tree_sha: str,
     ) -> str | None:
-        assert self.git_runner is not None
+        if self.git_runner is None:
+            raise ValueError("armed conveyor daemon requires injected git_runner")
         if item.repo_path is None:
             return "repo_path is required to compare landed head/tree identity"
         head = _coerce_result(
@@ -1258,7 +1277,8 @@ class ConveyorDaemon:
         item: ConveyorDaemonItem,
         landed: ConveyorBundleLandingResult,
     ) -> str | None:
-        assert self.git_runner is not None
+        if self.git_runner is None:
+            raise ValueError("armed conveyor daemon requires injected git_runner")
         if item.repo_path is None:
             return "repo_path is required to re-check publish base ancestry"
         if landed.behind != 0:
@@ -1289,7 +1309,8 @@ class ConveyorDaemon:
         item: ConveyorDaemonItem,
         landed: ConveyorBundleLandingResult,
     ) -> str | None:
-        assert self.git_runner is not None
+        if self.git_runner is None:
+            raise ValueError("armed conveyor daemon requires injected git_runner")
         if item.repo_path is None:
             return "repo_path is required to re-check publish manifest fidelity"
         diff = _coerce_result(
@@ -1319,7 +1340,8 @@ class ConveyorDaemon:
         return None
 
     def _validate_publish_transport_config(self, *, item: ConveyorDaemonItem) -> str | None:
-        assert self.git_runner is not None
+        if self.git_runner is None:
+            raise ValueError("armed conveyor daemon requires injected git_runner")
         if item.repo_path is None:
             return "repo_path is required to inspect local transport config"
         result = _coerce_result(
@@ -1389,14 +1411,16 @@ class ConveyorDaemon:
         )
 
     def _timestamp(self) -> str:
-        assert self.now is not None
+        if self.now is None:
+            raise ValueError("armed conveyor daemon requires injected now")
         timestamp = self.now()
         if not isinstance(timestamp, str) or not timestamp.strip():
             raise ValueError("now must return a non-empty timestamp string")
         return timestamp
 
     def _heartbeat_lease(self) -> str | None:
-        assert self.daemon_lease is not None
+        if self.daemon_lease is None:
+            raise ValueError("armed conveyor daemon requires injected daemon_lease")
         try:
             self.daemon_lease.heartbeat()
         except Exception as exc:

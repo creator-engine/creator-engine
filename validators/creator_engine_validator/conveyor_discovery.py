@@ -405,7 +405,24 @@ _OPEN_DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os
 _OPEN_FILE_FLAGS = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 _TEMP_ATTEMPTS = 32
 _MAX_LEDGER_BYTES = 16 * 1024 * 1024
-_RECEIPT_SYSCALLS_SUPPORTED = all(hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")) and all(function in os.supports_dir_fd for function in (os.open, os.stat, os.mkdir, os.rename, os.unlink)) and os.stat in os.supports_follow_symlinks
+_RECEIPT_DIR_FD_SYSCALLS = (os.open, os.stat, os.mkdir, os.rename, os.replace, os.unlink)
+
+
+def _receipt_syscalls_supported() -> bool:
+    # CPython documents ``replace`` with the same ``renameat`` dirfd support
+    # as ``rename`` but does not enumerate it in ``supports_dir_fd``.
+    return (
+        all(hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"))
+        and all(
+            function in os.supports_dir_fd
+            or (function is os.replace and os.rename in os.supports_dir_fd)
+            for function in _RECEIPT_DIR_FD_SYSCALLS
+        )
+        and os.stat in os.supports_follow_symlinks
+    )
+
+
+_RECEIPT_SYSCALLS_SUPPORTED = _receipt_syscalls_supported()
 def _require_receipt_syscalls() -> None:
     if not _RECEIPT_SYSCALLS_SUPPORTED:
         raise ReceiptPersistenceError("receipt_platform_unsupported")
@@ -511,7 +528,8 @@ class _SecureReceiptDirectory:
                 raise ReceiptPersistenceError("receipt_component_changed")
             _validate_directory(metadata, self.daemon_uid, private=False)
             for expected in self.components[1:]:
-                assert expected.name is not None
+                if expected.name is None:
+                    raise ReceiptPersistenceError("receipt_component_changed")
                 named_metadata = _stat_at(fd, expected.name)
                 next_fd = os.open(expected.name, _OPEN_DIRECTORY_FLAGS, dir_fd=fd)
                 reopened.append(next_fd)

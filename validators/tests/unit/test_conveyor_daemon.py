@@ -641,6 +641,34 @@ def test_armed_constructor_requires_controller_receipt_state_path():
         )
 
 
+def test_armed_dependency_refusal_survives_python_optimized_mode():
+    """The armed path must not turn a missing dependency into an -O no-op."""
+
+    script = """
+from creator_engine_validator.conveyor_daemon import ConveyorDaemon, ConveyorDaemonItem
+
+daemon = ConveyorDaemon(discovery_runner=lambda: ())
+try:
+    daemon._process_armed(ConveyorDaemonItem(branch="safe-branch"))
+except ValueError as exc:
+    if str(exc) != "armed conveyor daemon requires injected path_allocator":
+        raise SystemExit(str(exc))
+else:
+    raise SystemExit("armed dependency refusal did not fire")
+"""
+    source_root = Path(__file__).parents[2]
+    completed = subprocess.run(
+        [sys.executable, "-O", "-c", script],
+        cwd=source_root,
+        env={**os.environ, "PYTHONPATH": str(source_root)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
 def test_typed_item_receipt_identity_branch_mismatch_is_rejected():
     with pytest.raises(ValueError, match="receipt_identity_branch_mismatch"):
         ConveyorDaemonItem(

@@ -1,3 +1,5 @@
+import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -98,6 +100,28 @@ def test_build_daemon_pins_production_receipt_identity_to_controller_state(
     assert payload.receipt_identity is not None
     assert captured["receipt_state_path"] is config.discovery_state
     assert captured["discovery_runner"].state_path is config.discovery_state
+
+
+def test_jsonl_ledger_writer_creates_private_ledger_despite_permissive_umask(tmp_path: Path):
+    ledger_path = tmp_path / "ledger" / "daemon.jsonl"
+    prior = os.umask(0)
+    try:
+        writer = runner._jsonl_ledger_writer(ledger_path)
+        writer(type("Record", (), {"as_dict": lambda self: {"action": "test"}})())
+    finally:
+        os.umask(prior)
+
+    assert stat.S_IMODE(ledger_path.stat().st_mode) == 0o600
+
+
+def test_ensure_private_dir_refuses_existing_permissive_directory(tmp_path: Path):
+    unsafe = tmp_path / "unsafe"
+    unsafe.mkdir(mode=0o755)
+
+    with pytest.raises(runner.ConfigError, match="private directory is unsafe"):
+        runner._ensure_private_dir(unsafe)
+
+    assert stat.S_IMODE(unsafe.stat().st_mode) == 0o755
 
 
 @pytest.mark.parametrize(

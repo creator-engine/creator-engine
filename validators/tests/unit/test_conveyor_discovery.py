@@ -688,6 +688,20 @@ def test_component_swap_before_publication_does_not_mutate_replacement_tree(tmp_
     assert not list(moved.glob("*.tmp"))
 
 
+def test_receipt_syscall_guard_refuses_without_replace_dirfd_support(monkeypatch):
+    """Publication uses replaceat, so the platform guard must require it."""
+
+    original = os.supports_dir_fd
+    monkeypatch.setattr(
+        os,
+        "supports_dir_fd",
+        frozenset(function for function in original if function is not os.rename),
+    )
+
+    assert os.replace in conveyor_discovery._RECEIPT_DIR_FD_SYSCALLS
+    assert conveyor_discovery._receipt_syscalls_supported() is False
+
+
 @pytest.mark.parametrize("mask", [0o000, 0o077])
 def test_writer_created_directory_lock_temp_and_ledger_have_exact_private_modes(tmp_path, mask):
     state_path = tmp_path / "private" / "receipts.json"

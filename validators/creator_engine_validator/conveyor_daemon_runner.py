@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -252,7 +253,8 @@ def _jsonl_ledger_writer(path: Path):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     def write(record: ConveyorDaemonLedgerRecord) -> None:
-        with path.open("a", encoding="utf-8") as handle:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record.as_dict(), sort_keys=True, default=str) + "\n")
 
     return write
@@ -312,7 +314,13 @@ def _holder_id(config: ConveyorDaemonConfig) -> str:
 
 def _ensure_private_dir(path: Path) -> None:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.chmod(0o700)
+    metadata = path.stat(follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise ConfigError("conveyor private directory is unsafe")
 
 
 class _RecordingProbeRunner:
