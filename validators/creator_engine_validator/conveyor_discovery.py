@@ -652,7 +652,8 @@ def _create_or_open_lock(location: _SecureReceiptDirectory) -> tuple[int, os.sta
         raise
     return fd, metadata
 @contextmanager
-def _locked_receipt_state(state_path: Path) -> Iterable[_LockedReceiptState]:
+def _locked_receipt_directory(state_path: Path) -> Iterable[tuple[_SecureReceiptDirectory, int, os.stat_result]]:
+    """Pin the receipt directory and its private lock without reading the ledger."""
     location: _SecureReceiptDirectory | None = None
     lock_fd: int | None = None; lock_metadata: os.stat_result | None = None
     primary_error: BaseException | None = None
@@ -666,8 +667,7 @@ def _locked_receipt_state(state_path: Path) -> Iterable[_LockedReceiptState]:
             raise ReceiptPersistenceError("receipt_lock_changed")
         _validate_private_file(opened_lock, location.daemon_uid)
         location.rewalk()
-        data, ledger_metadata, _raw = _read_receipt_state(location)
-        yield _LockedReceiptState(data, location, ledger_metadata)
+        yield location, lock_fd, lock_metadata
     except (ReceiptPersistenceError, ValueError) as exc:
         primary_error = exc
         raise
@@ -697,6 +697,13 @@ def _locked_receipt_state(state_path: Path) -> Iterable[_LockedReceiptState]:
         if cleanup_error is not None and primary_error is None:
             error_type = ReceiptDurabilityUncertainError if location is not None and location.published else ReceiptPersistenceError
             raise error_type("receipt_state_cleanup_failed") from cleanup_error
+
+
+@contextmanager
+def _locked_receipt_state(state_path: Path) -> Iterable[_LockedReceiptState]:
+    with _locked_receipt_directory(state_path) as (location, _lock_fd, _lock_metadata):
+        data, ledger_metadata, _raw = _read_receipt_state(location)
+        yield _LockedReceiptState(data, location, ledger_metadata)
 def _receipt_entries(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(data, Mapping):
         raise ValueError("receipt_state_not_mapping")
