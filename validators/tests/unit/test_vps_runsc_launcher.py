@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from creator_engine_validator import codex_launch_spec as launch_spec
 
@@ -25,10 +26,29 @@ HOOK_COMMAND = (
 RUNSC_IMAGE_RE = re.compile(
     r"^(?:docker\.io/)?creator-engine/codex-runsc:x86_64@sha256:[0-9a-f]{64}$"
 )
-MANIFEST_VPS_IMAGE = (
-    "docker.io/creator-engine/codex-runsc:x86_64@"
-    "sha256:42a402cdc867036f3700a1901dfdade598d52b83ed1b178b9250eeee422fd639"
-)
+
+
+def vps_image_from_manifest(manifest_path: Path) -> str:
+    """Independently compose the immutable VPS image contract for assertions."""
+    document = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert isinstance(document, dict)
+    surfaces = document.get("surfaces")
+    assert isinstance(surfaces, list)
+    matches = [
+        surface
+        for surface in surfaces
+        if isinstance(surface, dict) and surface.get("name") == "VPS runsc image"
+    ]
+    assert len(matches) == 1
+    surface = matches[0]
+    source = surface.get("source")
+    digest = surface.get("commit_or_digest")
+    assert surface.get("version") == "x86_64"
+    assert source == "docker.io/creator-engine/codex-runsc:x86_64"
+    assert isinstance(digest, str)
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+    assert "digest pin required" in str(surface.get("update_policy"))
+    return f"{source}@{digest}"
 
 
 def expected_contained_codex_config() -> str:
@@ -468,7 +488,35 @@ def test_default_dry_run_uses_detached_named_persistent_run_without_rm() -> None
     assert "-i" not in argv
     assert "-t" not in argv
     assert "-it" not in argv
-    assert argv[runsc_image_index(argv)] == MANIFEST_VPS_IMAGE
+    assert argv[runsc_image_index(argv)] == vps_image_from_manifest(
+        REPO_ROOT / "surfaces" / "manifest.yaml"
+    )
+
+
+def test_default_image_follows_a_valid_alternative_manifest_contract(tmp_path: Path) -> None:
+    """The launcher must resolve the manifest contract, not a duplicated test pin."""
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        "surfaces:\n"
+        "  - name: VPS runsc image\n"
+        "    version: \"x86_64\"\n"
+        "    commit_or_digest: sha256:"
+        + "a" * 64
+        + "\n"
+        "    source: docker.io/creator-engine/codex-runsc:x86_64\n"
+        "    update_policy: digest pin required before default VPS launch use\n",
+        encoding="utf-8",
+    )
+
+    argv = dry_run_argv(
+        run_wrapper(
+            "tui",
+            CE_VPS_TEST_SURFACES_MANIFEST=str(manifest),
+            CE_VPS_IMAGE=None,
+        )
+    )
+
+    assert argv[runsc_image_index(argv)] == vps_image_from_manifest(manifest)
 
 
 def test_vps_image_override_is_preserved_without_a_duplicated_default_digest() -> None:
