@@ -25,6 +25,7 @@ from . import version as version_runtime
 from .release_publish import SEMVER_RE
 from .venv_install_common import (
     InstallLock,
+    LiveSymlinkVerifyFailed,
     build_venv_target,
     promote_and_write_state,
     venv_target_ok,
@@ -570,6 +571,7 @@ def clean_main_install(
             try:
                 actions = runner.apply(root, artifact)
             except Exception as exc:
+                detail = f":{exc}" if isinstance(exc, LiveSymlinkVerifyFailed) else ""
                 return CleanMainInstallResult(
                     ok=False,
                     status="refuse",
@@ -577,7 +579,7 @@ def clean_main_install(
                     identity=resolved,
                     artifact=artifact_summary,
                     install_root=str(root),
-                    problems=(f"promote_failed:{exc.__class__.__name__}:{exc}",),
+                    problems=(f"promote_failed:{exc.__class__.__name__}{detail}",),
                 )
             return CleanMainInstallResult(
                 ok=True,

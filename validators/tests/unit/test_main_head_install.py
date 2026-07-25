@@ -244,12 +244,12 @@ def test_promoter_refuses_when_promoted_live_symlink_cannot_run(monkeypatch, tmp
     install_root = tmp_path / "install-root"
 
     def refuse(_live: Path) -> None:
-        raise RuntimeError("live_cev3_reverify_failed: promoted venv cev3 --help failed")
+        raise venv_install_common.LiveSymlinkVerifyFailed("diagnostic wording deliberately changed")
 
     try:
         monkeypatch.setattr(venv_install_common, "verify_live_cev3", refuse)
         monkeypatch.delenv("PYTHONPATH", raising=False)
-        with pytest.raises(RuntimeError, match="live_cev3_reverify_failed"):
+        with pytest.raises(venv_install_common.LiveSymlinkVerifyFailed):
             MainHeadVenvPromoter().apply(install_root, artifact)
         assert not (install_root / "venv").exists()
         assert not (install_root / "install-state").exists()
@@ -312,6 +312,44 @@ def test_clean_main_install_uses_resolver_and_promoter_without_release_signature
     assert result.status == "installed"
     assert seen == {"commit": commit, "signature": "none"}
     assert "fake_promote_verified_artifact" in result.actions
+
+
+def test_clean_main_install_surfaces_typed_live_link_refusal_without_literal_matching(tmp_path: Path):
+    repo, _commit = _write_main_repo(tmp_path)
+
+    class RefusingPromoter:
+        def apply(self, _root: Path, _artifact) -> tuple[str, ...]:
+            raise venv_install_common.LiveSymlinkVerifyFailed("diagnostic wording deliberately changed")
+
+    result = clean_main_install(
+        repo_root=repo,
+        install_root=tmp_path / "install-root",
+        build_wheel=_fake_builder,
+        promoter=RefusingPromoter(),
+    )
+
+    assert result.ok is False
+    assert result.problems == (
+        "promote_failed:LiveSymlinkVerifyFailed:diagnostic wording deliberately changed",
+    )
+
+
+def test_clean_main_install_keeps_arbitrary_promoter_exception_detail_private(tmp_path: Path):
+    repo, _commit = _write_main_repo(tmp_path)
+
+    class RefusingPromoter:
+        def apply(self, _root: Path, _artifact) -> tuple[str, ...]:
+            raise RuntimeError("private host path: /srv/installer/secret")
+
+    result = clean_main_install(
+        repo_root=repo,
+        install_root=tmp_path / "install-root",
+        build_wheel=_fake_builder,
+        promoter=RefusingPromoter(),
+    )
+
+    assert result.ok is False
+    assert result.problems == ("promote_failed:RuntimeError",)
 
 
 def test_clean_main_install_cli_and_update_track_main_route_to_main_resolver(monkeypatch):

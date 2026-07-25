@@ -7,6 +7,18 @@ import pytest
 from creator_engine_validator import venv_install_common
 
 
+def test_verify_live_cev3_raises_a_dedicated_type(monkeypatch, tmp_path: Path):
+    live = tmp_path / "venv"
+
+    def fail(*_args, **_kwargs) -> None:
+        raise OSError("underlying command failure")
+
+    monkeypatch.setattr(venv_install_common.subprocess, "run", fail)
+
+    with pytest.raises(venv_install_common.LiveSymlinkVerifyFailed):
+        venv_install_common.verify_live_cev3(live)
+
+
 def test_promote_verifies_the_live_symlink_before_writing_state(monkeypatch, tmp_path: Path):
     root = tmp_path / "install-root"
     root.mkdir()
@@ -37,11 +49,11 @@ def test_promote_live_symlink_refusal_rolls_back_before_state_write(monkeypatch,
     states: list[str] = []
 
     def refuse(_live: Path) -> None:
-        raise RuntimeError("live_cev3_reverify_failed: promoted venv cev3 --help failed")
+        raise venv_install_common.LiveSymlinkVerifyFailed("diagnostic wording deliberately changed")
 
     monkeypatch.setattr(venv_install_common, "verify_live_cev3", refuse)
 
-    with pytest.raises(RuntimeError, match="live_cev3_reverify_failed"):
+    with pytest.raises(venv_install_common.LiveSymlinkVerifyFailed):
         venv_install_common.promote_and_write_state(root, target, lambda: states.append("written"))
 
     assert live.is_symlink()

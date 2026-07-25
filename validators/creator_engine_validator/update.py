@@ -39,6 +39,7 @@ from .bootstrap_manifest import (
 )
 from .venv_install_common import (
     InstallLock,
+    LiveSymlinkVerifyFailed,
     build_venv_target,
     promote_and_write_state,
     venv_target_ok,
@@ -1060,7 +1061,7 @@ def apply_update(
     try:
         actions = runner.apply(root, release)
     except Exception as exc:
-        detail = f":{exc}" if str(exc).startswith("live_cev3_reverify_failed:") else ""
+        detail = f":{exc}" if isinstance(exc, LiveSymlinkVerifyFailed) else ""
         return UpdateResult(
             ok=False,
             status="refuse",
