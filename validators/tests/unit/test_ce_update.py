@@ -14,6 +14,7 @@ import pytest
 
 from creator_engine_validator import ce_cli
 from creator_engine_validator import update as update_runtime
+from creator_engine_validator import venv_install_common
 from creator_engine_validator import v3_installer
 
 SITE = "https://mirror.test"
@@ -223,6 +224,7 @@ def test_apply_update_builds_console_scripts_against_final_target(monkeypatch, t
     )
 
     assert result.ok is True
+    assert result.actions == ("build_verified_venv", "promote_verified_venv", "write_install_state")
     target = (install_root / "venv").resolve()
     for command in ("ce", "cev3"):
         lines = (target / "bin" / command).read_text(encoding="utf-8").splitlines()
@@ -230,6 +232,64 @@ def test_apply_update_builds_console_scripts_against_final_target(monkeypatch, t
         assert interpreter_lines
         assert all(str(target) in line for line in interpreter_lines)
         assert all(".staging." not in line for line in interpreter_lines)
+
+
+def test_apply_update_reverifies_the_promoted_live_symlink(monkeypatch, tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
+    install_root = tmp_path / "install-root"
+    observed: list[Path] = []
+    original = venv_install_common.verify_live_cev3
+
+    def record(live: Path) -> None:
+        observed.append(live)
+        original(live)
+
+    monkeypatch.setattr(venv_install_common, "verify_live_cev3", record)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    result = update_runtime.apply_update(
+        install_root=install_root,
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.2.0", "a" * 40),
+        os_name="Linux",
+        machine="x86_64",
+    )
+
+    assert result.ok is True
+    assert observed == [install_root / "venv"]
+
+
+def test_apply_update_refuses_when_promoted_live_symlink_cannot_run(monkeypatch, tmp_path: Path):
+    mapping, _wheel_sha = _fake_release(semver="0.3.0", build_sha="b" * 40)
+    install_root = tmp_path / "install-root"
+
+    def refuse(_live: Path) -> None:
+        raise RuntimeError("live_cev3_reverify_failed: promoted venv cev3 --help failed")
+
+    monkeypatch.setattr(venv_install_common, "verify_live_cev3", refuse)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    result = update_runtime.apply_update(
+        install_root=install_root,
+        site=SITE,
+        trust_anchor_url=ANCHOR_URL,
+        fetcher=_fetcher(mapping),
+        sshsig_runner=_accepting_runner,
+        installed=update_runtime.InstalledIdentity("0.2.0", "a" * 40),
+        os_name="Linux",
+        machine="x86_64",
+    )
+
+    assert result.ok is False
+    assert result.status == "refuse"
+    assert result.problems == (
+        "swap_failed:RuntimeError:live_cev3_reverify_failed: promoted venv cev3 --help failed",
+    )
+    assert not (install_root / "venv").exists()
+    assert not (install_root / "install-state").exists()
 
 
 def test_apply_update_recovers_from_debris_at_final_target(monkeypatch, tmp_path: Path):

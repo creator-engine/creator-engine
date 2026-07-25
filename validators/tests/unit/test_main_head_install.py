@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from creator_engine_validator import ce_cli, main_head_install
+from creator_engine_validator import venv_install_common
 from creator_engine_validator.main_head_install import (
     MainHeadInstallRefused,
     MainHeadVenvPromoter,
@@ -198,6 +199,60 @@ def test_promoter_builds_console_scripts_against_final_target(monkeypatch, tmp_p
             assert interpreter_lines
             assert all(str(target) in line for line in interpreter_lines)
             assert all(".staging." not in line for line in interpreter_lines)
+    finally:
+        main_head_install._remove_worktree(resolved, artifact.worktree)
+
+
+def test_promoter_reverifies_the_promoted_live_symlink(monkeypatch, tmp_path: Path):
+    repo, _commit = _write_main_repo(tmp_path)
+    resolved = resolve_origin_main(repo)
+    artifact = build_main_head_artifact(
+        resolved,
+        work_root=tmp_path / "artifact-work",
+        build_wheel=_fake_builder,
+    )
+    install_root = tmp_path / "install-root"
+    observed: list[Path] = []
+    original = venv_install_common.verify_live_cev3
+
+    def record(live: Path) -> None:
+        observed.append(live)
+        original(live)
+
+    try:
+        monkeypatch.setattr(venv_install_common, "verify_live_cev3", record)
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+        actions = MainHeadVenvPromoter().apply(install_root, artifact)
+        assert actions == (
+            "build_verified_main_head_venv",
+            "promote_verified_main_head_venv",
+            "write_main_head_install_state",
+        )
+        assert observed == [install_root / "venv"]
+    finally:
+        main_head_install._remove_worktree(resolved, artifact.worktree)
+
+
+def test_promoter_refuses_when_promoted_live_symlink_cannot_run(monkeypatch, tmp_path: Path):
+    repo, _commit = _write_main_repo(tmp_path)
+    resolved = resolve_origin_main(repo)
+    artifact = build_main_head_artifact(
+        resolved,
+        work_root=tmp_path / "artifact-work",
+        build_wheel=_fake_builder,
+    )
+    install_root = tmp_path / "install-root"
+
+    def refuse(_live: Path) -> None:
+        raise RuntimeError("live_cev3_reverify_failed: promoted venv cev3 --help failed")
+
+    try:
+        monkeypatch.setattr(venv_install_common, "verify_live_cev3", refuse)
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+        with pytest.raises(RuntimeError, match="live_cev3_reverify_failed"):
+            MainHeadVenvPromoter().apply(install_root, artifact)
+        assert not (install_root / "venv").exists()
+        assert not (install_root / "install-state").exists()
     finally:
         main_head_install._remove_worktree(resolved, artifact.worktree)
 
