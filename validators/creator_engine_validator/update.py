@@ -37,6 +37,13 @@ from .bootstrap_manifest import (
     parse_bootstrap_manifest,
     parse_sha256s,
 )
+from .venv_install_common import (
+    InstallLock,
+    build_venv_target,
+    promote_and_write_state,
+    venv_target_ok,
+    write_text_atomic,
+)
 
 DEFAULT_SITE = "https://creator-engine.dev"
 DEFAULT_TRUST_ANCHOR_URL = (
@@ -966,102 +973,36 @@ class VenvSwapper:
     def apply(self, install_root: Path, release: VerifiedRelease) -> tuple[str, ...]:
         root = install_root
         root.mkdir(parents=True, exist_ok=True)
-        lock = _InstallLock(root)
+        lock = InstallLock(root, UpdateRefused)
         with lock:
             target = root / f"venv-{release.manifest.package_version}-{release.sha256s_sha256}"
             actions: list[str] = []
-            if not self._venv_target_ok(target):
-                self._build_target(target, release)
+            if not venv_target_ok(target):
+                build_venv_target(
+                    target,
+                    python_executable=self.python_executable,
+                    populate_wheelhouse=lambda wheelhouse: self._populate_wheelhouse(wheelhouse, release),
+                    requirement=f"{release.manifest.package_name}=={release.manifest.package_version}",
+                )
                 actions.append("build_verified_venv")
             else:
                 actions.append("reuse_verified_venv_target")
-            self._promote_and_write_state(root, target, release)
+            promote_and_write_state(
+                root,
+                target,
+                lambda: self._write_release_state(root, target, release),
+            )
             actions.append("promote_verified_venv")
             actions.append("write_install_state")
             return tuple(actions)
 
-    def _venv_target_ok(self, target: Path) -> bool:
-        ce = target / "bin" / "ce"
-        cev3 = target / "bin" / "cev3"
-        return ce.is_file() and os.access(ce, os.X_OK) and cev3.is_file() and os.access(cev3, os.X_OK)
+    @staticmethod
+    def _populate_wheelhouse(wheelhouse: Path, release: VerifiedRelease) -> None:
+        for filename, data in release.wheelhouse.items():
+            (wheelhouse / filename).write_bytes(data)
 
-    def _build_target(self, target: Path, release: VerifiedRelease) -> None:
-        wheelhouse = target.parent / f".{target.name}.wheelhouse.{os.getpid()}"
-        if target.exists():
-            shutil.rmtree(target)
-        if wheelhouse.exists():
-            shutil.rmtree(wheelhouse)
-        try:
-            wheelhouse.mkdir(parents=True)
-            for filename, data in release.wheelhouse.items():
-                (wheelhouse / filename).write_bytes(data)
-            subprocess.run([self.python_executable, "-m", "venv", str(target)], check=True)
-            subprocess.run(
-                [
-                    str(target / "bin" / "python"),
-                    "-m",
-                    "pip",
-                    "install",
-                    "--no-index",
-                    "--find-links",
-                    str(wheelhouse),
-                    f"{release.manifest.package_name}=={release.manifest.package_version}",
-                ],
-                check=True,
-            )
-            subprocess.run([str(target / "bin" / "ce"), "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            subprocess.run([str(target / "bin" / "cev3"), "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        except Exception:
-            shutil.rmtree(target, ignore_errors=True)
-            raise
-        finally:
-            shutil.rmtree(wheelhouse, ignore_errors=True)
-
-    def _promote_and_write_state(self, root: Path, target: Path, release: VerifiedRelease) -> None:
-        live = root / "venv"
-        link_tmp = root / f"venv.link.{os.getpid()}"
-        backup = root / f"venv.previous.{os.getpid()}"
-        if link_tmp.exists() or link_tmp.is_symlink():
-            link_tmp.unlink()
-        if backup.exists() or backup.is_symlink():
-            if backup.is_dir() and not backup.is_symlink():
-                shutil.rmtree(backup)
-            else:
-                backup.unlink()
-        previous_symlink_target = os.readlink(live) if live.is_symlink() else None
-        link_tmp.symlink_to(target.name)
-        moved_dir = False
-        promoted = False
-        try:
-            if live.exists() and not live.is_symlink():
-                os.replace(live, backup)
-                moved_dir = True
-            os.replace(link_tmp, live)
-            promoted = True
-            self._write_state(root, target, release)
-        except Exception:
-            if link_tmp.exists() or link_tmp.is_symlink():
-                link_tmp.unlink()
-            if promoted:
-                if live.exists() or live.is_symlink():
-                    if live.is_dir() and not live.is_symlink():
-                        shutil.rmtree(live)
-                    else:
-                        live.unlink()
-                if previous_symlink_target is not None:
-                    live.symlink_to(previous_symlink_target)
-            if moved_dir and backup.exists() and not live.exists():
-                os.replace(backup, live)
-            raise
-        if backup.exists():
-            if backup.is_dir() and not backup.is_symlink():
-                shutil.rmtree(backup)
-            else:
-                backup.unlink()
-
-    def _write_state(self, root: Path, target: Path, release: VerifiedRelease) -> None:
+    def _write_release_state(self, root: Path, target: Path, release: VerifiedRelease) -> None:
         state_path = root / "install-state"
-        tmp = state_path.with_name(f"{state_path.name}.tmp.{os.getpid()}")
         lines = [
             f"spec_canonical_sha256={release.canonical_spec_sha256}",
             f"trust_root_sha256={release.trust_root_sha256}",
@@ -1075,31 +1016,7 @@ class VenvSwapper:
             f"venv_target={target}",
             f"timestamp={datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         ]
-        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.replace(tmp, state_path)
-
-
-class _InstallLock:
-    def __init__(self, root: Path):
-        self.path = root / "install.lock"
-
-    def __enter__(self) -> "_InstallLock":
-        try:
-            self.path.mkdir()
-        except FileExistsError as exc:
-            raise UpdateRefused(f"install_lock_held: lock already exists at {self.path}") from exc
-        (self.path / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        try:
-            (self.path / "pid").unlink()
-        except FileNotFoundError:
-            pass
-        try:
-            self.path.rmdir()
-        except OSError:
-            pass
+        write_text_atomic(state_path, "\n".join(lines) + "\n")
 
 
 def apply_update(
@@ -1143,6 +1060,7 @@ def apply_update(
     try:
         actions = runner.apply(root, release)
     except Exception as exc:
+        detail = f":{exc}" if str(exc).startswith("live_cev3_reverify_failed:") else ""
         return UpdateResult(
             ok=False,
             status="refuse",
@@ -1152,7 +1070,7 @@ def apply_update(
             update_available=True,
             read_only=False,
             install_root=str(root),
-            problems=(f"swap_failed:{exc.__class__.__name__}",),
+            problems=(f"swap_failed:{exc.__class__.__name__}{detail}",),
             release=_release_summary(release),
         )
     return UpdateResult(
