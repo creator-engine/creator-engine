@@ -20,6 +20,10 @@ DEFAULT_LEASE_ROOT = Path(".ce/state/daemon-leases")
 _ACQUISITION_CLOCK_LOCK = threading.Lock()
 _LAST_ACQUISITION_TIMESTAMP = 0.0
 
+# The queue-daemon launcher intentionally couples its locked recovery to these
+# private seams: _operation_lock, _read_payload, _acquisition_timestamp, and
+# _takeover_stale_lease. Preserve their recovery semantics or update that caller.
+
 
 class DaemonLeaseError(RuntimeError):
     """Base class for daemon lease failures."""
@@ -160,9 +164,6 @@ def acquire(
         )
         return DaemonLease(daemon_name, holder_id, lease_path, payload)
 
-# The queue-daemon launcher intentionally couples its locked recovery to these
-# private seams: _operation_lock, _read_payload, _acquisition_timestamp, and
-# _takeover_stale_lease. Preserve their recovery semantics or update that caller.
 def _takeover_stale_lease(
     *,
     lease_path: Path,
