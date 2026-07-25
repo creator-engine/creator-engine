@@ -290,7 +290,10 @@ def _recover_same_host_dead_pid_lease(
         if not _same_host_dead_pid_lease(raw_payload):
             raise DaemonLeaseStale("queue-daemon lease is not eligible for automatic recovery")
 
-        existing = daemon_lease._read_payload(lease_path)
+        try:
+            existing = daemon_lease._read_payload(lease_path)
+        except FileNotFoundError as exc:
+            raise DaemonLeaseStale("queue-daemon lease changed during automatic recovery") from exc
         if existing.as_dict() != raw_payload:
             raise DaemonLeaseStale("queue-daemon lease changed during automatic recovery")
 

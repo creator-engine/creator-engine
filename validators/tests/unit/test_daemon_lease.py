@@ -131,6 +131,26 @@ def _write_lease_replacement_race_hook(
     )
 
 
+def _write_lease_deletion_recovery_race_hook(path: Path, *, lease_path: Path) -> None:
+    """Delete the stale lease after recovery eligibility but before its canonical reread."""
+
+    path.write_text(
+        "from pathlib import Path\n"
+        "from creator_engine_validator import daemon_lease\n\n"
+        "_original_read_payload = daemon_lease._read_payload\n"
+        f"_lease_path = Path({str(lease_path)!r})\n"
+        "_read_count = 0\n\n"
+        "def _delete_before_recovery_reread(path):\n"
+        "    global _read_count\n"
+        "    _read_count += 1\n"
+        "    if _read_count == 2 and path == _lease_path:\n"
+        "        path.unlink()\n"
+        "    return _original_read_payload(path)\n\n"
+        "daemon_lease._read_payload = _delete_before_recovery_reread\n",
+        encoding="utf-8",
+    )
+
+
 def _write_os_kill_error_hook(path: Path, *, pid: int, error: str) -> None:
     """Cause only the stale lease PID probe in the launcher child to fail."""
 
@@ -305,6 +325,30 @@ def test_malformed_lease_fails_closed(tmp_path: Path):
 
     with pytest.raises(DaemonLeaseAmbiguous, match="malformed daemon lease"):
         acquire("conveyor", "holder", state_root=root, now=1000.0)
+
+
+def test_extra_field_lease_refuses_without_audit_or_replacement(tmp_path: Path):
+    root = tmp_path / "leases"
+    root.mkdir()
+    lease_path = root / "conveyor.lease"
+    payload = _payload(holder_id="old-holder", heartbeat_at=10.0, pid=_missing_pid())
+    payload["unexpected"] = "field"
+    raw_payload = json.dumps(payload)
+    lease_path.write_text(raw_payload, encoding="utf-8")
+
+    with pytest.raises(DaemonLeaseAmbiguous, match="unexpected payload fields"):
+        acquire(
+            "conveyor",
+            "new-holder",
+            state_root=root,
+            ttl_seconds=30.0,
+            allow_takeover=True,
+            takeover_reason="operator audited takeover",
+            now=100.0,
+        )
+
+    assert lease_path.read_text(encoding="utf-8") == raw_payload
+    assert not (root / "conveyor.lease.takeovers.jsonl").exists()
 
 
 def test_missing_state_root_fails_closed(tmp_path: Path):
@@ -854,6 +898,44 @@ def test_queue_daemon_launcher_refuses_replaced_lease_after_dead_pid_recovery_ch
     assert not marker.exists()
     assert not (lease_root / "queue-daemon.lease.takeovers.jsonl").exists()
     assert json.loads(lease_path.read_text(encoding="utf-8"))["host"] == "different-host.invalid"
+
+
+def test_queue_daemon_launcher_refuses_deleted_lease_after_dead_pid_recovery_check(tmp_path: Path):
+    lease_root = tmp_path / "leases"
+    lease_root.mkdir()
+    lease_path = lease_root / "queue-daemon.lease"
+    lease_path.write_text(
+        json.dumps(_payload(holder_id="old-local", heartbeat_at=0.0, pid=_missing_pid())),
+        encoding="utf-8",
+    )
+    hook_dir = tmp_path / "hook"
+    hook_dir.mkdir()
+    _write_lease_deletion_recovery_race_hook(
+        hook_dir / "sitecustomize.py",
+        lease_path=lease_path,
+    )
+    fake_bin = tmp_path / "fake-queue-daemon"
+    marker = tmp_path / "should-not-run"
+    _write_fake_queue_daemon(fake_bin, marker=marker)
+    env = _queue_daemon_env(tmp_path, lease_root, fake_bin)
+    env["PYTHONPATH"] = f"{hook_dir}{os.pathsep}{_repo_root() / 'validators'}"
+    script = _repo_root() / "deploy" / "queue-daemon" / "launch-queue-daemon.sh"
+
+    proc = subprocess.run(
+        ["bash", str(script)],
+        cwd=_repo_root(),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+    assert proc.returncode == 73
+    assert "queue-daemon singleton lease refused" in proc.stderr
+    assert not marker.exists()
+    assert not lease_path.exists()
+    assert not (lease_root / "queue-daemon.lease.takeovers.jsonl").exists()
 
 
 def test_container_runner_maps_host_lease_root_to_container_state_mount(tmp_path: Path):

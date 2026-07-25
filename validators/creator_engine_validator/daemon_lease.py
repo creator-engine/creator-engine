@@ -160,7 +160,9 @@ def acquire(
         )
         return DaemonLease(daemon_name, holder_id, lease_path, payload)
 
-
+# The queue-daemon launcher intentionally couples its locked recovery to these
+# private seams: _operation_lock, _read_payload, _acquisition_timestamp, and
+# _takeover_stale_lease. Preserve their recovery semantics or update that caller.
 def _takeover_stale_lease(
     *,
     lease_path: Path,
