@@ -286,6 +286,100 @@ def test_scan_refuses_tip_not_reachable_from_any_origin_ref(tmp_path: Path):
     assert "origin_reachable_ref" not in entry.evidence
 
 
+def test_scan_prunes_stale_origin_tracking_ref_before_reachability(tmp_path: Path):
+    repo = _make_repo(tmp_path)
+    archived = _add_worktree(
+        repo,
+        tmp_path,
+        "wt-stale-origin-archive",
+        "stale-origin-archive",
+    )
+    (archived / "archive.txt").write_text("durably archived\n", encoding="utf-8")
+    _git(archived, "add", "archive.txt")
+    _git(archived, "commit", "-m", "archived tip")
+    _git(archived, "push", "origin", "HEAD:refs/heads/archive/seat-scratch/stale-tip")
+    _git(
+        archived,
+        "fetch",
+        "origin",
+        "refs/heads/archive/seat-scratch/stale-tip:refs/remotes/origin/archive/seat-scratch/stale-tip",
+    )
+    origin = Path(_git(repo, "remote", "get-url", "origin"))
+    _git(origin, "update-ref", "-d", "refs/heads/archive/seat-scratch/stale-tip")
+    _set_old(archived)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[archived.resolve()]
+
+    assert entry.verdict == "REPORT_ONLY"
+    assert entry.reason == "not-on-origin"
+    assert entry.evidence["origin_fetch_returncode"] == 0
+    assert entry.evidence["origin_ref_probe_count"] == 0
+
+
+def test_scan_refuses_registered_candidates_when_origin_fetch_fails(tmp_path: Path, monkeypatch):
+    repo = _make_repo(tmp_path)
+    merged = _add_worktree(repo, tmp_path, "wt-fetch-failure", "fetch-failure")
+    _set_old(merged)
+
+    original_run_git = worktree_prune._run_git
+
+    def failed_fetch(path: Path, args):
+        if args[:1] == ["fetch"]:
+            return worktree_prune.GitResult(128, "", "simulated fetch failure")
+        return original_run_git(path, args)
+
+    monkeypatch.setattr(worktree_prune, "_run_git", failed_fetch)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[merged.resolve()]
+
+    assert entry.verdict == "REPORT_ONLY"
+    assert entry.reason == "unknown-state"
+    assert entry.evidence["origin_fetch_returncode"] == 128
+    assert entry.evidence["origin_fetch_stderr"] == "simulated fetch failure"
+
+
+def test_scan_refuses_registered_candidates_when_origin_fetch_raises_oserror(
+    tmp_path: Path,
+    monkeypatch,
+):
+    repo = _make_repo(tmp_path)
+    merged = _add_worktree(repo, tmp_path, "wt-fetch-oserror", "fetch-oserror")
+    _set_old(merged)
+
+    original_run_git = worktree_prune._run_git
+
+    def failed_fetch(path: Path, args):
+        if args[:1] == ["fetch"]:
+            raise OSError("simulated origin unavailable")
+        return original_run_git(path, args)
+
+    monkeypatch.setattr(worktree_prune, "_run_git", failed_fetch)
+
+    result = worktree_prune.scan_worktrees(repo, extra_roots=[], age_hours=72)
+    entry = _by_path(result)[merged.resolve()]
+
+    assert entry.verdict == "REPORT_ONLY"
+    assert entry.reason == "unknown-state"
+    assert entry.evidence["origin_fetch_error"] == "OSError: simulated origin unavailable"
+
+
+def test_run_git_uses_bounded_timeout(tmp_path: Path, monkeypatch):
+    observed: dict[str, object] = {}
+
+    def completed_run(*args, **kwargs):
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, "ok\n", "")
+
+    monkeypatch.setattr(worktree_prune.subprocess, "run", completed_run)
+
+    result = worktree_prune._run_git(tmp_path, ["status"])
+
+    assert result.returncode == 0
+    assert observed["timeout"] == worktree_prune.GIT_COMMAND_TIMEOUT_SECONDS
+
+
 def test_scan_refuses_when_origin_ref_reachability_probe_fails(tmp_path: Path, monkeypatch):
     repo = _make_repo(tmp_path)
     local_only = _add_worktree(repo, tmp_path, "wt-probe-failure", "probe-failure")

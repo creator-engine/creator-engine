@@ -8,9 +8,14 @@ issue: CE-651
 
 **Preserve archived worktree tips before pruning.**
 
-- Worktree pruning now accepts a clean old tip that is reachable from a local
-  `origin/*` tracking ref, even if it is not an ancestor of `origin/main`.
-- Ref-list and reachability probe errors remain report-only, and audit evidence
-  names the origin ref that satisfied the durable-preservation check.
-- Tips absent from every local origin tracking ref are reported as
-  `not-on-origin`, replacing the narrower `unpushed-commits` label.
+- Worktree pruning refreshes `origin` with `git fetch --prune` once per scan
+  before using a remote-tracking ref as preservation evidence. A failed or
+  timed-out refresh leaves registered worktrees report-only, rather than
+  trusting an unbounded stale cache.
+- A clean old tip may be prunable when that fresh origin snapshot names a
+  containing ref even if the tip is not an ancestor of `origin/main`; audit
+  evidence names the satisfying ref.
+- Tips absent from every freshly fetched origin ref are reported as
+  `not-on-origin`, replacing the narrower `unpushed-commits` label. The remote
+  can still change after a successful fetch, so freshness is bounded to scan
+  time.

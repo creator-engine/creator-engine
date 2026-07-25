@@ -1,9 +1,15 @@
 """Fail-safe stale git worktree pruning.
 
-The runtime is deliberately conservative: a worktree is removable only when it
-is clean, old, and either already merged to ``origin/main`` or has no content
-delta against ``origin/main...HEAD``. Broken orphan directories are removable
-only when their payload is empty apart from the broken ``.git`` pointer.
+The runtime is deliberately conservative: a registered worktree is removable
+only when it is clean, old, and its tip is merged to ``origin/main``, has no
+content delta against ``origin/main...HEAD``, or is reachable from another
+origin ref. Before that reachability decision, each scan refreshes the local
+remote-tracking cache with ``git fetch --prune origin``. A failed refresh leaves
+registered candidates report-only: remote-tracking refs are a cache, and stale
+refs must never authorize irreversible deletion. A remote ref can still change
+after a successful refresh, so the freshness guarantee is bounded to scan time.
+Broken orphan directories are removable only when their payload is empty apart
+from the broken ``.git`` pointer.
 """
 from __future__ import annotations
 
@@ -19,6 +25,7 @@ from typing import Any, Sequence
 DEFAULT_EXTRA_ROOT = Path("/var/tmp")
 DEFAULT_AGE_HOURS = 72.0
 AUDIT_FILENAME = "worktree-prune.jsonl"
+GIT_COMMAND_TIMEOUT_SECONDS = 30.0
 
 
 class WorktreePruneError(RuntimeError):
@@ -102,8 +109,25 @@ def _run_git(repo: Path, args: Sequence[str]) -> GitResult:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        timeout=GIT_COMMAND_TIMEOUT_SECONDS,
     )
     return GitResult(completed.returncode, completed.stdout, completed.stderr)
+
+
+def _refresh_origin(repo: Path) -> tuple[bool, dict[str, Any]]:
+    """Refresh origin tracking refs once, refusing on an indeterminate result."""
+    evidence: dict[str, Any] = {"origin_fetch_command": ["fetch", "--prune", "origin"]}
+    try:
+        result = _run_git(repo, ["fetch", "--prune", "origin"])
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        evidence["origin_fetch_error"] = f"{type(exc).__name__}: {exc}"
+        return False, evidence
+
+    evidence["origin_fetch_returncode"] = result.returncode
+    if result.returncode != 0:
+        evidence["origin_fetch_stderr"] = result.stderr.strip()
+        return False, evidence
+    return True, evidence
 
 
 def _resolve_repo_root(repo_root: Path | str) -> Path:
@@ -277,9 +301,18 @@ def _status_clean(path: Path) -> tuple[bool, dict[str, Any], str | None]:
     return True, evidence, None
 
 
-def _head_safety(path: Path) -> tuple[bool, dict[str, Any], str | None]:
+def _head_safety(
+    path: Path,
+    *,
+    origin_fresh: bool,
+    origin_fetch_evidence: dict[str, Any],
+) -> tuple[bool, dict[str, Any], str | None]:
+    evidence: dict[str, Any] = dict(origin_fetch_evidence)
+    if not origin_fresh:
+        return False, evidence, "unknown-state"
+
     head = _run_git(path, ["rev-parse", "HEAD"])
-    evidence: dict[str, Any] = {"head_returncode": head.returncode}
+    evidence["head_returncode"] = head.returncode
     if head.returncode != 0:
         evidence["head_stderr"] = head.stderr.strip()
         return False, evidence, "unknown-state"
@@ -357,6 +390,8 @@ def classify_candidate(
     now: float | None = None,
     active_worktree: Path | None = None,
     protected_worktrees: Sequence[Path] = (),
+    origin_fresh: bool = False,
+    origin_fetch_evidence: dict[str, Any] | None = None,
 ) -> WorktreeVerdict:
     protected = {Path(path).resolve() for path in protected_worktrees}
     if active_worktree is not None:
@@ -423,7 +458,11 @@ def classify_candidate(
             "REPORT_ONLY", status_reason or "unknown-state", evidence,
         )
 
-    safe_head, head_evidence, head_reason = _head_safety(candidate.path)
+    safe_head, head_evidence, head_reason = _head_safety(
+        candidate.path,
+        origin_fresh=origin_fresh,
+        origin_fetch_evidence=origin_fetch_evidence or {},
+    )
     evidence.update(head_evidence)
     tip_sha = head_evidence.get("tip_sha") or candidate.head
     if not safe_head:
@@ -453,6 +492,7 @@ def scan_worktrees(
     now: float | None = None,
 ) -> WorktreePruneResult:
     repo = _resolve_repo_root(repo_root)
+    origin_fresh, origin_fetch_evidence = _refresh_origin(repo)
     protected_worktrees = {repo}
     cwd_worktree = _resolve_cwd_worktree_root()
     if cwd_worktree is not None:
@@ -464,6 +504,8 @@ def scan_worktrees(
             now=now,
             active_worktree=repo,
             protected_worktrees=tuple(protected_worktrees),
+            origin_fresh=origin_fresh,
+            origin_fetch_evidence=origin_fetch_evidence,
         )
         for candidate in discover_worktrees(repo, extra_roots)
     ]
