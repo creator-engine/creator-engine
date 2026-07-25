@@ -111,6 +111,22 @@ def _write_runsc_runner(root: Path, relative_path: str, variable: str, default: 
     return runner
 
 
+def _write_vps_manifest_resolving_runner(root: Path) -> Path:
+    runner = root / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text(
+        "resolve_manifest_vps_image() {\n"
+        "  :\n"
+        "}\n"
+        "manifest_path=surfaces/manifest.yaml\n"
+        "if [ -z \"${CE_VPS_IMAGE:-}\" ]; then\n"
+        "  CE_VPS_IMAGE=\"$(resolve_manifest_vps_image \"${manifest_path}\")\"\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    return runner
+
+
 def _write_consistent_repo(root: Path, doc: dict[str, object] | None = None) -> None:
     _write_manifest(root, doc or _consistent_doc())
     dockerfile = root / "deploy" / "vps-runsc" / "Dockerfile"
@@ -139,12 +155,7 @@ def _write_consistent_repo(root: Path, doc: dict[str, object] | None = None) -> 
         ),
         encoding="utf-8",
     )
-    _write_runsc_runner(
-        root,
-        "deploy/vps-runsc/run-vps-runsc.sh",
-        "CE_VPS_IMAGE",
-        "creator-engine/codex-runsc:0.141.0-x86_64",
-    )
+    _write_vps_manifest_resolving_runner(root)
     _write_runsc_runner(
         root,
         "deploy/dgx-runsc/run-codex-runsc.sh",
@@ -244,6 +255,36 @@ def test_consistent_manifest_mismatched_dgx_runner_default_fails(tmp_path: Path)
         and "expected 'creator-engine/codex-runsc:0.141.0-aarch64'" in error.message
         for error in result.errors
     )
+
+
+def test_consistent_manifest_vps_launcher_without_manifest_resolver_fails(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    _write_runsc_runner(
+        tmp_path,
+        "deploy/vps-runsc/run-vps-runsc.sh",
+        "CE_VPS_IMAGE",
+        "creator-engine/codex-runsc:0.141.0-x86_64",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_VPS_RUNSC_MANIFEST_RESOLVER_MISSING in _codes(result)
+
+
+def test_consistent_manifest_vps_launcher_with_digest_literal_fails(tmp_path: Path):
+    _write_consistent_repo(tmp_path)
+    launcher = tmp_path / "deploy" / "vps-runsc" / "run-vps-runsc.sh"
+    launcher.write_text(
+        launcher.read_text(encoding="utf-8")
+        + 'CE_VPS_IMAGE="creator-engine/codex-runsc:x86_64@sha256:'
+        + "a" * 64
+        + '"\n',
+        encoding="utf-8",
+    )
+
+    result = registered_checks()[chk.CONSISTENT_CHECK_NAME].run([tmp_path])
+
+    assert chk.CODE_VPS_RUNSC_IMAGE_LITERAL in _codes(result)
 
 
 def test_consistent_manifest_missing_dockerfile_digest_fails(tmp_path: Path):

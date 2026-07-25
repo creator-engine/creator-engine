@@ -31,6 +31,8 @@ CODE_DOCKERFILE_FROM_MISSING_DIGEST = "surfaces_manifest_dockerfile_from_missing
 CODE_DOCKERFILE_FROM_DIGEST_MISMATCH = "surfaces_manifest_dockerfile_from_digest_mismatch"
 CODE_ARG_MISMATCH = "surfaces_manifest_arg_mismatch"
 CODE_RUNSC_IMAGE_MISMATCH = "surfaces_manifest_runsc_image_mismatch"
+CODE_VPS_RUNSC_MANIFEST_RESOLVER_MISSING = "surfaces_manifest_vps_runsc_manifest_resolver_missing"
+CODE_VPS_RUNSC_IMAGE_LITERAL = "surfaces_manifest_vps_runsc_image_literal"
 CODE_REQUIREMENTS_PIN_MISMATCH = "surfaces_manifest_requirements_pin_mismatch"
 CODE_BUMP_MISSING_CARRIER = "surfaces_bump_missing_carrier"
 
@@ -88,9 +90,14 @@ ARG_RE = re.compile(r"^\s*ARG\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:=(?P<value>\S
 REQ_PIN_RE = re.compile(r"^\s*(?P<name>[A-Za-z0-9_.-]+)==(?P<version>[^\s;#]+)")
 SHELL_DEFAULT_RE = re.compile(r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-|-)(?P<value>[^}]+)\}")
 RUNSC_IMAGE_DEFAULTS = (
-    ("deploy/vps-runsc/run-vps-runsc.sh", "CE_VPS_IMAGE", "x86_64", False),
     ("deploy/dgx-runsc/run-codex-runsc.sh", "CE_DGX_IMAGE", "aarch64", True),
 )
+VPS_RUNSC_LAUNCHER = Path("deploy/vps-runsc/run-vps-runsc.sh")
+VPS_MANIFEST_RESOLUTION_RE = re.compile(
+    r'^\s*CE_VPS_IMAGE="\$\(resolve_manifest_vps_image\s+"\$\{manifest_path\}"\)"\s*$',
+    re.MULTILINE,
+)
+SHA256_DIGEST_LITERAL_RE = re.compile(r"sha256:[0-9a-f]{64}", re.IGNORECASE)
 
 
 def _surface_key(name: object) -> str:
@@ -704,6 +711,46 @@ def _runsc_image_errors(repo_root: Path, by_name: dict[str, dict[str, Any]]) -> 
     return errors
 
 
+def _vps_runsc_manifest_resolution_errors(repo_root: Path) -> list[ValidationError]:
+    """Require the VPS launcher to resolve, rather than duplicate, its image pin."""
+    path = repo_root / VPS_RUNSC_LAUNCHER
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [
+            make_error(
+                CODE_VPS_RUNSC_MANIFEST_RESOLVER_MISSING,
+                path,
+                "CE_VPS_IMAGE",
+                f"VPS launcher must define and invoke resolve_manifest_vps_image: {exc}",
+                CONSISTENT_CONTRACT,
+            )
+        ]
+
+    errors: list[ValidationError] = []
+    if "resolve_manifest_vps_image()" not in text or VPS_MANIFEST_RESOLUTION_RE.search(text) is None:
+        errors.append(
+            make_error(
+                CODE_VPS_RUNSC_MANIFEST_RESOLVER_MISSING,
+                path,
+                "CE_VPS_IMAGE",
+                "VPS launcher must define and invoke resolve_manifest_vps_image for its default image",
+                CONSISTENT_CONTRACT,
+            )
+        )
+    if SHA256_DIGEST_LITERAL_RE.search(text) is not None:
+        errors.append(
+            make_error(
+                CODE_VPS_RUNSC_IMAGE_LITERAL,
+                path,
+                "CE_VPS_IMAGE",
+                "VPS launcher must not carry an immutable image digest literal; surfaces/manifest.yaml owns it",
+                CONSISTENT_CONTRACT,
+            )
+        )
+    return errors
+
+
 def _requirement_pins(path: Path) -> dict[str, tuple[str, int]]:
     pins: dict[str, tuple[str, int]] = {}
     try:
@@ -843,6 +890,7 @@ def validate_repo_consistent(repo_root: Path) -> CheckResult:
         errors.extend(_dockerfile_errors(repo_root, by_name))
         errors.extend(_arg_errors(repo_root, by_name))
         errors.extend(_runsc_image_errors(repo_root, by_name))
+        errors.extend(_vps_runsc_manifest_resolution_errors(repo_root))
         errors.extend(_requirements_errors(repo_root, by_name))
     return CheckResult(name=CONSISTENT_CHECK_NAME, errors=tuple(errors))
 
