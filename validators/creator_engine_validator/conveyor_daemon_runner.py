@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -252,7 +253,19 @@ def _jsonl_ledger_writer(path: Path):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     def write(record: ConveyorDaemonLedgerRecord) -> None:
-        with path.open("a", encoding="utf-8") as handle:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            metadata = os.fstat(fd)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise ConfigError("conveyor ledger file is unsafe")
+        except Exception:
+            os.close(fd)
+            raise
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record.as_dict(), sort_keys=True, default=str) + "\n")
 
     return write
@@ -312,7 +325,13 @@ def _holder_id(config: ConveyorDaemonConfig) -> str:
 
 def _ensure_private_dir(path: Path) -> None:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.chmod(0o700)
+    metadata = path.stat(follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise ConfigError("conveyor private directory is unsafe")
 
 
 class _RecordingProbeRunner:
@@ -427,6 +446,9 @@ def _run_loop(config: ConveyorDaemonConfig, lease: DaemonLease) -> int:
             if config.iterations is not None and completed >= config.iterations:
                 break
             stop_event.wait(config.interval_seconds)
+    except ConfigError as exc:
+        _error(str(exc))
+        return 2
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)
         signal.signal(signal.SIGINT, previous_sigint)
@@ -468,11 +490,11 @@ def main_with_existing_lease(
 def main(env: Mapping[str, str] | None = None) -> int:
     try:
         config = load_config(env)
+        _ensure_private_dir(config.lease_root)
     except ConfigError as exc:
         _error(str(exc))
         return 2
 
-    _ensure_private_dir(config.lease_root)
     try:
         lease = acquire(
             "conveyor-daemon",
