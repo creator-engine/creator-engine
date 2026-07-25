@@ -64,7 +64,7 @@ boundary in every verification run.
 Verify the supplied record for a deployable or integration capability contains
 the live target, deployed revision or artifact digest, observation time, and
 target exercise result; the governed deployment/IaC reference or an explicit
-ratified waiver naming scope, target, revision, and reason; and the expected
+ratified waiver naming scope, target, revision, and reason no governed deployment/IaC applies; and the expected
 observable post-condition, observation source or query, observed value and
 time, and expected-versus-observed reconciliation. Merge or green CI alone is
 not close-ready evidence. Silence, manual mutation, and unavailable or deferred

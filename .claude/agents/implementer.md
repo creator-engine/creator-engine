@@ -43,7 +43,7 @@ capability is not close-ready merely because it is merged or CI is green. The
 return evidence must identify the live target or environment, deployed revision
 or artifact digest, observation time, and target exercise result; the governed
 deployment/IaC reference or an explicit ratified waiver naming scope, target,
-revision, and reason; and the expected observable post-condition, observation
+revision, and reason no governed deployment/IaC applies; and the expected observable post-condition, observation
 source or query, observed value and time, and expected-versus-observed
 reconciliation. Silence, manual mutation, and unavailable or deferred
 deployment are not waivers.

@@ -45,7 +45,7 @@ or prose is audit-only `UNVERIFIED_LEGACY`, never review evidence.
 For a deployable or integration capability, review whether the supplied record
 names the live target, deployed revision or artifact digest, observation time,
 and target exercise result; cites governed deployment/IaC or an explicit
-ratified waiver naming scope, target, revision, and reason; and states the
+ratified waiver naming scope, target, revision, and reason no governed deployment/IaC applies; and states the
 expected observable post-condition, observation source or query, observed value
 and time, and expected-versus-observed reconciliation. Merge or green CI alone
 is insufficient. Treat silence, manual mutation, and unavailable or deferred

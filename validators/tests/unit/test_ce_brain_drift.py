@@ -854,19 +854,28 @@ def test_authoritative_migrated_assertions_validate_and_probe():
     )
 
 
-def test_implementer_reserved_acts_cannot_be_overridden_by_deployment_authority():
+def test_role_closure_reservations_and_waiver_basis_are_explicit():
     root = Path(__file__).resolve().parents[3]
-    policy_text = (root / ".claude" / "agents" / "implementer.md").read_text(encoding="utf-8")
-    policy = " ".join(policy_text.split())
+    role_reservations = {
+        "architect_research.md": "this read-only role cannot deploy, ratify a waiver, reconcile by mutating a target, or decide closure",
+        "implementer.md": "Ratifying a waiver and deciding closure remain controller-reserved acts",
+        "reviewer.md": "The controller retains every submission and closure decision",
+        "verification.md": "must not deploy, mutate a target to force reconciliation, ratify a waiver, or decide closure",
+        "canary_qa.md": "must not deploy, create or ratify a waiver, mutate a target to force reconciliation, or decide closure",
+    }
 
-    assert (
-        "separate governed authority applies only to authorized deployment and IaC execution" in policy
+    for role_file, reservation in role_reservations.items():
+        policy_text = (root / ".claude" / "agents" / role_file).read_text(encoding="utf-8")
+        policy = " ".join(policy_text.split())
+        assert "reason no governed deployment/IaC applies" in policy
+        assert reservation in policy
+
+    implementer_policy = " ".join(
+        (root / ".claude" / "agents" / "implementer.md").read_text(encoding="utf-8").split()
     )
-    assert (
-        "Ratifying a waiver and deciding closure remain controller-reserved acts" in policy
-    )
-    assert "regardless of separate deployment authority" in policy
-    assert "decide closure unless a separate governed authority" not in policy
+    assert "separate governed authority applies only to authorized deployment and IaC execution" in implementer_policy
+    assert "regardless of separate deployment authority" in implementer_policy
+    assert "decide closure unless a separate governed authority" not in implementer_policy
 
 
 def test_missing_state_root_is_zero_active_assertions_for_cli_and_registered_check(tmp_path: Path):
