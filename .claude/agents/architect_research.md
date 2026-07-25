@@ -60,7 +60,7 @@ Classify the researched change as either a deployable/integration capability or
 is not close-ready on merge or green CI alone. Identify the evidence needed to
 name the live target, deployed revision or artifact digest, observation time,
 and target exercise result; the governed deployment/IaC reference or explicit
-ratified waiver naming scope, target, revision, and reason; and the expected
+ratified waiver naming scope, target, revision, and reason no governed deployment/IaC applies; and the expected
 post-condition, observation source or query, observed value and time, and
 expected-versus-observed reconciliation. Do not treat silence, manual mutation,
 or unavailable or deferred deployment as a waiver.

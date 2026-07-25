@@ -6000,4 +6000,54 @@ records:
   verification_method:
     evidence_ref: .github/scripts/ceops_autoclose.py
     type: static
+- claim:
+    details: Reviewer workers are read-only and depend on the controller to provide
+      an already-prepared review worktree and context.
+    evidence_sha256: b75fdac5341bea6c17d623cac6049daa9f5a0e6273f5c2c9c9eb70ec7c444936
+    item: 14
+    object: reviewer-readonly-prepared-worktree
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: 8c12992ee0821552a1072380b8c55f140bef0acf76d87ebb6d06354381ea2d69
+  evidence_ref: .claude/agents/reviewer.md
+  id: brain-assertion-87a50f25eac6fac94efded21
+  kind: brain-assertion
+  prev_hash: a4e929a7b09fe8ab6e37f2d75721abdeea3c91b200a107cb4d920ada8d35b61f
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 230
+  statement: Reviewer workers are read-only and depend on the controller to provide
+    an already-prepared review worktree and context.
+  status: superseded
+  superseded_by: brain-assertion-8fcbb29a1c9d145f460e9b55
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/reviewer.md
+    type: static
+- claim:
+    details: Reviewer workers are read-only and depend on the controller to provide
+      an already-prepared review worktree and context.
+    evidence_sha256: cd6ce6037fff9a52c091dfbb7e457c27f3b2b5a99270067e3e456373ee06f434
+    item: 14
+    object: reviewer-readonly-prepared-worktree
+    predicate: asserts
+    subject: doctrine-item
+  content_hash: ce94ec6b9384f675652e531837437580837820589c1603ed6c2cf0c98827f93e
+  evidence_ref: .claude/agents/reviewer.md
+  id: brain-assertion-8fcbb29a1c9d145f460e9b55
+  kind: brain-assertion
+  prev_hash: 8c12992ee0821552a1072380b8c55f140bef0acf76d87ebb6d06354381ea2d69
+  record_type: brain_assertion
+  schema_version: '1'
+  scope: doctrine/day1
+  sequence: 231
+  statement: Reviewer workers are read-only and depend on the controller to provide
+    an already-prepared review worktree and context.
+  status: active
+  superseded_by: null
+  type: convention
+  verification_method:
+    evidence_ref: .claude/agents/reviewer.md
+    type: static
 schema_version: '1'
