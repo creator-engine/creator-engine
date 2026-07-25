@@ -6,7 +6,7 @@ scope: conveyor receipt persistence and armed daemon
 issue: ce-ops#583
 ---
 
-Harden conveyor receipt persistence and armed daemon seams for ce-ops#583
+Harden conveyor receipt persistence and armed daemon seams for authorized
 slices 10–13 only.
 
 - Require the live `os.replace(..., src_dir_fd=..., dst_dir_fd=...)` capability
@@ -17,4 +17,4 @@ slices 10–13 only.
 - Create JSONL side-effect ledgers with mode `0600`, and create private runtime
   directories atomically at `0700` while refusing unsafe pre-existing paths.
 
-Slices 1–2, 6–9 of ce-ops#583 remain open and are deliberately untouched.
+Slices 1–2 and 6–9 remain open and are deliberately untouched.

@@ -1,6 +1,6 @@
 # PR path manifest — ce583-conveyor-receipt-hardening
 
-This per-PR carrier lists the closed authorized path set for ce-ops#583 slices
+This per-PR carrier lists the closed authorized path set for conveyor hardening slices
 10–13. CI requires the `base..HEAD` diff to equal this list; the manifest lists
 itself.
 
