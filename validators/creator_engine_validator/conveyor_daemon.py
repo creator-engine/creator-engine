@@ -316,7 +316,6 @@ class ConveyorDaemon:
         gh_runner: GhRunner | None = None,
         now: NowRunner | None = None,
         ledger_writer: LedgerWriter | None = None,
-        ledger_path: Path | str | None = None,
         receipt_state_path: Path | str | None = None,
         log_runner: LogRunner | None = None,
         prepare_runner: PrepareRunner = prepare_harvest,
@@ -344,7 +343,7 @@ class ConveyorDaemon:
         self.validate_runner = validate_runner
         self.gh_runner = gh_runner
         self.now = now
-        self.ledger_writer = ledger_writer or (_jsonl_ledger_writer(Path(ledger_path)) if ledger_path is not None else None)
+        self.ledger_writer = ledger_writer
         self.receipt_state_path = (
             normalize_receipt_state_path(receipt_state_path)
             if receipt_state_path is not None
@@ -1463,15 +1462,6 @@ def _receipt_terminal_state(result: ConveyorDaemonItemResult) -> str:
     if result.side_effect_started:
         return "uncertain"
     return "failed"
-
-
-def _jsonl_ledger_writer(path: Path) -> LedgerWriter:
-    def write(record: ConveyorDaemonLedgerRecord) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record.as_dict(), sort_keys=True) + "\n")
-
-    return write
 
 
 def _pr_create_args(

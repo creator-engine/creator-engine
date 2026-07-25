@@ -2871,3 +2871,13 @@ def test_daemon_construction_requires_repo_root_and_bundle_root_when_armed():
             ledger_writer=lambda record: None,
             validation_ledger_binding=_validation_ledger_binding(),
         )
+
+
+def test_daemon_constructor_has_no_ledger_path_writer_fallback(tmp_path: Path):
+    """The daemon accepts only the caller-injected ledger writer seam."""
+
+    with pytest.raises(TypeError, match="ledger_path"):
+        ConveyorDaemon(
+            discovery_runner=lambda: [],
+            ledger_path=tmp_path / "conveyor-daemon-ledger.jsonl",
+        )
