@@ -410,7 +410,8 @@ _RECEIPT_DIR_FD_SYSCALLS = (os.open, os.stat, os.mkdir, os.rename, os.replace, o
 
 def _receipt_syscalls_supported() -> bool:
     # CPython documents ``replace`` with the same ``renameat`` dirfd support
-    # as ``rename`` but does not enumerate it in ``supports_dir_fd``.
+    # as ``rename``; accept that equivalence when ``replace`` is absent from
+    # ``supports_dir_fd``.
     return (
         all(hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"))
         and all(

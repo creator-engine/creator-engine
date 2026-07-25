@@ -114,6 +114,20 @@ def test_jsonl_ledger_writer_creates_private_ledger_despite_permissive_umask(tmp
     assert stat.S_IMODE(ledger_path.stat().st_mode) == 0o600
 
 
+def test_jsonl_ledger_writer_refuses_existing_nonprivate_ledger(tmp_path: Path):
+    ledger_path = tmp_path / "ledger" / "daemon.jsonl"
+    ledger_path.parent.mkdir(mode=0o700)
+    ledger_path.touch(mode=0o644)
+    ledger_path.chmod(0o644)
+    writer = runner._jsonl_ledger_writer(ledger_path)
+
+    with pytest.raises(runner.ConfigError, match="ledger file is unsafe"):
+        writer(type("Record", (), {"as_dict": lambda self: {"action": "test"}})())
+
+    assert stat.S_IMODE(ledger_path.stat().st_mode) == 0o644
+    assert ledger_path.read_text(encoding="utf-8") == ""
+
+
 def test_ensure_private_dir_refuses_existing_permissive_directory(tmp_path: Path):
     unsafe = tmp_path / "unsafe"
     unsafe.mkdir(mode=0o755)
@@ -122,6 +136,56 @@ def test_ensure_private_dir_refuses_existing_permissive_directory(tmp_path: Path
         runner._ensure_private_dir(unsafe)
 
     assert stat.S_IMODE(unsafe.stat().st_mode) == 0o755
+
+
+def test_main_reports_clean_private_lease_directory_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    env = _base_env(tmp_path)
+    lease_root = Path(env["CE_DAEMON_LEASE_ROOT"])
+    lease_root.mkdir(mode=0o755)
+    lease_root.chmod(0o755)
+    acquired = False
+
+    def fake_acquire(*args, **kwargs):
+        nonlocal acquired
+        acquired = True
+        return FakeLease()
+
+    monkeypatch.setattr(runner, "acquire", fake_acquire)
+
+    assert runner.main(env) == 2
+    assert acquired is False
+    assert capsys.readouterr().err == "ERROR: conveyor private directory is unsafe\n"
+
+
+@pytest.mark.parametrize(
+    "root_env",
+    [
+        "CE_CONVEYOR_DAEMON_VALIDATION_LEDGER_ROOT",
+        "CE_CONVEYOR_DAEMON_ACTIVE_WORK_LEDGER_ROOT",
+    ],
+)
+def test_main_reports_clean_private_runtime_directory_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    root_env: str,
+):
+    env = _base_env(tmp_path)
+    unsafe_root = tmp_path / root_env.lower()
+    unsafe_root.mkdir(mode=0o755)
+    unsafe_root.chmod(0o755)
+    env[root_env] = str(unsafe_root)
+    lease = FakeLease()
+
+    monkeypatch.setattr(runner, "acquire", lambda *args, **kwargs: lease)
+
+    assert runner.main(env) == 2
+    assert lease.released is True
+    assert capsys.readouterr().err == "ERROR: conveyor private directory is unsafe\n"
 
 
 @pytest.mark.parametrize(

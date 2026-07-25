@@ -254,6 +254,17 @@ def _jsonl_ledger_writer(path: Path):
 
     def write(record: ConveyorDaemonLedgerRecord) -> None:
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            metadata = os.fstat(fd)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise ConfigError("conveyor ledger file is unsafe")
+        except Exception:
+            os.close(fd)
+            raise
         with os.fdopen(fd, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record.as_dict(), sort_keys=True, default=str) + "\n")
 
@@ -435,6 +446,9 @@ def _run_loop(config: ConveyorDaemonConfig, lease: DaemonLease) -> int:
             if config.iterations is not None and completed >= config.iterations:
                 break
             stop_event.wait(config.interval_seconds)
+    except ConfigError as exc:
+        _error(str(exc))
+        return 2
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)
         signal.signal(signal.SIGINT, previous_sigint)
@@ -476,11 +490,11 @@ def main_with_existing_lease(
 def main(env: Mapping[str, str] | None = None) -> int:
     try:
         config = load_config(env)
+        _ensure_private_dir(config.lease_root)
     except ConfigError as exc:
         _error(str(exc))
         return 2
 
-    _ensure_private_dir(config.lease_root)
     try:
         lease = acquire(
             "conveyor-daemon",
