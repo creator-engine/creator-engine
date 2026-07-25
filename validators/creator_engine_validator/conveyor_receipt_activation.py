@@ -67,7 +67,8 @@ def _legacy_entries(raw: bytes) -> tuple[dict[str, Any], ...]:
         if key in seen:
             raise ReceiptActivationRefused("legacy_receipt_entry_duplicate")
         seen.add(key)
-        # A sealed terminal state preserves handled history: it cannot be claimed.
+        # Historical ``processed`` records have no outcome marker.  Conservatively
+        # seal each as failed so an old handled tuple can never be claimed again.
         entries.append({"seat_id": seat_id, "branch": branch, "sha": sha, "state": "failed", "completion_sealed": True})
     return tuple(sorted(entries, key=lambda item: (item["seat_id"], item["branch"], item["sha"])))
 
@@ -111,8 +112,22 @@ def plan(state_path: str | Path) -> ReceiptActivationPlan:
 def _write_backup(location: receipt._SecureReceiptDirectory, name: str, raw: bytes) -> os.stat_result:
     try:
         fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | receipt._OPEN_FILE_FLAGS, 0o600, dir_fd=location.fd)
-    except FileExistsError as exc:
-        raise ReceiptActivationRefused("legacy_backup_exists") from exc
+    except FileExistsError:
+        # A retry may follow an interruption after the durable placeholder was
+        # written but before the legacy name was replaced.  Resume only when the
+        # existing private backup proves byte-identical to this reviewed plan.
+        try:
+            existing_fd, metadata = receipt._open_verified_file(location, name, os.O_RDONLY)
+        except (OSError, receipt.ReceiptPersistenceError) as inspect_exc:
+            raise ReceiptActivationRefused("legacy_backup_exists") from inspect_exc
+        try:
+            if receipt._read_all(existing_fd) != raw:
+                raise ReceiptActivationRefused("legacy_backup_exists")
+        finally:
+            close_error = receipt._close_fd(existing_fd)
+            if close_error is not None:
+                raise ReceiptActivationRefused("legacy_backup_close_failed") from close_error
+        return metadata
     try:
         receipt._validate_named_file(location, name, fd, exact_mode=None)
         os.fchmod(fd, 0o600)
@@ -156,9 +171,10 @@ def apply(state_path: str | Path, *, accept_plan_sha: str) -> ReceiptActivationP
             receipt._write_receipt_state(location, list(current.migrated_receipts), None)
         except BaseException:
             # Before v1 publication, restore the legacy name rather than leaving a
-            # daemon-visible missing ledger.  Any ambiguous publication remains fail-closed.
+            # daemon-visible missing ledger.  ``expected=None`` means the ledger
+            # name is absent; any ambiguous publication remains fail-closed.
             try:
-                if receipt._name_matches_inode(location, current.backup_name, legacy_metadata) and not receipt._ledger_matches_expected(location, None):
+                if receipt._name_matches_inode(location, current.backup_name, legacy_metadata) and receipt._ledger_matches_expected(location, None):
                     os.replace(current.backup_name, location.ledger_name, src_dir_fd=location.fd, dst_dir_fd=location.fd)
                     os.fsync(location.fd)
             except BaseException:
@@ -180,8 +196,13 @@ def rollback(state_path: str | Path, *, accept_plan_sha: str) -> None:
             raise ReceiptActivationRefused("legacy_backup_unavailable") from exc
         try:
             raw = receipt._read_all(backup_fd)
-            _legacy_entries(raw)
-            receipt._receipt_entries(receipt._read_receipt_state(location)[0])
+            migrated_receipts = _legacy_entries(raw)
+            try:
+                current_receipts = receipt._receipt_entries(receipt._read_receipt_state(location)[0])
+            except ValueError as exc:
+                raise ReceiptActivationRefused("rollback_receipt_state_invalid") from exc
+            if tuple(current_receipts) != migrated_receipts:
+                raise ReceiptActivationRefused("rollback_receipt_state_diverged")
             if not receipt._name_matches_inode(location, backup_name, backup_metadata):
                 raise ReceiptActivationRefused("legacy_backup_changed")
             location.rewalk()

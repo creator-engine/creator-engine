@@ -13,3 +13,6 @@ issue: ce-ops#582
   preserving the no-re-entry property for already handled signals.
 - Adds an atomic, private durable backup and an explicit verified rollback path.
 - Documents the Operator-only plan, apply, verification, and rollback flow.
+- Restores the legacy name after a pre-publication failure, permits only a
+  byte-identical same-plan backup resume, and refuses rollback after v1 history
+  diverges from the migrated sealed set.

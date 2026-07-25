@@ -42,11 +42,22 @@ success, verify the daemon still refuses any unsafe state, then restart through
 the canonical launcher. A previously handled signal must be visible only as a
 sealed terminal receipt and `claim()` must return false.
 
+If an interruption occurs after the private backup placeholder was made but
+before the legacy name was replaced, the legacy ledger and its byte-identical
+backup are both still present. The only sanctioned resume is to repeat `apply`
+with the same reviewed plan digest. It resumes only after verifying that exact
+backup's private descriptor-bound bytes; it never deletes either file. Any
+different, unreadable, or unsafe backup remains a refusal for Operator review.
+
 ## Verified rollback
 
 Rollback is also explicit and requires the reviewed activation plan digest. It
-atomically restores the private durable legacy backup; normal discovery will
-again refuse the unversioned state, rather than silently process it.
+atomically restores the private durable legacy backup only while the v1 ledger
+still exactly equals the originally migrated sealed set. If the daemon has
+observed, claimed, completed, or otherwise changed any receipt after apply,
+rollback refuses rather than silently discarding that history. Normal discovery
+will again refuse the restored unversioned state, rather than silently process
+it.
 
 ```bash
 PYTHONPATH=validators python -m creator_engine_validator.conveyor_receipt_activation \
@@ -55,3 +66,12 @@ PYTHONPATH=validators python -m creator_engine_validator.conveyor_receipt_activa
 
 If any command refuses, stop. Preserve the error and ledger metadata for review;
 do not retry by deleting a ledger or backup.
+
+## Legacy-state interpretation
+
+The former `processed` format carried only tuple coordinates and no outcome or
+terminal marker. Its final pre-v1 implementation added a tuple while discovery
+was building its returned payloads, before any later consumer outcome existed;
+it is therefore not evidence of terminal completion. Activation nevertheless
+uses the conservative safe mapping: every legacy tuple becomes a sealed
+`failed` receipt, so none can be claimed again.
