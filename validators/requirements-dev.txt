@@ -15,7 +15,7 @@ linkify-it-py==2.1.0
 uc-micro-py==2.0.0
 platformdirs==4.10.0
 typing-extensions==4.15.0
-anyio==4.13.0
+anyio==4.14.2
 idna==3.18
 # v3.5-B.6 cockpit-serve extra: the pinned textual-serve transitive closure,
 # vendored in wheelhouse-dev/ so CI's existing offline dev-install exercises
